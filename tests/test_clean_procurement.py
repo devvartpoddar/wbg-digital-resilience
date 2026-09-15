@@ -308,6 +308,12 @@ MAX_RATE = {
     "whitespace not collapsed": 0.0,             # 0.00%
     "description carries a second borrower reference": 5.0,   # 3.61%
     "description ends mid-word": 1.0,            # 0.22%
+    # Not a defect we repair - it cannot be repaired without guessing, and the
+    # matching copy makes it harmless (see match_key). The gate is a ceiling
+    # that would catch the parser getting WORSE, not a target to drive to zero.
+    # The true rate is higher than this check can see: it finds a case boundary,
+    # so "DataCenter" shows and "studyfor" does not.
+    "word glued to the next inside the description": 40.0,
     "borrower reference absent": 0.0,            # 0.00%
     "borrower reference not normalised": 0.0,    # 0.00%
     "category unmapped": 0.5,                    # 0.00%
@@ -347,3 +353,44 @@ def test_every_check_has_a_gate():
     missing = [c[0] for c in AP.CHECKS
                if c[0] not in MAX_RATE and c[2] == "defect"]
     assert missing == [], f"defect checks without a gate: {missing}"
+
+
+# ------------------------------------------------- the despaced matching copy
+
+class TestMatchKey:
+    """The defect these guard against is silent. A package whose entire purpose
+    is data centre infrastructure does not match the term "data center", the
+    package drops out of the asset class, and nothing anywhere reports an
+    error. These are the tests that make that failure loud."""
+
+    GLUED = ("Supply, Installation and commission of Storage Equipment,Servers "
+             "and Network equipment for enhancement of DataCenter Infrastructure "
+             "(Mainland and Zanzibar) - Phase 2")
+
+    def test_glued_term_is_found_after_despacing(self):
+        """'Data Center' lost its space when the cell was clipped at the column
+        edge. Despacing both sides puts them back in step."""
+        assert "data center" not in P.casefold_key(self.GLUED), \
+            "fixture is wrong - it should carry the glue"
+        assert P.match_key("data center") in P.match_key(self.GLUED)
+
+    def test_terms_that_were_never_glued_still_match(self):
+        for term in ("storage equipment", "network equipment", "infrastructure"):
+            assert P.match_key(term) in P.match_key(self.GLUED), term
+
+    def test_match_key_is_case_and_whitespace_free(self):
+        assert P.match_key("  Data   CENTER\tinfrastructure ") == "datacenterinfrastructure"
+
+    def test_match_key_changes_no_character(self):
+        """The whole argument rests on the glue only ever DELETING a space. If
+        match_key altered a character, two strings could match that do not
+        share their letters, and the reasoning would not hold."""
+        for text in (self.GLUED, "Réhabilitation du réseau", "LOT 2 (REBID)"):
+            assert P.match_key(text) == "".join(
+                c for c in P.casefold_key(text) if not c.isspace())
+
+    def test_published_text_is_untouched(self):
+        """match_key is for matching. The published string keeps its spaces,
+        its case and its punctuation, because a person reads it."""
+        assert P.collapse(self.GLUED) == self.GLUED
+        assert "DataCenter" in self.GLUED

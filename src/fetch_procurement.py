@@ -191,13 +191,30 @@ def _join_wrapped(parts):
     """Stitch a column's line fragments back into one string.
 
     The rendition clips each cell at the column edge, so a fragment usually ends
-    mid-word ('ehabilitation', 'Comm') and must be glued to the next. It
-    sometimes ends exactly at a space instead, and then gluing invents a word
-    ('Toolsfor'). The two are told apart with the system word list when it is
-    present, and by an uppercase/digit test when it is not; the count of joins
-    that needed the guess is reported, because it is the parser's error bar.
+    mid-word - 'S' + 'upply', 'commi' + 'ssion', 'equipm' + 'ent' - and the two
+    halves must be glued with nothing between them. Occasionally the clip lands
+    exactly ON a space instead, which is then stripped as trailing whitespace,
+    and gluing runs two words together: 'Data' + 'Center' becomes 'DataCenter'.
+
+    From the text alone the two cases are indistinguishable. The fragments in
+    one real cell end at 26, 29, 27, 26, 27 and 29 characters, so "did this line
+    fill the column?" does not separate them either, and neither does anything
+    else in the rendition. So this does NOT guess: it always glues, and returns
+    the number of seams so the loss has a number attached.
+
+    An earlier version consulted /usr/share/dict/words to decide. It was removed
+    for two reasons. Its space-inserting branch was unreachable - the elif above
+    it fired whenever the first condition was false - so it always glued anyway
+    and the list only inflated a counter. And a dictionary cannot settle this in
+    principle: 'Equipment,Servers' in the corpus was typed without a space by
+    the borrower, so there is no correct answer to look up.
+
+    The loss is handled where it belongs, in the matching copy. Gluing only ever
+    DELETES a space, never alters a character, so comparing on a
+    whitespace-stripped copy makes it invisible: 'DataCenter' and 'data center'
+    both reduce to 'datacenter'. See description_match in clean_procurement.py.
     """
-    out, guessed = "", 0
+    out, seams = "", 0
     for p in parts:
         p = p.strip()
         if not p:
@@ -206,40 +223,11 @@ def _join_wrapped(parts):
             out = p
             continue
         if out[-1].isalnum() and p[0].isalnum():
-            glued = out + p
-            if p[0].isupper() or p[0].isdigit() or not _is_word(glued.split()[-1]):
-                out = glued
-            elif _is_word(glued.split()[-1]):
-                out = glued
-                guessed += 1
-            else:
-                out = out + " " + p
-                guessed += 1
+            out += p
+            seams += 1
         else:
-            out = out + p
-    return out, guessed
-
-
-_WORDS = None
-
-
-def _is_word(token):
-    global _WORDS
-    if _WORDS is None:
-        _WORDS = set()
-        for path in ("/usr/share/dict/words", "/usr/share/dict/american-english"):
-            try:
-                with open(path, encoding="utf-8", errors="ignore") as fh:
-                    _WORDS.update(w.strip().lower() for w in fh)
-                break
-            except OSError:
-                continue
-    t = token.strip().lower()
-    if not t or not t.isalpha():
-        return False
-    if _WORDS:
-        return t in _WORDS
-    return len(t) <= 3
+            out += p
+    return out, seams
 
 
 def segment_for_project(text, project_id):
@@ -338,7 +326,7 @@ def parse_plan_text(text, doc_meta):
 
     out = []
     for n, rec in enumerate(records):
-        desc, guessed = _join_wrapped(rec["col0"])
+        desc, seams = _join_wrapped(rec["col0"])
         ref, desc = split_ref_chain(desc, rec["ref"])
         body = " ".join(rec["body"])
         numbers = DATE_RE.findall(body)
@@ -376,7 +364,7 @@ def parse_plan_text(text, doc_meta):
             "fetched_at": doc_meta["fetched_at"],
             "section": rec["section"],
             "record_index": n,
-            "_guessed_joins": guessed,
+            "_wrap_seams": seams,
             "_dates": len(numbers),
         }
         out.append(row)
@@ -757,7 +745,7 @@ def main():
 
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
-    prep, guessed_total, planned_only = [], 0, 0
+    prep, wrap_seams_total, planned_only = [], 0, 0
     for r in plan_rows:
         desc = r["description"]
         lang = detect_lang(desc)
@@ -770,9 +758,9 @@ def main():
         row["status"] = norm_status(r["status_raw"])
         row["planned_date"] = r["planned_date"]
         row["revised_date"] = r["revised_date"]
-        row.pop("_guessed_joins", None)
+        row.pop("_wrap_seams", None)
         row.pop("_dates", None)
-        guessed_total += r.get("_guessed_joins", 0)
+        wrap_seams_total += r.get("_wrap_seams", 0)
         if not seen_hash.get(r["plan_doc_id"]):
             seen_hash[r["plan_doc_id"]] = r["content_sha256"]
         prep.append(row)
@@ -807,7 +795,8 @@ def main():
         fh.write(f"awards rows: {len(awards):,}\n")
         fh.write(f"package_changes rows: {len(changes):,}\n")
         fh.write(f"packages with no usable key: {unkeyable:,}\n")
-        fh.write(f"wrap joins that needed the word-list guess: {guessed_total:,}\n")
+        fh.write(f"cell fragments glued (no space inserted, never guessed): "
+         f"{wrap_seams_total:,}\n")
         fh.write(f"preamble characters outside the plan tables: {sum(free_chars):,}\n")
         fh.write(f"bundled renditions cut to this project ({len(bundle_docs)}): "
                  f"{', '.join(bundle_docs)}\n")

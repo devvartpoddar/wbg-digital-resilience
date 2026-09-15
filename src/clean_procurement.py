@@ -72,6 +72,42 @@ def casefold_key(text):
     return collapse(text).casefold()
 
 
+def match_key(text):
+    """Step 2's matching copy with ALL whitespace removed as well as case.
+
+    This is what Stage 8 matches asset terms against, and it exists because of
+    one specific defect. Procurement plans are published only as documents, and
+    the text rendition clips each table cell at the column edge. Rejoining the
+    fragments is unavoidable, and where the clip landed exactly on a space that
+    space is gone: the corpus carries "DataCenter" for "Data Center",
+    "forZanzibar" for "for Zanzibar". Nothing in the rendition distinguishes
+    that case from an ordinary mid-word clip, so the parser does not guess -
+    see _join_wrapped in fetch_procurement.py.
+
+    It does not need to, because the damage is one-directional. Gluing only ever
+    DELETES a space. It never alters a character, inserts one, or reorders
+    anything. So removing every space from both sides puts them back in step:
+
+        "DataCenter"  -> "datacenter"
+        "Data Center" -> "datacenter"
+
+    and the term matches. Without this, "data center" misses a package whose
+    whole purpose is data centre infrastructure, which is the kind of silent
+    false negative that never shows up as an error.
+
+    It works the same for a package awarded years ago and one still only
+    planned, which matters: the alternative - taking the description from the
+    linked award, where the reference joins - is clean but only available for
+    packages that have already been awarded, and the forward-looking ones are
+    the point of the analysis.
+
+    The trade, stated rather than hidden: despacing can collide two genuinely
+    different phrases. For multi-word technical terms that is rare, and
+    audit_procurement.py counts the collisions so it stays a measured number.
+    """
+    return WS_RE.sub("", collapse(text).casefold())
+
+
 # ---------------------------------------------------------------- step 3 and 4
 
 # The published description sometimes carries the borrower reference in front of
@@ -379,19 +415,22 @@ def extract_amount_and_date(text):
 
 PACKAGE_COLS = [
     "package_id", "project_id", "borrower_ref", "borrower_ref_norm", "description",
-    "description_clean", "description_sha256", "description_lang", "lot", "phase",
+    "description_clean", "description_match", "description_sha256",
+    "description_lang", "lot", "phase",
     "is_rebid", "is_placeholder", "superseded_by", "clean_version", "category",
     "method", "status", "status_raw", "planned_date", "revised_date",
     "estimated_amount", "currency", "actual_amount", "plan_version", "fetched_at",
 ]
 NOTICE_COLS = [
     "notice_id", "project_id", "notice_type", "publication_date", "deadline_date",
-    "bid_description", "bid_description_clean", "description_lang", "is_placeholder",
+    "bid_description", "bid_description_clean", "bid_description_match",
+    "description_lang", "is_placeholder",
     "clean_version", "procurement_category", "country_code", "sector", "url",
 ]
 AWARD_COLS = [
     "contract_id", "project_id", "borrower_ref", "borrower_ref_norm", "description",
-    "description_clean", "description_sha256", "description_lang", "is_placeholder",
+    "description_clean", "description_match", "description_sha256",
+    "description_lang", "is_placeholder",
     "clean_version", "signed_date", "no_objection_date", "total_amount", "currency",
     "procurement_group", "method", "review_type", "supplier_name", "supplier_country",
     "supplier_amount", "region", "sector",
@@ -442,6 +481,7 @@ def clean_packages(rows, counters):
             "borrower_ref_norm": norm_ref(r["borrower_ref"]),
             "description": raw_desc,
             "description_clean": clean,
+            "description_match": match_key(clean),
             "description_sha256": desc_sha256(clean),
             "description_lang": r.get("description_lang") or detect_lang(clean),
             "lot": marks["lot"], "phase": marks["phase"],
@@ -515,6 +555,7 @@ def clean_notices(rows, counters):
             "publication_date": r["publication_date"],
             "deadline_date": r["deadline_date"],
             "bid_description": raw, "bid_description_clean": clean,
+            "bid_description_match": match_key(clean),
             "description_lang": r.get("description_lang") or detect_lang(clean),
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "clean_version": CLEAN_VERSION,
@@ -538,6 +579,7 @@ def clean_awards(rows, counters):
             "borrower_ref": r["borrower_ref"],
             "borrower_ref_norm": norm_ref(r["borrower_ref"]),
             "description": raw, "description_clean": clean,
+            "description_match": match_key(clean),
             "description_sha256": desc_sha256(clean),
             "description_lang": r.get("description_lang") or detect_lang(clean),
             "is_placeholder": str(is_placeholder(clean)).lower(),

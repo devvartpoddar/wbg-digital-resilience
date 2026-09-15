@@ -90,6 +90,28 @@ REF_INLINE = re.compile(r"[A-Z]{2,}-[A-Z0-9]{1,12}-[0-9]{2,10}-(?:CW|GD|GO|CS|NC
 REF_SHAPE = re.compile(r"^[A-Z0-9][A-Z0-9\u2013-]*$")
 
 
+@check("word glued to the next inside the description",
+       tables=("packages", "notices", "awards"), severity="soft")
+def _glued_inside(row):
+    """The real shape of the wrap defect, which "description ends mid-word"
+    does not see: it tests the LAST token only, so it reported 2 hits on a
+    corpus where a dozen were visible by eye.
+
+    A lower-case letter immediately followed by an upper-case one, inside a
+    token, is the signature: DataCenter, forZanzibar, ProcurementConsultant.
+    It is a floor rather than a count - "Designingand" and "studyfor" are glued
+    too and carry no case boundary to find them by - so read it as "at least
+    this many", and read it alongside the seam count in the fetch report.
+
+    Nothing repairs these. They are made harmless in the matching copy instead;
+    see match_key in clean_procurement.py. The check exists so the size of the
+    loss stays visible rather than becoming invisible once it stops hurting.
+    """
+    field = "bid_description_clean" if "bid_description_clean" in row else "description_clean"
+    d = row.get(field) or ""
+    return [m.group(0) for m in re.finditer(r"\b\w*[a-z][A-Z]\w*\b", d)][:3]
+
+
 @check("description carries a second borrower reference")
 def _double_ref(row):
     """Two packages stitched into one: the next record's reference survived
@@ -292,6 +314,30 @@ def main():
             out.append(f"      {text}")
         out.append("")
 
+    # The cost of the despaced matching copy, measured rather than asserted.
+    # Removing every space can in principle make two different descriptions
+    # identical. If that number is ever large, matching on the despaced copy is
+    # buying recall at a price worth knowing about.
+    out.append("despacing collisions - descriptions that differ but despace alike")
+    out.append("=" * 86)
+    for t, field in (("packages", "description"), ("notices", "bid_description"),
+                     ("awards", "description")):
+        rows = tables.get(t) or []
+        mkey = f"{field}_match"
+        if not rows or mkey not in rows[0]:
+            continue
+        groups = defaultdict(set)
+        for r in rows:
+            if (r.get(mkey) or "").strip():
+                groups[r[mkey]].add((r.get(f"{field}_clean") or "").strip())
+        collided = {k: v for k, v in groups.items() if len(v) > 1}
+        pct = 100.0 * len(collided) / max(len(groups), 1)
+        out.append(f"  {t:<10} {len(collided):>5} of {len(groups):,} distinct "
+                   f"match keys collide ({pct:.2f}%)")
+        for k, v in list(collided.items())[:3]:
+            out.append(f"      {sorted(v)[0][:70]}")
+            out.append(f"      {sorted(v)[1][:70]}")
+    out.append("")
     out.append("value profile - top twenty distinct values per enum-ish field")
     out.append("=" * 86)
     for t, fields in ENUM_FIELDS.items():
