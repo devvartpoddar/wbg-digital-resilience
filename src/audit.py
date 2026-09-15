@@ -24,6 +24,22 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 # deliberately not prose, so prose checks would only produce noise there.
 PROSE_BLOCKS = ("narrative", "annex")
 
+# Model tokens per word, MEASURED rather than assumed.
+#
+# The full corpus was embedded with openai/text-embedding-3-large on 2026-09-15.
+# The API reported 3,027,632 tokens for the 28,181 unique texts, which carried
+# 2,287,945 words and 15,557,234 characters. So this text runs 1.32 tokens per
+# word and 5.14 characters per token: the per-word rule of thumb was accurate to
+# under 2%, and the one-token-per-four-characters rule overshot by 28%. The
+# earlier version of this file said to budget the character end, which would
+# have over-provisioned by about a third.
+#
+# This holds for THIS tokeniser on THIS kind of text. A different model, or a
+# corpus in another language, needs its own number - take it from the
+# tokens_reported field of meta/embedding_manifest.json, which records what the
+# API actually billed rather than what anyone predicted.
+TOKENS_PER_WORD = 3_027_632 / 2_287_945
+
 CHECKS = []
 
 
@@ -178,43 +194,38 @@ def main():
     out.append("")
 
     # Volume, so the cost of embedding rests on measured counts. Words and
-    # characters are exact; model tokens are not, and are reported as a RANGE.
+    # characters are exact, and so, now, is the token figure.
     #
-    # The low end is 1.3 model tokens per word, the usual figure for ordinary
-    # English. The high end is one token per four characters. They disagree here
-    # because this text is not ordinary English: it runs 6.8 characters per word
-    # against roughly 5.3 for general prose, so words break into more subword
-    # pieces than the per-word rule assumes. On this corpus the two ends differ
-    # by about 30%, and the character rule is the safer one to budget against.
-    #
-    # Neither is a measurement. Only the embedding model's own tokeniser settles
-    # the bill, so re-derive this once a model is pinned rather than trusting
-    # either end of the range.
+    # This used to print a RANGE between the two usual rules of thumb - 1.3
+    # tokens per word and one token per four characters - which disagreed by
+    # about 30% here, with a note saying to budget the character end. That
+    # advice was wrong, and the full run settled it. See TOKENS_PER_WORD.
     words = Counter()
     chars = Counter()
     for row in rows:
         words[row["block"]] += int(row["n_tokens"])
         chars[row["block"]] += int(row["char_end"]) - int(row["char_start"])
-    def tok_range(w, c):
-        return f"{int(w * 1.3):,} - {int(c / 4):,}"
+    def tok_est(w):
+        return f"{int(w * TOKENS_PER_WORD):,}"
 
     out.append(f"{'block':<34}{'paras':>8}{'words':>12}{'chars':>12}"
-               f"{'model tokens (range)':>26}")
+               f"{'model tokens (est)':>26}")
     out.append("-" * 92)
     for blk in sorted(blocks, key=lambda b: -words[b]):
         out.append(f"{blk:<34}{blocks[blk]:>8}{words[blk]:>12,}{chars[blk]:>12,}"
-                   f"{tok_range(words[blk], chars[blk]):>26}")
+                   f"{tok_est(words[blk]):>26}")
     pw = sum(words[b] for b in PROSE_BLOCKS)
     pc = sum(chars[b] for b in PROSE_BLOCKS)
     out.append("-" * 92)
     out.append(f"{'EMBEDDABLE (narrative+annex)':<34}{prose:>8}{pw:>12,}{pc:>12,}"
-               f"{tok_range(pw, pc):>26}")
+               f"{tok_est(pw):>26}")
     tw, tc = sum(words.values()), sum(chars.values())
     out.append(f"{'ALL BLOCKS':<34}{len(rows):>8}{tw:>12,}{tc:>12,}"
-               f"{tok_range(tw, tc):>26}")
+               f"{tok_est(tw):>26}")
     out.append("")
     out.append(f"chars per word: {pc / max(pw, 1):.2f} over the embeddable prose "
-               f"(ordinary English is nearer 5.3, so budget the upper end)")
+               f"(ordinary English is nearer 5.3; the token column is measured, "
+               f"not derived from this)")
     out.append("")
     out.append(f"{'check':<44}{'hits':>8}{'% of scope':>12}  severity")
     out.append("-" * 82)
