@@ -36,8 +36,13 @@ MARKER = re.compile(r"@#&OPS.*?@(\w+)#doctemplate")
 
 NUMBERED_PARA = re.compile(r"^\s*(\d{1,3})\.\s+(\S)")
 BULLET = re.compile(r"^\s*(?:[•●➢▪\-]|\(?[ivxlc]{1,5}[\).]|\(?[a-z][\).])\s+\S")
-FOOTNOTE_BODY = re.compile(r"^\s{0,6}(\d{1,3})\s+[A-Za-z“\"(]")
-PAGE_FOOTER = re.compile(r"^\s*(?:Page\s+)?\d{1,4}\s*$", re.I)
+# A footnote body starts with its number, in three shapes: number and text on
+# one line, number running straight into the text with no space ("10Supporting
+# climate resilient agriculture"), and the number alone above its text.
+# Requiring whitespace missed the second, and those were exactly the ones that
+# then leaked into the narrative as if they were body prose.
+FOOTNOTE_BODY = re.compile(r"^\s{0,8}(\d{1,3})(?:\s*[A-Za-z“\"(]|\s*$)")
+PAGE_FOOTER = re.compile(r"^\s*(?:Page\s+)?\d{1,4}(?:\s+of\s+\d{1,4})?(?:\s+of)?\s*$", re.I)
 TOKEN = re.compile(r"[\w'’-]+", re.UNICODE)
 
 # Inline footnote reference glued to the preceding word or to a closing period.
@@ -61,13 +66,28 @@ CHAR_MAP = {
 }
 
 NUMERIC_TOKEN = re.compile(r"^[\d.,%()$-]+$")
+FOOTNOTE_OPEN = re.compile(r"^(\d{1,3})\s*(?=[A-Z\"(])")
+# Marks a line as belonging to a page's footnote region while pages are being
+# flattened. Never reaches stored text.
+FOOTNOTE_SENTINEL = "\x01"
+
+
+GUTTER = re.compile(r"\S {6,}\S")
 
 
 def looks_tabular(body):
     """A flattened table reads as prose to everything downstream but carries
     almost no language: mostly figures, dates and currency. Label it rather than
     drop it - the results framework and disbursement tables hold real numbers -
-    but keep it out of the narrative block so a text search does not hit it."""
+    but keep it out of the narrative block so a text search does not hit it.
+
+    Must run BEFORE whitespace is collapsed: the column gutters are the single
+    most reliable signal, and collapsing destroys them. Two or more wide gutters
+    means the line was a table row whatever its wording, which catches the
+    results-framework tables that the numeric test misses because their
+    indicator names are wordy."""
+    if len(GUTTER.findall(body)) >= 2:
+        return True
     toks = TOKEN.findall(body)
     if len(toks) < 6:
         return False
@@ -126,6 +146,30 @@ def find_running_lines(pages):
                 kill.add(i)
         drop.append(kill)
     return drop
+
+
+HEADER_BANK = re.compile(r"^\s*The World Bank\s*$")
+HEADER_PID = re.compile(r"\(P\d{6}\)")
+
+
+def strip_header_pairs(page_lines):
+    """Remove the 'The World Bank' / '<Project Title> (P123456)' header pair.
+
+    The repetition test needs a document with enough pages to establish what
+    repeats; a short one slips through. This pair is structural, not lexical -
+    the bank line followed within two lines by a project identifier in brackets -
+    so it can be removed wherever it appears."""
+    kill = set()
+    for i, line in enumerate(page_lines):
+        if not HEADER_BANK.match(line):
+            continue
+        for j in range(i + 1, min(i + 3, len(page_lines))):
+            if HEADER_PID.search(page_lines[j]):
+                kill.update(range(i, j + 1))
+                break
+        else:
+            kill.add(i)
+    return [l for i, l in enumerate(page_lines) if i not in kill]
 
 
 def footnote_bodies(page_lines):
@@ -228,6 +272,7 @@ def rejoin(lines):
     for line in lines:
         s = line.rstrip()
         if (out and out[-1].strip() and not is_block_start(line)
+                and line.startswith(FOOTNOTE_SENTINEL) == out[-1].startswith(FOOTNOTE_SENTINEL)
                 and not is_heading(out[-1])
                 and not re.search(r"[.!?:;]\s*$", out[-1])
                 and not re.match(r"^\s*$", s)):
@@ -245,7 +290,7 @@ def clean_document(raw):
     # Footnote bodies must be found AFTER the running header and page-number
     # lines are out of the way: they sit at the very foot of the page, so a
     # 'Page 7' line below them aborts the upward scan and finds nothing.
-    stripped_pages = [[l for i, l in enumerate(pg) if i not in kill]
+    stripped_pages = [strip_header_pairs([l for i, l in enumerate(pg) if i not in kill])
                       for pg, kill in zip(pages, drops)]
     # A few renditions carry no form feeds at all, so the whole document is one
     # "page". Page-foot logic is meaningless there: the footnote scan would range
@@ -257,18 +302,26 @@ def clean_document(raw):
     else:
         scanned = [(set(), set()) for _ in stripped_pages]
     bodies = [n for n, _ in scanned]
+    all_footnotes = set().union(*bodies) if bodies else set()
 
     state = {"last": 0, "used": set(), "hits": 0, "misses": 0}
     kept_pages = []
     for n, page in enumerate(stripped_pages):
         allowed = bodies[n] | (bodies[n + 1] if n + 1 < len(bodies) else set())
         body_line_idx = scanned[n][1]
+        # Footnotes sit at the foot of the page, and their text wraps onto
+        # continuation lines that do not start with a number. Treating only the
+        # opening line as a footnote orphaned every continuation into the
+        # narrative as a paragraph starting mid-sentence. From the first
+        # footnote line to the end of the page is footnote material.
+        fn_from = min(body_line_idx) if body_line_idx else None
         lines = []
         for i, line in enumerate(page):
-            # A footnote body keeps its own leading number; only inline
-            # references inside prose are stripped.
-            if i not in body_line_idx:
+            in_fn = fn_from is not None and i >= fn_from
+            if not in_fn:
                 line = strip_footnote_marks(line, allowed, state)
+            elif line.strip():
+                line = FOOTNOTE_SENTINEL + line
             lines.append(line)
         kept_pages.append(lines)
 
@@ -280,6 +333,7 @@ def clean_document(raw):
     body_start = max(toc_lines) + 1 if toc_lines else 0
 
     blocks, cur = [], []
+    heading_flush = [False]
     sec_path, sec_title, marker = "", "", ""
     annex_seen = False
     # Some documents are a standalone annex, disclosed on their own - a technical
@@ -296,19 +350,48 @@ def clean_document(raw):
         nonlocal cur, cursor
         if not cur:
             return
-        body = "\n".join(cur).strip("\n")
+        raw_body = "\n".join(cur).strip("\n")
         cur = []
-        if not body.strip():
+        if not raw_body.strip():
             return
+        # Decide tabular on the laid-out text, then store prose with whitespace
+        # collapsed: a paragraph is one line, with no page-layout spacing left
+        # in it to reach the embedding.
+        tabular = looks_tabular(raw_body)
+        from_footnote = FOOTNOTE_SENTINEL in raw_body
+        raw_body = raw_body.replace(FOOTNOTE_SENTINEL, "")
+        body = re.sub(r"\s+", " ", raw_body).strip()
+        if not body:
+            return
+        # A footnote body flattened into a paragraph: it opens with the number it
+        # defines, e.g. '38Vietnam provides a good example'. Label it rather than
+        # let it sit in the narrative as if it were body prose.
+        m_fn = FOOTNOTE_OPEN.match(body)
+        is_footnote = from_footnote or (bool(m_fn) and int(m_fn.group(1)) in all_footnotes)
+        if is_footnote and m_fn:
+            # Drop the leading number only where the paragraph actually opens
+            # with one; a continuation line carries no number of its own.
+            body = body[m_fn.end(1):].lstrip()
+        if is_footnote and not body:
+            return
+        # A DETACHED footnote marker - '...infrastructure 17 and low capacity...'
+        # - is deliberately NOT stripped. Nothing separates it from a quantity:
+        # an A/B test over the corpus showed five of six removals destroyed real
+        # content ("SDGs 9 and 11", "Component 1 will build", "Lines 100 and
+        # 911"), against one genuine marker. A stray digit costs far less than a
+        # silently deleted figure.
         start = cursor
         clean_parts.append(body + "\n\n")
         cursor += len(body) + 2
-        block = ("template:" + marker if marker else
+        block = ("heading" if heading_flush[0] else
+                 "footnote" if is_footnote else
+                 "template:" + marker if marker else
                  "frontmatter" if (start_idx[0] < body_start or not sec_path) else
                  "annex" if annex_seen else "narrative")
-        if block in ("narrative", "annex") and looks_tabular(body):
+        if block in ("narrative", "annex") and tabular:
             block = "table"
         spans.append((start, start + len(body), sec_path, sec_title, block))
+        heading_flush[0] = False
 
     start_idx = [0]
     for i, line in enumerate(flat):
@@ -342,6 +425,7 @@ def clean_document(raw):
                 sec_title = m_roman.group(2).strip(" .:-")
             start_idx = [i]
             cur = [line.strip()]
+            heading_flush[0] = True
             flush()
             continue
 
@@ -352,6 +436,7 @@ def clean_document(raw):
             sec_title = m_letter.group(2).strip(" .:-")
             start_idx = [i]
             cur = [line.strip()]
+            heading_flush[0] = True
             flush()
             continue
 
