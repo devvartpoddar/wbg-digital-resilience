@@ -162,6 +162,28 @@ def main():
     out = []
     out.append(f"paragraphs scanned: {len(rows)}   prose blocks (narrative+annex): {prose}")
     out.append("")
+
+    # Volume, so the cost of embedding is a measured number rather than an
+    # estimate. n_tokens counts WORDS; embedding providers bill model tokens,
+    # which run about 1.3x words on English prose, so both are reported.
+    words = Counter()
+    chars = Counter()
+    for row in rows:
+        words[row["block"]] += int(row["n_tokens"])
+        chars[row["block"]] += int(row["char_end"]) - int(row["char_start"])
+    out.append(f"{'block':<34}{'paras':>8}{'words':>12}{'chars':>12}{'est. model tokens':>19}")
+    out.append("-" * 85)
+    for blk in sorted(blocks, key=lambda b: -words[b]):
+        out.append(f"{blk:<34}{blocks[blk]:>8}{words[blk]:>12,}{chars[blk]:>12,}"
+                   f"{int(words[blk] * 1.3):>19,}")
+    pw = sum(words[b] for b in PROSE_BLOCKS)
+    pc = sum(chars[b] for b in PROSE_BLOCKS)
+    out.append("-" * 85)
+    out.append(f"{'EMBEDDABLE (narrative+annex)':<34}{prose:>8}{pw:>12,}{pc:>12,}"
+               f"{int(pw * 1.3):>19,}")
+    out.append(f"{'ALL BLOCKS':<34}{len(rows):>8}{sum(words.values()):>12,}"
+               f"{sum(chars.values()):>12,}{int(sum(words.values()) * 1.3):>19,}")
+    out.append("")
     out.append(f"{'check':<44}{'hits':>8}{'% of scope':>12}  severity")
     out.append("-" * 82)
     clean_prose = set(r["paragraph_id"] for r in rows if r["block"] in PROSE_BLOCKS)
