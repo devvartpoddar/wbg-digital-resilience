@@ -242,3 +242,18 @@ def test_contents_span_covers_unevenly_spaced_entries():
     assert {0, 6, 12, 13} <= toc, "gaps between contents entries broke detection"
     # The first body heading must NOT be absorbed into the contents span.
     assert 15 not in toc, "contents detection swallowed a real body heading"
+
+
+def test_undecodable_bytes_are_dropped_not_replaced():
+    """The Bank's own converter truncates a sequence, so a closing quote reaches
+    us as b'\\xe2\\x80?' instead of b'\\xe2\\x80\\x9d', and one real document
+    carries CESU-8 surrogate pairs. Decoding must not turn any of that into
+    U+FFFD, which would reach the embeddings as noise; those bytes form no
+    character, so the fragment is dropped and the count is kept."""
+    text, dropped = C.decode_raw(b'services ("eFaas\xe2\x80? and more')
+    assert "\ufffd" not in text
+    assert text == 'services ("eFaas? and more'
+    assert dropped == 2
+    text, dropped = C.decode_raw(b"value \xed\xa0\xb5\xed\xb1\x87 end")
+    assert text == "value  end"
+    assert dropped == 6

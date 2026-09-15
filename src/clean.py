@@ -104,6 +104,27 @@ PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
 REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
 
 
+def decode_raw(blob):
+    """Bytes of a rendition -> text, discarding bytes that form no character.
+
+    The renditions are UTF-8, but a handful are not quite: the World Bank's own
+    converter drops one byte out of a three-byte sequence, so a closing quote
+    arrives as b'\\xe2\\x80' followed by '?' instead of b'\\xe2\\x80\\x9d', and
+    one document carries CESU-8 surrogate pairs. Decoding with errors='replace'
+    turns every one of those into U+FFFD, which is noise in an embedding and is
+    not recoverable - the missing byte is gone at the source (re-fetching the
+    same URL returns byte-identical corruption). A byte that forms no character
+    is not content, so dropping the fragment loses nothing that "precision over
+    recall" protects; it keeps the text the source could actually express.
+
+    Returns (text, bytes_dropped). The count is reported in the clean run so a
+    rendition that is broken wholesale shows as a number rather than a silent
+    difference.
+    """
+    text = blob.decode("utf-8", errors="ignore")
+    return text, len(blob) - len(text.encode("utf-8"))
+
+
 def fold_chars(text):
     out = []
     for ch in text:
@@ -558,7 +579,10 @@ def main():
         if not os.path.exists(src):
             stats["missing_raw"] += 1
             continue
-        raw = open(src, encoding="utf-8", errors="replace").read()
+        with open(src, "rb") as fh:
+            blob = fh.read()
+        raw, undecodable = decode_raw(blob)
+        stats["undecodable_bytes_dropped"] += undecodable
         clean, spans, fn = clean_document(raw)
 
         with open(os.path.join(clean_dir, f"{doc['doc_id']}.txt"), "w", encoding="utf-8") as fh:
