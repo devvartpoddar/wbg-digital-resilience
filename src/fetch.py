@@ -204,7 +204,7 @@ def main():
             }
 
         if n % 10 == 0:
-            print(f"  ...{n}/{len(projects)} projects, {len(rows)} documents", flush=True)
+            print(f"  ...{n}/{len(projects)} projects, {len(by_doc)} documents", flush=True)
 
     rows = []
     for did in sorted(by_doc):
