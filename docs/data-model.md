@@ -636,6 +636,72 @@ Package and award descriptions are short metadata fields, not document text, and
 | `confidence` | float |
 | `verified_by` | string, nullable |
 
+### Stage 1 tables — `packages_raw`, `notices_raw`, `awards_raw`
+
+`src/fetch_procurement.py` writes these; `src/clean_procurement.py` turns them
+into the three tables above. They are kept because the prepared tables are
+deduplicated — `packages.csv` holds one row per package, latest plan version —
+and the plan version history is the product of this stage, not a by-product.
+Nothing here is committed beyond what section 1 allows.
+
+`packages_raw.csv` carries one row per (plan version x package), so a package
+that appears in twenty plan versions has twenty rows:
+
+| Column | Type |
+|---|---|
+| `package_version_id` | string, `{plan_doc_id}:{borrower_ref}` |
+| `package_id` | string, the borrower reference |
+| `project_id` | string |
+| `plan_version` | string, the plan document identifier |
+| `plan_doc_id`, `plan_disclosure_date` | string, date |
+| `borrower_ref`, `description` | string, as published |
+| `description_sha256`, `description_lang`, `is_placeholder` | derived |
+| `category`, `category_raw`, `method`, `method_raw`, `market_approach` | string |
+| `status`, `status_raw` | string |
+| `planned_date`, `revised_date` | date, nullable |
+| `estimated_amount`, `currency` | float, string |
+| `content_sha256` | string, of the plan text rendition |
+| `fetched_at` | timestamp |
+| `section`, `record_index` | string, integer — where in the rendition it was found |
+
+`notices_raw.csv` and `awards_raw.csv` carry one row per interface record, as
+published plus the derived hashes. `teammemfullname` is read and discarded when
+the response is prepared and reaches neither file.
+
+### `data/intermediate/procurement/package_changes.csv`
+
+The version-to-version diff, written by `src/fetch_procurement.py`. Keyed on
+`borrower_ref_norm` where a reference is present and on the SHA-256 of the
+normalised description where it is not.
+
+| Column | Type |
+|---|---|
+| `project_id` | string |
+| `key`, `key_basis` | string, enum (`borrower_ref_norm` · `description_sha256`) |
+| `borrower_ref` | string |
+| `change` | enum (`appeared` · `changed` · `disappeared`) |
+| `field` | string, nullable |
+| `from_value`, `to_value` | string |
+| `from_plan_version`, `to_plan_version` | string |
+| `detected_at` | timestamp |
+
+### `data/intermediate/procurement/superseded_packages.csv`
+
+Every plan-version row that a later version replaced, written by
+`src/clean_procurement.py` (step 8). Business rule A1.12 defines the drop reason
+`duplicate_package` for these; they are held here rather than in
+`prepared/rejected_units.csv` because the document cleaner owns that file and two
+stages writing it would race.
+
+| Column | Type |
+|---|---|
+| `package_id`, `project_id`, `plan_version` | string |
+| `borrower_ref`, `borrower_ref_norm`, `description` | string |
+| `status`, `estimated_amount` | string |
+| `superseded_by` | string, nullable |
+| `clean_version` | string |
+
+
 ---
 
 ## 11. Outputs
