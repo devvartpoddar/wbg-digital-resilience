@@ -1,0 +1,2 @@
+sample_id,purpose,unit_type,drawn_at,stratification,seed,n_drawn,source_run_id
+training-20260915-s1,training,paragraph,2026-09-15T21:24:12Z,per-class: 23 nearest the asset definition (max 3/document) + 7 uniform random,1,231,
