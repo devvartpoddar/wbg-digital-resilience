@@ -151,3 +151,67 @@ def test_every_block_value_is_known(scanned):
         blk = r["block"]
         assert blk in known or blk.startswith("template:"), \
             f"unexpected block {blk!r} on {r['paragraph_id']}"
+
+
+# ---------------------------------------------------------------- embeddings
+#
+# These skip until src/embed.py has run. Once it has, they are what stops the
+# matrix and the index drifting apart. emb_index.csv is the ONLY record of
+# which row holds which paragraph: if the two disagree, every downstream
+# lookup returns a real vector for the wrong text, which looks like nothing
+# being wrong at all.
+#
+# The matrix is opened with mmap_mode="r" on purpose. At this cohort it is
+# ~415 MB; at the ten-to-twenty-times cohort it is 4-8 GB, and a plain
+# numpy.load() pulls all of it into memory. This is the access pattern every
+# reader of the file should copy.
+
+def _embeddings():
+    idx = os.path.join(DATA, "emb_index.csv")
+    npy = os.path.join(DATA, "paragraph_emb.npy")
+    if not (os.path.exists(idx) and os.path.exists(npy)):
+        pytest.skip("no embeddings on disk; run src/embed.py first")
+    numpy = pytest.importorskip("numpy")
+    with open(idx, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    return rows, numpy.load(npy, mmap_mode="r"), numpy
+
+
+def test_matrix_and_index_have_the_same_length():
+    index, arr, _np = _embeddings()
+    assert arr.shape[0] == len(index), (
+        f"paragraph_emb.npy has {arr.shape[0]} rows but emb_index.csv lists "
+        f"{len(index)} - one of them was written from a different run")
+
+
+def test_index_rows_are_contiguous_from_zero():
+    index, _arr, _np = _embeddings()
+    assert [int(r["row"]) for r in index] == list(range(len(index)))
+
+
+def test_every_indexed_paragraph_exists(scanned):
+    rows, _h, _s = scanned
+    index, _arr, _np = _embeddings()
+    known = {r["paragraph_id"] for r in rows}
+    unknown = [r["paragraph_id"] for r in index if r["paragraph_id"] not in known][:5]
+    assert not unknown, f"emb_index.csv names paragraphs that do not exist: {unknown}"
+
+
+def test_no_paragraph_is_indexed_twice():
+    index, _arr, _np = _embeddings()
+    ids = [r["paragraph_id"] for r in index]
+    assert len(ids) == len(set(ids)), "a paragraph holds two rows in the matrix"
+
+
+def test_no_row_is_a_zero_vector():
+    """A zeroed row would sit in the matrix looking like a vector and quietly
+    corrupt every similarity computed against it. src/embed.py omits a failed
+    paragraph rather than filling it; this asserts that it did."""
+    index, arr, numpy = _embeddings()
+    if arr.shape[0] == 0:
+        pytest.skip("matrix is empty")
+    norms = numpy.linalg.norm(numpy.asarray(arr, dtype="float64"), axis=1)
+    bad = [i for i in range(len(norms)) if not 0.9 <= norms[i] <= 1.1][:5]
+    assert not bad, (f"rows {bad} are not unit vectors "
+                     f"(first norm {norms[bad[0]]:.4f}) - "
+                     f"{index[bad[0]]['paragraph_id']}")
