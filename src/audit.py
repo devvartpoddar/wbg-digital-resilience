@@ -111,9 +111,23 @@ def _control(t):
     return [c for c in t if unicodedata.category(c) in ("Cc", "Cf") and c not in "\n\t"]
 
 
-@check("smart quote or ligature left unfolded", blocks=None, severity="defect")
+@check("smart quote, ligature or hyphen left unfolded", blocks=None, severity="defect")
 def _unfolded(t):
-    return re.findall("[‘’“”–­ﬁﬂ ]", t)
+    """Characters clean.py is supposed to have folded to their ASCII form. The
+    hyphens matter as much as the quotes: U+2010 in "Sub-component" renders
+    identically to a plain hyphen and tokenises as something else."""
+    return re.findall("[\u2018\u2019\u201c\u201d\u2013\u2010\u2011"
+                      "\u00ad\ufb01\ufb02\u00a0]", t)
+
+
+@check("private use area character", blocks=None, severity="defect")
+def _private_use(t):
+    """A code point in a Private Use Area means whatever the font that emitted
+    it decided, and nothing at all once the font is gone. clean.py maps the two
+    that appear in this corpus; this is what makes a third one a number rather
+    than a surprise in an embedding months later."""
+    return [c for c in t if 0xE000 <= ord(c) <= 0xF8FF
+            or 0xF0000 <= ord(c) <= 0x10FFFD]
 
 
 

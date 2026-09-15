@@ -100,6 +100,13 @@ ANNEX 2: Detailed Description
 
 4.   The detailed description restates the component design and adds the
 siting criteria applied to each district.
+
+5.   Sub‐component 3.1 covers Non‐Consulting services, and the review
+found:  a baseline study,  a costing note.
+
+Safeguard triggered
+Environmental Assessment OP/BP 4.01 ✔
+Natural Habitats OP/BP 4.04 ✔
 """
 
 DOC = FF.join([PAGE_COVER, PAGE_BODY_A, PAGE_BODY_B, PAGE_TABLE, PAGE_ANNEX])
@@ -131,6 +138,35 @@ def test_survives_cleaning(cleaned, token):
     """Abbreviations, currency figures and quantities must reach the output
     unchanged. An earlier rule deleted the digits in five of these."""
     assert token in joined(cleaned), f"{token!r} was destroyed by cleaning"
+
+
+# ---------------------------------------------------------------- characters
+
+def test_unicode_hyphens_are_folded_to_ascii(cleaned):
+    """U+2010 renders identically to a plain hyphen and reads identically to a
+    person, but tokenises as something else. 665 of them survived the first
+    full corpus, in "Non-Consulting" and "Sub-component"."""
+    t = joined(cleaned)
+    assert "\u2010" not in t and "\u2011" not in t
+    assert "Sub-component 3.1" in t
+    assert "Non-Consulting services" in t
+
+
+def test_private_use_characters_are_folded(cleaned):
+    """A Private Use Area code point means whatever font emitted it and nothing
+    once the font is gone, so it is noise rather than a character. These two are
+    Symbol's and Wingdings' bullets."""
+    t = joined(cleaned)
+    assert not any(0xE000 <= ord(c) <= 0xF8FF for c in t), \
+        "a private-use character reached the stored text"
+    assert "\u2022 a baseline study" in t, "the bullet it was drawn as should remain"
+
+
+def test_check_marks_are_left_alone(cleaned):
+    """A tick in the safeguards table is DATA - it says which policy is
+    triggered. Folding it to a bullet, as the other markers are folded, would
+    destroy the distinction between checked and unchecked."""
+    assert "\u2714" in joined(cleaned), "a check mark was folded away"
 
 
 # ----------------------------------------------------------------- footnotes

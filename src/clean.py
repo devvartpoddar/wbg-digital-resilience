@@ -60,9 +60,21 @@ CHAR_MAP = {
     " ": " ", " ": " ", " ": " ", " ": " ", "​": "",
     "‘": "'", "’": "'", "‚": "'", "‛": "'",
     "“": '"', "”": '"', "«": '"', "»": '"',
-    "–": "-", "−": "-", "­": "",
+    "\u2013": "-", "\u2212": "-", "\u00ad": "",
+    # U+2010 HYPHEN and U+2011 NON-BREAKING HYPHEN are what a renderer emits
+    # for an ordinary hyphen in "Non-Consulting" or "Sub-component". They are
+    # not dashes and carry no meaning the ASCII hyphen lacks, but they tokenise
+    # as something else entirely. 665 of them survived the first full corpus.
+    "\u2010": "-", "\u2011": "-",
     "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
-    "●": "•", "➢": "•", "▪": "•",
+    "\u25cf": "\u2022", "\u27a2": "\u2022", "\u25aa": "\u2022",
+    # Private Use Area. These are Symbol and Wingdings bullets that a converter
+    # carried across as raw font code points: U+F0B7 is Symbol's bullet, U+F06C
+    # Wingdings'. Outside the font that defined them they mean nothing at all,
+    # so they are noise in an embedding rather than characters. Mapped to the
+    # bullet they were drawn as, matching the three above. Any OTHER private-use
+    # character is caught by the audit rather than guessed at here.
+    "\uf0b7": "\u2022", "\uf06c": "\u2022",
 }
 
 NUMERIC_TOKEN = re.compile(r"^[\d.,%()$-]+$")

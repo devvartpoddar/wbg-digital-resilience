@@ -36,7 +36,8 @@ MAX_RATE = {
     "tabular: numeric tokens over a third": 1.5,
     "unicode replacement character": 0.0,
     "control or format character": 0.0,
-    "smart quote or ligature left unfolded": 0.0,
+    "smart quote, ligature or hyphen left unfolded": 0.0,
+    "private use area character": 0.0,
     # Soft checks. A paragraph starting mid-sentence is usually a split that
     # should not have happened; one without terminal punctuation is often a
     # legitimate bullet. Both are capped loosely to catch a collapse.
