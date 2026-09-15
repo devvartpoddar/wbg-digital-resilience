@@ -282,7 +282,13 @@ def clean_document(raw):
     blocks, cur = [], []
     sec_path, sec_title, marker = "", "", ""
     annex_seen = False
-    roman_seen = False
+    # Some documents are a standalone annex, disclosed on their own - a technical
+    # note pulled out of a PAD, for instance. They have no Section I, so the
+    # "an annex cannot precede Section I" rule would suppress their only heading
+    # and leave the document with no body at all. Where the document contains no
+    # body roman heading anywhere, that rule has nothing to protect.
+    roman_seen = not any(
+        ROMAN.match(l) for i, l in enumerate(flat) if i not in toc_lines)
     spans = []
     clean_parts, cursor = [], 0
 
