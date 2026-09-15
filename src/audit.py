@@ -84,7 +84,13 @@ def _midsentence(t):
     """A paragraph whose first character is lowercase is usually the tail of one
     split across a page or a table cell."""
     s = t.lstrip()
-    return ["frag"] if s and s[0].islower() else []
+    if not s or not s[0].islower():
+        return []
+    # A list item legitimately starts lowercase: "a. Mobile broadband ..." under
+    # a stem ending in a colon. That is structure, not a broken split.
+    if re.match(r"^(?:\(?[a-z]|\(?[ivxlc]{1,4})[\.\)]\s+\S", s):
+        return []
+    return ["frag"]
 
 
 @check("no sentence-ending punctuation", severity="soft")

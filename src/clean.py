@@ -285,21 +285,54 @@ def rejoin(lines):
     """Join a line to the next when the first does not end a sentence and the
     second does not open a new block. Undoes page-layout line wrapping.
 
+    Body text and footnotes are rejoined as SEPARATE streams. A page's footnote
+    region sits physically between a paragraph that ran off the foot of the page
+    and its continuation overleaf, so joining strictly to the previous line left
+    every such paragraph split. Tracking the last body line and the last footnote
+    line independently lets the body flow across the interruption while keeping
+    both in their original order.
+
     A heading is never joined onto: headings carry no terminal punctuation, so
-    without this guard every heading absorbs the paragraph beneath it - which
-    corrupts the heading text and, worse, turns a mid-document sentence into a
-    false ANNEX match that mislabels everything after it."""
+    without that guard each one absorbs the paragraph beneath it.
+    """
     out = []
+    last_body = -1
+    last_fn = -1
+    last_was_footnote = False
+
+    def can_extend(target, line):
+        return (target >= 0 and out[target].strip()
+                and not is_block_start(line)
+                and not is_heading(out[target].replace(FOOTNOTE_SENTINEL, ""))
+                and not re.search(r"[.!?:;]\s*$", out[target]))
+
     for line in lines:
         s = line.rstrip()
-        if (out and out[-1].strip() and not is_block_start(line)
-                and line.startswith(FOOTNOTE_SENTINEL) == out[-1].startswith(FOOTNOTE_SENTINEL)
-                and not is_heading(out[-1])
-                and not re.search(r"[.!?:;]\s*$", out[-1])
-                and not re.match(r"^\s*$", s)):
-            out[-1] = out[-1].rstrip() + " " + s.lstrip()
+        if not s.strip():
+            out.append(s)
+            last_fn = -1
+            # A blank after a footnote region separates the footnotes from what
+            # follows, not one body paragraph from the next. Resetting the body
+            # stream there is what kept a paragraph interrupted by footnotes from
+            # ever rejoining with its continuation overleaf.
+            if not last_was_footnote:
+                last_body = -1
+            continue
+        if line.startswith(FOOTNOTE_SENTINEL):
+            if can_extend(last_fn, line):
+                out[last_fn] = out[last_fn].rstrip() + " " + s.lstrip().replace(
+                    FOOTNOTE_SENTINEL, "")
+            else:
+                out.append(s)
+                last_fn = len(out) - 1
+            last_was_footnote = True
+            continue
+        if can_extend(last_body, line):
+            out[last_body] = out[last_body].rstrip() + " " + s.lstrip()
         else:
             out.append(s)
+            last_body = len(out) - 1
+        last_was_footnote = False
     return out
 
 
@@ -357,6 +390,9 @@ def clean_document(raw):
             lines.pop(0)
         while lines and not lines[-1].strip():
             lines.pop()
+        lines = [l for i, l in enumerate(lines)
+                 if l.strip() or not (i + 1 < len(lines)
+                                      and lines[i + 1].startswith(FOOTNOTE_SENTINEL))]
         if merged and lines:
             prev = merged[-1].rstrip()
             # Blank lines at the page edges are layout, not paragraph breaks.

@@ -40,8 +40,8 @@ MAX_RATE = {
     # Soft checks. A paragraph starting mid-sentence is usually a split that
     # should not have happened; one without terminal punctuation is often a
     # legitimate bullet. Both are capped loosely to catch a collapse.
-    "starts mid-sentence": 20.0,
-    "no sentence-ending punctuation": 30.0,
+    "starts mid-sentence": 6.0,
+    "no sentence-ending punctuation": 25.0,
 }
 
 MIN_CLEAN_PROSE_PCT = 97.0
