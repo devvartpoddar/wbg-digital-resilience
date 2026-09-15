@@ -16,6 +16,10 @@ import requests
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 WDS = "https://search.worldbank.org/api/v3/wds"
 
+# Identify the caller rather than arriving as an anonymous script.
+HEADERS = {"User-Agent": "wbg-digital-resilience/0.1 (research; "
+                         "+https://github.com/devvartpoddar/wbg-digital-resilience)"}
+
 # The appraisal document of an investment operation, and of its additional
 # financings. A project routinely has one PAD and several Project Papers.
 DOC_TYPES = ("Project Appraisal Document", "Project Paper")
@@ -48,7 +52,7 @@ def classify(doc_type, title):
     return "project_paper_other"
 
 
-def get(url, *, timeout=60, tries=4):
+def get(url, *, timeout=60, tries=6):
     """GET, following redirects manually so an http:// Location can be upgraded.
 
     About a quarter of document URLs 302 to documents1.worldbank.org over plain
@@ -60,7 +64,8 @@ def get(url, *, timeout=60, tries=4):
         try:
             seen = url
             for _ in range(5):
-                r = requests.get(seen, timeout=timeout, allow_redirects=False)
+                r = requests.get(seen, timeout=timeout, allow_redirects=False,
+                                 headers=HEADERS)
                 if r.status_code in (301, 302, 303, 307, 308):
                     loc = r.headers.get("location", "")
                     seen = urllib.parse.urljoin(seen, loc)
@@ -71,9 +76,13 @@ def get(url, *, timeout=60, tries=4):
                 return r
             raise RuntimeError("too many redirects")
         except Exception as exc:
+            # A 403 here is the content delivery network throttling, not a
+            # permission problem: the same URL succeeds moments later. Back off
+            # further for those rather than giving up on a real document.
             if attempt == tries - 1:
                 raise
-            time.sleep(2 ** attempt)
+            transient = "403" in str(exc) or "429" in str(exc)
+            time.sleep((3 if transient else 1) * (2 ** attempt))
 
 
 def list_docs(project_id, doc_type):
