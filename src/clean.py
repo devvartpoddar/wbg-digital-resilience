@@ -172,34 +172,26 @@ def annex_match(line):
 
 
 def find_contents_lines(lines):
-    """Indices of heading-shaped lines that belong to the contents page.
+    """Indices of heading-shaped lines belonging to the contents page.
 
-    A per-line test on the trailing page number is not enough on its own: one
-    Tanzania contents entry ends '...digital commitments 81', a single space
-    before the number, which reads exactly like prose ending in a figure. What
-    separates a contents page from the body is that its entries are packed
-    together. So: find runs of nearby heading-shaped lines, and if most of a run
-    carries a trailing page number, the whole run is contents.
+    Entries that carry a trailing page number are certain. Take the span they
+    occupy and claim every heading-shaped line inside it, which picks up the
+    stragglers a per-line test misses: one Tanzania entry ends '...digital
+    commitments 81' with a single space before the number, indistinguishable
+    from prose ending in a figure.
+
+    Span rather than run-length, because contents entries are not evenly
+    spaced - an Ethiopia contents page leaves gaps of seven lines between
+    top-level entries, which a gap-based rule splits into fragments, leaving
+    body_start in the middle of the contents and the remaining entries read as
+    real headings.
     """
     heads = [i for i, l in enumerate(lines) if ROMAN.match(l) or annex_match(l)]
-    if not heads:
+    tailed = [i for i in heads if TOC_TAIL.search(lines[i].rstrip())]
+    if len(tailed) < 3:
         return set()
-    runs, cur = [], [heads[0]]
-    for a, b in zip(heads, heads[1:]):
-        if b - a <= 4:
-            cur.append(b)
-        else:
-            runs.append(cur)
-            cur = [b]
-    runs.append(cur)
-    out = set()
-    for run in runs:
-        if len(run) < 4:
-            continue
-        tailed = sum(1 for i in run if TOC_TAIL.search(lines[i].rstrip()))
-        if tailed >= len(run) / 2:
-            out.update(run)
-    return out
+    lo, hi = min(tailed), max(tailed)
+    return {i for i in heads if lo <= i <= hi}
 
 
 def is_heading(line):
@@ -272,6 +264,7 @@ def clean_document(raw):
     blocks, cur = [], []
     sec_path, sec_title, marker = "", "", ""
     annex_seen = False
+    roman_seen = False
     spans = []
     clean_parts, cursor = [], 0
 
@@ -306,11 +299,19 @@ def clean_document(raw):
         if (m_roman or m_annex) and not is_toc and i >= body_start:
             flush()
             marker = ""
+            # An annex heading cannot precede Section I of the body. Where one
+            # appears to, it is a contents entry whose page number wrapped onto
+            # the next line and so escaped the contents span. Treating it as a
+            # real annex latches every later paragraph into the annex block and
+            # leaves the document with no narrative at all.
+            if m_annex and not roman_seen:
+                continue
             if m_annex:
                 annex_seen = True
                 sec_path = f"{m_annex.group(1).upper()} {m_annex.group(2)}"
                 sec_title = m_annex.group(3).strip(" .:-")
             else:
+                roman_seen = True
                 sec_path = m_roman.group(1)
                 sec_title = m_roman.group(2).strip(" .:-")
             start_idx = [i]
