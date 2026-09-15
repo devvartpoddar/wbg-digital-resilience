@@ -163,26 +163,44 @@ def main():
     out.append(f"paragraphs scanned: {len(rows)}   prose blocks (narrative+annex): {prose}")
     out.append("")
 
-    # Volume, so the cost of embedding is a measured number rather than an
-    # estimate. n_tokens counts WORDS; embedding providers bill model tokens,
-    # which run about 1.3x words on English prose, so both are reported.
+    # Volume, so the cost of embedding rests on measured counts. Words and
+    # characters are exact; model tokens are not, and are reported as a RANGE.
+    #
+    # The low end is 1.3 model tokens per word, the usual figure for ordinary
+    # English. The high end is one token per four characters. They disagree here
+    # because this text is not ordinary English: it runs 6.8 characters per word
+    # against roughly 5.3 for general prose, so words break into more subword
+    # pieces than the per-word rule assumes. On this corpus the two ends differ
+    # by about 30%, and the character rule is the safer one to budget against.
+    #
+    # Neither is a measurement. Only the embedding model's own tokeniser settles
+    # the bill, so re-derive this once a model is pinned rather than trusting
+    # either end of the range.
     words = Counter()
     chars = Counter()
     for row in rows:
         words[row["block"]] += int(row["n_tokens"])
         chars[row["block"]] += int(row["char_end"]) - int(row["char_start"])
-    out.append(f"{'block':<34}{'paras':>8}{'words':>12}{'chars':>12}{'est. model tokens':>19}")
-    out.append("-" * 85)
+    def tok_range(w, c):
+        return f"{int(w * 1.3):,} - {int(c / 4):,}"
+
+    out.append(f"{'block':<34}{'paras':>8}{'words':>12}{'chars':>12}"
+               f"{'model tokens (range)':>26}")
+    out.append("-" * 92)
     for blk in sorted(blocks, key=lambda b: -words[b]):
         out.append(f"{blk:<34}{blocks[blk]:>8}{words[blk]:>12,}{chars[blk]:>12,}"
-                   f"{int(words[blk] * 1.3):>19,}")
+                   f"{tok_range(words[blk], chars[blk]):>26}")
     pw = sum(words[b] for b in PROSE_BLOCKS)
     pc = sum(chars[b] for b in PROSE_BLOCKS)
-    out.append("-" * 85)
+    out.append("-" * 92)
     out.append(f"{'EMBEDDABLE (narrative+annex)':<34}{prose:>8}{pw:>12,}{pc:>12,}"
-               f"{int(pw * 1.3):>19,}")
-    out.append(f"{'ALL BLOCKS':<34}{len(rows):>8}{sum(words.values()):>12,}"
-               f"{sum(chars.values()):>12,}{int(sum(words.values()) * 1.3):>19,}")
+               f"{tok_range(pw, pc):>26}")
+    tw, tc = sum(words.values()), sum(chars.values())
+    out.append(f"{'ALL BLOCKS':<34}{len(rows):>8}{tw:>12,}{tc:>12,}"
+               f"{tok_range(tw, tc):>26}")
+    out.append("")
+    out.append(f"chars per word: {pc / max(pw, 1):.2f} over the embeddable prose "
+               f"(ordinary English is nearer 5.3, so budget the upper end)")
     out.append("")
     out.append(f"{'check':<44}{'hits':>8}{'% of scope':>12}  severity")
     out.append("-" * 82)
