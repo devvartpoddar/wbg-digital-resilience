@@ -1,0 +1,88 @@
+project_id,country_code,region,approval_fy,practice,included,exclusion_reason,cohort_version
+P160766,TZ,Eastern and Southern Africa,2021,,true,,2026-09-15
+P161086,BD,South Asia,2020,,true,,2026-09-15
+P162599,BJ,Western and Central Africa,2019,,true,,2026-09-15
+P167183,NG,Western and Central Africa,2020,,true,,2026-09-15
+P167543,NE,Western and Central Africa,2020,,true,,2026-09-15
+P167588,GD,Latin America and Caribbean,2020,,true,,2026-09-15
+P169698,GE,Europe and Central Asia,2021,,true,,2026-09-15
+P169945,,,,,true,,2026-09-15
+P170658,PE,Latin America and Caribbean,2020,,true,,2026-09-15
+P170718,FM,East Asia and Pacific,2020,,true,,2026-09-15
+P170910,,,,,true,,2026-09-15
+P170941,KE,Eastern and Southern Africa,2023,,true,,2026-09-15
+P171034,ET,Eastern and Southern Africa,2021,,true,,2026-09-15
+P171099,CV,Western and Central Africa,2021,,true,,2026-09-15
+P171305,UG,Eastern and Southern Africa,2021,,true,,2026-09-15
+P171517,MH,East Asia and Pacific,2022,,true,,2026-09-15
+P171528,6R,Latin America and Caribbean,2020,,true,,2026-09-15
+P171791,6R,Latin America and Caribbean,2020,,true,,2026-09-15
+P171976,HT,Latin America and Caribbean,2021,,true,,2026-09-15
+P172350,MZ,Eastern and Southern Africa,2022,,true,,2026-09-15
+P172524,SN,Western and Central Africa,2023,,true,,2026-09-15
+P173240,CM,Western and Central Africa,2022,,true,,2026-09-15
+P173373,RW,Eastern and Southern Africa,2022,,true,,2026-09-15
+P174402,PK,South Asia,2024,,true,,2026-09-15
+P174461,DJ,Middle East and North Africa,2022,,false,no_appraisal_document_disclosed,2026-09-15
+P174620,CF,Western and Central Africa,2022,,true,,2026-09-15
+P175218,ID,East Asia and Pacific,2023,,true,,2026-09-15
+P175592,CG,Western and Central Africa,2022,,true,,2026-09-15
+P175987,GA,Western and Central Africa,2021,,true,,2026-09-15
+P176108,KI,East Asia and Pacific,2022,,true,,2026-09-15
+P176126,GH,Western and Central Africa,2022,,true,,2026-09-15
+P176181,3E,Eastern and Southern Africa,2023,,true,,2026-09-15
+P176317,PH,East Asia and Pacific,2025,,true,,2026-09-15
+P176396,BI,Eastern and Southern Africa,2022,,true,,2026-09-15
+P176459,MZ,Eastern and Southern Africa,2022,,true,,2026-09-15
+P176543,NP,South Asia,2022,,true,,2026-09-15
+P176631,MN,East Asia and Pacific,2022,,true,,2026-09-15
+P176733,IN,South Asia,2023,,true,,2026-09-15
+P176932,3W,Western and Central Africa,2024,,true,,2026-09-15
+P177022,BF,Western and Central Africa,2024,,true,,2026-09-15
+P177040,MV,South Asia,2022,,true,,2026-09-15
+P177077,SL,Western and Central Africa,2022,,true,,2026-09-15
+P177158,ST,Eastern and Southern Africa,2022,,true,,2026-09-15
+P177478,LR,Western and Central Africa,2024,,true,,2026-09-15
+P178609,AR,Latin America and Caribbean,2023,,true,,2026-09-15
+P179040,ET,Eastern and Southern Africa,2024,,true,,2026-09-15
+P179108,UZ,Europe and Central Asia,2024,,true,,2026-09-15
+P179138,TG,Western and Central Africa,2025,,true,,2026-09-15
+P179204,KZ,Europe and Central Asia,2024,,true,,2026-09-15
+P179265,CV,Western and Central Africa,2024,,false,instrument_dpo,2026-09-15
+P180000,TD,Western and Central Africa,2025,,true,,2026-09-15
+P180059,CI,Western and Central Africa,,,true,,2026-09-15
+P180462,BR,Latin America and Caribbean,2024,,true,,2026-09-15
+P180495,ZR,Eastern and Southern Africa,2024,,true,,2026-09-15
+P180693,AO,Eastern and Southern Africa,2024,,true,,2026-09-15
+P180807,WS,East Asia and Pacific,2025,,true,,2026-09-15
+P180931,3E,Eastern and Southern Africa,2024,,true,,2026-09-15
+P180987,BI,Eastern and Southern Africa,2024,,true,,2026-09-15
+P181146,VN,East Asia and Pacific,2023,,false,instrument_dpo,2026-09-15
+P181324,HN,Latin America and Caribbean,2024,,true,,2026-09-15
+P181416,7C,Europe and Central Asia,2024,,true,,2026-09-15
+P181682,CF,Western and Central Africa,,,false,no_documents_disclosed,2026-09-15
+P181707,AL,Europe and Central Asia,,,false,no_documents_disclosed,2026-09-15
+P500570,BR,Latin America and Caribbean,,,true,,2026-09-15
+P500628,3W,Western and Central Africa,,,true,,2026-09-15
+P502532,3E,Eastern and Southern Africa,2024,,true,,2026-09-15
+P505094,ZM,Eastern and Southern Africa,,,true,,2026-09-15
+P505095,MW,Eastern and Southern Africa,2024,,true,,2026-09-15
+P506611,TJ,Europe and Central Asia,2025,,true,,2026-09-15
+P506791,LB,Middle East and North Africa,,,true,,2026-09-15
+P507788,SD,Eastern and Southern Africa,,,false,appraisal_not_yet_disclosed,2026-09-15
+P508317,,,,,true,,2026-09-15
+P508363,BR,Latin America and Caribbean,,,true,,2026-09-15
+P508383,NG,Western and Central Africa,,,true,,2026-09-15
+P508607,,,,,false,no_documents_disclosed,2026-09-15
+P508948,,,,,true,,2026-09-15
+P511767,,,,,true,,2026-09-15
+P511786,,,,,false,appraisal_not_yet_disclosed,2026-09-15
+P512158,,,,,false,appraisal_not_yet_disclosed,2026-09-15
+P513038,,,,,false,no_documents_disclosed,2026-09-15
+P513208,,,,,false,appraisal_not_yet_disclosed,2026-09-15
+P513786,,,,,false,instrument_pforr,2026-09-15
+P513936,,,,,false,instrument_pforr,2026-09-15
+P514497,,,,,false,appraisal_not_yet_disclosed,2026-09-15
+P515305,,,,,false,no_documents_disclosed,2026-09-15
+P516517,,,,,false,appraisal_not_yet_disclosed,2026-09-15
+P518944,,,,,false,appraisal_not_yet_disclosed,2026-09-15
