@@ -28,7 +28,11 @@ DOC_TYPES = ("Project Appraisal Document", "Project Paper")
 # guard is the HTML check below: the Bank's silent-403 body is a 118-byte page.
 MIN_BYTES = 3_000
 
-DOC_COLS = ["doc_id", "project_id", "doc_type", "doc_kind", "title",
+# One row per document, not per project-document pair. A regional programme
+# discloses one appraisal document that serves several projects, so project_ids
+# is pipe-delimited: keying on project_id instead would repeat the document and
+# emit duplicate paragraph identifiers downstream.
+DOC_COLS = ["doc_id", "project_ids", "doc_type", "doc_kind", "title",
             "disclosure_date", "lang", "source_url", "bytes", "content_sha256",
             "has_markers", "fetched_at"]
 
@@ -128,7 +132,7 @@ def main():
         projects = projects[:args.limit]
     print(f"cohort: {len(projects)} projects included", flush=True)
 
-    rows, notes = [], []
+    by_doc, notes = {}, []
     counts = {"fetched": 0, "cached": 0, "too_small": 0, "no_txturl": 0,
               "no_docs": 0, "error": 0}
 
@@ -185,28 +189,37 @@ def main():
                 time.sleep(args.delay)
 
             text = blob.decode("utf-8", errors="replace")
-            rows.append({
-                "doc_id": doc["doc_id"], "project_id": pid, "doc_type": doc["doc_type"],
+            if doc["doc_id"] in by_doc:
+                by_doc[doc["doc_id"]]["_projects"].add(pid)
+                continue
+            by_doc[doc["doc_id"]] = {
+                "_projects": {pid},
+                "doc_id": doc["doc_id"], "doc_type": doc["doc_type"],
                 "doc_kind": classify(doc["doc_type"], doc["title"]),
                 "title": doc["title"], "disclosure_date": doc["disclosure_date"],
                 "lang": doc["lang"], "source_url": doc["txturl"], "bytes": len(blob),
                 "content_sha256": hashlib.sha256(blob).hexdigest(),
                 "has_markers": "true" if "@#&OPS" in text else "false",
                 "fetched_at": stamp,
-            })
+            }
 
         if n % 10 == 0:
             print(f"  ...{n}/{len(projects)} projects, {len(rows)} documents", flush=True)
 
+    rows = []
+    for did in sorted(by_doc):
+        row = dict(by_doc[did])
+        row["project_ids"] = "|".join(sorted(row.pop("_projects")))
+        rows.append(row)
     # Deterministic order so a re-run produces the same file.
-    rows.sort(key=lambda r: (r["project_id"], r["doc_id"]))
+    rows.sort(key=lambda r: r["doc_id"])
     docs_csv = os.path.join(args.out, "documents.csv")
     with open(docs_csv, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=DOC_COLS, lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
 
-    seen = {r["project_id"] for r in rows}
+    seen = {p for r in rows for p in r["project_ids"].split("|")}
     missing = [p["project_id"] for p in projects if p["project_id"] not in seen]
     report = os.path.join(args.out, "fetch_report.txt")
     with open(report, "w", encoding="utf-8") as fh:

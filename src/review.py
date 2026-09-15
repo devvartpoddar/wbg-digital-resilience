@@ -97,7 +97,7 @@ def main():
         doc = docs.get(r["doc_id"], {})
         out.append("=" * args.width)
         out.append(f"[{n}] {r['paragraph_id']}")
-        out.append(f"    project {r['project_id']} | {doc.get('doc_kind', '?')} | "
+        out.append(f"    project {r['project_ids']} | {doc.get('doc_kind', '?')} | "
                    f"{doc.get('title', '')[:60]}")
         out.append(f"    section {r['section_path'] or '-'} | {r['section_title'] or '-'}")
         out.append(f"    block {r['block']} | {r['n_tokens']} tokens | "

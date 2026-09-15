@@ -78,7 +78,7 @@ def looks_tabular(body):
         wordy / len(toks) < 0.45
 
 
-PARA_COLS = ["paragraph_id", "doc_id", "project_id", "ordinal", "section_path",
+PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
              "section_title", "block", "char_start", "char_end", "n_tokens",
              "text_sha256"]
 REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
@@ -413,7 +413,7 @@ def main():
                 continue
             paras.append({
                 "paragraph_id": pid, "doc_id": doc["doc_id"],
-                "project_id": doc["project_id"], "ordinal": ordinal,
+                "project_ids": doc["project_ids"], "ordinal": ordinal,
                 "section_path": path, "section_title": title[:120], "block": block,
                 "char_start": a, "char_end": b, "n_tokens": ntok,
                 "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
@@ -439,6 +439,16 @@ def main():
             w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")
             w.writeheader()
             w.writerows(rows)
+
+    # A shared regional document serves several projects. If it ever lands in
+    # documents.csv once per project again, every one of its paragraphs is
+    # emitted several times under the same identifier - which is silent, and
+    # poisons any count or join downstream. Fail loudly instead.
+    dupes = [k for k, v in Counter(p["paragraph_id"] for p in paras).items() if v > 1]
+    if dupes:
+        raise SystemExit(
+            f"{len(dupes)} duplicate paragraph_id values, e.g. {dupes[:3]}. "
+            "documents.csv must hold one row per doc_id, with project_ids pipe-delimited.")
 
     blocks = Counter(p["block"] for p in paras)
     sections = Counter(p["section_path"] for p in paras)
