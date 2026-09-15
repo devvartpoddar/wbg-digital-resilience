@@ -1,0 +1,25 @@
+{
+  "base_url": "https://openrouter.ai/api/v1",
+  "cache_dir": "data/emb_cache/openai__text-embedding-3-large.3072",
+  "created_at": "2026-09-15T20:01:59Z",
+  "dimensions": 3072,
+  "endpoint": "synchronous",
+  "host": "yggdrasil",
+  "model_requested": "openai/text-embedding-3-large",
+  "model_served": "text-embedding-3-large",
+  "paragraphs": 34005,
+  "paragraphs_without_a_vector": 0,
+  "provider_pin": {
+    "allow_fallbacks": false,
+    "order": [
+      "openai"
+    ]
+  },
+  "rate_limit_headers": {},
+  "requests": 294,
+  "rows_embedded": 34005,
+  "tokens_reported": 3027632,
+  "unique_texts": 28181,
+  "usd_per_mtok": 0.13,
+  "usd_spent": 0.3936
+}
