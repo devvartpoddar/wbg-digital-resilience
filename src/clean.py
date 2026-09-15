@@ -68,13 +68,38 @@ CHAR_MAP = {
     "\u2010": "-", "\u2011": "-",
     "ﬀ": "ff", "ﬁ": "fi", "ﬂ": "fl", "ﬃ": "ffi", "ﬄ": "ffl",
     "\u25cf": "\u2022", "\u27a2": "\u2022", "\u25aa": "\u2022",
-    # Private Use Area. These are Symbol and Wingdings bullets that a converter
+    # Private Use Area. These are Symbol and Wingdings glyphs that a converter
     # carried across as raw font code points: U+F0B7 is Symbol's bullet, U+F06C
     # Wingdings'. Outside the font that defined them they mean nothing at all,
     # so they are noise in an embedding rather than characters. Mapped to the
-    # bullet they were drawn as, matching the three above. Any OTHER private-use
-    # character is caught by the audit rather than guessed at here.
+    # character they were drawn as. Any OTHER private-use character is caught by
+    # the audit rather than guessed at here.
+    #
+    # The six below were found by the "private use area character" check on the
+    # first full corpus, not by inspection. The code points are U+F000 + the
+    # glyph's byte position in the font's own encoding, which is the convention
+    # the two above already assume, and the reading is from Alan Wood's
+    # Symbol/Wingdings tables:
+    #
+    #   U+F0A7  Wingdings 0xA7, black small square  -> bullet. 28 occurrences,
+    #           and \u25aa (the same square, unfolded) is already mapped above.
+    #   U+F0D8  Wingdings 0xD8, rightwards arrowhead -> bullet. 95 occurrences,
+    #           and its sibling \u27a2 is already mapped above. Both of these
+    #           are list markers, so BULLET at line 38 now splits the glued
+    #           runs they left behind: the same segmentation bug adb2592 fixed
+    #           for U+F0B7/U+F06C, still open for these two.
+    #   U+F05B  Symbol 0x5B "["   \
+    #   U+F05D  Symbol 0x5D "]"   /  read as brackets because that is what they
+    #           spell in context ("\uf05bCFI-CIRAS\uf05d"). Through Wingdings
+    #           they would be astronomically unrelated glyphs.
+    #   U+F020  Symbol/Wingdings 0x20, space. Carries no glyph at all, so it
+    #           folds to the space it stands for rather than to nothing.
+    #   U+F02E  Symbol 0x2E, a period. One occurrence, and it sits in a line
+    #           clean.py drops as too_short, so it moves no number today; it
+    #           folds so that a re-rendition of that page cannot reintroduce it.
     "\uf0b7": "\u2022", "\uf06c": "\u2022",
+    "\uf0a7": "\u2022", "\uf0d8": "\u2022",
+    "\uf05b": "[", "\uf05d": "]", "\uf020": " ", "\uf02e": ".",
 }
 
 NUMERIC_TOKEN = re.compile(r"^[\d.,%()$-]+$")

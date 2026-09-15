@@ -162,6 +162,44 @@ def test_private_use_characters_are_folded(cleaned):
     assert "\u2022 a baseline study" in t, "the bullet it was drawn as should remain"
 
 
+# The four glyphs the first full corpus turned up that the fixture above does
+# not carry: two more Wingdings bullets, and Symbol's brackets and space. A
+# second one-page document keeps them out of the fixture, so adding them cannot
+# move a span any other test indexes.
+PUA_PAGE = """\
+     The World Bank
+     Riverine Connectivity Project (P999001)
+
+I. FOURTH SECTION
+
+6.   Support was agreed for the districts as follows:
+\uf0a7 households connected to the network
+\uf0a7 clinics served by the backbone
+\uf0d8 district offices on the link
+
+7.   The institution \uf05bNCI\uf05d leads delivery, with support from its
+partners. \uf020
+"""
+
+
+def test_later_private_use_glyphs_are_folded():
+    """U+F0A7 and U+F0D8 are Wingdings' black small square and arrowhead, the
+    same glyphs as U+25AA and U+27A2 which already fold to a bullet. U+F05B and
+    U+F05D are Symbol's brackets and U+F020 its space. Found by the audit's
+    private-use check on the full corpus, not by inspection."""
+    text, spans, _state = C.clean_document(PUA_PAGE)
+    assert not any(0xE000 <= ord(c) <= 0xF8FF for c in text), \
+        "a private-use character reached the stored text"
+    narrative = [text[a:b] for a, b, _p, _t, blk in spans if blk == "narrative"]
+    bullets = [b for b in narrative if b.startswith("\u2022")]
+    assert len(bullets) == 3, (
+        "the two Wingdings bullets must each start their own paragraph, not "
+        f"leave one glued run: got {narrative!r}")
+    assert any("households connected to the network" in b for b in bullets)
+    assert any("offices on the link" in b for b in bullets)
+    assert "[NCI]" in text, "Symbol's brackets should fold to ASCII brackets"
+
+
 def test_check_marks_are_left_alone(cleaned):
     """A tick in the safeguards table is DATA - it says which policy is
     triggered. Folding it to a bullet, as the other markers are folded, would
