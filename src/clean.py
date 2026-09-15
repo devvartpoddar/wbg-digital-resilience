@@ -60,6 +60,24 @@ CHAR_MAP = {
     "●": "•", "➢": "•", "▪": "•",
 }
 
+NUMERIC_TOKEN = re.compile(r"^[\d.,%()$-]+$")
+
+
+def looks_tabular(body):
+    """A flattened table reads as prose to everything downstream but carries
+    almost no language: mostly figures, dates and currency. Label it rather than
+    drop it - the results framework and disbursement tables hold real numbers -
+    but keep it out of the narrative block so a text search does not hit it."""
+    toks = TOKEN.findall(body)
+    if len(toks) < 6:
+        return False
+    numeric = sum(1 for t in toks if NUMERIC_TOKEN.match(t) or t.isdigit())
+    wordy = sum(1 for t in toks if len(t) > 3 and not t.isdigit())
+    digits = sum(c.isdigit() for c in body)
+    return (numeric / len(toks) >= 0.35 or digits / max(len(body), 1) >= 0.20) and \
+        wordy / len(toks) < 0.45
+
+
 PARA_COLS = ["paragraph_id", "doc_id", "project_id", "ordinal", "section_path",
              "section_title", "block", "char_start", "char_end", "n_tokens",
              "text_sha256"]
@@ -282,6 +300,8 @@ def clean_document(raw):
         block = ("template:" + marker if marker else
                  "frontmatter" if (start_idx[0] < body_start or not sec_path) else
                  "annex" if annex_seen else "narrative")
+        if block in ("narrative", "annex") and looks_tabular(body):
+            block = "table"
         spans.append((start, start + len(body), sec_path, sec_title, block))
 
     start_idx = [0]
