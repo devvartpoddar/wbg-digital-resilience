@@ -187,13 +187,26 @@ def footnote_bodies(page_lines):
     idx = [i for i, l in enumerate(page_lines) if l.strip()]
     if not idx:
         return set(), set()
-    lower = idx[len(idx) // 2:]
+    # The region must OPEN on a blank line. Without that a wrapped prose line
+    # beginning with a figure - "100 and 911 will coexist..." - reads as
+    # "footnote 100" and drags the rest of the page into the footnote block.
+    start = None
+    for i in idx[len(idx) // 2:]:
+        if FOOTNOTE_BODY.match(page_lines[i]) and (i == 0 or not page_lines[i - 1].strip()):
+            start = i
+            break
+    if start is None:
+        return set(), set()
+    # From there to the foot of the page is footnote material: the bodies and
+    # the continuation lines their text wraps onto.
     nums, where = set(), set()
-    for i in lower:
+    for i in range(start, len(page_lines)):
+        if not page_lines[i].strip():
+            continue
         m = FOOTNOTE_BODY.match(page_lines[i])
         if m:
             nums.add(int(m.group(1)))
-            where.add(i)
+        where.add(i)
     return nums, where
 
 
@@ -253,6 +266,14 @@ def find_contents_lines(lines):
     if len(tailed) < 3:
         return set()
     lo, hi = min(tailed), max(tailed)
+    # Absorb only an IMMEDIATELY adjacent further entry - one whose title wrapped
+    # so its page number landed on the next line. Reaching further than this
+    # swallows the first real body heading, which is far more damaging than
+    # missing a contents entry: the annex-before-Section-I rule in
+    # clean_document() is the backstop for anything this does not catch.
+    for i in sorted(heads):
+        if i > hi and i - hi <= 1:
+            hi = i
     return {i for i in heads if lo <= i <= hi}
 
 
@@ -325,9 +346,30 @@ def clean_document(raw):
             lines.append(line)
         kept_pages.append(lines)
 
-    flat = []
+    # Rejoin across the whole document, not page by page: the running headers
+    # and page numbers are already gone, so a paragraph that runs off the foot
+    # of one page sits directly above its continuation. Rejoining per page left
+    # every one of those split, as a fragment starting mid-sentence.
+    merged = []
     for page in kept_pages:
-        flat.extend(rejoin(page))
+        lines = list(page)
+        while lines and not lines[0].strip():
+            lines.pop(0)
+        while lines and not lines[-1].strip():
+            lines.pop()
+        if merged and lines:
+            prev = merged[-1].rstrip()
+            # Blank lines at the page edges are layout, not paragraph breaks.
+            # Keep a separator only where the previous page actually finished a
+            # sentence or the next page opens a new block; otherwise let the two
+            # halves meet so rejoin can mend the paragraph.
+            if (not prev or re.search(r"[.!?:;]\s*$", prev)
+                    or is_block_start(lines[0])
+                    or lines[0].startswith(FOOTNOTE_SENTINEL)
+                    or prev.startswith(FOOTNOTE_SENTINEL)):
+                merged.append("")
+        merged.extend(lines)
+    flat = rejoin(merged)
 
     toc_lines = find_contents_lines(flat)
     body_start = max(toc_lines) + 1 if toc_lines else 0
