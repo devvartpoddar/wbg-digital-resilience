@@ -517,3 +517,129 @@ def test_the_climate_probe_counts_notices_as_well_as_packages_and_awards():
     import inspect
     src = inspect.getsource(V6.main)
     assert "notices" in src and "bid_description_clean" in src
+
+
+# ------------------------------------------------- carrying values forward
+
+def _version(pv, date, **fields):
+    base = {"package_id": "PK-1", "project_id": "P1", "plan_version": pv,
+            "_plan_disclosure_date": date, "plan_disclosure_date": date,
+            "borrower_ref": "PK-1", "borrower_ref_norm": "pk1",
+            "description": "Supply of fiber", "status": "unknown", "status_raw": "",
+            "method": "unknown", "method_raw": "", "category": "goods",
+            "category_raw": "Goods", "market_approach": "", "planned_date": "",
+            "revised_date": "", "estimated_amount": "0.00", "currency": ""}
+    base.update(fields)
+    return base
+
+
+class TestCarryForward:
+    """The newest plan version is not reliably the best-parsed one. A package can
+    carry an amount for years and then appear blank because the latest plan's
+    table was laid out differently and the column was lost. These assert that a
+    parse failure cannot overwrite a value the borrower actually stated."""
+
+    def _run(self, versions):
+        from collections import Counter
+        kept, _sup = P.dedupe_packages(versions, Counter())
+        return kept[0]
+
+    def test_a_later_blank_does_not_erase_an_earlier_amount(self):
+        row = self._run([
+            _version("v1", "2020-01-01", estimated_amount="2000000.00"),
+            _version("v2", "2021-01-01", estimated_amount=""),
+        ])
+        assert row["estimated_amount"] == "2000000.00"
+        assert "estimated_amount:v1" in row["carried_from"]
+
+    def test_a_later_real_value_beats_an_earlier_one(self):
+        """2,000,000 then blank then 1,000,000 keeps 1,000,000, not 2,000,000."""
+        row = self._run([
+            _version("v1", "2020-01-01", estimated_amount="2000000.00"),
+            _version("v2", "2021-01-01", estimated_amount="0.00"),
+            _version("v3", "2022-01-01", estimated_amount="1000000.00"),
+        ])
+        assert row["estimated_amount"] == "1000000.00"
+        assert "estimated_amount" not in row["carried_from"], \
+            "the newest version stated it, so nothing was carried"
+
+    def test_zero_is_treated_as_not_yet_costed(self):
+        """In this corpus a package sits at 0.00 for its first several plan
+        versions before a real figure appears, so zero reads as absent."""
+        row = self._run([
+            _version("v1", "2020-01-01", estimated_amount="200000.00"),
+            _version("v2", "2021-01-01", estimated_amount="0.00"),
+        ])
+        assert row["estimated_amount"] == "200000.00"
+
+    def test_unknown_is_absent_but_a_real_status_is_not(self):
+        """'unknown' is the parser failing to read the column, not the borrower
+        saying the answer is unknown."""
+        row = self._run([
+            _version("v1", "2020-01-01", status="signed", status_raw="Signed"),
+            _version("v2", "2021-01-01", status="unknown", status_raw=""),
+        ])
+        assert row["status"] == "signed" and row["status_raw"] == "Signed"
+
+    def test_a_cancelled_status_is_not_overwritten_by_an_older_signed_one(self):
+        row = self._run([
+            _version("v1", "2020-01-01", status="signed", status_raw="Signed"),
+            _version("v2", "2021-01-01", status="cancelled", status_raw="Canceled"),
+        ])
+        assert row["status"] == "cancelled"
+
+    def test_nothing_is_invented_when_no_version_ever_stated_it(self):
+        row = self._run([
+            _version("v1", "2020-01-01"),
+            _version("v2", "2021-01-01"),
+        ])
+        assert row["status_raw"] == "" and row["status"] == "unknown"
+        assert "status" not in row["carried_from"]
+
+    def test_identity_and_description_come_from_the_newest_version(self):
+        row = self._run([
+            _version("v1", "2020-01-01", description="Supply of fiber"),
+            _version("v2", "2021-01-01", description="Supply of fiber, revised"),
+        ])
+        assert row["description"] == "Supply of fiber, revised"
+        assert row["plan_version"] == "v2"
+
+    def test_carried_from_names_the_version_each_value_came_from(self):
+        row = self._run([
+            _version("v1", "2020-01-01", estimated_amount="500.00"),
+            _version("v2", "2021-01-01", status="signed", status_raw="Signed"),
+            _version("v3", "2022-01-01"),
+        ])
+        carried = dict(p.split(":") for p in row["carried_from"].split("|") if p)
+        assert carried["estimated_amount"] == "v1"
+        assert carried["status_raw"] == "v2"
+
+    def test_supersession_points_at_the_row_that_replaced_it(self):
+        """superseded_by was previously written as an empty string, so the older
+        rows existed with no pointer to what replaced them."""
+        from collections import Counter
+        kept, sup = P.dedupe_packages(
+            [_version("v1", "2020-01-01"), _version("v2", "2021-01-01")], Counter())
+        assert len(sup) == 1
+        assert sup[0]["superseded_by"] == "v2"
+
+    def test_two_projects_sharing_a_reference_stay_separate(self):
+        from collections import Counter
+        a = _version("v1", "2020-01-01"); a["project_id"] = "P1"
+        b = _version("v1", "2020-01-01"); b["project_id"] = "P2"
+        kept, _ = P.dedupe_packages([a, b], Counter())
+        assert len(kept) == 2
+        assert {r["project_id"] for r in kept} == {"P1", "P2"}
+
+
+@pytest.mark.parametrize("field, value, expected", [
+    ("estimated_amount", "", True), ("estimated_amount", "0.00", True),
+    ("estimated_amount", "0", True), ("estimated_amount", "1.00", False),
+    ("estimated_amount", "not a number", True),
+    ("status", "unknown", True), ("status", "signed", False),
+    ("status_raw", "unknown", False),   # the borrower's own word, not ours
+    ("status_raw", "  ", True), ("method", "unknown", True),
+    ("planned_date", "2024-01-01", False), ("planned_date", "", True),
+])
+def test_absent_decides_what_counts_as_not_stated(field, value, expected):
+    assert P.absent(field, value) is expected
