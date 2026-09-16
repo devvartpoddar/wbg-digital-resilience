@@ -419,7 +419,8 @@ PACKAGE_COLS = [
     "description_lang", "lot", "phase",
     "is_rebid", "is_placeholder", "superseded_by", "clean_version", "category",
     "method", "status", "status_raw", "planned_date", "revised_date",
-    "estimated_amount", "currency", "actual_amount", "plan_version", "fetched_at",
+    "estimated_amount", "currency", "actual_amount", "plan_version",
+    "plan_disclosure_date", "carried_from", "fetched_at",
 ]
 NOTICE_COLS = [
     "notice_id", "project_id", "notice_type", "publication_date", "deadline_date",
@@ -501,26 +502,88 @@ def clean_packages(rows, counters):
             "plan_version": r["plan_version"],
             "fetched_at": r["fetched_at"],
             "_plan_disclosure_date": r.get("plan_disclosure_date") or "",
+            "plan_disclosure_date": r.get("plan_disclosure_date") or "",
         })
     return out
 
 
-def dedupe_packages(rows, counters):
-    """Step 8: one row per package, latest plan version kept, supersession recorded.
+# Fields carried forward from the most recent plan version that actually
+# carried a value. See dedupe_packages.
+CARRY_FORWARD = ("status", "status_raw", "method", "method_raw", "category",
+                 "category_raw", "market_approach", "planned_date", "revised_date",
+                 "estimated_amount", "currency")
 
-    The table carries an identifier per package, so history cannot live in it.
-    The superseded rows are written whole to superseded_packages.csv and counted
-    here - a supersession that leaves no trace is how a revised amount becomes
-    invisible.
+# Normalised enum values that mean "this version did not tell us" rather than
+# being an answer in their own right.
+_NOT_AN_ANSWER = {"status": "unknown", "method": "unknown", "category": "unknown"}
+
+
+def absent(field, value):
+    """Did this plan version actually state a value for this field?
+
+    A blank is absent. So is a normalised enum that fell through to `unknown`,
+    because that is the parser saying it could not read the column rather than
+    the borrower saying the answer is unknown. `status_raw` is deliberately not
+    in that set: there it would be the borrower's own word.
+
+    A zero amount is absent too, and that one is a judgement rather than a fact.
+    In this corpus a package routinely sits at 0.00 for its first several plan
+    versions before a real figure appears - CS-FIRME-9 ran eight versions at
+    zero, then 200,000 - so zero reads as "not costed yet". The cost of the
+    judgement is real and worth stating: a package genuinely revised DOWN to
+    zero, defunded rather than un-costed, keeps its old figure. carried_from
+    records which version each surviving value came from, so that case is
+    visible rather than silent, and packages_raw.csv still holds every version
+    verbatim.
+    """
+    v = (value or "").strip()
+    if not v:
+        return True
+    if _NOT_AN_ANSWER.get(field) == v:
+        return True
+    if field.endswith("_amount"):
+        try:
+            return float(v) == 0.0
+        except ValueError:
+            return True
+    return False
+
+
+def dedupe_packages(rows, counters):
+    """Step 8: one row per package, with each field taken from the most recent
+    plan version that stated it, and supersession recorded.
+
+    NOT simply the newest version's row. The newest plan is not reliably the
+    best-parsed one: a package can carry an amount and a status for years and
+    then appear blank in the latest plan because that plan's table was laid out
+    differently and those columns were lost. Keeping the newest row wholesale
+    lets a parse failure overwrite good data, which is how a known 200,000
+    becomes an empty cell. On eight countries this recovered status for 729
+    packages, raising it from 25% populated to 87%.
+
+    So the row is assembled field by field. The newest version supplies the
+    identity, the description and the plan_version; for every field in
+    CARRY_FORWARD, if the newest version did not state it, the most recent
+    version that did is used instead. A later real value always beats an
+    earlier one - 2,000,000 then blank keeps 2,000,000, but 2,000,000 then
+    blank then 1,000,000 keeps 1,000,000.
+
+    `carried_from` names the plan version each carried field came from, so
+    nothing is taken on trust. Fields the newest version stated itself do not
+    appear there.
 
     Grouped on (project_id, package_id), not on package_id. The borrower
     reference is only unique within a project, and generic ones recur across
     projects - 'CS-INDV', 'GO-RFB' and 'CS-QCBS' each appear under three of the
     70, and 8 references in total are shared by two or more projects. Keyed on
     the reference alone the later project's package is folded into the earlier
-    project's row, and it leaves no trace anywhere: one project's package
-    vanishes, the other's description is overwritten by a stranger's. 10 packages
-    were being lost that way. The version history within a project is unaffected.
+    project's row and leaves no trace: one project's package vanishes, the
+    other's description is overwritten by a stranger's. 10 packages were being
+    lost that way.
+
+    The superseded rows are written whole to superseded_packages.csv, each
+    pointing at the version that replaced it, and counted - a supersession that
+    leaves no trace is how a revised amount becomes invisible.
     """
     groups = defaultdict(list)
     for r in rows:
@@ -528,8 +591,24 @@ def dedupe_packages(rows, counters):
     kept, superseded = [], []
     for key, versions in groups.items():
         versions.sort(key=lambda x: (x["_plan_disclosure_date"], x["plan_version"]))
-        newest = versions[-1]
+        newest = dict(versions[-1])
+        newest_version = newest.get("plan_version", "")
+
+        carried = []
+        for field in CARRY_FORWARD:
+            if field not in newest or not absent(field, newest.get(field)):
+                continue
+            for older in reversed(versions[:-1]):
+                if not absent(field, older.get(field)):
+                    newest[field] = older[field]
+                    carried.append(f"{field}:{older.get('plan_version', '')}")
+                    counters[f"carried_{field}"] += 1
+                    break
+        newest["carried_from"] = "|".join(carried)
+        if carried:
+            counters["packages_with_a_carried_field"] += 1
         kept.append(newest)
+
         for old in versions[:-1]:
             superseded.append({
                 "package_id": old["package_id"], "project_id": old["project_id"],
@@ -537,7 +616,7 @@ def dedupe_packages(rows, counters):
                 "borrower_ref_norm": old["borrower_ref_norm"],
                 "description": old["description"], "status": old["status"],
                 "estimated_amount": old["estimated_amount"],
-                "superseded_by": "", "clean_version": CLEAN_VERSION,
+                "superseded_by": newest_version, "clean_version": CLEAN_VERSION,
             })
         if len(versions) > 1:
             counters["packages_seen_in_more_than_one_version"] += 1
