@@ -387,3 +387,49 @@ class TestTheWrapJoinAndTheLoanCell:
         out = F._join_wrapped_refs(["PE-PRONATEL-196394-CW-",
                                     "RFB / Elaboracion del estudio"])
         assert out == ["PE-PRONATEL-196394-CW-RFB / Elaboracion del estudio"]
+
+    def test_a_tail_that_lands_after_the_loan_line_still_joins(self):
+        """The shape that cost 218 rows of the 70-project corpus.
+
+        A wide layout prints the row's other cells between the two halves of a
+        clipped reference, so the tail is not on the adjacent line. Looking only
+        at the next line never joins it, and once the loan guard stopped the
+        parser fabricating an identity out of the loan number, the record
+        vanished instead of being mis-keyed. Reproduced from
+        data/raw/plans/40013368.txt:1126-1128 - shape only, no borrower text."""
+        out = F._join_wrapped_refs([
+            " ZZ-AAAAA-111111-CS-IND      Component 4. Project Manag   Individual Consult",
+            "                             IDA / 70960   Prior   Open - National   48,000.00",
+            " V / A consultant role       ement and Implementation    ant Selection",
+        ])
+        assert any(l.lstrip().startswith("ZZ-AAAAA-111111-CS-INDV / A consultant role")
+                   for l in out)
+
+    def test_the_cells_between_the_two_halves_are_kept(self):
+        """The loan and the amounts sit in that gap and belong to this record."""
+        out = F._join_wrapped_refs([
+            " ZZ-AAAAA-111111-CS-IND",
+            "   IDA / 70960   Prior   48,000.00",
+            " V / A consultant role",
+        ])
+        assert any("IDA / 70960" in l and "48,000.00" in l for l in out)
+
+    def test_a_long_token_is_not_glued_on_across_a_gap(self):
+        """A clipped fragment is a character or three. Allowing any length at a
+        distance would rebuild the loan-cell bug with a different cell."""
+        out = F._join_wrapped_refs([
+            " ZZ-AAAAA-111111-CS-IND",
+            "   some other column text",
+            " SOMETHINGLONG / An unrelated phrase",
+        ])
+        assert not any("ZZ-AAAAA-111111-CS-INDSOMETHINGLONG" in l for l in out)
+
+    def test_the_gapped_scan_will_not_cross_into_the_next_record(self):
+        out = F._join_wrapped_refs([
+            " ZZ-AAAAA-111111-CS-IND",
+            " ZZ-BBBBB-222222-GO-RFQ / A different package",
+            " V / Belongs to neither",
+        ])
+        assert not any("ZZ-AAAAA-111111-CS-INDV / Belongs to neither" in l for l in out)
+        assert any("ZZ-BBBBB-222222-GO-RFQ / A different package" in l for l in out)
+

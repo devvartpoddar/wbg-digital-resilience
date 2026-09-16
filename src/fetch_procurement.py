@@ -322,6 +322,9 @@ SLASH_TAIL = re.compile(r"^\s*(/\s*\S.*)$")
 # The observed gap is one or two lines. Four allows some slack without letting
 # the scan wander into the next record.
 MAX_ORPHAN_GAP = 4
+# How long a wrapped reference's tail may be when it is NOT on the adjacent
+# line. A clipped fragment is 'V', 'DV', 'RFB' - never a phrase.
+MAX_GAPPED_TAIL = 6
 
 
 def _join_wrapped_refs(lines):
@@ -337,24 +340,67 @@ def _join_wrapped_refs(lines):
 
         ['SO-MOCT-FGS-358521-CS-IN   Component 4. ...',  ->  ['...CS-INDV / PIU Project
          'DV / PIU Project Coordinator   Component 4. ...']       Coordinator   Component 4. ...']
+
+    The tail is not always on the next line. In a wide layout the row's other
+    cells print between the two halves, and the Loan/Amount line lands in the
+    gap:
+
+        ' GH-MOCDTI-481188-CS-IND     Component 4. Project Manag   Individual Consult'
+        '                             IDA / 70960   Prior   Open - National   48,000.00'
+        ' V / Innovation Specialist   ement and Implementation    ant Selection'
+
+    That is one record - 'GH-MOCDTI-481188-CS-INDV / Innovation Specialist' -
+    and looking only at the adjacent line never joins it. 218 rows of the
+    70-project corpus were lost that way, in Ghana's P176126 and Burundi's
+    P176396, once the loan guard stopped the parser fabricating an identity out
+    of the loan number instead.
     """
     out, i = [], 0
     while i < len(lines):
         head = REF_WRAP_HEAD.match(lines[i])
-        if head and re.search(r"\d", head.group(1)) and i + 1 < len(lines):
-            tail = REF_WRAP_TAIL.match(lines[i + 1])
-            # A Loan / Credit cell has the same shape as the tail of a wrapped
-            # reference - 'IDA / D9060' reads as the token 'IDA' followed by a
-            # slash and a description - and gluing one on destroys the package:
-            # 'MZ-MJACER-423921-GO-RFQ' plus 'IDA / D9060' becomes
-            # 'MZ-MJACER-423921-GO-RFQIDA / D9060', which REF_RE happily accepts
-            # and which matches no package that exists. It cost 17 of them.
-            #
-            # This lay dormant while the join only ever ran over fixed-width
-            # renditions, where the loan cell shares a line with the columns
-            # either side of it and never stands alone. It fires the moment the
-            # join is applied to a rendition that prints one cell per line.
-            if tail and not plan_table.LOAN_RE.match(lines[i + 1]):
+        if head and re.search(r"\d", head.group(1)):
+            joined = False
+            for d in range(1, MAX_ORPHAN_GAP + 1):
+                j = i + d
+                if j >= len(lines):
+                    break
+                if REF_RE.match(lines[j]) or REF_ALONE.match(lines[j]):
+                    break               # the next record started; do not cross it
+                if SLASH_TAIL.match(lines[j]):
+                    # A line that OPENS with the slash is this record's
+                    # description arriving on its own, which is the orphan shape
+                    # below - and it means the reference on the head line was
+                    # complete, not clipped. Stopping here is what keeps the
+                    # scan from reaching past it and gluing a later fragment on:
+                    # 'MZ-MJACER-423912-GO-RFQ' whose description reads
+                    # '/ o Urgent consumables for' then 'DNRN / DNIC / PIU' two
+                    # lines on became 'MZ-MJACER-423912-GO-RFQDNRN', a
+                    # legitimate package turned into a fabricated one. The
+                    # orphan branch handles this record correctly; the wrap
+                    # branch only has to get out of its way.
+                    break
+                # A Loan / Credit cell has the same shape as the tail of a
+                # wrapped reference - 'IDA / D9060' reads as the token 'IDA'
+                # followed by a slash and a description - and gluing one on
+                # destroys the package: 'MZ-MJACER-423921-GO-RFQ' plus
+                # 'IDA / D9060' becomes 'MZ-MJACER-423921-GO-RFQIDA / D9060',
+                # which REF_RE happily accepts and which matches no package that
+                # exists. Skipped rather than stopped at, because in the wide
+                # layouts the loan cell is exactly what sits BETWEEN a clipped
+                # reference and its tail.
+                if plan_table.LOAN_RE.match(lines[j]):
+                    continue
+                tail = REF_WRAP_TAIL.match(lines[j])
+                if not tail:
+                    continue
+                # Beyond the adjacent line, the tail has to look like a tail: a
+                # clipped fragment is a character or three, never a phrase. The
+                # scan reaches four lines now, and without this a long token
+                # belonging to some other cell could be glued on to produce a
+                # reference that REF_RE accepts and no package matches - which
+                # is the same failure the loan guard above exists to prevent.
+                if d > 1 and len(tail.group(1)) > MAX_GAPPED_TAIL:
+                    continue
                 # The head is re-glued with the tail's token, and everything
                 # else - the description the tail carried and the columns the
                 # head carried - is appended after it.
@@ -362,8 +408,14 @@ def _join_wrapped_refs(lines):
                 candidate += head.group(2) or ""
                 if REF_RE.match(candidate):
                     out.append(candidate)
-                    i += 2
-                    continue
+                    # The lines in between hold this same record's other cells -
+                    # the loan, the amounts - and are kept where they were.
+                    out.extend(lines[i + 1:j])
+                    i = j + 1
+                    joined = True
+                    break
+            if joined:
+                continue
 
         # The orphaned-reference shape: a complete reference alone on its line,
         # with its slash arriving a line or two later. The scan stops at the
