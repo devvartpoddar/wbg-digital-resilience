@@ -4,11 +4,12 @@
 Reads  inputs/labels/paragraph_labels.csv, inputs/taxonomy/assets.csv,
        data/paragraph_emb.npy, data/emb_index.csv, data/paragraphs.csv
 Writes data/intermediate/models/asset_{asset_id}.npz   one weight vector each
-       data/intermediate/models/asset_models.json      the provenance record
+       data/intermediate/models/asset_models.json      what detect_assets.py reads
+       meta/asset_models.json                          committed; the provenance record
        data/train_assets_report.txt
 
   python3 src/train_assets.py
-  python3 src/train_assets.py --folds 5 --report-only
+  python3 src/train_assets.py --folds 5 --meta /tmp/meta
 
 Three decisions shape this file, and each is a response to the same fact: there
 are about 120 labels per class against 3,072 dimensions.
@@ -147,6 +148,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.join(ROOT, "data"))
     ap.add_argument("--inputs", default=os.path.join(ROOT, "inputs"))
+    ap.add_argument("--meta", default=os.path.join(ROOT, "meta"),
+                    help="where the committed provenance record goes; nothing "
+                         "under data/ is ever committed")
     ap.add_argument("--folds", type=int, default=5)
     ap.add_argument("--seed", type=int, default=0)
     args = ap.parse_args()
@@ -243,6 +247,16 @@ def main():
     out.append("uniform-random calibration draw, which this enriched draw is not.")
 
     with open(os.path.join(args.data, "intermediate", "models", "asset_models.json"),
+              "w", encoding="utf-8") as fh:
+        json.dump(manifest, fh, indent=2, sort_keys=True); fh.write("\n")
+    # The same record again under meta/, which is not gitignored, because this
+    # file is the provenance record for the weights and is committed - the way
+    # embedding_manifest.json is. Nothing under data/ is ever committed, so
+    # without this copy the weights on disk would be traceable to nothing in
+    # git. Both files are written from the one dict in this run, so they cannot
+    # come to describe different models.
+    os.makedirs(args.meta, exist_ok=True)
+    with open(os.path.join(args.meta, "asset_models.json"),
               "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True); fh.write("\n")
     body = "\n".join(out)

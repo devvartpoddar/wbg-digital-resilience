@@ -200,7 +200,8 @@ def test_end_to_end_writes_models_and_a_manifest(tmp_path, monkeypatch):
     import json
     data, inputs = build_corpus(str(tmp_path))
     monkeypatch.setattr(sys, "argv", ["train_assets.py", "--data", data,
-                                      "--inputs", inputs, "--folds", "4"])
+                                      "--inputs", inputs, "--folds", "4",
+                                      "--meta", os.path.join(str(tmp_path), "meta")])
     assert T.main() == 0
     mpath = os.path.join(data, "intermediate", "models", "asset_models.json")
     manifest = json.load(open(mpath, encoding="utf-8"))
@@ -211,6 +212,11 @@ def test_end_to_end_writes_models_and_a_manifest(tmp_path, monkeypatch):
     assert fiber["positives"] > 0 and fiber["n"] == 144
     assert os.path.exists(os.path.join(data, "intermediate", "models", "asset_fiber.npz"))
     assert os.path.exists(os.path.join(data, "train_assets_report.txt"))
+    # The provenance record is written twice: once under data/ for detect_assets
+    # to read, and once under meta/, which is the copy git can see. They are the
+    # same dict, so it is a bug if they ever differ.
+    committed = os.path.join(str(tmp_path), "meta", "asset_models.json")
+    assert json.load(open(committed, encoding="utf-8")) == manifest
 
 
 def test_a_class_with_too_few_labels_is_skipped_not_guessed(tmp_path, monkeypatch):
@@ -219,7 +225,8 @@ def test_a_class_with_too_few_labels_is_skipped_not_guessed(tmp_path, monkeypatc
     import json
     data, inputs = build_corpus(str(tmp_path))
     monkeypatch.setattr(sys, "argv", ["train_assets.py", "--data", data,
-                                      "--inputs", inputs, "--folds", "4"])
+                                      "--inputs", inputs, "--folds", "4",
+                                      "--meta", os.path.join(str(tmp_path), "meta")])
     T.main()
     manifest = json.load(open(os.path.join(data, "intermediate", "models",
                                            "asset_models.json"), encoding="utf-8"))
@@ -234,7 +241,8 @@ def test_saved_weights_reproduce_the_training_scores(tmp_path, monkeypatch):
     was measured."""
     data, inputs = build_corpus(str(tmp_path))
     monkeypatch.setattr(sys, "argv", ["train_assets.py", "--data", data,
-                                      "--inputs", inputs, "--folds", "4"])
+                                      "--inputs", inputs, "--folds", "4",
+                                      "--meta", os.path.join(str(tmp_path), "meta")])
     T.main()
     z = numpy.load(os.path.join(data, "intermediate", "models", "asset_fiber.npz"))
     X = numpy.load(os.path.join(data, "paragraph_emb.npy"))

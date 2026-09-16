@@ -44,7 +44,8 @@ def scored(tmp_path, monkeypatch):
             with open(os.path.join(data, "clean", f"{did}.txt"), "w", encoding="utf-8") as cf:
                 cf.write(text)
     monkeypatch.setattr(sys, "argv", ["train_assets.py", "--data", data,
-                                      "--inputs", inputs, "--folds", "4"])
+                                      "--inputs", inputs, "--folds", "4",
+                                      "--meta", os.path.join(str(tmp_path), "meta")])
     T.main()
     monkeypatch.setattr(sys, "argv", ["detect_assets.py", "--data", data,
                                       "--inputs", inputs, "--top", "3"])
