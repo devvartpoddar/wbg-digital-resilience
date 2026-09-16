@@ -39,9 +39,19 @@ PROC_DIR = os.path.join("intermediate", "procurement")
 # crosstabulation found none of it in the most exposed package classes. This is a
 # lexical probe, not a classifier - it is here to say whether the finding holds,
 # not to score anything.
-CLIMATE_TERMS = ("climate", "resilien", "flood", "typhoon", "cyclone", "drought",
-                 "disaster", "hazard", "storm", "sea level", "erosion",
-                 "earthquake", "extreme weather", "early warning", "adaptation")
+#
+# These are the eight terms the card names, verbatim: flood, cyclone, typhoon,
+# storm, seismic, climate, resilien*, adaptation. "seismic" was missing from the
+# earlier set, which carried "earthquake" instead - they are not the same probe
+# and the difference matters in a corpus of this kind. "resilien*" is a prefix
+# match, which "resilien" as a substring already is.
+CLIMATE_TERMS = ("flood", "cyclone", "typhoon", "storm", "seismic", "climate",
+                 "resilien", "adaptation")
+# The wider lexical set the first run of this test used, kept so the two are
+# comparable. Reported on its own line and never as the headline.
+CLIMATE_TERMS_WIDE = CLIMATE_TERMS + ("drought", "disaster", "hazard", "sea level",
+                                      "erosion", "earthquake", "extreme weather",
+                                      "early warning")
 
 # The two exposed classes named in the card, approximated lexically because no
 # asset term list is committed yet.
@@ -62,14 +72,25 @@ def load(data, table):
 def near_pairs(unmatched, candidates, limit=20, floor=0.55):
     """Pair each unmatched reference with its closest counterpart, so the residue
     can be read rather than only counted. Ratio is difflib's, on the normalised
-    forms, and the pairs come back best-first."""
+    forms, and the pairs come back best-first.
+
+    One SequenceMatcher is reused and each candidate is skipped on
+    real_quick_ratio, which is an upper bound on ratio - it cannot change the
+    answer, only the work. At full scale this is ~7M comparisons per run and
+    rebuilding the matcher for each of them is most of the cost.
+    """
     out = []
+    sm = difflib.SequenceMatcher()
     for ref, project in unmatched:
+        sm.set_seq1(ref)
         best, score = "", 0.0
         for cand, cproject in candidates:
             if project and cproject and project != cproject:
                 continue
-            r = difflib.SequenceMatcher(None, ref, cand).ratio()
+            sm.set_seq2(cand)
+            if sm.real_quick_ratio() <= score:
+                continue
+            r = sm.ratio()
             if r > score:
                 best, score = cand, r
         if best and score >= floor:
@@ -86,6 +107,7 @@ def main():
 
     packages = load(args.data, "packages")
     awards = load(args.data, "awards")
+    notices = load(args.data, "notices")
 
     pkg = [(r["borrower_ref"].strip(), r["borrower_ref_norm"].strip(),
             r["project_id"], r["description_clean"], r["status"])
@@ -171,14 +193,22 @@ def main():
 
     # the climate-language note
     out.append("")
-    out.append("climate language in package descriptions (lexical probe)")
+    out.append("climate language in procurement text (lexical probe, no classifier)")
     out.append("-" * 74)
-    with_climate = [r for r in packages
-                    if any(t in (r["description_clean"] or "").lower()
-                           for t in CLIMATE_TERMS)]
-    out.append(f"  packages whose description carries any of {len(CLIMATE_TERMS)} "
-               f"climate terms: {len(with_climate):,} of {len(packages):,} "
-               f"({100.0 * len(with_climate) / max(len(packages), 1):.1f}%)")
+    out.append(f"  terms, as named in the card: {', '.join(CLIMATE_TERMS)}")
+    for label, rows, field in (("packages", packages, "description_clean"),
+                               ("notices", notices, "bid_description_clean"),
+                               ("awards", awards, "description_clean")):
+        n = sum(1 for r in rows
+                if any(t in (r.get(field) or "").lower() for t in CLIMATE_TERMS))
+        out.append(f"  {label:<10} {n:>6,} of {len(rows):>6,} carry any of them "
+                   f"({100.0 * n / max(len(rows), 1):.2f}%)")
+    wide = sum(1 for r in packages
+               if any(t in (r["description_clean"] or "").lower()
+                      for t in CLIMATE_TERMS_WIDE))
+    out.append(f"  packages carrying any of the wider {len(CLIMATE_TERMS_WIDE)}-term "
+               f"set the first run used: {wide:,} of {len(packages):,} "
+               f"({100.0 * wide / max(len(packages), 1):.2f}%)")
     for name, terms in CLASS_TERMS.items():
         cls = [r for r in packages
                if any(t in (r["description_clean"] or "").lower() for t in terms)]
@@ -186,11 +216,6 @@ def main():
                 if any(t in (r["description_clean"] or "").lower() for t in CLIMATE_TERMS))
         out.append(f"  {name}-classified packages: {len(cls):,}; carrying climate "
                    f"language: {n:,}")
-    aw_with_climate = [r for r in awards
-                       if any(t in (r["description_clean"] or "").lower()
-                              for t in CLIMATE_TERMS)]
-    out.append(f"  awards carrying climate language: {len(aw_with_climate):,} "
-               f"of {len(awards):,}")
 
     # where the references actually differ, structurally
     out.append("")

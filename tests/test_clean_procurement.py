@@ -29,6 +29,8 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 
 import clean_procurement as P  # noqa: E402
 import audit_procurement as AP  # noqa: E402
+import fetch_procurement as FP  # noqa: E402
+import v6_link_test as V6  # noqa: E402
 
 
 # ------------------------------------------------------- step 1: characters
@@ -306,14 +308,14 @@ MAX_RATE = {
     "unicode replacement character": 0.0,        # 0.00% - removed at cleaning
     "control or format character": 0.0,          # 0.00%
     "whitespace not collapsed": 0.0,             # 0.00%
-    "description carries a second borrower reference": 5.0,   # 3.61%
+    "description carries a second borrower reference": 5.5,   # 5.11%, see note below
     "description ends mid-word": 1.0,            # 0.22%
     # Not a defect we repair - it cannot be repaired without guessing, and the
     # matching copy makes it harmless (see match_key). The gate is a ceiling
     # that would catch the parser getting WORSE, not a target to drive to zero.
     # The true rate is higher than this check can see: it finds a case boundary,
     # so "DataCenter" shows and "studyfor" does not.
-    "word glued to the next inside the description": 40.0,
+    "word glued to the next inside the description": 40.0,   # 29.91% of 14,478
     "borrower reference absent": 0.0,            # 0.00%
     "borrower reference not normalised": 0.0,    # 0.00%
     "category unmapped": 0.5,                    # 0.00%
@@ -330,6 +332,13 @@ MAX_RATE = {
 # code point nobody has read yet, so it is reported rather than guessed at.
 # CHAR_MAP in clean.py folds the ten the appraisal corpus taught us, including
 # U+F0D8, which was the other one here.
+#
+# "second borrower reference" moved from 3.61% to 5.11% when the plan parser
+# stopped losing records whose reference wrapped across two lines. The increase
+# is not the defect getting worse: in the plans that always parsed it is 3.60%
+# (156 of 4,330), unchanged, and the rest is 113 of 937 rows in the plans the
+# merge recovered, which are the messiest renditions in the corpus. The gate is
+# above 5.11% and still below anything that would read as a regression.
 
 
 @pytest.mark.parametrize("name", sorted(MAX_RATE))
@@ -394,3 +403,117 @@ class TestMatchKey:
         its case and its punctuation, because a person reads it."""
         assert P.collapse(self.GLUED) == self.GLUED
         assert "DataCenter" in self.GLUED
+
+
+# ------------------------------------------------- one reference, two projects
+
+def _pkg_row(project, ref, version, date, description, status="planned"):
+    return {"package_id": ref, "project_id": project, "borrower_ref": ref,
+            "borrower_ref_norm": P.norm_ref(ref), "description": description,
+            "description_clean": description, "description_match": P.match_key(description),
+            "description_sha256": P.desc_sha256(description), "description_lang": "en",
+            "lot": "", "phase": "", "is_rebid": "false", "is_placeholder": "false",
+            "superseded_by": "", "clean_version": P.CLEAN_VERSION, "category": "goods",
+            "method": "open_national", "status": status, "status_raw": status,
+            "planned_date": "", "revised_date": "", "estimated_amount": "100.00",
+            "currency": "USD", "actual_amount": "", "plan_version": version,
+            "fetched_at": "t", "plan_disclosure_date": date,
+            "_plan_disclosure_date": date}
+
+
+def test_step8_keeps_two_projects_apart_when_they_share_a_reference():
+    """The borrower reference is unique within a project, not across them.
+    'CS-INDV' and 'GO-RFB' are printed by three of the 70 projects each; keyed on
+    the reference alone the second project's package is folded into the first
+    project's row and disappears, taking its plan history with it."""
+    rows = [_pkg_row("P1", "CS-INDV", "d1", "2024-01-01", "Supply of cable"),
+            _pkg_row("P2", "CS-INDV", "d2", "2024-01-01", "Fourniture de cable")]
+    kept, superseded = P.dedupe_packages(rows, Counter())
+    assert sorted(r["project_id"] for r in kept) == ["P1", "P2"]
+    assert sorted(r["description"] for r in kept) == ["Fourniture de cable", "Supply of cable"]
+    assert superseded == []
+
+
+def test_step8_still_folds_two_versions_of_one_project_package():
+    rows = [_pkg_row("P1", "CS-INDV", "d1", "2024-01-01", "Supply of cable",
+                     status="planned"),
+            _pkg_row("P1", "CS-INDV", "d2", "2024-06-01", "Supply of cable",
+                     status="signed")]
+    counters = Counter()
+    kept, superseded = P.dedupe_packages(rows, counters)
+    assert [r["plan_version"] for r in kept] == ["d2"]
+    assert counters["package_versions_superseded"] == 1
+
+
+def test_the_plan_diff_does_not_compare_one_project_against_another():
+    """package_changes keeps a running 'seen' dict. Keyed on the reference alone
+    it would find P2's CS-INDV in P1's row and report a change that never
+    happened."""
+    rows = [_pkg_row("P1", "CS-INDV", "d1", "2024-01-01", "Supply of cable"),
+            _pkg_row("P2", "CS-INDV", "d2", "2024-01-01", "Fourniture de cable")]
+    changes, _unkeyable = FP.package_changes(rows)
+    assert [c["change"] for c in changes] == ["appeared", "appeared"]
+    assert {c["project_id"] for c in changes} == {"P1", "P2"}
+
+
+# ------------------------------------------- the reference that wrapped in two
+
+WRAPPED = ("Project information\n"
+           "WORKS\n"
+           "AA-AGENCY-123456-CW-\n"
+           "RFB / Construction of the fibre duct\n"
+           "   IBRD / 90000   Open - National   100,000.00\n")
+
+
+def test_a_reference_wrapped_across_two_lines_becomes_one_record():
+    merged = FP._join_wrapped_refs(WRAPPED.split("\n"))
+    assert any(ln.startswith("AA-AGENCY-123456-CW-RFB / Construction") for ln in merged)
+    assert "AA-AGENCY-123456-CW-" not in merged
+
+
+def test_a_reference_clipped_mid_token_needs_no_separator():
+    """The same clip, one iteration earlier: the column edge fell inside 'QCBS'.
+    Merging must not invent a separator that the rendition did not print."""
+    assert FP._join_wrapped_refs(["AA-AGENCY-220449-CS-QCB",
+                                  "S / Upgrades to the establishment"]) == \
+        ["AA-AGENCY-220449-CS-QCBS / Upgrades to the establishment"]
+
+
+def test_a_line_with_the_shape_but_no_number_is_left_alone():
+    """A section heading is the same shape as a clipped reference. Every borrower
+    reference in this corpus carries a digit; headings do not."""
+    lines = ["NON-CONSULTING-", "S / SERVICES"]
+    assert FP._join_wrapped_refs(lines) == lines
+
+
+def test_parse_plan_text_recovers_a_wrapped_reference_end_to_end():
+    """Without the merge REF_RE matches nothing in this rendition, every line is
+    preamble and the document parses to zero package rows - which no counter in
+    the report used to distinguish from a plan with an empty package table."""
+    meta = {"project_id": "P1", "doc_id": "d1", "disclosure_date": "2024-01-01",
+            "content_sha256": "x", "fetched_at": "t"}
+    lines = WRAPPED.split("\n")
+    assert not any(FP.REF_RE.match(ln) for ln in lines), \
+        "fixture is wrong - the unmerged text should have no record boundary"
+    rows, _free = FP.parse_plan_text(WRAPPED, meta)
+    assert len(rows) == 1
+    assert rows[0]["borrower_ref"] == "AA-AGENCY-123456-CW-RFB"
+    assert rows[0]["description"] == "Construction of the fibre duct"
+
+
+# --------------------------------------------- the climate probe's term list
+
+def test_the_climate_probe_carries_the_eight_terms_the_card_names():
+    """The earlier list had 'earthquake' where the card says 'seismic'. They are
+    different words and only one of them is in the instruction."""
+    for term in ("flood", "cyclone", "typhoon", "storm", "seismic", "climate",
+                 "resilien", "adaptation"):
+        assert term in V6.CLIMATE_TERMS, term
+
+
+def test_the_climate_probe_counts_notices_as_well_as_packages_and_awards():
+    """The card asks for all three tables. The probe counted packages and awards
+    and left notices out."""
+    import inspect
+    src = inspect.getsource(V6.main)
+    assert "notices" in src and "bid_description_clean" in src

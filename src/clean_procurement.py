@@ -512,10 +512,19 @@ def dedupe_packages(rows, counters):
     The superseded rows are written whole to superseded_packages.csv and counted
     here - a supersession that leaves no trace is how a revised amount becomes
     invisible.
+
+    Grouped on (project_id, package_id), not on package_id. The borrower
+    reference is only unique within a project, and generic ones recur across
+    projects - 'CS-INDV', 'GO-RFB' and 'CS-QCBS' each appear under three of the
+    70, and 8 references in total are shared by two or more projects. Keyed on
+    the reference alone the later project's package is folded into the earlier
+    project's row, and it leaves no trace anywhere: one project's package
+    vanishes, the other's description is overwritten by a stranger's. 10 packages
+    were being lost that way. The version history within a project is unaffected.
     """
     groups = defaultdict(list)
     for r in rows:
-        groups[r["package_id"]].append(r)
+        groups[(r["project_id"], r["package_id"])].append(r)
     kept, superseded = [], []
     for key, versions in groups.items():
         versions.sort(key=lambda x: (x["_plan_disclosure_date"], x["plan_version"]))
