@@ -136,3 +136,119 @@ class TestNormalisationOfForeignValues:
         french = "Fourniture et installation d'équipements"
         assert "é" in C.collapse(french)
         assert "é" not in C.enum_key(french)
+
+
+import plan_table as PT  # noqa: E402
+
+
+def _doc(*blocks):
+    return "\n".join(blocks).split("\n")
+
+
+HEADER = """GOODS
+Activity Reference No. /
+Description
+Loan / Credit N o.
+Component Review Type Method
+Market Approac h
+Estimated Am ount (US$)
+Actual Amount
+(US$)
+Process St atus
+Planned Actual Planned Actual"""
+
+
+class TestFindingTheTable:
+    """Everything outside the STEP tables is the borrower's own narrative and
+    is not data. Locating the table exactly is what lets the rest be ignored."""
+
+    def test_a_section_name_in_the_narrative_is_not_a_section(self):
+        """'GOODS' and 'WORKS' occur alone on a line in preamble prose. The
+        column heading on the next line is what tells a heading from a word;
+        without that test one corpus document reports 3,822 sections."""
+        lines = _doc("Some preamble about", "WORKS", "and their financing,",
+                     "which continues for", "several more lines of prose.",
+                     HEADER, "ZZ-AAA-1 / A thing", "IDA / 1234")
+        found = PT.find_tables(lines)
+        assert [t.section for t in found] == ["GOODS"]
+
+    def test_the_heading_band_is_not_read_as_a_row(self):
+        lines = _doc(HEADER, "ZZ-AAA-1 / A thing", "IDA / 1234",
+                     "100.00 0.00 Signed 2021-01-01")
+        table = PT.find_tables(lines)[0]
+        assert not any(PT.ANCHOR_RE.search(l) for l in table.data)
+
+
+class TestCollapsedRendition:
+    """A rendition with no column positions at all. These were read as nothing
+    whatever - the fixed-width parser splits a line at its first run of two
+    spaces and a collapsed rendition has none - and they are the newest
+    rendition of six of the eight projects, so they decide the current state."""
+
+    def test_cells_packed_onto_one_line_are_read(self):
+        lines = _doc(HEADER, "ZZ-AAA-1 / A thing", "IDA / 1234",
+                     "Post Direct Selection Direct 10,000.00 0.00 Canceled 2019-08-04")
+        row = PT.read_collapsed_table(PT.find_tables(lines)[0])[0]
+        assert row["estimated_amount"] == "10,000.00"
+        assert row["actual_amount"] == "0.00"
+        assert row["status_raw"] == "Canceled"
+
+    def test_cells_on_their_own_lines_are_read_the_same_way(self):
+        """The same table in a different rendition. Read as lines these need
+        two readers; read as a token stream they are one shape."""
+        lines = _doc(HEADER, "ZZ-AAA-1 / A thing", "IDA / 1234", "", "Post", "",
+                     "10,000.00", "", "0.00", "", "Signed", "", "2024-05-19")
+        row = PT.read_collapsed_table(PT.find_tables(lines)[0])[0]
+        assert row["estimated_amount"] == "10,000.00"
+        assert row["status_raw"] == "Signed"
+
+    def test_the_status_is_found_without_knowing_the_word(self):
+        """Between the last amount and the first milestone date, in whatever
+        language the plan is written in. No vocabulary is consulted here."""
+        lines = _doc(HEADER, "ZZ-AAA-1 / Une chose", "IDA / 1234",
+                     "50,000.00 45,492.48 Achevé 2019-11-20")
+        row = PT.read_collapsed_table(PT.find_tables(lines)[0])[0]
+        assert row["status_raw"] == "Achevé"
+
+    def test_a_run_of_dates_is_never_read_as_a_status(self):
+        lines = _doc(HEADER, "ZZ-AAA-1 / A thing", "IDA / 1234",
+                     "50,000.00 0.00 2019-11-20 2020-01-15 2020-03-04")
+        row = PT.read_collapsed_table(PT.find_tables(lines)[0])[0]
+        assert row["status_raw"] == ""
+
+    def test_a_single_amount_is_the_actual_when_no_estimated_column_is_printed(self):
+        """19% of renditions are old enough that STEP printed only the actual.
+        Read positionally without checking the heading, an actual of 0.00 is
+        filed as an estimate of zero - which is worse than reading nothing."""
+        lines = _doc(HEADER, "ZZ-AAA-1 / A thing", "IDA / 1234", "0.00 Signed")
+        table = PT.find_tables(lines)[0]
+        row = PT.read_collapsed_table(table, has_estimated=False)[0]
+        assert row["actual_amount"] == "0.00" and row["estimated_amount"] == ""
+        row = PT.read_collapsed_table(table, has_estimated=True)[0]
+        assert row["estimated_amount"] == "0.00"
+
+
+class TestRefusingScrambledRenditions:
+    """Some renditions emit each column of a page as its own run, so the
+    reference column and the money column are in different orders. Attaching
+    one package's amount to another's reference is worse than reading neither,
+    because the result looks like data."""
+
+    def test_a_record_split_by_a_reprinted_heading_gives_up_its_figures(self):
+        lines = _doc(HEADER, "ZZ-AAA-1 / A thing", "IDA / 1234",
+                     "Process St atus", "Documents",
+                     "50,000.00 0.00 Signed 2019-11-20")
+        row = PT.read_collapsed_table(PT.find_tables(lines)[0])[0]
+        assert row["interleaved"]
+        assert row["estimated_amount"] == "" and row["status_raw"] == ""
+        assert row["description"].startswith("ZZ-AAA-1")
+
+    def test_a_table_where_most_records_lost_their_money_is_refused(self):
+        rows = [{"estimated_amount": "1.00", "actual_amount": ""}] + \
+               [{"estimated_amount": "", "actual_amount": ""} for _ in range(4)]
+        assert not PT.collapsed_is_aligned(rows)
+
+    def test_an_intact_table_is_not_refused(self):
+        rows = [{"estimated_amount": "1.00", "actual_amount": ""} for _ in range(19)] + \
+               [{"estimated_amount": "", "actual_amount": ""}]
+        assert PT.collapsed_is_aligned(rows)

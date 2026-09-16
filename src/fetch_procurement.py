@@ -41,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import plan_table                                     # noqa: E402
 from fetch import get, HEADERS, read_cohort            # noqa: E402
 from clean_procurement import (                        # noqa: E402
     CLEAN_VERSION, norm_ref, split_markers, is_placeholder, detect_lang,
@@ -432,6 +433,78 @@ def split_ref_chain(desc, fallback):
     return ref, (rest or desc)
 
 
+def _parse_collapsed(tables, doc_meta):
+    """Rows out of a rendition that prints the table with no column positions.
+
+    These are 22 of the corpus's 496 renditions and they used to yield nothing
+    at all - the parser for the fixed-width layout splits a line at the first
+    run of two spaces, and in a collapsed rendition there are none, so every
+    line became the description and no metadata column was ever found. They
+    matter far out of proportion to their number: the newest rendition of six
+    of the eight projects is one, and the newest rendition is what the
+    current-state table reads.
+
+    A document whose columns came apart gives up its figures wholesale rather
+    than risk attaching one package's amount to another's reference. It keeps
+    its references and descriptions, which are still the borrower's and still
+    correct, and the figures come from its earlier renditions instead.
+    """
+    rows, all_rows, refused = [], [], False
+    per_table = []
+    for table in tables:
+        read = plan_table.read_collapsed_table(table)
+        per_table.append((table, read))
+        all_rows.extend(read)
+    if not plan_table.collapsed_is_aligned(all_rows):
+        refused = True
+
+    n = 0
+    for table, read in per_table:
+        for rec in read:
+            ref, desc = split_ref_chain(collapse_ws(rec["description"]), "")
+            if not ref:
+                continue
+            block = rec["block"]
+            dates = [] if refused else rec["dates"]
+            rows.append({
+                "project_id": doc_meta["project_id"],
+                "plan_version": doc_meta["doc_id"],
+                "plan_doc_id": doc_meta["doc_id"],
+                "plan_disclosure_date": doc_meta["disclosure_date"],
+                "borrower_ref": ref,
+                "description": desc,
+                "category_raw": rec["section"],
+                "method_raw": "" if refused else _first_token(block, METHOD_TOKENS),
+                "market_approach": "" if refused else _first_token(block, APPROACH_TOKENS),
+                "status_raw": "" if refused else rec["status_raw"],
+                "planned_date": dates[0] if dates else "",
+                "revised_date": dates[-1] if len(dates) > 1 else "",
+                "estimated_amount": ""
+                    if refused else _as_amount(rec["estimated_amount"]),
+                "currency": "USD",
+                "content_sha256": doc_meta["content_sha256"],
+                "fetched_at": doc_meta["fetched_at"],
+                "section": rec["section"],
+                "record_index": n,
+                "_wrap_seams": 0,
+                "_dates": len(dates),
+                "_layout": "collapsed_refused" if refused else "collapsed",
+            })
+            n += 1
+    return rows, []
+
+
+def _as_amount(value):
+    try:
+        return f"{float((value or '0').replace(',', '')):.2f}" if value else ""
+    except ValueError:
+        return ""
+
+
+def collapse_ws(text):
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
 def parse_plan_text(text, doc_meta):
     """Pull the STEP plan table out of a plan's text rendition.
 
@@ -444,6 +517,10 @@ def parse_plan_text(text, doc_meta):
     across records.
     """
     lines = text.replace("\r\n", "\n").split("\n")
+    tables = plan_table.find_tables(lines)
+    if tables and sum(plan_table.is_collapsed(t) for t in tables) > len(tables) / 2:
+        return _parse_collapsed(tables, doc_meta)
+
     lines = _join_wrapped_refs(lines)
     records, cur, section = [], None, ""
     free_text = []
