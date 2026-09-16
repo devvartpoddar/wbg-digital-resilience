@@ -22,8 +22,9 @@ the layout is the text extractor's, not the borrower's:
 
   gutters    The table prints at fixed character positions, columns separated
              by runs of spaces, each cell wrapped over as many physical lines
-             as it needs. 474 of 496 renditions. Read by slicing every line of
-             a record on that document's own column boundaries.
+             as it needs. 474 of 496 renditions. This module bounds those
+             tables and reads their heading bands; fetch_procurement reads the
+             rows within the bounds.
 
   collapsed  Whitespace is gone. Each cell is on its own line, or a few narrow
              cells share one. 22 of 496 renditions - but they are the NEWEST
@@ -31,12 +32,16 @@ the layout is the text extractor's, not the borrower's:
              current-state table says, and being 4% of documents does not make
              them a tail case.
 
-Column boundaries are not guessed. The headings give the order, which is fixed,
-and their positions give a coarse x; the data rows give the exact edge, because
-a gutter in a fixed-width table is blank on every line. Neither signal is
-sufficient alone: heading labels are centred over their columns and butt
-against each other with a single space on the right-hand side of the table,
-while data gutters close whenever a long description overflows.
+Slicing a gutter table into its columns by character position was tried and is
+not here. The heading labels are centred over their columns and butt against
+each other with a single space on the right-hand side of the table, so their
+positions give only a coarse x; the data rows give a sharper edge, but the
+amount columns are right-aligned and the extractor places text by measured
+width, so a column's start drifts a character or two from row to row. Reading
+the rows by their closed value sets instead - which is what fetch_procurement
+does - already recovers 80% of statuses and 77% of amounts, and positional
+slicing was never shown to beat it. What this module contributes to those
+tables is the bound and the heading band, which is where the real defects were.
 """
 import re
 import unicodedata
@@ -168,10 +173,13 @@ def is_collapsed(table):
 
     Measured on the heading band rather than the rows, because an empty section
     has no rows and a section whose every description is short has few wide
-    lines. A band that still prints its headings side by side kept its columns.
+    lines. A single line printing three headings side by side is proof enough
+    that the columns survived - requiring two misreads a band narrow enough to
+    fit on one line, and a collapsed band has no such line at all, because
+    collapsing leaves the headings one per line or separated by single spaces.
     """
     wide = sum(1 for l in table.header if len(re.findall(r"\S {2,}\S", l)) >= 3)
-    return wide < 2
+    return wide < 1
 
 
 def _label_positions(header, label, min_prefix=5):
@@ -232,135 +240,57 @@ def solve_columns(header, section):
     return chosen
 
 
-def column_spans(table, section, min_starts=2):
-    """Turn the solved label positions into [start, end) character spans.
+def has_column(table, label):
+    """Does this table print the column headed `label`?
 
-    The label's x is not the column's edge. STEP centres a heading over its
-    column, so slicing at the label position clips the left of every cell under
-    it - on one Nigerian table the Loan cell begins two characters before its
-    own heading does.
+    The five STEP sections do not carry the same columns - CONSULTING FIRMS and
+    INDIVIDUAL CONSULTANTS have a Contract Type where GOODS has a
+    Prequalification - and the same section is printed with different columns in
+    different plans. One of those differences changes a value rather than just
+    the layout: 19% of renditions are old enough that STEP printed only an
+    Actual Amount, and on those the single figure on a row is the actual. A
+    reader that takes the first figure it finds as the estimate files an actual
+    of 0.00 as an estimate of zero on 25,793 of the corpus's records, which is
+    worse than reading nothing because nothing about the result looks wrong.
 
-    The edge is read off the rows instead, from where their cells START. For
-    each position, count the rows on which a run of text begins there: a line
-    is blank at p-1 and not blank at p. A left-aligned column puts every one of
-    its cells at exactly its own left edge, so that count spikes there and
-    nowhere near it, and the spike is the edge.
-
-    This replaced looking for the blank gutter between the columns, which is
-    the obvious thing and does not work. Two reasons, both fatal and both seen
-    on the corpus. The gutter between the description and the loan is often a
-    single character wide and is closed by any description that fills its
-    column, so on a real table there is no run of blank to find. And inside a
-    column whose cells are mostly short, the unused right-hand part is blank on
-    more rows than the true gutter is, so the blankest position in the interval
-    lies in the middle of a column rather than between two - which silently
-    merges that column with its neighbour and shifts every column after it.
-
-    Amount columns are right-aligned and so have no single start position. They
-    still work, because what is needed is a position no cell begins to the left
-    of, and the leftmost of their starts is one: the column is read slightly
-    narrow and nothing is clipped.
+    So the question is asked of each table's own heading band, per rendition,
+    and never assumed from the section.
     """
-    chosen = solve_columns(table.header, section)
-    if not chosen:
-        return []
-    rows = [l for l in table.data if l.strip()]
-    width = max([len(l) for l in rows] + [len(l) for l in table.header] + [1])
-    padded = [l.ljust(width + 1) for l in rows]
-    # A cell edge is a run of text that begins after a GAP, not after a single
-    # space. Counting every word boundary instead puts a spike inside every
-    # multi-word cell - "Component 4: Project" offers one at the "4:" - and the
-    # tie-break then lands the column edge in the middle of the cell before it.
-    starts = [0] * (width + 1)
-    for line in padded:
-        for p in range(2, width):
-            if line[p] != " " and line[p - 1] == " " and line[p - 2] == " ":
-                starts[p] += 1
-
-    xs = [x for _, x in chosen]
-    bounds = [0]
-    for left, right in zip(xs, xs[1:]):
-        lo, hi = left + 1, min(right + 1, width)
-        best, best_p = 0, None
-        for p in range(lo, hi):
-            if starts[p] >= best and starts[p] >= min_starts:
-                best, best_p = starts[p], p        # ties resolve rightwards
-        # A column that is empty in every row of this table offers no start to
-        # find. The midpoint is then as good as anything and costs only the
-        # width of a column nothing is read out of.
-        bounds.append(best_p if best_p is not None else (left + right) // 2)
-    bounds.append(width)
-    return [(field, bounds[i], bounds[i + 1]) for i, (field, _) in enumerate(chosen)]
+    return bool(_label_positions(["\n".join(table.header)], label))
 
 
-def _assemble(pieces):
-    """Rebuild one cell from its slices, in line order.
+ESTIMATED_LABEL = "Estimated Amount (US$)"
 
-    A cell too wide for its column wraps, and the rendition gives no marker for
-    where. The break point itself is the signal: a piece that reaches the
-    column's right edge was cut mid-word and its successor glues on, while one
-    that stops short broke at a space and its successor needs one. Getting this
-    wrong is not cosmetic - it is the difference between "Pending
-    Implementation" and "PendingImplementation", and between a description that
-    can be read and one that cannot.
 
-    `pieces` is (text, reached_right_edge) per line, already stripped of the
-    lines that held nothing in this column.
+def present_columns(table):
+    """Which of the section's catalogue columns this table actually prints.
+
+    Ordered as STEP prints them. Written into the fetch report per section, so
+    that "are all five tables being read with their own columns" is answered
+    from a run's output rather than by reading the code.
     """
-    out, glue = "", False
-    for text, filled in pieces:
-        if not out:
-            out = text
-        elif glue:
-            out += text
-        else:
-            out += " " + text
-        glue = filled
-    return out
+    if is_collapsed(table):
+        # No meaningful x to order by - every heading sits at the left margin on
+        # its own line - so presence is all that can be asked.
+        band = ["\n".join(table.header)]
+        found = [field for field, label in catalogue(table.section)
+                 if _label_positions(band, label)]
+    else:
+        # Ordered, because order is what resolves an ambiguous heading:
+        # "Contract Type" and "Contract Completion" share nine characters, and
+        # a bare presence test reports a Contract Type column in a GOODS table
+        # that only has the Contract Completion milestone.
+        found = [field for field, _ in solve_columns(table.header, table.section)]
+    return [f for f in found if not f.startswith("_milestone")]
 
 
-def read_gutter_table(table):
-    """Rows out of a table that kept its column positions.
+def table_span(table):
+    """The [start, end) line range this table occupies in the rendition.
 
-    A record is a band of consecutive lines, opened by the line whose FIRST
-    column holds a borrower reference and closed by the next such line. Every
-    line of the band contributes to whichever columns it has text in, so a cell
-    wrapped over five lines is read from those five lines and nothing else -
-    which is the whole reason for locating columns rather than matching values.
-    The previous parser searched the whole record for a known status word, and
-    could only find the values it already had a word for.
+    Everything outside every table's span is the borrower's own narrative and
+    is not data.
     """
-    spans = column_spans(table, table.section)
-    if not spans:
-        return []
-    ref_a, ref_b = spans[0][1], spans[0][2]
-    width = max([len(l) for l in table.data] + [1])
-    bands, cur = [], None
-    for line in table.data:
-        padded = line.ljust(width)
-        if ROW_START_RE.match(padded[ref_a:ref_b]):
-            if cur:
-                bands.append(cur)
-            cur = [padded]
-        elif cur is not None:
-            cur.append(padded)
-    if cur:
-        bands.append(cur)
-
-    rows = []
-    for band in bands:
-        row = {"section": table.section}
-        for field, a, b in spans:
-            pieces = []
-            for line in band:
-                cell = line[a:b]
-                text = cell.rstrip()
-                if not text.strip():
-                    continue
-                pieces.append((text.strip(), len(text) >= (b - a)))
-            row[field] = _assemble(pieces)
-        rows.append(row)
-    return rows
+    return table.start, table.start + len(table.header) + len(table.data)
 
 
 # A collapsed rendition has no column positions, so the cells have to be told
@@ -368,16 +298,6 @@ def read_gutter_table(table):
 LOAN_RE = re.compile(r"^\s*(IDA|IBRD|TF|GRANT|CREDIT|DON|PRET)\s*/\s*\S", re.I)
 AMOUNT_TOKEN_RE = re.compile(r"[\d,]+\.\d{2}")
 DATE_TOKEN_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
-# The money line: whichever line carries the amounts. It does NOT begin with
-# them - the narrow cells to their left pack onto the same line, so a real one
-# reads "Post  Direct Selection  Direct  10,000.00  0.00  Canceled  2019-08-04".
-# Requiring the line to start with an amount finds 39% of the records in a
-# rendition where the true figure is 100%.
-#
-# What sits between the last amount and the first milestone date is the Process
-# Status, in whatever language the plan is written in. That is also how the
-# status vocabulary was mined in the first place, and it means this does not
-# need to know the word to find the cell.
 
 
 # Lines belonging to a column-heading band that the rendition reprints at every

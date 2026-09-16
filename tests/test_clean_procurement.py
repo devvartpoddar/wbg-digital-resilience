@@ -458,8 +458,15 @@ def test_the_plan_diff_does_not_compare_one_project_against_another():
 
 # ------------------------------------------- the reference that wrapped in two
 
+# A minimal but complete STEP table: the section heading, the column heading
+# band that tells it from the same word in a sentence, and one row whose
+# reference wrapped. Records are only read from inside such a table, so the
+# heading band is not decoration here - without it there is no table and the
+# rendition correctly parses to nothing.
 WRAPPED = ("Project information\n"
            "WORKS\n"
+           "Activity Reference No. /   Loan / Credit N   Market Approac   Estimated Am\n"
+           "      Description               o.                  h            ount (US$)\n"
            "AA-AGENCY-123456-CW-\n"
            "RFB / Construction of the fibre duct\n"
            "   IBRD / 90000   Open - National   100,000.00\n")

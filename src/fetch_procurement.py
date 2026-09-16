@@ -36,6 +36,7 @@ The parser for it is `parse_plan_text` and it is deliberately conservative - it
 recovers what it can and reports what it could not key.
 """
 import argparse, csv, hashlib, json, os, re, sys, threading, time, unicodedata, urllib.parse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -311,8 +312,12 @@ REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9][A-Z0-9\u2013\u2014-]{0,20})\s*/\s*(.*
 # references normally against 47 orphaned this way, Niger 128 against 61,
 # Uganda 153 against 21. Tanzania, Nigeria and Kenya have none - their
 # renditions keep the slash on the reference's line.
+# Alone in its COLUMN, not necessarily alone on its line: a fixed-width
+# rendition prints the row's other columns beside it, and requiring the whole
+# line to hold nothing else misses the shape wherever the layout kept its
+# columns. Those renditions are 474 of 496.
 REF_ALONE = re.compile(
-    r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){2,5})\s*$")
+    r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){2,5})(\s{2,}\S.*)?\s*$")
 SLASH_TAIL = re.compile(r"^\s*(/\s*\S.*)$")
 # The observed gap is one or two lines. Four allows some slack without letting
 # the scan wander into the next record.
@@ -338,7 +343,18 @@ def _join_wrapped_refs(lines):
         head = REF_WRAP_HEAD.match(lines[i])
         if head and re.search(r"\d", head.group(1)) and i + 1 < len(lines):
             tail = REF_WRAP_TAIL.match(lines[i + 1])
-            if tail:
+            # A Loan / Credit cell has the same shape as the tail of a wrapped
+            # reference - 'IDA / D9060' reads as the token 'IDA' followed by a
+            # slash and a description - and gluing one on destroys the package:
+            # 'MZ-MJACER-423921-GO-RFQ' plus 'IDA / D9060' becomes
+            # 'MZ-MJACER-423921-GO-RFQIDA / D9060', which REF_RE happily accepts
+            # and which matches no package that exists. It cost 17 of them.
+            #
+            # This lay dormant while the join only ever ran over fixed-width
+            # renditions, where the loan cell shares a line with the columns
+            # either side of it and never stands alone. It fires the moment the
+            # join is applied to a rendition that prints one cell per line.
+            if tail and not plan_table.LOAN_RE.match(lines[i + 1]):
                 # The head is re-glued with the tail's token, and everything
                 # else - the description the tail carried and the columns the
                 # head carried - is appended after it.
@@ -367,7 +383,11 @@ def _join_wrapped_refs(lines):
                     continue
                 candidate = f"{alone.group(1)} {tail.group(1)}"
                 if REF_RE.match(candidate):
-                    out.append(candidate)
+                    # Whatever else printed on the reference's own line belongs
+                    # to this row's other columns - the component, the review
+                    # type - and is carried onto the joined line rather than
+                    # dropped with it.
+                    out.append(candidate + (alone.group(2) or ""))
                     # The lines between the two belong to other columns of this
                     # same record and are kept where they were; only the slash
                     # line is consumed, because it is now part of the join.
@@ -460,6 +480,7 @@ def _parse_collapsed(tables, doc_meta):
 
     n = 0
     for table, read in per_table:
+        columns = "|".join(plan_table.present_columns(table))
         for rec in read:
             ref, desc = split_ref_chain(collapse_ws(rec["description"]), "")
             if not ref:
@@ -488,6 +509,8 @@ def _parse_collapsed(tables, doc_meta):
                 "record_index": n,
                 "_wrap_seams": 0,
                 "_dates": len(dates),
+                "_columns": columns,
+                "_no_est": not plan_table.has_column(table, plan_table.ESTIMATED_LABEL),
                 "_layout": "collapsed_refused" if refused else "collapsed",
             })
             n += 1
@@ -506,42 +529,82 @@ def collapse_ws(text):
 
 
 def parse_plan_text(text, doc_meta):
-    """Pull the STEP plan table out of a plan's text rendition.
+    """Pull the STEP plan tables out of a plan's text rendition.
 
-    Records are delimited by the borrower reference, which is the first thing in
-    the first column of every row of every section. Everything between two
-    references belongs to the first. Column zero (reference and description) is
-    recovered exactly; the metadata columns are located by matching their closed
-    value sets anywhere in the record block, because the rendition wraps each
-    cell over an unknown number of physical lines and no column offset is stable
-    across records.
+    Only the tables. A plan document is two things bolted together and one of
+    them is not data: the front is narrative the borrower writes, sometimes with
+    annex tables of its own, and the back is generated by STEP. plan_table finds
+    the five STEP sections exactly - all 496 renditions of the eight-country
+    corpus carry all five, with the "Activity Reference No." heading as the test
+    that tells a heading from the same word in a sentence - and records are
+    built from inside those bounds and nowhere else.
+
+    This used to scan the whole document, and got away with it: no record has
+    ever been built from outside a table, because REF_RE needs a borrower
+    reference at the start of a line and the narrative has none. That is a
+    property of eight countries' prose, not a property the code enforced, and
+    70 projects is a larger sample of borrower annexes. Now it is enforced, and
+    what falls outside is counted as free text rather than silently skipped.
+
+    Each of the five tables is read with its own heading band, because they do
+    not carry the same columns. The section comes from the table rather than
+    from a heading matched anywhere in the document, which alone corrected the
+    category of 4,003 records in 34 renditions where a bare "CONSULTING FIRMS"
+    in a preamble was re-labelling every record after it.
+
+    Within a table, the metadata columns are still located by matching their
+    closed value sets across the record block rather than by character
+    position - see the note in plan_table on why slicing was not adopted.
     """
-    lines = text.replace("\r\n", "\n").split("\n")
+    lines = _join_wrapped_refs(text.replace("\r\n", "\n").split("\n"))
     tables = plan_table.find_tables(lines)
-    if tables and sum(plan_table.is_collapsed(t) for t in tables) > len(tables) / 2:
+    if not tables:
+        return [], lines
+    if sum(plan_table.is_collapsed(t) for t in tables) > len(tables) / 2:
         return _parse_collapsed(tables, doc_meta)
 
-    lines = _join_wrapped_refs(lines)
-    records, cur, section = [], None, ""
-    free_text = []
+    out, n = [], 0
+    covered = set()
+    for table in tables:
+        start, end = plan_table.table_span(table)
+        covered.update(range(start, end))
+        # Asked of THIS table's heading band. 19% of renditions print no
+        # Estimated Amount column at all, and on those the figure on the row is
+        # the actual - filing it as an estimate would invent a number the plan
+        # never stated, on the one field that is carried forward.
+        has_estimated = plan_table.has_column(table, plan_table.ESTIMATED_LABEL)
+        columns = "|".join(plan_table.present_columns(table))
+        for rec in _records_in_table(table):
+            row = _plan_row(rec, table.section, has_estimated, doc_meta, n)
+            row["_columns"] = columns
+            row["_no_est"] = not has_estimated
+            out.append(row)
+            n += 1
+    free_text = [l for i, l in enumerate(lines) if i not in covered]
+    return out, free_text
 
-    for i, ln in enumerate(lines):
-        sec = SECTION_RE.match(ln)
-        if sec:
-            section = sec.group(1)
-            continue
+
+def _records_in_table(table):
+    """Split one table's rows into records.
+
+    A record opens on the line whose first column holds a borrower reference and
+    runs to the next one, because that reference is the first thing STEP prints
+    in the first column of every row of every section. Column zero - the
+    reference and the description - is taken exactly; everything to the right of
+    the first gap is the record's body, where the metadata cells are matched.
+    """
+    records, cur = [], None
+    for ln in table.data:
         m = REF_RE.match(ln)
         if m:
             if cur:
                 records.append(cur)
             rest = re.split(r" {2,}", m.group(2), maxsplit=1)
-            cur = {"section": section, "line": i, "ref": m.group(1),
-                   "col0": [_clip_tail(rest[0])], "body": []}
+            cur = {"ref": m.group(1), "col0": [_clip_tail(rest[0])], "body": []}
             if len(rest) > 1:
                 cur["body"].append(rest[1])
             continue
         if cur is None:
-            free_text.append(ln)
             continue
         if HEADER_LINE_RE.match(ln):
             continue
@@ -553,48 +616,48 @@ def parse_plan_text(text, doc_meta):
             cur["body"].append(cell[1])
     if cur:
         records.append(cur)
+    return records
 
-    out = []
-    for n, rec in enumerate(records):
-        desc, seams = _join_wrapped(rec["col0"])
-        ref, desc = split_ref_chain(desc, rec["ref"])
-        body = " ".join(rec["body"])
-        numbers = DATE_RE.findall(body)
-        amounts = [c for c in re.split(r" {2,}|\s{3,}", body) if AMOUNT_RE.match(c.strip())]
-        amount = None
-        for tok in amounts:
-            try:
-                amount = float(tok.replace(",", ""))
+
+def _plan_row(rec, section, has_estimated, doc_meta, index):
+    """One package row from one record of a fixed-width table."""
+    desc, seams = _join_wrapped(rec["col0"])
+    ref, desc = split_ref_chain(desc, rec["ref"])
+    body = " ".join(rec["body"])
+    numbers = DATE_RE.findall(body)
+    amount = None
+    if has_estimated:
+        for tok in re.split(r" {2,}|\s{3,}", body):
+            if AMOUNT_RE.match(tok.strip()):
+                try:
+                    amount = float(tok.replace(",", ""))
+                except ValueError:
+                    continue
                 break
-            except ValueError:
-                continue
-        status_raw = _first_token(body, STATUS_TOKENS)
-        method_raw = _first_token(body, METHOD_TOKENS)
-        approach = _first_token(body, APPROACH_TOKENS)
-        row = {
-            "project_id": doc_meta["project_id"],
-            "plan_version": doc_meta["doc_id"],
-            "plan_doc_id": doc_meta["doc_id"],
-            "plan_disclosure_date": doc_meta["disclosure_date"],
-            "borrower_ref": ref,
-            "description": desc,
-            "category_raw": rec["section"],
-            "method_raw": method_raw,
-            "market_approach": approach,
-            "status_raw": status_raw,
-            "planned_date": numbers[0] if numbers else "",
-            "revised_date": numbers[-1] if len(numbers) > 1 else "",
-            "estimated_amount": "" if amount is None else f"{amount:.2f}",
-            "currency": "USD",
-            "content_sha256": doc_meta["content_sha256"],
-            "fetched_at": doc_meta["fetched_at"],
-            "section": rec["section"],
-            "record_index": n,
-            "_wrap_seams": seams,
-            "_dates": len(numbers),
-        }
-        out.append(row)
-    return out, free_text
+    return {
+        "project_id": doc_meta["project_id"],
+        "plan_version": doc_meta["doc_id"],
+        "plan_doc_id": doc_meta["doc_id"],
+        "plan_disclosure_date": doc_meta["disclosure_date"],
+        "borrower_ref": ref,
+        "description": desc,
+        "category_raw": section,
+        "method_raw": _first_token(body, METHOD_TOKENS),
+        "market_approach": _first_token(body, APPROACH_TOKENS),
+        "status_raw": _first_token(body, STATUS_TOKENS),
+        "planned_date": numbers[0] if numbers else "",
+        "revised_date": numbers[-1] if len(numbers) > 1 else "",
+        "estimated_amount": "" if amount is None else f"{amount:.2f}",
+        "currency": "USD",
+        "content_sha256": doc_meta["content_sha256"],
+        "fetched_at": doc_meta["fetched_at"],
+        "section": section,
+        "record_index": index,
+        "_wrap_seams": seams,
+        "_dates": len(numbers),
+        "_columns": "",
+        "_no_est": False,
+    }
 
 
 def _clip_tail(cell):
@@ -1022,6 +1085,8 @@ def main():
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
     prep, wrap_seams_total, planned_only = [], 0, 0
+    section_columns = Counter()
+    no_estimated_column = 0
     for r in plan_rows:
         desc = r["description"]
         lang = detect_lang(desc)
@@ -1036,6 +1101,9 @@ def main():
         row["revised_date"] = r["revised_date"]
         row.pop("_wrap_seams", None)
         row.pop("_dates", None)
+        row.pop("_layout", None)
+        section_columns[(r["section"], row.pop("_columns", ""))] += 1
+        no_estimated_column += 1 if row.pop("_no_est", False) else 0
         wrap_seams_total += r.get("_wrap_seams", 0)
         if not seen_hash.get(r["plan_doc_id"]):
             seen_hash[r["plan_doc_id"]] = r["content_sha256"]
@@ -1069,6 +1137,34 @@ def main():
         fh.write(f"distinct (project, plan document) pairs: {distinct_versions:,}\n")
         fh.write(f"notices rows: {len(notices):,}\n")
         fh.write(f"awards rows: {len(awards):,}\n")
+
+        # Which columns each of the five STEP sections actually printed, and in
+        # how many rows. They do not carry the same set - the consulting
+        # sections have a Contract Type where goods and works have a
+        # Prequalification - and one difference changes a value rather than the
+        # layout: a table with no Estimated Amount column prints the ACTUAL as
+        # its only figure. This table is how that is checked from a run's
+        # output rather than by reading the parser.
+        fh.write("\ncolumns found per STEP section (rows read with that set)\n")
+        for section in ("WORKS", "GOODS", "NON CONSULTING SERVICES",
+                        "CONSULTING FIRMS", "INDIVIDUAL CONSULTANTS"):
+            variants = [(cols, n) for (sec, cols), n in section_columns.items()
+                        if sec == section]
+            total = sum(n for _, n in variants)
+            fh.write(f"  {section}  ({total:,} rows)\n")
+            for cols, n in sorted(variants, key=lambda v: -v[1])[:4]:
+                shown = cols.replace("|", ", ") or "(none read)"
+                fh.write(f"      {n:>7,}  {shown}\n")
+        # Counted from the parser's own decision, not inferred from the column
+        # list above: that list is what could be ORDERED out of the heading
+        # band, and a band truncated by an immediate first data row yields less
+        # than the band contains. The Estimated Amount heading has no
+        # confusable sibling, so its presence is asked directly.
+        fh.write(f"  rows from a table printing NO Estimated Amount column: "
+                 f"{no_estimated_column:,} "
+                 f"({100 * no_estimated_column / max(1, len(prep)):.1f}%) - "
+                 f"their estimated_amount is left blank, never filled from the "
+                 f"actual\n")
         fh.write(f"package_changes rows: {len(changes):,}\n")
         fh.write(f"packages with no usable key: {unkeyable:,}\n")
         fh.write(f"cell fragments glued (no space inserted, never guessed): "

@@ -252,3 +252,138 @@ class TestRefusingScrambledRenditions:
         rows = [{"estimated_amount": "1.00", "actual_amount": ""} for _ in range(19)] + \
                [{"estimated_amount": "", "actual_amount": ""}]
         assert PT.collapsed_is_aligned(rows)
+
+
+GUTTER_HEADER = (
+    "Activity Reference No. /   Loan / Credit N   Market Approac   "
+    "Estimated Am   Actual Amount   Process St\n"
+    "      Description               o.                h            "
+    "ount (US$)        (US$)          atus")
+NO_ESTIMATE_HEADER = (
+    "Activity Reference No. /   Loan / Credit N   Market Approac   "
+    "Actual Amount   Process St\n"
+    "      Description               o.                h            "
+    "  (US$)           atus")
+META = {"project_id": "P1", "doc_id": "d1", "disclosure_date": "2024-01-01",
+        "content_sha256": "x", "fetched_at": "t"}
+
+
+class TestOnlyTheStepTables:
+    """A plan document is two things bolted together and one is not data. This
+    used to be true by luck - the whole document was scanned, and stayed inside
+    the tables only because a borrower reference never appears in prose."""
+
+    def test_nothing_before_the_first_table_is_read(self):
+        """The narrative front of a plan runs to dozens of pages and carries the
+        borrower's own annex tables. None of it is data.
+
+        The right-hand bound is weaker and worth stating: the LAST table runs to
+        the end of the document, because nothing marks where it stops. Two
+        things say that is safe rather than lucky. STEP generates the five
+        sections consecutively at the end, and on the corpus the borrower
+        annexes do not use STEP-shaped references - the four renditions whose
+        annex falls after the first table yield zero reference-shaped lines
+        near it. A gap-based bound was measured and rejected: legitimate gaps
+        between records inside properly bounded tables reach 1,982 lines, so any
+        threshold that caught an annex would cut real records first.
+        """
+        text = ("Annexe: Libelle du marche\n"
+                "ZZ-BBB-222 / A borrower annex row   IBRD / 900   99.00\n"
+                "more preamble prose here\n"
+                "GOODS\n" + GUTTER_HEADER + "\n"
+                "ZZ-AAA-111 / A real package   IBRD / 900   Limited   50.00   0.00   Signed\n")
+        rows, free = F.parse_plan_text(text, META)
+        assert [r["borrower_ref"] for r in rows] == ["ZZ-AAA-111"]
+        assert any("Annexe" in l for l in free)
+
+    def test_a_rendition_with_no_step_table_parses_to_nothing(self):
+        rows, free = F.parse_plan_text("Just preamble.\nNo tables here.\n", META)
+        assert rows == []
+        assert len(free) >= 2
+
+
+class TestSectionComesFromTheTable:
+
+    def test_a_bare_section_word_in_the_preamble_does_not_relabel_records(self):
+        """4,003 records across 34 renditions were mis-categorised this way: the
+        section was set by matching the word anywhere, so a contents page
+        reading 'CONSULTING FIRMS' re-labelled every GOODS row after it."""
+        text = ("Contents\n"
+                "CONSULTING FIRMS\n"
+                "and other matters, continued over several lines\n"
+                "of ordinary prose so the heading test cannot reach the table.\n"
+                "GOODS\n" + GUTTER_HEADER + "\n"
+                "ZZ-AAA-111 / A thing   IBRD / 900   Limited   50.00   0.00   Signed\n")
+        rows, _ = F.parse_plan_text(text, META)
+        assert [r["category_raw"] for r in rows] == ["GOODS"]
+
+    def test_each_table_labels_its_own_records(self):
+        text = ("GOODS\n" + GUTTER_HEADER + "\n"
+                "ZZ-AAA-111 / A thing   IBRD / 900   Limited   50.00   0.00   Signed\n"
+                "CONSULTING FIRMS\n" + GUTTER_HEADER + "\n"
+                "ZZ-BBB-222 / A study   IBRD / 900   Limited   70.00   0.00   Signed\n")
+        rows, _ = F.parse_plan_text(text, META)
+        assert [(r["borrower_ref"], r["category_raw"]) for r in rows] == \
+            [("ZZ-AAA-111", "GOODS"), ("ZZ-BBB-222", "CONSULTING FIRMS")]
+
+
+class TestTheEstimatedAmountColumn:
+    """The five sections do not carry the same columns, and one difference
+    changes a value: 19% of renditions print no Estimated Amount at all, and on
+    those the figure on the row is the ACTUAL. 25,793 records of the corpus."""
+
+    def test_no_estimated_column_means_no_estimated_amount(self):
+        text = ("GOODS\n" + NO_ESTIMATE_HEADER + "\n"
+                "ZZ-AAA-111 / A thing   IBRD / 900   Limited   0.00   Signed\n")
+        rows, _ = F.parse_plan_text(text, META)
+        assert rows[0]["estimated_amount"] == ""
+        assert rows[0]["status_raw"] == "Signed"
+
+    def test_an_estimated_column_is_read_as_before(self):
+        text = ("GOODS\n" + GUTTER_HEADER + "\n"
+                "ZZ-AAA-111 / A thing   IBRD / 900   Limited   50.00   0.00   Signed\n")
+        rows, _ = F.parse_plan_text(text, META)
+        assert rows[0]["estimated_amount"] == "50.00"
+
+    def test_the_question_is_asked_per_table_not_per_document(self):
+        """A rendition can print the column in one section and not another."""
+        text = ("GOODS\n" + GUTTER_HEADER + "\n"
+                "ZZ-AAA-111 / A thing   IBRD / 900   Limited   50.00   0.00   Signed\n"
+                "CONSULTING FIRMS\n" + NO_ESTIMATE_HEADER + "\n"
+                "ZZ-BBB-222 / A study   IBRD / 900   Limited   70.00   Signed\n")
+        rows, _ = F.parse_plan_text(text, META)
+        assert rows[0]["estimated_amount"] == "50.00"
+        assert rows[1]["estimated_amount"] == ""
+
+
+class TestPerSectionColumns:
+
+    def test_the_consulting_sections_have_a_contract_type_and_goods_does_not(self):
+        """'Contract Type' and 'Contract Completion' share nine characters, so a
+        bare presence test reports a Contract Type column in every table that
+        has the Contract Completion milestone."""
+        goods = ("GOODS\n"
+                 "Activity Reference No. /   Loan / Credit N   Prequalification   "
+                 "Process St   Signed Contract   Contract Completion\n"
+                 "ZZ-AAA-111 / A thing   IBRD / 900\n")
+        table = PT.find_tables(goods.split("\n"))[0]
+        cols = PT.present_columns(table)
+        assert "prequalification" in cols
+        assert "contract_type" not in cols
+
+
+class TestTheWrapJoinAndTheLoanCell:
+    """A Loan / Credit cell has the same shape as the tail of a wrapped
+    reference. Gluing one on produces something REF_RE accepts and no package
+    matches, and the row is gone."""
+
+    def test_a_loan_cell_is_never_glued_onto_a_reference(self):
+        out = F._join_wrapped_refs(["MZ-AAA-111-GO-RFQ", "IDA / D9060",
+                                    "/ Acquisition of furniture"])
+        assert "MZ-AAA-111-GO-RFQIDA / D9060" not in out
+        assert "MZ-AAA-111-GO-RFQ" in " ".join(out)
+
+    def test_a_genuine_wrapped_reference_still_joins(self):
+        out = F._join_wrapped_refs(["PE-PRONATEL-196394-CW-",
+                                    "RFB / Elaboracion del estudio"])
+        assert out == ["PE-PRONATEL-196394-CW-RFB / Elaboracion del estudio"]
