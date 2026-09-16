@@ -34,6 +34,7 @@ The only file this stage ever writes that is not derived here is nothing - every
 output is rebuilt from the raw tables in one pass, so a re-run is byte-identical.
 """
 import argparse, csv, hashlib, os, re, sys
+import unicodedata
 from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -275,6 +276,26 @@ STATUS_MAP = {
     "pending": "planned",
     "completed": "signed",
     "contract completed": "signed",
+    "under review": "under_execution",
+    "pending implementation": "planned",
+    # French. Mined from the corpus, not translated at a desk - see the note on
+    # METHOD_TOKENS in fetch_procurement. `collapse` folds accents before the
+    # lookup, so the keys here are ASCII and 'Achevé' arrives as 'acheve'.
+    "acheve": "signed",
+    "annule": "cancelled",
+    "signe": "signed",
+    "planifie": "planned",
+    "en cours d'execution": "under_execution",
+    "en attente d'execution": "planned",
+    "en cours d'examen": "under_execution",
+    "en cours d'evaluation": "under_execution",
+    "en cours de preparation": "under_preparation",
+    # Portuguese
+    "concluido": "signed",
+    "cancelado": "cancelled",
+    "assinado": "signed",
+    "em execucao": "under_execution",
+    "em preparacao": "under_preparation",
 }
 
 METHOD_MAP = {
@@ -295,6 +316,21 @@ METHOD_MAP = {
     "single source selection": ("direct_selection", "single source"),
     "framework agreement": ("other", "framework"),
     "competitive dialogue": ("other", "competitive dialogue"),
+    "quality and cost-based selection": ("quality_cost_based", ""),
+    # French, mined from the corpus.
+    "demande de prix": ("request_for_quotations", "request for quotations"),
+    "appel d'offres": ("open_national", "request for bids"),
+    "entente directe": ("direct_selection", "direct selection"),
+    "passation de marche de gre a gre": ("direct_selection", "direct selection"),
+    "selection fondee sur les qualifications des consultants":
+        ("consultant_qualification", ""),
+    "selection fondee sur la qualite et le cout": ("quality_cost_based", ""),
+    "selection au moindre cout": ("least_cost", ""),
+    "consultant individuel": ("other", "individual consultant"),
+    "individuel": ("other", "individual consultant"),
+    "direct - national": ("direct_selection", "direct"),
+    "direct - international": ("direct_selection", "direct"),
+    "open / national": ("open_national", "request for bids"),
 }
 
 CATEGORY_MAP = {
@@ -324,9 +360,31 @@ def norm_category(value):
     return "unknown"
 
 
+def enum_key(value):
+    """The lookup key for a closed value set: collapsed, unaccented, casefolded.
+
+    Separate from `collapse` on purpose. `collapse` produces the string that is
+    stored and read by a person, and stripping the accents off a French package
+    description to store it would be vandalism. Here the string is never stored
+    - it exists only to find a row in STATUS_MAP or METHOD_MAP - so folding
+    'Achevé' to 'acheve' costs nothing and lets those maps stay ASCII.
+    """
+    stripped = unicodedata.normalize("NFKD", collapse(value))
+    stripped = "".join(c for c in stripped if not unicodedata.combining(c))
+    return stripped.replace("\u2019", "'").casefold().strip(" .:;")
+
+
 def norm_status(value):
-    """Step 9 for packages.status (A1.24). Unmapped goes to `unknown`."""
-    key = collapse(value).casefold().strip(" .:;")
+    """Step 9 for packages.status (A1.24). Unmapped goes to `unknown`.
+
+    'Terminated' and its French 'Résilié' are deliberately absent from
+    STATUS_MAP and so land in `unknown`, which A1.24 says is what happens to a
+    value that does not map, counted rather than silently assigned. They are
+    1,209 rows of the eight-country corpus and neither `signed` nor `cancelled`
+    is true of them: the contract was signed and then ended early. The enum has
+    no value for that. `status_raw` keeps the borrower's own word.
+    """
+    key = enum_key(value)
     if not key:
         return "unknown"
     if key in STATUS_MAP:
@@ -345,8 +403,8 @@ def norm_method(method_raw, market_approach=""):
     Bids' is open national or open international depending on the approach cell
     beside it.
     """
-    m = collapse(method_raw).casefold()
-    a = collapse(market_approach).casefold()
+    m = enum_key(method_raw)
+    a = enum_key(market_approach)
     if a in METHOD_MAP:
         base, flavour = METHOD_MAP[a]
         if not m:
@@ -509,9 +567,32 @@ def clean_packages(rows, counters):
 
 # Fields carried forward from the most recent plan version that actually
 # carried a value. See dedupe_packages.
-CARRY_FORWARD = ("status", "status_raw", "method", "method_raw", "category",
-                 "category_raw", "market_approach", "planned_date", "revised_date",
-                 "estimated_amount", "currency")
+#
+# Two fields only, and the restraint is the point. A carried field is an
+# assertion this table makes on the borrower's behalf, so it has to be one the
+# borrower would still stand behind.
+#
+#   estimated_amount  A property of the package. Version 9 leaving the cost
+#                     column blank does not retract the 200,000 version 8
+#                     printed; nothing was said, so the last thing said stands.
+#   method            Likewise how the package is to be procured. It can be
+#                     revised, and a revision overwrites the carried value the
+#                     moment it is printed - carrying only fills a silence.
+#
+# Everything else is deliberately NOT carried, status above all. A status is a
+# fact at a point in time, and 'Under Implementation' as of 2021 asserts
+# nothing about 2024; carrying it forward manufactures a present-tense claim
+# out of a stale one. An unknown status stays unknown and is confirmed with the
+# project team. The same reasoning retires planned_date, revised_date,
+# category, category_raw and market_approach: each is either point-in-time or
+# cheap to leave blank, and a blank that is honest beats a value that is stale.
+CARRY_FORWARD = ("estimated_amount", "method")
+
+# Fields that must travel with a carried field, taken from the SAME plan
+# version, so the pair can never be assembled out of two different ones. An
+# amount carried from version 8 with a currency from version 3 would be a
+# figure nobody ever published.
+CARRY_COMPANIONS = {"estimated_amount": ("currency",), "method": ("method_raw",)}
 
 # Normalised enum values that mean "this version did not tell us" rather than
 # being an answer in their own right.
@@ -554,19 +635,22 @@ def dedupe_packages(rows, counters):
     plan version that stated it, and supersession recorded.
 
     NOT simply the newest version's row. The newest plan is not reliably the
-    best-parsed one: a package can carry an amount and a status for years and
-    then appear blank in the latest plan because that plan's table was laid out
-    differently and those columns were lost. Keeping the newest row wholesale
-    lets a parse failure overwrite good data, which is how a known 200,000
-    becomes an empty cell. On eight countries this recovered status for 729
-    packages, raising it from 25% populated to 87%.
+    best-parsed one: a package can carry an amount for years and then appear
+    blank in the latest plan because that plan's table was laid out differently
+    and the cost column was lost. Keeping the newest row wholesale lets a parse
+    failure overwrite good data, which is how a known 200,000 becomes an empty
+    cell.
 
     So the row is assembled field by field. The newest version supplies the
-    identity, the description and the plan_version; for every field in
-    CARRY_FORWARD, if the newest version did not state it, the most recent
-    version that did is used instead. A later real value always beats an
-    earlier one - 2,000,000 then blank keeps 2,000,000, but 2,000,000 then
-    blank then 1,000,000 keeps 1,000,000.
+    identity, the description, the plan_version and every field not in
+    CARRY_FORWARD; for the two that are, if the newest version did not state
+    the field, the most recent version that did is used instead. A later real
+    value always beats an earlier one - 2,000,000 then blank keeps 2,000,000,
+    but 2,000,000 then blank then 1,000,000 keeps 1,000,000.
+
+    Status is not among them and that is on purpose; see CARRY_FORWARD. A
+    package whose latest plan does not print a status has an unknown status
+    here, which is what is true.
 
     `carried_from` names the plan version each carried field came from, so
     nothing is taken on trust. Fields the newest version stated itself do not
@@ -601,6 +685,12 @@ def dedupe_packages(rows, counters):
             for older in reversed(versions[:-1]):
                 if not absent(field, older.get(field)):
                     newest[field] = older[field]
+                    # The companions come from this same version, blank or not,
+                    # so an amount and its currency are always the pair that was
+                    # actually published together.
+                    for companion in CARRY_COMPANIONS.get(field, ()):
+                        if companion in newest:
+                            newest[companion] = older.get(companion, "")
                     carried.append(f"{field}:{older.get('plan_version', '')}")
                     counters[f"carried_{field}"] += 1
                     break

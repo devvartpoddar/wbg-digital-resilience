@@ -35,7 +35,7 @@ fixed-width print of a STEP table whose cells clip mid-word at the column edge.
 The parser for it is `parse_plan_text` and it is deliberately conservative - it
 recovers what it can and reports what it could not key.
 """
-import argparse, csv, hashlib, json, os, re, sys, threading, time, urllib.parse
+import argparse, csv, hashlib, json, os, re, sys, threading, time, unicodedata, urllib.parse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -78,14 +78,48 @@ HEADER_LINE_RE = re.compile(
 SECTION_RE = re.compile(r"^\s*(WORKS|GOODS|CONSULTING SERVICES|CONSULTING FIRMS|"
                         r"INDIVIDUAL CONSULTANTS|NON[ -]CONSULTING SERVICES|"
                         r"NON CONSULTING SERVICES)\s*$")
+# The closed value sets STEP prints in the Method, Market Approach and Process
+# Status cells. Longest first, because _first_token returns the first that
+# matches and 'Signed' is a prefix of nothing but 'Under' is a prefix of three.
+#
+# These lists were English-only until they were checked against the corpus, and
+# that was a silent, large defect: a francophone borrower prints 'Achevé', not
+# 'Completed', so every one of its packages came back with no status and no
+# method. Niger read 5% populated and Mozambique 3%, and both were read as
+# layout failures when the layout was fine and the vocabulary was not.
+#
+# The values below are not translations guessed at a desk. They were mined from
+# the 496 renditions without assuming any vocabulary at all - the Process Status
+# cell is whatever sits between the Actual Amount and the first milestone date,
+# so a regex over that gap enumerates the set - and the whole corpus yields 13
+# distinct status strings. Adding a borrower in a new language means re-running
+# that mining step, not inventing words.
 METHOD_TOKENS = ("Request for Bids", "Request for Quotations", "Direct Selection",
                  "Direct Contracting", "Consultant Qualification Selection",
                  "Consultant Qualification  Selection", "Quality And Cost Based Selection",
-                 "Quality and Cost Based Selection", "Least Cost Selection",
-                 "Individual Consultant Selection", "Single Source Selection",
-                 "Framework Agreement", "Competitive Dialogue")
+                 "Quality and Cost Based Selection", "Quality And Cost-Based Selection",
+                 "Least Cost Selection", "Individual Consultant Selection",
+                 "Single Source Selection", "Framework Agreement", "Competitive Dialogue",
+                 # French
+                 "Selection fondee sur les qualifications des consultants",
+                 "Selection fondee sur la qualite et le cout",
+                 "Selection au moindre cout", "Passation de marche de gre a gre",
+                 "Entente directe", "Demande de prix", "Appel d'offres",
+                 "Consultant individuel", "Individuel")
 APPROACH_TOKENS = ("Open - International", "Open - National", "Limited - International",
-                   "Limited - National", "Open - international", "Open - national")
+                   "Limited - National", "Direct - International", "Direct - National",
+                   "Open - international", "Open - national", "Open / National",
+                   "Limited", "Direct", "Open")
+STATUS_TOKENS = ("Pending Implementation", "Under Implementation", "Under Preparation",
+                 "Under Evaluation", "Under Review", "Not Started", "In Progress",
+                 "Contract Completed", "Contract Signed", "Terminated", "Completed",
+                 "Cancelled", "Canceled", "Advertised", "Signed", "Planned", "Pending",
+                 # French
+                 "En attente d'execution", "En cours d'execution", "En cours d'examen",
+                 "En cours de preparation", "En cours d'evaluation",
+                 "Acheve", "Annule", "Resilie", "Signe", "Planifie",
+                 # Portuguese
+                 "Em execucao", "Em preparacao", "Concluido", "Cancelado", "Assinado")
 
 PACKAGE_COLS = [
     "package_version_id", "package_id", "project_id", "plan_version", "plan_doc_id",
@@ -259,6 +293,30 @@ REF_WRAP_HEAD = re.compile(
     r"(\s{2,}.*)?$")
 REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9][A-Z0-9\u2013\u2014-]{0,20})\s*/\s*(.*)$")
 
+# A second, different separation, and the one that costs the most. Here the
+# reference is COMPLETE on its own line and the '/ description' that belongs
+# with it arrives one to four lines later, with other columns' text in between:
+#
+#   ' NE-PCU-SV-229733-GO-RFQ'
+#   '                    4. Strengthening project ma'      <- a different column
+#   "/ Fourniture et installation d'        Single Stage - One E"
+#
+# In a wide-layout rendition the columns wrap independently and the extractor
+# emits them interleaved by vertical position, so the reference's own line ends
+# before the slash is reached. REF_RE wants both on one line and matches
+# neither, and the record is lost.
+#
+# Measured on the biggest plan of each of eight countries: Mozambique parses 3
+# references normally against 47 orphaned this way, Niger 128 against 61,
+# Uganda 153 against 21. Tanzania, Nigeria and Kenya have none - their
+# renditions keep the slash on the reference's line.
+REF_ALONE = re.compile(
+    r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){2,5})\s*$")
+SLASH_TAIL = re.compile(r"^\s*(/\s*\S.*)$")
+# The observed gap is one or two lines. Four allows some slack without letting
+# the scan wander into the next record.
+MAX_ORPHAN_GAP = 4
+
 
 def _join_wrapped_refs(lines):
     """Put a reference that wrapped across two physical lines back on one.
@@ -289,6 +347,36 @@ def _join_wrapped_refs(lines):
                     out.append(candidate)
                     i += 2
                     continue
+
+        # The orphaned-reference shape: a complete reference alone on its line,
+        # with its slash arriving a line or two later. The scan stops at the
+        # next reference so it cannot reach across a record boundary, and the
+        # joined line still has to be something REF_RE accepts.
+        alone = REF_ALONE.match(lines[i])
+        if alone and re.search(r"\d", alone.group(1)):
+            joined = False
+            for d in range(1, MAX_ORPHAN_GAP + 1):
+                j = i + d
+                if j >= len(lines):
+                    break
+                if REF_ALONE.match(lines[j]) or REF_RE.match(lines[j]):
+                    break               # the next record started; do not cross it
+                tail = SLASH_TAIL.match(lines[j])
+                if not tail:
+                    continue
+                candidate = f"{alone.group(1)} {tail.group(1)}"
+                if REF_RE.match(candidate):
+                    out.append(candidate)
+                    # The lines between the two belong to other columns of this
+                    # same record and are kept where they were; only the slash
+                    # line is consumed, because it is now part of the join.
+                    out.extend(lines[i + 1:j])
+                    i = j + 1
+                    joined = True
+                    break
+            if joined:
+                continue
+
         out.append(lines[i])
         i += 1
     return out
@@ -403,11 +491,7 @@ def parse_plan_text(text, doc_meta):
                 break
             except ValueError:
                 continue
-        status_raw = _first_token(body, ("Signed", "Canceled", "Cancelled",
-                                         "Under Implementation", "Under Preparation",
-                                         "Not Started", "Planned", "Completed",
-                                         "Under implementation", "Under preparation",
-                                         "Pending", "In Progress"))
+        status_raw = _first_token(body, STATUS_TOKENS)
         method_raw = _first_token(body, METHOD_TOKENS)
         approach = _first_token(body, APPROACH_TOKENS)
         row = {
@@ -441,9 +525,45 @@ def _clip_tail(cell):
     return LENDER_RE.sub("", cell)
 
 
+def _match_form(value):
+    """Fold a cell to the form the closed value sets are written in.
+
+    Three foldings, each answering a way the rendition disguises a known value:
+    accents, because the token lists are ASCII and the plans are not; the
+    curly apostrophe, because STEP prints both; and case.
+
+    Returns (folded, despaced). The despaced form exists because a cell that is
+    too wide for its column wraps mid-word, and the two halves reach this
+    function with a gap between them - 'Under Implementati' and 'on' is 9,036
+    rows of the corpus. Removing every space from both the text and the token
+    turns that back into a match, and it is safe for the same reason the
+    procurement match_key is safe: wrapping only ever inserts a gap, never a
+    character, so despacing both sides cannot make two different values equal
+    unless they differed by spacing alone.
+    """
+    folded = unicodedata.normalize("NFKD", value or "")
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    folded = folded.replace("\u2019", "'").replace("\u02bc", "'").casefold()
+    return folded, re.sub(r"\s+", "", folded)
+
+
 def _first_token(text, tokens):
+    """The first of `tokens` that appears in `text`, or ''.
+
+    Two passes, and never one: an exact match on the folded text is tried for
+    every token before any despaced match is considered. Doing it token by token
+    instead would let a despaced match on a short token beat an exact match on a
+    longer one further down the list, which is how 'Signed' wins over 'Contract
+    Signed'.
+    """
+    ftext, dtext = _match_form(text)
     for t in tokens:
-        if re.search(r"(?<![A-Za-z])" + re.escape(t) + r"(?![A-Za-z])", text):
+        ft, _ = _match_form(t)
+        if re.search(r"(?<!\w)" + re.escape(ft) + r"(?!\w)", ftext):
+            return t
+    for t in tokens:
+        _, dt = _match_form(t)
+        if len(dt) >= 6 and dt in dtext:
             return t
     return ""
 

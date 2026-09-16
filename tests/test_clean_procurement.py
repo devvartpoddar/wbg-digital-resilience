@@ -572,14 +572,33 @@ class TestCarryForward:
         ])
         assert row["estimated_amount"] == "200000.00"
 
-    def test_unknown_is_absent_but_a_real_status_is_not(self):
-        """'unknown' is the parser failing to read the column, not the borrower
-        saying the answer is unknown."""
+    def test_status_is_never_carried_forward(self):
+        """A status is a fact at a point in time, so a silent newest version
+        leaves it unknown rather than inheriting a stale one.
+
+        This is the opposite of what this code did until the rule was changed,
+        and the older behaviour is the reason it is worth a test of its own: an
+        `unknown` here is a real answer about the present, while 'signed as of
+        four years ago' is a claim nobody made. Unknown statuses are confirmed
+        with the project teams, not manufactured."""
         row = self._run([
             _version("v1", "2020-01-01", status="signed", status_raw="Signed"),
             _version("v2", "2021-01-01", status="unknown", status_raw=""),
         ])
-        assert row["status"] == "signed" and row["status_raw"] == "Signed"
+        assert row["status"] == "unknown"
+        assert row["status_raw"] == ""
+        assert "status" not in row["carried_from"]
+
+    def test_the_amount_is_still_carried_when_the_status_is_not(self):
+        """The two rules meet on one row, so assert them together: a version
+        that states neither inherits the amount and not the status."""
+        row = self._run([
+            _version("v1", "2020-01-01", status="signed", status_raw="Signed",
+                     estimated_amount="500.00"),
+            _version("v2", "2021-01-01"),
+        ])
+        assert row["estimated_amount"] == "500.00"
+        assert row["status"] == "unknown"
 
     def test_a_cancelled_status_is_not_overwritten_by_an_older_signed_one(self):
         row = self._run([
@@ -612,7 +631,8 @@ class TestCarryForward:
         ])
         carried = dict(p.split(":") for p in row["carried_from"].split("|") if p)
         assert carried["estimated_amount"] == "v1"
-        assert carried["status_raw"] == "v2"
+        assert "status_raw" not in carried
+        assert "status" not in carried
 
     def test_supersession_points_at_the_row_that_replaced_it(self):
         """superseded_by was previously written as an empty string, so the older
