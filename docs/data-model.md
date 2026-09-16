@@ -538,12 +538,13 @@ All eight rows written per paragraph, including those below threshold.
 
 | Column | Type |
 |---|---|
-| `package_id` | string, primary key |
+| `package_id` | string, the borrower reference; composite key with `project_id` |
 | `project_id` | string |
 | `borrower_ref` | string, nullable, as published |
 | `borrower_ref_norm` | string, nullable |
 | `description` | string, as published |
 | `description_clean` | string |
+| `description_match` | string, case- and whitespace-free |
 | `description_sha256` | string, of cleaned text |
 | `description_lang` | string |
 | `lot` | string, nullable |
@@ -564,7 +565,9 @@ All eight rows written per paragraph, including those below threshold.
 | `plan_version` | string |
 | `fetched_at` | timestamp |
 
-Package and award descriptions are short metadata fields, not document text, and are committed. Both the published string and the cleaned string are kept — the first for display, the second for matching.
+Package and award descriptions are short metadata fields, not document text, and are committed. Three copies of each are kept, and they are not interchangeable: `description` is the published string, for display; `description_clean` is it with the step-3/4 markers (lot, phase, rebid, an embedded reference) removed, for reading; `description_match` is `description_clean` case-folded with every space removed, for matching.
+
+The despacing in `description_match` is not tidiness. The plan rendition clips each table cell at the column edge and the parser glues the fragments back together, which deletes a space when the clip landed on one — the corpus really does carry `DataCenter` for `Data Center`. Gluing never alters, inserts or reorders a character, so a matching copy with no whitespace at all is immune to it, and `data center` still finds the package. The cost is measured, not assumed: `despaced collisions` in the procurement audit counts descriptions that differ but despace alike.
 
 `actual_amount` is unreliable and frequently zero for signed packages. Signed amounts come from `awards`.
 
@@ -579,6 +582,7 @@ Package and award descriptions are short metadata fields, not document text, and
 | `deadline_date` | date, nullable |
 | `bid_description` | string, as published |
 | `bid_description_clean` | string |
+| `bid_description_match` | string, case- and whitespace-free |
 | `description_lang` | string |
 | `is_placeholder` | boolean |
 | `clean_version` | string |
@@ -597,6 +601,7 @@ Package and award descriptions are short metadata fields, not document text, and
 | `borrower_ref_norm` | string, nullable |
 | `description` | string, as published |
 | `description_clean` | string |
+| `description_match` | string, case- and whitespace-free |
 | `description_lang` | string |
 | `clean_version` | string |
 | `signed_date` | date |

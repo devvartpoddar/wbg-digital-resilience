@@ -61,6 +61,9 @@ PROC_DIR = "intermediate/procurement"
 DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 AMOUNT_RE = re.compile(r"^[\d,]+\.\d{2}$")
 REF_RE = re.compile(r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){1,5})\s*/\s*(.*)$")
+# Does a rendition's text look like it carries borrower references at all? Used
+# only to tell an empty package table apart from a parse failure.
+PLAN_REF_SHAPE = re.compile(r"\b[A-Z]{2,}[-\u2013][A-Z0-9]{1,12}[-\u2013][0-9]{3,}")
 LENDER_RE = re.compile(r"\s*IDA\s*/\s*[\dA-Za-z]+\s*$")
 # Column headings the rendition repeats down every page. A heading taken as a
 # continuation line is how "Activity Reference No." ends up inside a package
@@ -219,15 +222,76 @@ def _join_wrapped(parts):
         p = p.strip()
         if not p:
             continue
-        if not out:
-            out = p
-            continue
-        if out[-1].isalnum() and p[0].isalnum():
-            out += p
+        if out and out[-1].isalnum() and p[0].isalnum():
+            # Two alphanumerics run together with nothing between them, which is
+            # the only seam where a space could have been lost. Counted, not
+            # repaired: see the docstring.
             seams += 1
-        else:
-            out += p
+        out += p
     return out, seams
+
+
+# Some renditions clip the column edge INSIDE the reference itself, so the last
+# segment of the reference sits at the start of the next line and NO line carries
+# 'reference /'. REF_RE then matches nothing in the whole document, every line is
+# treated as preamble, and the document parses to zero package rows while looking
+# perfectly healthy in the report - 218 of the 2,463 cached renditions did that.
+# Both halves are reference-shaped, so this is a shape test, not a guess at
+# wording. Three shapes are in the corpus:
+#
+#   ' PE-PRONATEL-196394-CW-'          the reference alone on its line
+#   'RFB / Elaboración del'
+#
+#   'SO-MOCT-FGS-358521-CS-IN       Component 4. Project Manag  ...'
+#   'DV / PIU Project Coordinator    Component 4. Project Manag  ...'
+#   the reference line also carries that row's other columns
+#
+#   'DM-MPWDE-220449-CS-QCB'           the clip fell inside the token, so the
+#   'S / Upgrades to the establish'    join needs no separator at all
+#
+# The digit requirement keeps this from firing on a heading: an all-caps section
+# line like 'NON-CONSULTING SERVICES' is the same shape, and every borrower
+# reference in this corpus carries a number. The second guard is stronger: the
+# merged line has to be a record boundary REF_RE accepts, so a merge that would
+# produce something that is not a reference at all is not made.
+REF_WRAP_HEAD = re.compile(
+    r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){1,5}[-\u2013\u2014]?)"
+    r"(\s{2,}.*)?$")
+REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9][A-Z0-9\u2013\u2014-]{0,20})\s*/\s*(.*)$")
+
+
+def _join_wrapped_refs(lines):
+    """Put a reference that wrapped across two physical lines back on one.
+
+    Returns a new line list; nothing else about the rendition is touched. The
+    second half of the reference is glued to the first, the description that
+    followed it stays where it was, and the rest of the line - the row's other
+    columns, which carry the method, the status and the dates - is kept.
+
+        [' PE-PRONATEL-196394-CW-',      ->  ['PE-PRONATEL-196394-CW-RFB / Elaboración del']
+         'RFB / Elaboración del']
+
+        ['SO-MOCT-FGS-358521-CS-IN   Component 4. ...',  ->  ['...CS-INDV / PIU Project
+         'DV / PIU Project Coordinator   Component 4. ...']       Coordinator   Component 4. ...']
+    """
+    out, i = [], 0
+    while i < len(lines):
+        head = REF_WRAP_HEAD.match(lines[i])
+        if head and re.search(r"\d", head.group(1)) and i + 1 < len(lines):
+            tail = REF_WRAP_TAIL.match(lines[i + 1])
+            if tail:
+                # The head is re-glued with the tail's token, and everything
+                # else - the description the tail carried and the columns the
+                # head carried - is appended after it.
+                candidate = f"{head.group(1)}{tail.group(1)} / {tail.group(2)}"
+                candidate += head.group(2) or ""
+                if REF_RE.match(candidate):
+                    out.append(candidate)
+                    i += 2
+                    continue
+        out.append(lines[i])
+        i += 1
+    return out
 
 
 def segment_for_project(text, project_id):
@@ -292,6 +356,7 @@ def parse_plan_text(text, doc_meta):
     across records.
     """
     lines = text.replace("\r\n", "\n").split("\n")
+    lines = _join_wrapped_refs(lines)
     records, cur, section = [], None, ""
     free_text = []
 
@@ -420,6 +485,7 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
               f"{len(tasks)} renditions to have", flush=True)
 
     rows, fetch_failures, free_text_chars, bundle_docs = [], [], [], []
+    empty_docs = []
     blobs = {}
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {
@@ -461,6 +527,14 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
         }
         parsed, free = parse_plan_text(text, meta)
         free_text_chars.append(sum(len(x) for x in free))
+        if not parsed:
+            # A rendition that parsed to nothing is either a plan whose package
+            # table is genuinely empty (common: 648 of them carry no
+            # reference-shaped token anywhere) or a parse failure. The two must
+            # not be the same number in the report, or a silent partial reads as
+            # an empty plan.
+            empty_docs.append((d["doc_id"], pid,
+                               bool(PLAN_REF_SHAPE.search(text))))
         for r in parsed:
             r["package_id"] = r["borrower_ref"]
             r["package_version_id"] = f"{d['doc_id']}:{r['borrower_ref']}"
@@ -468,7 +542,8 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
 
     print(f"  parsed {len(rows):,} package rows from {len(blobs):,} renditions",
           flush=True)
-    return rows, listing_failures, no_plan, fetch_failures, free_text_chars, bundle_docs
+    return (rows, listing_failures, no_plan, fetch_failures, free_text_chars,
+            bundle_docs, empty_docs)
 
 
 def _fetch_plan_file(path, url, refresh, delay):
@@ -668,6 +743,10 @@ def package_changes(rows):
     # plan order: oldest disclosure date first, tie-broken by doc id
     order = sorted(by_plan, key=lambda k: (by_plan[k][0]["plan_disclosure_date"], k[1]))
     changes, unkeyable = [], 0
+    # Keyed by (project, key), not by key alone. Generic references recur across
+    # projects - 'CS-INDV', 'GO-RFB', 'CS-QCBS' each appear under three - so a
+    # key-only dict compares one project's package against another's and reports
+    # changes that never happened.
     seen = {}
     for project, version in order:
         packages = by_plan[(project, version)]
@@ -683,7 +762,7 @@ def package_changes(rows):
                 unkeyable += 1
             current[key] = (r, basis)
         for key, (r, basis) in current.items():
-            prev = seen.get(key)
+            prev = seen.get((project, key))
             if prev is None:
                 changes.append(_change(project, key, basis, r["borrower_ref"], "appeared",
                                        "", "", "", "", version, stamp))
@@ -695,12 +774,12 @@ def package_changes(rows):
                         changes.append(_change(project, key, basis, r["borrower_ref"],
                                                "changed", field, pr.get(field, ""),
                                                r.get(field, ""), pv, version, stamp))
-        for key, (pr, basis) in seen.items():
-            if key not in current and pr["project_id"] == project:
+        for (sp, key), (pr, basis) in list(seen.items()):
+            if sp == project and key not in current:
                 changes.append(_change(project, key, basis, pr["borrower_ref"],
                                        "disappeared", "", "", "", pr["plan_version"],
                                        version, stamp))
-        seen.update(current)
+        seen.update({(project, k): v for k, v in current.items()})
     # packages never seen twice contribute no change rows
     return changes, unkeyable
 
@@ -737,11 +816,11 @@ def main():
     t0 = time.time()
 
     plan_rows, listing_fail, no_plan, plan_fail, free_chars = [], [], [], [], []
-    bundle_docs = []
+    bundle_docs, empty_docs = [], []
     if not args.skip_plans:
-        plan_rows, listing_fail, no_plan, plan_fail, free_chars, bundle_docs = (
-            collect_plans(projects, args.data, log, args.refresh, args.delay,
-                          workers=args.workers))
+        (plan_rows, listing_fail, no_plan, plan_fail, free_chars, bundle_docs,
+         empty_docs) = collect_plans(projects, args.data, log, args.refresh,
+                                     args.delay, workers=args.workers)
 
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
@@ -807,6 +886,17 @@ def main():
                            - parsed_pids - set(no_plan))
         fh.write(f"projects whose parse yielded no package row ({len(zero_rows)}): "
                  f"{', '.join(zero_rows)}\n")
+        # The per-DOCUMENT view, which the project-level line above hides: a
+        # project with one readable plan and four unreadable ones looks fine.
+        failed = [(d, p) for d, p, looks in empty_docs if looks]
+        fh.write(f"renditions that parsed to zero package rows ({len(empty_docs)}): "
+                 f"{len(empty_docs) - len(failed)} carry no reference-shaped token "
+                 f"anywhere (an empty package table - not a failure), "
+                 f"{len(failed)} carry one (a real parse failure)\n")
+        for n, (did, pid) in enumerate(failed):
+            fh.write(f"{did}/{pid}{chr(10) if n % 4 == 3 else '  '}")
+        if failed:
+            fh.write("\n")
         fh.write(f"plan listing failures ({len(listing_fail)}):\n")
         for pid, exc in listing_fail:
             fh.write(f"  {pid}\t{exc}\n")
