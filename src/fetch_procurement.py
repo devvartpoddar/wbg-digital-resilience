@@ -35,12 +35,14 @@ fixed-width print of a STEP table whose cells clip mid-word at the column edge.
 The parser for it is `parse_plan_text` and it is deliberately conservative - it
 recovers what it can and reports what it could not key.
 """
-import argparse, csv, hashlib, json, os, re, sys, threading, time, urllib.parse
+import argparse, csv, hashlib, json, os, re, sys, threading, time, unicodedata, urllib.parse
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+import plan_table                                     # noqa: E402
 from fetch import get, HEADERS, read_cohort            # noqa: E402
 from clean_procurement import (                        # noqa: E402
     CLEAN_VERSION, norm_ref, split_markers, is_placeholder, detect_lang,
@@ -78,14 +80,48 @@ HEADER_LINE_RE = re.compile(
 SECTION_RE = re.compile(r"^\s*(WORKS|GOODS|CONSULTING SERVICES|CONSULTING FIRMS|"
                         r"INDIVIDUAL CONSULTANTS|NON[ -]CONSULTING SERVICES|"
                         r"NON CONSULTING SERVICES)\s*$")
+# The closed value sets STEP prints in the Method, Market Approach and Process
+# Status cells. Longest first, because _first_token returns the first that
+# matches and 'Signed' is a prefix of nothing but 'Under' is a prefix of three.
+#
+# These lists were English-only until they were checked against the corpus, and
+# that was a silent, large defect: a francophone borrower prints 'Achevé', not
+# 'Completed', so every one of its packages came back with no status and no
+# method. Niger read 5% populated and Mozambique 3%, and both were read as
+# layout failures when the layout was fine and the vocabulary was not.
+#
+# The values below are not translations guessed at a desk. They were mined from
+# the 496 renditions without assuming any vocabulary at all - the Process Status
+# cell is whatever sits between the Actual Amount and the first milestone date,
+# so a regex over that gap enumerates the set - and the whole corpus yields 13
+# distinct status strings. Adding a borrower in a new language means re-running
+# that mining step, not inventing words.
 METHOD_TOKENS = ("Request for Bids", "Request for Quotations", "Direct Selection",
                  "Direct Contracting", "Consultant Qualification Selection",
                  "Consultant Qualification  Selection", "Quality And Cost Based Selection",
-                 "Quality and Cost Based Selection", "Least Cost Selection",
-                 "Individual Consultant Selection", "Single Source Selection",
-                 "Framework Agreement", "Competitive Dialogue")
+                 "Quality and Cost Based Selection", "Quality And Cost-Based Selection",
+                 "Least Cost Selection", "Individual Consultant Selection",
+                 "Single Source Selection", "Framework Agreement", "Competitive Dialogue",
+                 # French
+                 "Selection fondee sur les qualifications des consultants",
+                 "Selection fondee sur la qualite et le cout",
+                 "Selection au moindre cout", "Passation de marche de gre a gre",
+                 "Entente directe", "Demande de prix", "Appel d'offres",
+                 "Consultant individuel", "Individuel")
 APPROACH_TOKENS = ("Open - International", "Open - National", "Limited - International",
-                   "Limited - National", "Open - international", "Open - national")
+                   "Limited - National", "Direct - International", "Direct - National",
+                   "Open - international", "Open - national", "Open / National",
+                   "Limited", "Direct", "Open")
+STATUS_TOKENS = ("Pending Implementation", "Under Implementation", "Under Preparation",
+                 "Under Evaluation", "Under Review", "Not Started", "In Progress",
+                 "Contract Completed", "Contract Signed", "Terminated", "Completed",
+                 "Cancelled", "Canceled", "Advertised", "Signed", "Planned", "Pending",
+                 # French
+                 "En attente d'execution", "En cours d'execution", "En cours d'examen",
+                 "En cours de preparation", "En cours d'evaluation",
+                 "Acheve", "Annule", "Resilie", "Signe", "Planifie",
+                 # Portuguese
+                 "Em execucao", "Em preparacao", "Concluido", "Cancelado", "Assinado")
 
 PACKAGE_COLS = [
     "package_version_id", "package_id", "project_id", "plan_version", "plan_doc_id",
@@ -259,6 +295,37 @@ REF_WRAP_HEAD = re.compile(
     r"(\s{2,}.*)?$")
 REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9][A-Z0-9\u2013\u2014-]{0,20})\s*/\s*(.*)$")
 
+# A second, different separation, and the one that costs the most. Here the
+# reference is COMPLETE on its own line and the '/ description' that belongs
+# with it arrives one to four lines later, with other columns' text in between:
+#
+#   ' NE-PCU-SV-229733-GO-RFQ'
+#   '                    4. Strengthening project ma'      <- a different column
+#   "/ Fourniture et installation d'        Single Stage - One E"
+#
+# In a wide-layout rendition the columns wrap independently and the extractor
+# emits them interleaved by vertical position, so the reference's own line ends
+# before the slash is reached. REF_RE wants both on one line and matches
+# neither, and the record is lost.
+#
+# Measured on the biggest plan of each of eight countries: Mozambique parses 3
+# references normally against 47 orphaned this way, Niger 128 against 61,
+# Uganda 153 against 21. Tanzania, Nigeria and Kenya have none - their
+# renditions keep the slash on the reference's line.
+# Alone in its COLUMN, not necessarily alone on its line: a fixed-width
+# rendition prints the row's other columns beside it, and requiring the whole
+# line to hold nothing else misses the shape wherever the layout kept its
+# columns. Those renditions are 474 of 496.
+REF_ALONE = re.compile(
+    r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){2,5})(\s{2,}\S.*)?\s*$")
+SLASH_TAIL = re.compile(r"^\s*(/\s*\S.*)$")
+# The observed gap is one or two lines. Four allows some slack without letting
+# the scan wander into the next record.
+MAX_ORPHAN_GAP = 4
+# How long a wrapped reference's tail may be when it is NOT on the adjacent
+# line. A clipped fragment is 'V', 'DV', 'RFB' - never a phrase.
+MAX_GAPPED_TAIL = 6
+
 
 def _join_wrapped_refs(lines):
     """Put a reference that wrapped across two physical lines back on one.
@@ -273,13 +340,67 @@ def _join_wrapped_refs(lines):
 
         ['SO-MOCT-FGS-358521-CS-IN   Component 4. ...',  ->  ['...CS-INDV / PIU Project
          'DV / PIU Project Coordinator   Component 4. ...']       Coordinator   Component 4. ...']
+
+    The tail is not always on the next line. In a wide layout the row's other
+    cells print between the two halves, and the Loan/Amount line lands in the
+    gap:
+
+        ' GH-MOCDTI-481188-CS-IND     Component 4. Project Manag   Individual Consult'
+        '                             IDA / 70960   Prior   Open - National   48,000.00'
+        ' V / Innovation Specialist   ement and Implementation    ant Selection'
+
+    That is one record - 'GH-MOCDTI-481188-CS-INDV / Innovation Specialist' -
+    and looking only at the adjacent line never joins it. 218 rows of the
+    70-project corpus were lost that way, in Ghana's P176126 and Burundi's
+    P176396, once the loan guard stopped the parser fabricating an identity out
+    of the loan number instead.
     """
     out, i = [], 0
     while i < len(lines):
         head = REF_WRAP_HEAD.match(lines[i])
-        if head and re.search(r"\d", head.group(1)) and i + 1 < len(lines):
-            tail = REF_WRAP_TAIL.match(lines[i + 1])
-            if tail:
+        if head and re.search(r"\d", head.group(1)):
+            joined = False
+            for d in range(1, MAX_ORPHAN_GAP + 1):
+                j = i + d
+                if j >= len(lines):
+                    break
+                if REF_RE.match(lines[j]) or REF_ALONE.match(lines[j]):
+                    break               # the next record started; do not cross it
+                if SLASH_TAIL.match(lines[j]):
+                    # A line that OPENS with the slash is this record's
+                    # description arriving on its own, which is the orphan shape
+                    # below - and it means the reference on the head line was
+                    # complete, not clipped. Stopping here is what keeps the
+                    # scan from reaching past it and gluing a later fragment on:
+                    # 'MZ-MJACER-423912-GO-RFQ' whose description reads
+                    # '/ o Urgent consumables for' then 'DNRN / DNIC / PIU' two
+                    # lines on became 'MZ-MJACER-423912-GO-RFQDNRN', a
+                    # legitimate package turned into a fabricated one. The
+                    # orphan branch handles this record correctly; the wrap
+                    # branch only has to get out of its way.
+                    break
+                # A Loan / Credit cell has the same shape as the tail of a
+                # wrapped reference - 'IDA / D9060' reads as the token 'IDA'
+                # followed by a slash and a description - and gluing one on
+                # destroys the package: 'MZ-MJACER-423921-GO-RFQ' plus
+                # 'IDA / D9060' becomes 'MZ-MJACER-423921-GO-RFQIDA / D9060',
+                # which REF_RE happily accepts and which matches no package that
+                # exists. Skipped rather than stopped at, because in the wide
+                # layouts the loan cell is exactly what sits BETWEEN a clipped
+                # reference and its tail.
+                if plan_table.LOAN_RE.match(lines[j]):
+                    continue
+                tail = REF_WRAP_TAIL.match(lines[j])
+                if not tail:
+                    continue
+                # Beyond the adjacent line, the tail has to look like a tail: a
+                # clipped fragment is a character or three, never a phrase. The
+                # scan reaches four lines now, and without this a long token
+                # belonging to some other cell could be glued on to produce a
+                # reference that REF_RE accepts and no package matches - which
+                # is the same failure the loan guard above exists to prevent.
+                if d > 1 and len(tail.group(1)) > MAX_GAPPED_TAIL:
+                    continue
                 # The head is re-glued with the tail's token, and everything
                 # else - the description the tail carried and the columns the
                 # head carried - is appended after it.
@@ -287,8 +408,48 @@ def _join_wrapped_refs(lines):
                 candidate += head.group(2) or ""
                 if REF_RE.match(candidate):
                     out.append(candidate)
-                    i += 2
+                    # The lines in between hold this same record's other cells -
+                    # the loan, the amounts - and are kept where they were.
+                    out.extend(lines[i + 1:j])
+                    i = j + 1
+                    joined = True
+                    break
+            if joined:
+                continue
+
+        # The orphaned-reference shape: a complete reference alone on its line,
+        # with its slash arriving a line or two later. The scan stops at the
+        # next reference so it cannot reach across a record boundary, and the
+        # joined line still has to be something REF_RE accepts.
+        alone = REF_ALONE.match(lines[i])
+        if alone and re.search(r"\d", alone.group(1)):
+            joined = False
+            for d in range(1, MAX_ORPHAN_GAP + 1):
+                j = i + d
+                if j >= len(lines):
+                    break
+                if REF_ALONE.match(lines[j]) or REF_RE.match(lines[j]):
+                    break               # the next record started; do not cross it
+                tail = SLASH_TAIL.match(lines[j])
+                if not tail:
                     continue
+                candidate = f"{alone.group(1)} {tail.group(1)}"
+                if REF_RE.match(candidate):
+                    # Whatever else printed on the reference's own line belongs
+                    # to this row's other columns - the component, the review
+                    # type - and is carried onto the joined line rather than
+                    # dropped with it.
+                    out.append(candidate + (alone.group(2) or ""))
+                    # The lines between the two belong to other columns of this
+                    # same record and are kept where they were; only the slash
+                    # line is consumed, because it is now part of the join.
+                    out.extend(lines[i + 1:j])
+                    i = j + 1
+                    joined = True
+                    break
+            if joined:
+                continue
+
         out.append(lines[i])
         i += 1
     return out
@@ -344,39 +505,158 @@ def split_ref_chain(desc, fallback):
     return ref, (rest or desc)
 
 
-def parse_plan_text(text, doc_meta):
-    """Pull the STEP plan table out of a plan's text rendition.
+def _parse_collapsed(tables, doc_meta):
+    """Rows out of a rendition that prints the table with no column positions.
 
-    Records are delimited by the borrower reference, which is the first thing in
-    the first column of every row of every section. Everything between two
-    references belongs to the first. Column zero (reference and description) is
-    recovered exactly; the metadata columns are located by matching their closed
-    value sets anywhere in the record block, because the rendition wraps each
-    cell over an unknown number of physical lines and no column offset is stable
-    across records.
+    These are 22 of the corpus's 496 renditions and they used to yield nothing
+    at all - the parser for the fixed-width layout splits a line at the first
+    run of two spaces, and in a collapsed rendition there are none, so every
+    line became the description and no metadata column was ever found. They
+    matter far out of proportion to their number: the newest rendition of six
+    of the eight projects is one, and the newest rendition is what the
+    current-state table reads.
+
+    A document whose columns came apart gives up its figures wholesale rather
+    than risk attaching one package's amount to another's reference. It keeps
+    its references and descriptions, which are still the borrower's and still
+    correct, and the figures come from its earlier renditions instead.
     """
-    lines = text.replace("\r\n", "\n").split("\n")
-    lines = _join_wrapped_refs(lines)
-    records, cur, section = [], None, ""
-    free_text = []
+    rows, all_rows, refused = [], [], False
+    per_table = []
+    for table in tables:
+        read = plan_table.read_collapsed_table(table)
+        per_table.append((table, read))
+        all_rows.extend(read)
+    if not plan_table.collapsed_is_aligned(all_rows):
+        refused = True
 
-    for i, ln in enumerate(lines):
-        sec = SECTION_RE.match(ln)
-        if sec:
-            section = sec.group(1)
-            continue
+    n = 0
+    for table, read in per_table:
+        columns = "|".join(plan_table.present_columns(table))
+        for rec in read:
+            ref, desc = split_ref_chain(collapse_ws(rec["description"]), "")
+            if not ref:
+                continue
+            block = rec["block"]
+            dates = [] if refused else rec["dates"]
+            rows.append({
+                "project_id": doc_meta["project_id"],
+                "plan_version": doc_meta["doc_id"],
+                "plan_doc_id": doc_meta["doc_id"],
+                "plan_disclosure_date": doc_meta["disclosure_date"],
+                "borrower_ref": ref,
+                "description": desc,
+                "category_raw": rec["section"],
+                "method_raw": "" if refused else _first_token(block, METHOD_TOKENS),
+                "market_approach": "" if refused else _first_token(block, APPROACH_TOKENS),
+                "status_raw": "" if refused else rec["status_raw"],
+                "planned_date": dates[0] if dates else "",
+                "revised_date": dates[-1] if len(dates) > 1 else "",
+                "estimated_amount": ""
+                    if refused else _as_amount(rec["estimated_amount"]),
+                "currency": "USD",
+                "content_sha256": doc_meta["content_sha256"],
+                "fetched_at": doc_meta["fetched_at"],
+                "section": rec["section"],
+                "record_index": n,
+                "_wrap_seams": 0,
+                "_dates": len(dates),
+                "_columns": columns,
+                "_no_est": not plan_table.has_column(table, plan_table.ESTIMATED_LABEL),
+                "_layout": "collapsed_refused" if refused else "collapsed",
+            })
+            n += 1
+    return rows, []
+
+
+def _as_amount(value):
+    try:
+        return f"{float((value or '0').replace(',', '')):.2f}" if value else ""
+    except ValueError:
+        return ""
+
+
+def collapse_ws(text):
+    return re.sub(r"\s+", " ", text or "").strip()
+
+
+def parse_plan_text(text, doc_meta):
+    """Pull the STEP plan tables out of a plan's text rendition.
+
+    Only the tables. A plan document is two things bolted together and one of
+    them is not data: the front is narrative the borrower writes, sometimes with
+    annex tables of its own, and the back is generated by STEP. plan_table finds
+    the five STEP sections exactly - all 496 renditions of the eight-country
+    corpus carry all five, with the "Activity Reference No." heading as the test
+    that tells a heading from the same word in a sentence - and records are
+    built from inside those bounds and nowhere else.
+
+    This used to scan the whole document, and got away with it: no record has
+    ever been built from outside a table, because REF_RE needs a borrower
+    reference at the start of a line and the narrative has none. That is a
+    property of eight countries' prose, not a property the code enforced, and
+    70 projects is a larger sample of borrower annexes. Now it is enforced, and
+    what falls outside is counted as free text rather than silently skipped.
+
+    Each of the five tables is read with its own heading band, because they do
+    not carry the same columns. The section comes from the table rather than
+    from a heading matched anywhere in the document, which alone corrected the
+    category of 4,003 records in 34 renditions where a bare "CONSULTING FIRMS"
+    in a preamble was re-labelling every record after it.
+
+    Within a table, the metadata columns are still located by matching their
+    closed value sets across the record block rather than by character
+    position - see the note in plan_table on why slicing was not adopted.
+    """
+    lines = _join_wrapped_refs(text.replace("\r\n", "\n").split("\n"))
+    tables = plan_table.find_tables(lines)
+    if not tables:
+        return [], lines
+    if sum(plan_table.is_collapsed(t) for t in tables) > len(tables) / 2:
+        return _parse_collapsed(tables, doc_meta)
+
+    out, n = [], 0
+    covered = set()
+    for table in tables:
+        start, end = plan_table.table_span(table)
+        covered.update(range(start, end))
+        # Asked of THIS table's heading band. 19% of renditions print no
+        # Estimated Amount column at all, and on those the figure on the row is
+        # the actual - filing it as an estimate would invent a number the plan
+        # never stated, on the one field that is carried forward.
+        has_estimated = plan_table.has_column(table, plan_table.ESTIMATED_LABEL)
+        columns = "|".join(plan_table.present_columns(table))
+        for rec in _records_in_table(table):
+            row = _plan_row(rec, table.section, has_estimated, doc_meta, n)
+            row["_columns"] = columns
+            row["_no_est"] = not has_estimated
+            out.append(row)
+            n += 1
+    free_text = [l for i, l in enumerate(lines) if i not in covered]
+    return out, free_text
+
+
+def _records_in_table(table):
+    """Split one table's rows into records.
+
+    A record opens on the line whose first column holds a borrower reference and
+    runs to the next one, because that reference is the first thing STEP prints
+    in the first column of every row of every section. Column zero - the
+    reference and the description - is taken exactly; everything to the right of
+    the first gap is the record's body, where the metadata cells are matched.
+    """
+    records, cur = [], None
+    for ln in table.data:
         m = REF_RE.match(ln)
         if m:
             if cur:
                 records.append(cur)
             rest = re.split(r" {2,}", m.group(2), maxsplit=1)
-            cur = {"section": section, "line": i, "ref": m.group(1),
-                   "col0": [_clip_tail(rest[0])], "body": []}
+            cur = {"ref": m.group(1), "col0": [_clip_tail(rest[0])], "body": []}
             if len(rest) > 1:
                 cur["body"].append(rest[1])
             continue
         if cur is None:
-            free_text.append(ln)
             continue
         if HEADER_LINE_RE.match(ln):
             continue
@@ -388,52 +668,48 @@ def parse_plan_text(text, doc_meta):
             cur["body"].append(cell[1])
     if cur:
         records.append(cur)
+    return records
 
-    out = []
-    for n, rec in enumerate(records):
-        desc, seams = _join_wrapped(rec["col0"])
-        ref, desc = split_ref_chain(desc, rec["ref"])
-        body = " ".join(rec["body"])
-        numbers = DATE_RE.findall(body)
-        amounts = [c for c in re.split(r" {2,}|\s{3,}", body) if AMOUNT_RE.match(c.strip())]
-        amount = None
-        for tok in amounts:
-            try:
-                amount = float(tok.replace(",", ""))
+
+def _plan_row(rec, section, has_estimated, doc_meta, index):
+    """One package row from one record of a fixed-width table."""
+    desc, seams = _join_wrapped(rec["col0"])
+    ref, desc = split_ref_chain(desc, rec["ref"])
+    body = " ".join(rec["body"])
+    numbers = DATE_RE.findall(body)
+    amount = None
+    if has_estimated:
+        for tok in re.split(r" {2,}|\s{3,}", body):
+            if AMOUNT_RE.match(tok.strip()):
+                try:
+                    amount = float(tok.replace(",", ""))
+                except ValueError:
+                    continue
                 break
-            except ValueError:
-                continue
-        status_raw = _first_token(body, ("Signed", "Canceled", "Cancelled",
-                                         "Under Implementation", "Under Preparation",
-                                         "Not Started", "Planned", "Completed",
-                                         "Under implementation", "Under preparation",
-                                         "Pending", "In Progress"))
-        method_raw = _first_token(body, METHOD_TOKENS)
-        approach = _first_token(body, APPROACH_TOKENS)
-        row = {
-            "project_id": doc_meta["project_id"],
-            "plan_version": doc_meta["doc_id"],
-            "plan_doc_id": doc_meta["doc_id"],
-            "plan_disclosure_date": doc_meta["disclosure_date"],
-            "borrower_ref": ref,
-            "description": desc,
-            "category_raw": rec["section"],
-            "method_raw": method_raw,
-            "market_approach": approach,
-            "status_raw": status_raw,
-            "planned_date": numbers[0] if numbers else "",
-            "revised_date": numbers[-1] if len(numbers) > 1 else "",
-            "estimated_amount": "" if amount is None else f"{amount:.2f}",
-            "currency": "USD",
-            "content_sha256": doc_meta["content_sha256"],
-            "fetched_at": doc_meta["fetched_at"],
-            "section": rec["section"],
-            "record_index": n,
-            "_wrap_seams": seams,
-            "_dates": len(numbers),
-        }
-        out.append(row)
-    return out, free_text
+    return {
+        "project_id": doc_meta["project_id"],
+        "plan_version": doc_meta["doc_id"],
+        "plan_doc_id": doc_meta["doc_id"],
+        "plan_disclosure_date": doc_meta["disclosure_date"],
+        "borrower_ref": ref,
+        "description": desc,
+        "category_raw": section,
+        "method_raw": _first_token(body, METHOD_TOKENS),
+        "market_approach": _first_token(body, APPROACH_TOKENS),
+        "status_raw": _first_token(body, STATUS_TOKENS),
+        "planned_date": numbers[0] if numbers else "",
+        "revised_date": numbers[-1] if len(numbers) > 1 else "",
+        "estimated_amount": "" if amount is None else f"{amount:.2f}",
+        "currency": "USD",
+        "content_sha256": doc_meta["content_sha256"],
+        "fetched_at": doc_meta["fetched_at"],
+        "section": section,
+        "record_index": index,
+        "_wrap_seams": seams,
+        "_dates": len(numbers),
+        "_columns": "",
+        "_no_est": False,
+    }
 
 
 def _clip_tail(cell):
@@ -441,9 +717,45 @@ def _clip_tail(cell):
     return LENDER_RE.sub("", cell)
 
 
+def _match_form(value):
+    """Fold a cell to the form the closed value sets are written in.
+
+    Three foldings, each answering a way the rendition disguises a known value:
+    accents, because the token lists are ASCII and the plans are not; the
+    curly apostrophe, because STEP prints both; and case.
+
+    Returns (folded, despaced). The despaced form exists because a cell that is
+    too wide for its column wraps mid-word, and the two halves reach this
+    function with a gap between them - 'Under Implementati' and 'on' is 9,036
+    rows of the corpus. Removing every space from both the text and the token
+    turns that back into a match, and it is safe for the same reason the
+    procurement match_key is safe: wrapping only ever inserts a gap, never a
+    character, so despacing both sides cannot make two different values equal
+    unless they differed by spacing alone.
+    """
+    folded = unicodedata.normalize("NFKD", value or "")
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    folded = folded.replace("\u2019", "'").replace("\u02bc", "'").casefold()
+    return folded, re.sub(r"\s+", "", folded)
+
+
 def _first_token(text, tokens):
+    """The first of `tokens` that appears in `text`, or ''.
+
+    Two passes, and never one: an exact match on the folded text is tried for
+    every token before any despaced match is considered. Doing it token by token
+    instead would let a despaced match on a short token beat an exact match on a
+    longer one further down the list, which is how 'Signed' wins over 'Contract
+    Signed'.
+    """
+    ftext, dtext = _match_form(text)
     for t in tokens:
-        if re.search(r"(?<![A-Za-z])" + re.escape(t) + r"(?![A-Za-z])", text):
+        ft, _ = _match_form(t)
+        if re.search(r"(?<!\w)" + re.escape(ft) + r"(?!\w)", ftext):
+            return t
+    for t in tokens:
+        _, dt = _match_form(t)
+        if len(dt) >= 6 and dt in dtext:
             return t
     return ""
 
@@ -825,6 +1137,8 @@ def main():
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
     prep, wrap_seams_total, planned_only = [], 0, 0
+    section_columns = Counter()
+    no_estimated_column = 0
     for r in plan_rows:
         desc = r["description"]
         lang = detect_lang(desc)
@@ -839,6 +1153,9 @@ def main():
         row["revised_date"] = r["revised_date"]
         row.pop("_wrap_seams", None)
         row.pop("_dates", None)
+        row.pop("_layout", None)
+        section_columns[(r["section"], row.pop("_columns", ""))] += 1
+        no_estimated_column += 1 if row.pop("_no_est", False) else 0
         wrap_seams_total += r.get("_wrap_seams", 0)
         if not seen_hash.get(r["plan_doc_id"]):
             seen_hash[r["plan_doc_id"]] = r["content_sha256"]
@@ -872,6 +1189,34 @@ def main():
         fh.write(f"distinct (project, plan document) pairs: {distinct_versions:,}\n")
         fh.write(f"notices rows: {len(notices):,}\n")
         fh.write(f"awards rows: {len(awards):,}\n")
+
+        # Which columns each of the five STEP sections actually printed, and in
+        # how many rows. They do not carry the same set - the consulting
+        # sections have a Contract Type where goods and works have a
+        # Prequalification - and one difference changes a value rather than the
+        # layout: a table with no Estimated Amount column prints the ACTUAL as
+        # its only figure. This table is how that is checked from a run's
+        # output rather than by reading the parser.
+        fh.write("\ncolumns found per STEP section (rows read with that set)\n")
+        for section in ("WORKS", "GOODS", "NON CONSULTING SERVICES",
+                        "CONSULTING FIRMS", "INDIVIDUAL CONSULTANTS"):
+            variants = [(cols, n) for (sec, cols), n in section_columns.items()
+                        if sec == section]
+            total = sum(n for _, n in variants)
+            fh.write(f"  {section}  ({total:,} rows)\n")
+            for cols, n in sorted(variants, key=lambda v: -v[1])[:4]:
+                shown = cols.replace("|", ", ") or "(none read)"
+                fh.write(f"      {n:>7,}  {shown}\n")
+        # Counted from the parser's own decision, not inferred from the column
+        # list above: that list is what could be ORDERED out of the heading
+        # band, and a band truncated by an immediate first data row yields less
+        # than the band contains. The Estimated Amount heading has no
+        # confusable sibling, so its presence is asked directly.
+        fh.write(f"  rows from a table printing NO Estimated Amount column: "
+                 f"{no_estimated_column:,} "
+                 f"({100 * no_estimated_column / max(1, len(prep)):.1f}%) - "
+                 f"their estimated_amount is left blank, never filled from the "
+                 f"actual\n")
         fh.write(f"package_changes rows: {len(changes):,}\n")
         fh.write(f"packages with no usable key: {unkeyable:,}\n")
         fh.write(f"cell fragments glued (no space inserted, never guessed): "

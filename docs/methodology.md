@@ -122,9 +122,67 @@ Two corpora, cleaned separately. Appraisal documents are long prose recovered fr
 5. Normalise the borrower reference: case, whitespace, separators. This is what V6 depends on.
 6. Detect the language of the description.
 7. Flag non-descriptive placeholders — `TBD`, a bare category name, a reference with no words. Flag and count; do not drop.
-8. Deduplicate packages across plan versions, keeping the latest and recording the supersession.
-9. Normalise status and method values to the closed sets in the business rules. Unmapped values go to `unknown` and are counted.
+8. Deduplicate packages across plan versions. The row is assembled field by field, not taken wholesale from the newest version — see **Carry-forward** below. Record the supersession.
+9. Normalise status and method values to the closed sets in the business rules. The source vocabularies are multilingual — see **The plan is a printed table** below. Unmapped values go to `unknown` and are counted.
 10. Hash the raw and cleaned descriptions separately.
+
+**The plan is a printed STEP table, and the parser depends on that.** A plan
+document is two things bolted together: narrative the borrower writes, and five
+tables STEP generates — WORKS, GOODS, NON CONSULTING SERVICES, CONSULTING FIRMS,
+INDIVIDUAL CONSULTANTS. All 496 renditions of the eight-country corpus carry all
+five, each under the same English column headings whatever language the rest of
+the document is in. Records are built from inside those tables and nowhere else,
+each table located by its section heading plus the `Activity Reference No.`
+column heading within three lines. The heading alone is not enough: the same
+words occur in prose, and one rendition reports 3,822 sections without the
+second test.
+
+The section supplies `category_raw`. Taking it from a heading matched anywhere
+in the document mislabelled 562 rows, because a bare "CONSULTING FIRMS" in a
+contents page relabels every record after it.
+
+Each table is asked, of its own heading band, whether it prints an Estimated
+Amount column. 25% of rows come from tables that do not — those renditions are
+old enough that STEP printed only the actual — and on them the single figure on
+the row is the actual amount. It is recorded as such and never as an estimate;
+filing an actual of 0.00 as an estimate of zero is worse than reading nothing,
+because nothing about the result looks wrong.
+
+Two layouts, and the layout is the text extractor's rather than the borrower's.
+474 renditions print fixed-width columns. 22 have no whitespace left at all,
+one cell per line or a few narrow cells sharing one — and those are the newest
+rendition for six of the eight projects, so they decide what the current-state
+table says. Read as a stream of typed tokens rather than as lines, the two are
+one shape, because the only order STEP prints is its columns, left to right.
+
+**A rendition whose columns came apart gives up its figures.** Some collapsed
+renditions emit each column of a page as its own run, so the reference column
+and the money column end up in different orders — one Niger plan prints the
+third row's description before the first row's amounts. Those keep their
+references and descriptions and contribute no amounts, status or dates: per
+record where a reprinted heading splits it, and wholesale where most records
+lost their money line. A package with no amount is a gap a later plan version
+can fill; a package with another package's amount is wrong and looks right.
+
+**A bundled rendition is cut to this project, or skipped.** Some plan documents
+are published with a text rendition concatenating many operations — one 8.9 MB
+rendition returned for Tanzania carries preambles for 59 projects. A rendition
+with more than one preamble is split at the preambles and only this project's
+segment is used; where it cannot be cut it is counted and not parsed. 29
+renditions in the 70-project run.
+
+**Carry-forward: two fields, and the restraint is the point.** Where the newest
+plan version does not state a value, `estimated_amount` and `method` — only
+those two — fall back to the most recent version that did. `currency` is taken
+from the same version as the amount, so the pair is always one that was actually
+published. `carried_from` names the source version per field, so nothing is
+taken on trust.
+
+**Status is never carried forward.** A status is a fact at a point in time, and
+inheriting it manufactures a present-tense claim out of a stale one: Nigeria read
+97.9% populated on statuses that were four years old. With carry-forward removed
+the honest figure is 23.2%. An unknown status stays unknown and is confirmed with
+the project team.
 
 **Amounts and dates sometimes appear inside the description string.** Extract them to their own columns rather than leaving them to be matched as text.
 
@@ -368,6 +426,25 @@ Each is a check that has not been run. Results go in `analysis/`, script and out
 **The measure list is the binding constraint.** A run against an incomplete measure list is reproducibly incomplete.
 
 **Procurement evidences opportunity, not delivery.**
+
+**Some plan renditions contribute no figures.** Where the extractor scattered a
+table's columns across the page, the rendition's references and descriptions are
+kept and its amounts, status and dates are refused rather than guessed. Niger's
+newest rendition is one of these, so that project's current-state status reads
+zero while its earlier renditions parse at 84%. Whether to fall back to the
+newest *readable* rendition is an open decision, not a defect.
+
+**Some plans carry no borrower reference at all.** One project's plan renditions
+print a component number where the reference belongs — spot-checked on three of
+its twenty renditions, none carries a reference-shaped token anywhere — so its
+134 rows have no legitimate key and are not emitted. Keying them would mean
+minting a synthetic identifier for packages the Bank never referenced, which is
+a data-model decision rather than a parser fix.
+
+**Nine projects parse to zero package rows.** P171099, P174620, P175218,
+P175987, P177158, P179204, P180693, P180807, P502532 — one of them because its
+single plan rendition returns a hard 404 from the documents interface. The rest
+are undiagnosed.
 
 **Cleaning is the first place quality is lost and the hardest to notice.** A defect that survives Stage 2 is embedded, scored and joined without ever raising an error. V10 is the only check standing between the corpus and every number the pipeline produces.
 
