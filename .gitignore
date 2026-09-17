@@ -15,3 +15,12 @@ analysis/a3_clusters/naming_worksheet.xlsx
 # The A4 de-glue examples are package descriptions - source text - so they are
 # not committed either. Same rule, same reason.
 analysis/a4_package_assets/deglue_examples.txt
+
+# Probe intermediates: one row per clause or per package, all of them
+# re-derivable by re-running the script beside them. They carry no text -
+# ids, offsets and hashes only - so the reason they are not committed is
+# size, not disclosure. 34 MB of the 35 MB this branch would otherwise add.
+# They stay on the server, as everything under data/ does.
+analysis/a3_clusters/pool.csv
+analysis/a3_clusters/pool_dropped.csv
+analysis/a4_package_assets/package_resolution.csv
