@@ -1,0 +1,102 @@
+A3 - the clause pool, before clustering
+==============================================================================
+
+ASSUMPTIONS
+------------------------------------------------------------------------------
+
+1. HEADINGS ARE IDENTIFIED STRUCTURALLY, NOT BY A REGEX. The task says to use
+   `block_type` and `section_label` because "the corpus already knows". The
+   corpus does not: paragraphs.csv carries `block`, and every heading inside the
+   pool is typed narrative or annex. The rule used instead is the corpus's own
+   token count plus the splitter's result - a prose paragraph of 12 tokens or
+   fewer that produced exactly one clause, opened by a sentence boundary, is a
+   heading. A regex over the text was deliberately not written. IF THE INTENT
+   WAS to trust a `block_type` value that does not yet exist, the heading count
+   below is an approximation of it and the pool is slightly larger or smaller
+   than intended.
+
+2. The climate co-benefit accounting pattern IS a regex, because for that class
+   the task did not forbid one. It matches "percent of the financing cost",
+   "is going toward the climate-related activity" and "climate co-benefit ...
+   percent". Three clauses matched. IF THE CLASS IS BROADER than those shapes -
+   any sentence whose purpose is to report a climate-tagging percentage - the
+   drop is under-counted and a few bookkeeping clauses remain in the pool.
+
+3. DEDUPLICATION IS BY NORMALISED CLAUSE HASH: lowercase, non-alphanumerics
+   collapsed to single spaces, then SHA-256. The FIRST occurrence in
+   clause_id order is kept and later ones are dropped. Clauses that differ only
+   in punctuation therefore collapse. IF THE INTENT WAS to keep one instance per
+   distinct clause_id, no rows would be dropped here and the pool grows by the
+   duplicate count.
+
+4. The pool is gated on block type only. methodology Stage 4 and business-rule
+   31 both say clauses exist only where an asset fired; this probe does not
+   apply that gate, and the reasons are in the task. IF THE ASSET GATE IS
+   RESTORED, the pool shrinks sharply and the discovery step can only find
+   measures on paragraphs the eight asset classifiers already reach.
+
+5. Clauses are embedded with the SAME pinned model as the paragraph corpus
+   (meta/embedding_manifest.json: text-embedding-3-large, 3072 dimensions,
+   provider pinned to openai with fallbacks refused). The vectors land in the
+   same content-addressed cache, keyed on the SHA-256 of the text, so a re-run
+   costs nothing. The corpus itself is NOT re-embedded.
+
+6. `data/clause_emb.npy` and `data/clause_emb_index.csv` follow the on-disk
+   convention of the paragraph matrix (data/paragraph_emb.npy, data/emb_index.csv)
+   rather than docs/data-model.md's data/intermediate/features/ path, because
+   src/embed.py writes the paragraph pair at the top of data/ and a second
+   location would be a parallel invention.
+
+What was dropped
+------------------------------------------------------------------------------
+  duplicate               20,276   15.3%
+  heading                  1,970    1.5%
+  climate_accounting           4    0.0%
+  kept                   110,126   83.2%
+  total                  132,376
+
+The task's local trial put these three classes at roughly 15% of
+units. Measured here: 16.8%.
+
+The pool
+------------------------------------------------------------------------------
+clauses in                         132,376
+pool clauses                       110,126
+unique texts                       110,126
+paragraphs contributing             14,953
+documents contributing                 145
+projects reachable                     145  (via documents.csv)
+rows in clause_emb.npy             110,126
+tokens reported by the provider          0
+requests                                 0
+spend                            $  0.0000
+
+Pool by block and by section
+------------------------------------------------------------------------------
+  block narrative        82,599
+  block annex            27,527
+
+    16,464  'Project Components'
+     9,916  'Implementation Arrangements and Support Plan'
+     9,915  'Sectoral and Institutional Context'
+     4,961  'KEY RISKS'
+     3,620  'Detailed Project Description'
+     3,546  'Fiduciary'
+     3,166  'Country Context'
+     3,153  'Relevance to Higher Level Objectives'
+     2,936  'Technical, Economic and Financial Analysis'
+     2,857  'DESCRIPTION OF PROPOSED CHANGES'
+     2,356  'Institutional and Implementation Arrangements'
+     2,220  'Environmental and Social'
+     2,177  'Project Beneficiaries'
+     2,163  'Lessons Learned and Reflected in the Project Design'
+     1,876  'PROJECT STATUS AND RATIONALE FOR RESTRUCTURING'
+
+Split rule inside the pool
+------------------------------------------------------------------------------
+  sentence         44,711   40.6%
+  verb_subtree     32,836   29.8%
+  coord_conj       13,520   12.3%
+  relative          8,316    7.6%
+  subord_conj       5,411    4.9%
+  semicolon         5,332    4.8%

@@ -1,3 +1,15 @@
 requests==2.32.3
 pytest==9.1.1
 numpy==2.5.3
+spacy==3.8.16
+scikit-learn==1.9.1
+openpyxl==3.1.5
+
+# The clause parser's model is not on PyPI under this name, so it is not a
+# requirement line. Install it from the release wheel and check the digest -
+# Stage 4 pins both the library and the model, and clause_id embeds the splitter
+# version precisely because a model change moves every boundary:
+#   en_core_web_sm-3.8.0-py3-none-any.whl
+#   https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
+#   sha256 1932429db727d4bff3deed6b34cfc05df17794f4a52eeb26cf8928f7c1a0fb85
+#   python -m pip install ./en_core_web_sm-3.8.0-py3-none-any.whl

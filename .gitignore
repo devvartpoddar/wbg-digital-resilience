@@ -6,3 +6,12 @@ data/
 *.pdf
 __pycache__/
 .venv/
+
+# The A3 naming worksheet carries clause text, so it is not committed. No
+# document text is committed anywhere in this repository; the one committed
+# place is inputs/labels/samples/. The worksheet's path is named in the PR body.
+analysis/a3_clusters/naming_worksheet.xlsx
+
+# The A4 de-glue examples are package descriptions - source text - so they are
+# not committed either. Same rule, same reason.
+analysis/a4_package_assets/deglue_examples.txt

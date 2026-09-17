@@ -1,0 +1,4 @@
+variant,n_packages,n_fine,n_coarse_only,n_unresolved,pct_fine,pct_coarse_only,pct_unresolved
+clean,5601,624,576,4401,11.1,10.3,78.6
+deglued,5601,641,583,4377,11.4,10.4,78.1
+match_key,5601,1151,697,3753,20.5,12.4,67.0

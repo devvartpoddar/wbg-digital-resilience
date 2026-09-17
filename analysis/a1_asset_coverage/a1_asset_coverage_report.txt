@@ -1,0 +1,154 @@
+A1 - project-level asset coverage
+==============================================================================
+
+ASSUMPTIONS
+------------------------------------------------------------------------------
+
+1. span_project does not exist. docs/data-model.md specifies
+   data/intermediate/prepared/span_project.csv (doc_id, project_id, link_basis)
+   and the task says the paragraph->project join must go through it. No stage
+   writes that table. The same mapping is carried on every row of
+   paragraphs.csv and documents.csv as a pipe-delimited `project_ids`, so that
+   is what is used here. The two sources agree on every paragraph (mismatches
+   reported below). IF THIS IS WRONG the fix is one join, and n_documents and
+   n_projects_with_ge1 move only for the two regional documents
+   (34222788 = 2 projects, 34338772 = 4 projects).
+
+2. Threshold scales are not the same. `probability` in paragraph_asset.csv is
+   Platt-scaled to 0-1; `threshold` is on the raw decision-function scale, and
+   `fired` was computed as raw_score >= threshold. So the 0.30/0.50/0.70 rows
+   cut on `probability`, and the "current" row reads `fired` directly. The
+   probability each class's current threshold is equivalent to is in
+   current_threshold_probability_equivalent. IF THE INTENT WAS to cut the raw
+   score at the numeric values 0.30/0.50/0.70, every probability row here is
+   wrong and the class orderings change.
+
+3. Coverage is reported over every paragraph the detector scored, not only
+   prose. paragraphs.csv carries no `in_scope` column (docs/data-model.md says
+   it should), so there is no in-scope flag to filter on. The prose-only
+   (narrative + annex) view is in the *_prose columns and is the one to read
+   for the screen, because a probability on a table row is not comparable to
+   one on a paragraph of prose. IF COVERAGE SHOULD BE PROSE-ONLY, read the
+   *_prose columns; fiber in particular gains several projects.
+
+4. "Saturation" is defined here as the highest threshold at which project
+   coverage is within 2 percentage points of the class's maximum across the
+   four thresholds - i.e. the most precise cut that still reaches essentially
+   every project the class can reach at all. A different definition moves the
+   saturation column, not the coverage numbers.
+
+5. The denominator is the 70 `included == true` rows of inputs/config/cohort.csv.
+   cohort.csv holds 87 rows; the other 17 are excluded and are not in
+   documents.csv at all, so restricting to the cohort changes nothing today.
+
+6. Every paragraph in paragraph_asset.csv resolved to a row in paragraphs.csv
+   and every paragraph's project list resolved to an included project, so no
+   row was dropped from the join.
+
+PASS / FAIL against the acceptance criterion
+------------------------------------------------------------------------------
+PASS = >=90% project coverage at the class's CURRENT threshold.
+FAIL = <60%. 60-90% is reported as PARTIAL, which the criterion
+does not name but which is neither.
+
+asset_class           current%  prose%   verdict  saturates at
+------------------------------------------------------------------------------
+access_connectivity     100.0%   98.6%      PASS          0.30
+cybersecurity            97.1%   97.1%      PASS          0.50
+data_hosting             97.1%   97.1%      PASS          0.30
+dpi                     100.0%   98.6%      PASS          0.30
+drm_ews                 100.0%   97.1%      PASS          0.70
+fiber                    70.0%   65.7%   PARTIAL          0.30
+mobile_towers            94.3%   84.3%      PASS          0.30
+submarine_cable          71.4%   61.4%   PARTIAL          0.30
+------------------------------------------------------------------------------
+6 PASS, 2 PARTIAL, 0 FAIL, of 8 classes.
+
+Coverage by class and threshold
+------------------------------------------------------------------------------
+prob-cut rows are thresholds on `probability`; the `current` row is
+the class's own threshold from meta/asset_models.json, read through
+the `fired` column. All paragraphs scored, prose in brackets.
+
+asset_class                 thr                 scale    paras  docs  proj      %
+------------------------------------------------------------------------------
+access_connectivity        0.30           probability    4,347   136    70 100.0%   [3,030 / 134 / 69 / 98.6%]
+access_connectivity        0.50           probability    2,461   123    66  94.3%   [1,835 / 113 / 66 / 94.3%]
+access_connectivity        0.70           probability    1,362   103    59  84.3%   [1,039 / 96 / 57 / 81.4%]
+access_connectivity   -0.030283 raw-logit (via fired)    3,585   133    70 100.0%   [2,578 / 128 / 69 / 98.6%]
+
+cybersecurity              0.30           probability    2,284   117    69  98.6%   [1,621 / 106 / 69 / 98.6%]
+cybersecurity              0.50           probability    1,570   111    68  97.1%   [1,143 / 99 / 68 / 97.1%]
+cybersecurity              0.70           probability    1,109   104    67  95.7%   [834 / 96 / 67 / 95.7%]
+cybersecurity         -0.113954 raw-logit (via fired)    1,589   111    68  97.1%   [1,155 / 99 / 68 / 97.1%]
+
+data_hosting               0.30           probability      986   104    68  97.1%   [652 / 95 / 68 / 97.1%]
+data_hosting               0.50           probability      697    90    62  88.6%   [481 / 80 / 59 / 84.3%]
+data_hosting               0.70           probability      488    78    59  84.3%   [368 / 68 / 57 / 81.4%]
+data_hosting          -0.247319 raw-logit (via fired)      976   103    68  97.1%   [645 / 94 / 68 / 97.1%]
+
+dpi                        0.30           probability    3,332   135    69  98.6%   [2,389 / 123 / 68 / 97.1%]
+dpi                        0.50           probability    1,873   108    64  91.4%   [1,418 / 100 / 64 / 91.4%]
+dpi                        0.70           probability    1,019    93    58  82.9%   [806 / 78 / 55 / 78.6%]
+dpi                   -0.257982 raw-logit (via fired)    3,547   138    70 100.0%   [2,538 / 126 / 69 / 98.6%]
+
+drm_ews                    0.30           probability    1,748   111    70 100.0%   [1,144 / 99 / 69 / 98.6%]
+drm_ews                    0.50           probability    1,165   101    70 100.0%   [778 / 91 / 68 / 97.1%]
+drm_ews                    0.70           probability      771    98    69  98.6%   [533 / 88 / 68 / 97.1%]
+drm_ews               -0.082134 raw-logit (via fired)    1,438   105    70 100.0%   [936 / 93 / 68 / 97.1%]
+
+fiber                      0.30           probability      632    71    58  82.9%   [435 / 63 / 55 / 78.6%]
+fiber                      0.50           probability      271    55    49  70.0%   [187 / 52 / 46 / 65.7%]
+fiber                      0.70           probability      161    44    41  58.6%   [111 / 37 / 36 / 51.4%]
+fiber                  0.062883 raw-logit (via fired)      260    55    49  70.0%   [181 / 52 / 46 / 65.7%]
+
+mobile_towers              0.30           probability      932    87    64  91.4%   [560 / 70 / 58 / 82.9%]
+mobile_towers              0.50           probability      447    66    51  72.9%   [272 / 55 / 47 / 67.1%]
+mobile_towers              0.70           probability      203    48    39  55.7%   [133 / 37 / 34 / 48.6%]
+mobile_towers         -0.278016 raw-logit (via fired)      999    90    66  94.3%   [597 / 72 / 59 / 84.3%]
+
+submarine_cable            0.30           probability      956   105    69  98.6%   [473 / 75 / 56 / 80.0%]
+submarine_cable            0.50           probability      573    74    56  80.0%   [303 / 58 / 48 / 68.6%]
+submarine_cable            0.70           probability      363    63    48  68.6%   [209 / 49 / 41 / 58.6%]
+submarine_cable       -0.059922 raw-logit (via fired)      464    66    50  71.4%   [256 / 51 / 43 / 61.4%]
+
+Saturation, per class
+------------------------------------------------------------------------------
+Coverage is monotone in the threshold, so the ceiling is the lowest
+threshold tried. Saturation below is the highest threshold still
+within 2pp of that ceiling - the most precise cut that costs nothing.
+
+asset_class             @0.70   @0.50   @0.30  ceiling  saturates at  gain 0.70->0.30
+------------------------------------------------------------------------------
+access_connectivity     81.4%   94.3%   98.6%    98.6%          0.30            17.2pp
+cybersecurity           95.7%   97.1%   98.6%    98.6%          0.50             2.9pp
+data_hosting            81.4%   84.3%   97.1%    97.1%          0.30            15.7pp
+dpi                     78.6%   91.4%   97.1%    97.1%          0.30            18.5pp
+drm_ews                 97.1%   97.1%   98.6%    98.6%          0.70             1.5pp
+fiber                   51.4%   65.7%   78.6%    78.6%          0.30            27.2pp
+mobile_towers           48.6%   67.1%   82.9%    82.9%          0.30            34.3pp
+submarine_cable         58.6%   68.6%   80.0%    80.0%          0.30            21.4pp
+
+Read the last column as the screen's headroom: a class whose
+coverage barely moves between 0.70 and 0.30 is already saturating
+and has nothing to gain from a looser threshold.
+
+Provenance
+------------------------------------------------------------------------------
+run_id           20260917T1958-301533a
+model_version    2026-09-16T13:56:49Z
+threshold_version f1-on-training-draw
+paragraph_asset rows read  272,040
+paragraphs in paragraphs.csv  34,005
+paragraphs disagreeing with documents.csv on project_ids  0
+included projects (denominator)  70
+
+classes whose current threshold is equivalent to these probabilities:
+  access_connectivity     -0.030283  ->  p = 0.3605
+  cybersecurity           -0.113954  ->  p = 0.4936
+  data_hosting            -0.247319  ->  p = 0.3056
+  dpi                     -0.257982  ->  p = 0.2813
+  drm_ews                 -0.082134  ->  p = 0.4011
+  fiber                    0.062883  ->  p = 0.5130
+  mobile_towers           -0.278016  ->  p = 0.2834
+  submarine_cable         -0.059922  ->  p = 0.6072

@@ -1,0 +1,13 @@
+variant,category,n_packages,n_fine,n_coarse_only,n_unresolved,pct_fine,pct_coarse_only,pct_unresolved
+clean,consultant_services,3488,338,287,2863,9.7,8.2,82.1
+clean,goods,1329,197,204,928,14.8,15.3,69.8
+clean,non_consulting_services,594,58,79,457,9.8,13.3,76.9
+clean,works,190,31,6,153,16.3,3.2,80.5
+deglued,consultant_services,3488,345,288,2855,9.9,8.3,81.9
+deglued,goods,1329,206,210,913,15.5,15.8,68.7
+deglued,non_consulting_services,594,57,79,458,9.6,13.3,77.1
+deglued,works,190,33,6,151,17.4,3.2,79.5
+match_key,consultant_services,3488,620,325,2543,17.8,9.3,72.9
+match_key,goods,1329,366,270,693,27.5,20.3,52.1
+match_key,non_consulting_services,594,121,94,379,20.4,15.8,63.8
+match_key,works,190,44,8,138,23.2,4.2,72.6
