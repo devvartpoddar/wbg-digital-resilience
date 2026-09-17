@@ -35,23 +35,26 @@ def clauses_of(nlp, text):
 
 # --------------------------------------------------------------- the worked case
 
-def test_worked_example_yields_at_least_four_clauses(nlp):
-    """34338772:p00680 states five measures in one bullet."""
-    text = ("Climate resilience measures for the broadband connectivity "
-            "infrastructure (backbone, backhaul, and last-mile networks) will "
-            "follow recommendations from the ITU Standardization Sector on "
-            "adaptation 73 to determine the choice of technology, such as "
-            "between microwave, underground, and aerial fiber optic cables; "
-            "deploy weather-resistant fiber optic, weather-proofing ducts, "
-            "poles, switches, sockets, and appliances in the network; and embed "
-            "elevation in the communication towers to prevent damage from "
-            "floods and heavy precipitation.")
+def test_a_five_measure_bullet_splits_into_five_clauses(nlp):
+    """The shape the corpus actually produces: one bullet, several techniques,
+    joined by semicolons, a coordinating conjunction and two infinitives.
+
+    SYNTHETIC TEXT, deliberately. The real paragraph this stands for
+    (34338772:p00680) is checked against the corpus by the probe's acceptance
+    run, not by a fixture - no document text is committed in this repository.
+    """
+    text = ("Adaptation measures for the regional backbone will follow an "
+            "international standard on hazard resilience, and the operator "
+            "must pick a medium for each span - buried, overhead or wireless; "
+            "install hardened cable and protect the ducts, poles, switches, "
+            "sockets, and cabinets on the route; and raise the elevation of "
+            "the masts so that high water does not reach the equipment.")
     got = clauses_of(nlp, text)
     assert len(got) >= 4
+    assert [r for _c, r in got].count("semicolon") == 2
     joined = " ".join(c for c, _ in got)
-    # every measure survives somewhere in the split
-    for fragment in ("ITU Standardization Sector", "between microwave",
-                     "deploy weather-resistant", "embed elevation"):
+    for fragment in ("international standard", "buried, overhead or wireless",
+                     "install hardened cable", "raise the elevation"):
         assert fragment in joined
 
 

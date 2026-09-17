@@ -12,14 +12,15 @@ Writes data/intermediate/prepared/clauses.csv     schema: docs/data-model.md
   python3 src/segment.py --limit 20       # smoke test
   python3 src/segment.py                  # the prose corpus
 
-WHY A PARAGRAPH IS NOT A UNIT. One bullet routinely states five measures -
-34338772:p00680 carries "adopt ITU L.1502 / ETSI standards", "choose between
-microwave, underground and aerial fiber", "deploy weather-resistant fiber",
-"weather-proof the ducts, poles, switches and sockets" and "embed elevation in
-the towers" in a single sentence. Attribution and modality both need a unit
-small enough to hold one proposition, so the paragraph is cut into clauses.
-The paragraph stays the unit for detection; the clause is the unit for
-attribution and modality; the two are not reconciled (methodology Stage 4).
+WHY A PARAGRAPH IS NOT A UNIT. One bullet routinely states five measures. A
+single annex paragraph in the corpus (34338772:p00680) names, in one sentence,
+five distinct techniques: adopting an international adaptation standard,
+choosing between three transmission media, deploying hazard-resistant cable,
+protecting the passive plant, and raising tower elevations. Attribution and
+modality both need a unit small enough to hold one proposition, so the
+paragraph is cut into clauses. The paragraph stays the unit for detection; the
+clause is the unit for attribution and modality; the two are not reconciled
+(methodology Stage 4).
 
 THE BOUNDARY CONDITIONS are the ones named in methodology Stage 4 and the
 values in business-rules A1.11: sentence, semicolon, coord_conj, subord_conj,
@@ -28,11 +29,14 @@ relative, verb_subtree. ClearNLP-style labels throughout - this model emits
 against Universal Dependencies matches nothing and raises nothing.
 
 WHAT IS NOT DONE. No noun-phrase splitting. A coordinated object noun phrase
-still bundles - "deploy weather-resistant fiber optic, weather-proofing ducts,
-poles, switches" is one clause holding two measures. That is the known limit,
-it is measured in the probe report, and `clause_measure` keys on clause_id +
+still bundles: one verb governing a cable type and then a list of passive plant
+is a single clause holding two measures. That is the known limit, it is
+measured in the probe report, and `clause_measure` keys on clause_id +
 measure_id, so it is multi-label by design. Splitting noun phrases would
 inherit the parser's error rate for a marginal gain.
+
+NO CLAUSE TEXT IS QUOTED ANYWHERE IN THIS FILE. No document text is committed
+in this repository; a clause resolves from data/clean/ through its offsets.
 
 IDEMPOTENT AND RESUMABLE. A clause_id embeds the splitter version, so a
 splitter change cannot silently repoint existing clause labels at different
@@ -156,11 +160,11 @@ def find_boundaries(doc):
         put(sent.start, "sentence")
 
     # Semicolons first. A semicolon that is followed by the conjunction
-    # continuing the list ("... in the network; and embed elevation in the
-    # towers") splits before the conjunction, so "and" opens the clause it
-    # introduces instead of trailing the previous one. Those positions are
-    # marked before the coordinating-conjunction rule runs, which is what stops
-    # that rule from adding a second boundary immediately after.
+    # continuing the list ("... x; and y ...") splits before the conjunction, so
+    # "and" opens the clause it introduces instead of trailing the previous one.
+    # Those positions are marked before the coordinating-conjunction rule runs,
+    # which is what stops that rule from adding a second boundary immediately
+    # after.
     for t in doc:
         if t.is_space or t.text != ";":
             continue
