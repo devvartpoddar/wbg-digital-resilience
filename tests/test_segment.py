@@ -69,9 +69,9 @@ def test_semicolon_splits(nlp):
 
 
 def test_semicolon_before_a_coordinating_conjunction_keeps_and_with_its_clause(nlp):
-    got = clauses_of(nlp, "Harden the ducts; and embed elevation in the towers.")
+    got = clauses_of(nlp, "Seal the cabinets; and raise the masts.")
     assert len(got) == 2
-    assert got[1][0].startswith("and embed")
+    assert got[1][0].startswith("and raise")
 
 
 def test_coordinating_conjunction_between_verb_subtrees_splits(nlp):
@@ -132,7 +132,7 @@ def test_offsets_resolve_and_are_trimmed(nlp):
 
 
 def test_spans_never_overlap_and_stay_inside_the_paragraph(nlp):
-    text = ("The project will deploy weather-resistant fiber, back up the "
+    text = ("The project will lay hardened cable, back up the "
             "switch, and harden the towers; it will also monitor river levels.")
     spans = S.segment_text(nlp, text)
     last = -1
