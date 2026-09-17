@@ -563,11 +563,26 @@ All eight rows written per paragraph, including those below threshold.
 | `currency` | string |
 | `actual_amount` | float, nullable |
 | `plan_version` | string |
+| `plan_disclosure_date` | date |
+| `carried_from` | string, nullable — see below |
 | `fetched_at` | timestamp |
 
 Package and award descriptions are short metadata fields, not document text, and are committed. Three copies of each are kept, and they are not interchangeable: `description` is the published string, for display; `description_clean` is it with the step-3/4 markers (lot, phase, rebid, an embedded reference) removed, for reading; `description_match` is `description_clean` case-folded with every space removed, for matching.
 
 The despacing in `description_match` is not tidiness. The plan rendition clips each table cell at the column edge and the parser glues the fragments back together, which deletes a space when the clip landed on one — the corpus really does carry `DataCenter` for `Data Center`. Gluing never alters, inserts or reorders a character, so a matching copy with no whitespace at all is immune to it, and `data center` still finds the package. The cost is measured, not assumed: `despaced collisions` in the procurement audit counts descriptions that differ but despace alike.
+
+`carried_from` is the provenance of the row's carried fields, written as
+`field:plan_version` pairs joined by `|` — for example
+`estimated_amount:40031495|method:40007266`. A row is assembled field by field
+rather than taken wholesale from its newest plan version: where that version did
+not state `estimated_amount` or `method`, the most recent version that did
+supplies it, and `currency` comes from the same version as the amount. Those two
+fields are the only ones that carry. A field absent from `carried_from` was
+stated by the newest version itself, so the column is a complete record of what
+this table asserts on the borrower's behalf beyond the latest plan.
+
+Status is deliberately not among them. See business rule 17a and the
+carry-forward note in methodology Stage 2b.
 
 `actual_amount` is unreliable and frequently zero for signed packages. Signed amounts come from `awards`.
 
@@ -645,8 +660,9 @@ The despacing in `description_match` is not tidiness. The plan rendition clips e
 
 `src/fetch_procurement.py` writes these; `src/clean_procurement.py` turns them
 into the three tables above. They are kept because the prepared tables are
-deduplicated — `packages.csv` holds one row per package, latest plan version —
-and the plan version history is the product of this stage, not a by-product.
+deduplicated — `packages.csv` holds one row per package, assembled field by
+field from its plan versions — and the plan version history is the product of
+this stage, not a by-product.
 Nothing here is committed beyond what section 1 allows.
 
 `packages_raw.csv` carries one row per (plan version x package), so a package

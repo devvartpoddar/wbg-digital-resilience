@@ -216,6 +216,8 @@ Applies to `packages.category`, `awards.procurement_group`, `notices.procurement
 
 Source values vary across plan versions and are normalised at preparation. Unmapped values go to `unknown` and are counted, never silently assigned.
 
+`Terminated` and its French `Résilié` are deliberately absent from the mapping and so land in `unknown` — 1,209 rows of the eight-country corpus. The contract was signed and then ended early, and neither `signed` nor `cancelled` is true of it. `status_raw` keeps the borrower's own word. Whether the set gains a sixth value is an open decision.
+
 ### A1.25 `method`
 
 | Value |
@@ -373,6 +375,8 @@ Never null: any primary key, any `run_id`, any version stamp including `clean_ve
 15. `paragraphs.raw_text_sha256` and `text_sha256` differ only where a cleaning rule fired; where they are equal, no rule fired.
 16. `packages.is_placeholder` true does not exclude the row from `package_asset`; placeholders are classified and flagged, not dropped.
 17. `packages.superseded_by`, where set, references a `package_id` with a later `plan_version` and the same `borrower_ref_norm`.
+17a. Carry-forward across plan versions applies to `estimated_amount` and `method` only. `currency` is taken from the same plan version as the carried amount. `status`, `status_raw`, `category`, `planned_date` and `revised_date` are never carried: a status is a fact at a point in time and inheriting it asserts something no version stated.
+17b. `packages.carried_from` names the source plan version of every carried field. A field absent from `carried_from` was stated by the newest version itself.
 18. `borrower_ref_norm` is derived from `borrower_ref` by case folding, whitespace collapse and separator normalisation only. No characters are added or removed.
 19. `documents.paragraphs_dropped` equals the count of `rejected_units` rows for that `doc_id`.
 
@@ -425,6 +429,10 @@ Never null: any primary key, any `run_id`, any version stamp including `clean_ve
 52. `package_award_link.confidence` is 1.0 where `join_method` is `refnum_exact` or `manual`.
 53. A `package_id` links to at most one `contract_id` unless `join_method` is `fuzzy`.
 54. `awards.description_lang` is one of `en`, `fr`, `es`, `pt`.
+
+54a. `packages.estimated_amount` is null where the source table printed no Estimated Amount column. On those renditions the single figure on the row is the actual amount and is recorded as `actual_amount`, never promoted to an estimate.
+54b. A zero `estimated_amount` in a source version is treated as *not yet costed* and does not block carry-forward from an earlier version. This is a judgement with a cost: a package genuinely revised down to zero keeps its earlier figure. `carried_from` makes the case visible, and `packages_raw` holds every version verbatim.
+54c. A rendition whose table columns are scattered contributes `borrower_ref` and `description` only. Its amounts, status and dates are refused, not inferred.
 
 ### A4.9 Outputs
 
