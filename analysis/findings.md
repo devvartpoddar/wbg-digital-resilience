@@ -42,3 +42,37 @@ it noise in any clustering over clause vectors.
 
 `analysis/a2_segmentation/check_set.csv` holds the 20 hand-counted paragraphs the
 splitter is scored against, and is kept for exactly that reason.
+
+## The clause is too small a unit to hold a measure
+
+The clustering run over 119,591 clauses is deleted, but what it established is
+not. Communities scoring highest on an agent-plus-modal commitment test turned
+out to be **sentence stems**, not commitments:
+
+| community | clauses | projects | what its medoids say |
+|---|---|---|---|
+| c0358 | 110 | 50 | "The Project is expected to offer multiple social and economic benefits" |
+| c0323 | 61 | 31 | "This subcomponent will finance activities" |
+| c0324 | 39 | 26 | "This subcomponent will also finance TA activities" |
+| c0523 | 30 | 16 | "The project will not finance civil works" |
+
+"This subcomponent will finance activities" is a stem: whatever it finances sits
+in the next clause, which has no agent and no modal and therefore scores zero on
+the same test. That is why 66% of communities scored zero, and why the measure
+layer looked thin — **the splitter severs the commitment from its content**, and
+both halves then look like noise. split-2 narrowed `verb_subtree` and still cuts
+the object away from the verb.
+
+**A nearest-reference label below about 0.5 cosine is noise wearing a label.**
+The four communities above were reported as "climate risk analytics in public
+financial management" because REF085 was the closest of 89 entries at cosine
+0.26–0.36. A text search for "climate risk analytics", "public financial
+management" and "disaster loss database" across all 611 shortlisted communities
+returns two hits, both about PFM performance and neither about climate.
+
+**The one thing that has demonstrably worked on this corpus is query-by-example
+retrieval at paragraph level.** `data/neighbours_check.txt` queried the
+paragraph embeddings with measure-shaped sentences and returned genuine measure
+paragraphs at 0.50–0.82 cosine: weather-proofing of ducts and poles, tower
+elevation, underground versus aerial choice, non-flood-prone siting. No
+clustering, no training, no derived scores.
