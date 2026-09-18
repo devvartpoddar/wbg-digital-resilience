@@ -404,9 +404,9 @@ def main():
     ap.add_argument("--random-n", type=int, default=60)
     ap.add_argument("--targeted-sections", default="",
                     help="regex over section_label; set it after --inspect")
-    ap.add_argument("--rows-rich", type=int, default=6,
+    ap.add_argument("--rows-rich", type=int, default=4,
                     help="blank annotation rows per flagged/targeted paragraph")
-    ap.add_argument("--rows-random", type=int, default=3)
+    ap.add_argument("--rows-random", type=int, default=2)
     ap.add_argument("--inspect", action="store_true",
                     help="report section labels and tracker shape; writes nothing")
     args = ap.parse_args()
