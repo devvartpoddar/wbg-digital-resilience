@@ -60,12 +60,16 @@ whether it can tell them apart.
 | `hazard` | free text, blank if unstated | tests whether hazard proximity is a usable signal |
 | `stem` | paste, only when the commitment verb sits outside `quote` | how often commitment is severed from content |
 
-### `quote` is the minimal span, and it must come from the sheet
+### `quote` is the smallest self-contained span, and it must come from the sheet
 
-**Minimal contiguous span containing the activity and its object.** For
-"(i) burial of fiber optic cable along flood-prone segments" the quote is
-`burial of fiber optic cable along flood-prone segments` — object and qualifier
-in, enumerator and shared stem out.
+**Highlight the smallest span that, read on its own, states both that the project
+will do this and what it is.** Usually that is one sentence:
+`The Project will bury fiber optic cable along flood-prone segments`.
+
+When that is impossible because the commitment sits in a lead-in shared across a
+bulleted list, quote the item alone —
+`burial of fiber optic cable along 120 km of flood-prone segments` — and put the
+lead-in in `stem`. Enumerators and list punctuation stay out either way.
 
 **Paste from the workbook, never from the PDF.** Our extraction differs from
 Acrobat on ligatures, hyphenation and glued table cells. A quote that is not an
@@ -92,15 +96,24 @@ that bounds three of the five candidate methods before any of them is built.
 
 ### `stem` measures the failure that killed the clause run
 
-"The Project will support climate resilience of the backbone network through:
-(i) burial of fiber... (ii) elevation of towers..." — the commitment verb lives
-in the stem, shared across four measures. Each item span on its own has no agent
-and no modal, so any method testing spans independently for commitment language
-scores all four at zero. That is what happened in `analysis/findings.md`.
+**The rule: read the quote on its own. If it tells you the project promised this,
+leave `stem` blank. If it does not, because the "will" is in a shared lead-in,
+the lead-in goes in `stem`.**
 
-Paste the stem once per enumeration and fill it down. Blank for standalone
-sentences. The share of measures with a non-empty stem is a hard constraint on
-method design.
+"To enhance the climate resilience of the backbone network, the Project will
+finance: (i) burial of fiber optic cable...; (ii) elevation of tower
+foundations..." — four measures, and not one of the four items contains "will"
+or "the Project". The commitment lives once, in the lead-in.
+
+That is why the clause run failed. "burial of fiber optic cable along flood-prone
+segments" scores zero on any agent-plus-modal test, while "this subcomponent will
+finance activities" scores high and says nothing — which is exactly what got
+reported as a discovered measure in `analysis/findings.md`.
+
+Paste the lead-in once per list and fill it down. **The share of measures with a
+non-empty stem is a fork in the road: low, and span-level commitment scoring is
+viable; high, and every method that scores spans independently is structurally
+broken and is not worth building.**
 
 ## Exhaustiveness, tiered
 
