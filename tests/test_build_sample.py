@@ -61,6 +61,37 @@ def write_corpus(tmp, paragraphs):
     return data
 
 
+# The column names src/clean.py actually writes (PARA_COLS at clean.py:138).
+# data/paragraphs.csv carries these and no `block_type`/`section_label`/
+# `token_count`/`in_scope`, and no span_project.csv beside it.
+PARA_COLS_ON_DISK = ["paragraph_id", "doc_id", "project_ids", "ordinal",
+                     "section_path", "section_title", "block", "char_start",
+                     "char_end", "n_tokens", "text_sha256"]
+
+
+def rewrite_on_disk_schema(data, drop_span_project=True):
+    """Re-write the fixture corpus as the box's table, not the data model's."""
+    prep = data / "intermediate" / "prepared"
+    links = {r["doc_id"]: r["project_id"]
+             for r in csv.DictReader(open(prep / "span_project.csv"))}
+    rows = list(csv.DictReader(open(prep / "paragraphs.csv")))
+    with open(prep / "paragraphs.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=PARA_COLS_ON_DISK)
+        w.writeheader()
+        for r in rows:
+            w.writerow({
+                "paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
+                "project_ids": links.get(r["doc_id"], ""),
+                "ordinal": r["ordinal"], "section_path": "ANNEX 2",
+                "section_title": r["section_label"], "block": r["block_type"],
+                "char_start": r["char_start"], "char_end": r["char_end"],
+                "n_tokens": "7", "text_sha256": r["text_sha256"],
+            })
+    if drop_span_project:
+        (prep / "span_project.csv").unlink()
+    return data
+
+
 def write_tracker(path, entries, extra_col=False):
     """entries: [(project, excerpt, {category: value})]."""
     wb = openpyxl.Workbook()
@@ -238,3 +269,53 @@ def test_missing_tracker_skips_the_flagged_slice(tmp_path, capsys):
     assert "SKIPPED" in capsys.readouterr().out
     wb = openpyxl.load_workbook(out)
     assert {r[4].value for r in wb["paragraphs"].iter_rows(min_row=2)} == {"random"}
+
+
+def test_on_disk_schema_is_read_when_the_modelled_columns_are_absent(tmp_path):
+    """The crash was span_project.csv; the silent one was the column names.
+
+    paragraphs.csv on the box carries block/section_title/n_tokens and no
+    in_scope. Reading only the modelled names finds no prose paragraph at all
+    and writes an empty workbook, which is worse than the crash.
+    """
+    data = rewrite_on_disk_schema(corpus_fixture(tmp_path))
+    paras = bs.load_corpus(str(data), lambda m: None)
+    assert len(paras) == 6
+    by_id = {p["paragraph_id"]: p for p in paras}
+    assert by_id["d1:p000"]["block_type"] == "narrative"
+    assert by_id["d1:p000"]["section_label"] == "Project Components"
+    assert by_id["d1:p000"]["token_count"] == 7
+    assert by_id["d1:p002"]["block_type"] == "annex"
+
+
+def test_missing_span_project_falls_back_to_the_project_ids_column(tmp_path):
+    """span_project.csv is the modelled home of the link and is not on the box."""
+    data = rewrite_on_disk_schema(corpus_fixture(tmp_path))
+    assert not (data / "intermediate" / "prepared" / "span_project.csv").exists()
+    paras = bs.load_corpus(str(data), lambda m: None)
+    assert {p["project_id"] for p in paras} == {"P100001", "P100002", "P100003"}
+
+
+def test_pipe_delimited_project_ids_link_to_the_first_project(tmp_path):
+    data = rewrite_on_disk_schema(corpus_fixture(tmp_path))
+    prep = data / "intermediate" / "prepared"
+    rows = list(csv.DictReader(open(prep / "paragraphs.csv")))
+    for r in rows:
+        r["project_ids"] += "|P999999"
+    with open(prep / "paragraphs.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=PARA_COLS_ON_DISK)
+        w.writeheader(); w.writerows(rows)
+    paras = bs.load_corpus(str(data), lambda m: None)
+    assert {p["project_id"] for p in paras} == {"P100001", "P100002", "P100003"}
+
+
+def test_build_writes_paragraphs_from_the_on_disk_table(tmp_path):
+    data = rewrite_on_disk_schema(corpus_fixture(tmp_path))
+    out = tmp_path / "o.xlsx"
+    bs.build(args(data=str(data), out=str(out), targeted=0, random_n=2),
+             lambda m: None)
+    wb = openpyxl.load_workbook(out)
+    rows = [[c.value for c in r] for r in wb["paragraphs"].iter_rows(min_row=2)]
+    assert len(rows) == 2, "the sample came out empty"
+    assert all(r[3] for r in rows), "the section label did not ride through"
+    assert all(r[1].startswith("P100") for r in rows), "no project id"

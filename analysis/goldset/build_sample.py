@@ -86,17 +86,58 @@ def truthy(v):
     return str(v).strip().lower() in ("1", "true", "yes", "y")
 
 
+def col(row, *names):
+    """The first of `names` the row carries a value under.
+
+    docs/data-model.md names the columns `block_type`, `section_label` and
+    `token_count`; paragraphs.csv on disk (src/clean.py's PARA_COLS) carries
+    `block`, `section_title` and `n_tokens` instead. src/segment.py already
+    reads either name for the block column, and says why: the schema and the
+    table have not been reconciled. A sampler that reads one name only does not
+    crash on the other - it finds no prose paragraphs at all and writes an empty
+    workbook, which is worse. An absent `in_scope` is read as in scope: the
+    table on disk carries no scope flag, and the prose filter is what defines
+    the pool (analysis/a2_segmentation/check_segmentation.py assumption 2).
+    """
+    for name in names:
+        if row.get(name) not in (None, ""):
+            return row[name]
+    return ""
+
+
+def doc_projects(data_dir, paras):
+    """doc_id -> project_id, for the project grouping the sample reports on.
+
+    docs/data-model.md names `span_project.csv` as the home of this link, and
+    that is the table the fixture writes. The table src/clean.py actually
+    produces carries the link on the row instead, as `project_ids`,
+    pipe-delimited when one document serves several operations. Prefer the
+    modelled table, fall back to the column, and leave the id empty rather than
+    aborting: the id is only needed to match the tracker, which is not on this
+    box, and losing the run over it would be worse than losing the grouping.
+    """
+    path = prepared(data_dir, "span_project.csv")
+    if os.path.exists(path):
+        out = {}
+        for r in read_csv(path):
+            out.setdefault(r["doc_id"], r["project_id"])
+        return out
+    out = {}
+    for r in paras:
+        first = (r.get("project_ids") or "").split("|")[0].strip()
+        out.setdefault(r["doc_id"], first)
+    return out
+
+
 def load_corpus(data_dir, log):
     """paragraph rows (prose, in scope) with text resolved and hash-checked."""
     paras = read_csv(prepared(data_dir, "paragraphs.csv"))
-    links = read_csv(prepared(data_dir, "span_project.csv"))
-    doc_project = {}
-    for r in links:
-        doc_project.setdefault(r["doc_id"], r["project_id"])
+    doc_project = doc_projects(data_dir, paras)
 
     bodies, out, skipped, bad_hash = {}, [], Counter(), []
     for r in paras:
-        if r.get("block_type") not in PROSE_BLOCKS:
+        block = col(r, "block_type", "block")
+        if block not in PROSE_BLOCKS:
             skipped["not prose"] += 1
             continue
         if "in_scope" in r and not truthy(r["in_scope"]):
@@ -125,9 +166,9 @@ def load_corpus(data_dir, log):
             "paragraph_id": r["paragraph_id"],
             "doc_id": doc,
             "project_id": doc_project.get(doc, ""),
-            "section_label": r.get("section_label", ""),
-            "block_type": r["block_type"],
-            "token_count": int(r.get("token_count") or 0),
+            "section_label": col(r, "section_label", "section_title"),
+            "block_type": block,
+            "token_count": int(col(r, "token_count", "n_tokens") or 0),
             "text": text,
         })
     if bad_hash:
