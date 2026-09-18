@@ -1,0 +1,763 @@
+discovery — measure and asset communities in the clause space
+==============================================================================
+
+ASSUMPTIONS
+------------------------------------------------------------------------------
+
+1. asset_profile uses the EXISTING fired asset classes, which over-fire
+   (analysis/findings.md). It is read as a RELATIVE spread - is this
+   community concentrated on one asset or spread across many - and never
+   as an asset label. IF THE CLASSIFIER IS REPLACED, asset_spread moves
+   and nothing else in this table does.
+
+2. commitment_share is a LEXICAL stand-in for Stage 7 modality, because
+   clauses.csv stores no verb. It tests register - an agent cue plus a
+   modal - not topic. A real modality pass will disagree at the margins.
+
+3. The junk sieve is section provenance plus project spread. Section
+   provenance is a fact about where the document puts a paragraph, not a
+   judgement about what it says. The full section inventory is below so
+   the pattern list can be audited.
+
+4. template_score never decides alone: measures recur across documents
+   too. It ranks, and section provenance separates.
+
+5. The section inventory below is printed in FULL - every distinct
+   title, over all paragraphs and again over prose only - because the
+   audit is of the pattern list, and a section that carries a financed
+   commitment while being flagged junk need not be a large one. A
+   section title is a column of paragraphs.csv rather than clause text,
+   and the tail of that column holds a document's first sentence rather
+   than a title, which is itself part of what the audit has to see. IF
+   NO DOCUMENT-DERIVED STRING WAS MEANT TO BE COMMITTED, this inventory
+   belongs in a gitignored file beside shortlist.md and the audit reads
+   it there; every JUNK flag and every count would be unchanged.
+
+6. The two scopes are printed separately because they are not the same
+   set: junk_section_share is computed over a community's clauses, and
+   a clause exists only for a narrative or annex paragraph. A JUNK flag
+   on a section holding no prose cannot move a verdict.
+
+RUN
+------------------------------------------------------------------------------
+
+run_id              20260918T0131-7dd1a33
+discovery_version   discover-1
+seed                1
+reduction           PCA + UMAP  (reduced_53727a0096629217.npy)
+min_cluster_size    25
+clauses clustered   119,591
+communities         818
+noise               46.0%
+shortlist           611
+stoplist            207
+
+THE QUESTION THIS RUN EXISTS TO ANSWER
+------------------------------------------------------------------------------
+
+Does a community appear at MEASURE granularity, or only at topic
+granularity? A 'fiber' community with no 'underground routing'
+community beneath it is the failure mode, and no amount of resolution
+tuning fixes it. Read the top of shortlist.md and decide.
+
+TOP OF THE SHORTLIST, by hazard proximity
+------------------------------------------------------------------------------
+
+  c0581  n=   39  proj= 27  haz=0.753  commit=0.0  Relevance to Higher Level Objectiv
+  c0517  n=   54  proj= 34  haz=0.743  commit=0.0185  Project Components
+  c0583  n=   30  proj= 20  haz=0.726  commit=0.0  Project Components
+  c0363  n=  138  proj= 44  haz=0.707  commit=0.0072  Sectoral and Institutional Context
+  c0584  n=  502  proj= 62  haz=0.706  commit=0.0  Country Context
+  c0648  n=   96  proj= 44  haz=0.682  commit=0.0  Project Components
+  c0649  n=   39  proj= 25  haz=0.674  commit=0.0  Project Components
+  c0624  n=   29  proj= 22  haz=0.652  commit=0.0  Project Components
+  c0493  n=   40  proj= 27  haz=0.636  commit=0.0  Technical, Economic and Financial 
+  c0456  n=  154  proj= 59  haz=0.610  commit=0.0065  Project Components
+  c0565  n=   83  proj= 40  haz=0.610  commit=0.0  Project Components
+  c0622  n=   58  proj= 40  haz=0.607  commit=0.0  Technical, Economic and Financial 
+  c0623  n=   90  proj= 43  haz=0.600  commit=0.0  Relevance to Higher Level Objectiv
+  c0650  n=   58  proj= 39  haz=0.594  commit=0.0  Relevance to Higher Level Objectiv
+  c0575  n=  177  proj= 49  haz=0.565  commit=0.1243  Project Components
+  c0496  n=   32  proj= 28  haz=0.553  commit=0.0  Technical, Economic and Financial 
+  c0455  n=   26  proj= 15  haz=0.542  commit=0.0769  Technical, Economic and Financial 
+  c0152  n=  147  proj= 56  haz=0.525  commit=0.0  KEY RISKS
+  c0576  n=   43  proj= 22  haz=0.518  commit=0.0  Project Components
+  c0422  n=   56  proj= 12  haz=0.483  commit=0.0714  Project Components
+  c0113  n=   29  proj= 21  haz=0.482  commit=0.0  Sectoral and Institutional Context
+  c0743  n=  107  proj= 43  haz=0.480  commit=0.0  Project Components
+  c0224  n=   55  proj= 28  haz=0.478  commit=0.0  KEY RISKS
+  c0629  n=   71  proj= 41  haz=0.477  commit=0.5211  Relevance to Higher Level Objectiv
+  c0089  n=  122  proj= 56  haz=0.476  commit=0.0  Sustainability
+
+SECTION INVENTORY — audit the junk pattern list against this
+------------------------------------------------------------------------------
+
+Every distinct section title in paragraphs.csv, with the JUNK flag the
+sieve applies to it. The full list, not the top of it: a section that
+carries a financed commitment and is flagged junk is the one failure
+this list exists to make visible, and it need not be a large one.
+
+          7097  
+          3122  Project Components
+  JUNK    2591  Implementation Arrangements and Support Plan
+          2372  DETAILED CHANGE(S)
+  JUNK    1593  RESULTS FRAMEWORK AND MONITORING
+          1377  Sectoral and Institutional Context
+  JUNK     827  DESCRIPTION OF PROPOSED CHANGES
+  JUNK     711  KEY RISKS
+           691  Detailed Project Description
+  JUNK     521  Fiduciary
+  JUNK     519  RESULTS FRAMEWORK
+           494  Relevance to Higher Level Objectives
+           479  Technical, Economic and Financial Analysis
+  JUNK     378  Institutional and Implementation Arrangements
+           373  Country Context
+  JUNK     358  PROJECT STATUS AND RATIONALE FOR RESTRUCTURING
+  JUNK     356  Lessons Learned and Reflected in the Project Design
+  JUNK     323  Environmental and Social
+           313  Project Beneficiaries
+           306  DESCRIPTION OF ADDITIONAL FINANCING
+           304  Project Development Objective
+           294  Economic and Financial Analysis
+           254  Sustainability
+           240  Technical Design and Component Descriptions
+           207  PROPOSED CHANGES
+           180  Project Status
+           178  Detailed changes in activities and funds allocation, by component (in US$m)
+           173  Rationale for Bank Involvement and Role of Partners
+           149  Technical, Economic, and Financial Analysis
+  JUNK     148  Results Monitoring and Evaluation Arrangements
+           146  Technical, Economic and Financial Analysis (if applicable)
+           145  National Level Program Details - Grenada
+           132  Support for Climate Change Adaptation and Mitigation
+           125  Technical and Economic Analysis
+           122  Results Chain
+           119  Republic of Malawi
+           118  Rationale for Restructuring
+           118  Project Development Objective (PDO)
+           114  GRIEVANCE REDRESS SERVICES
+           113  Detailed Economic and Financial Analysis
+           112  Democratic Republic of Congo
+           110  Economic Analysis
+           108  Timelines and Additional Details of Project Activities
+           108  Climate Action Supported by the IDEA MPA
+           106  Identified Gender Barriers and Proposed Actions
+           104  Specific Project Design Analysis
+            92  Republic of Angola
+            83  Project Implementation Status
+            82  Gender Assessment
+  JUNK      74  Implementation Arrangements and Project Support
+  JUNK      72  PROJECT STATUS AND RATIONALE
+            71  PROJECT DESCRIPTION
+            69  Rationale for World Bank Involvement and Role of Partners
+            69  Gender Analysis
+            67  STRATEGIC CONTEXT
+            65  National Level Program Details - Dominica
+            63  PROJECT APPRAISAL SUMMARY
+            61  Detailed Technical Justification and Design
+            60  National-Level Project Details: Somalia
+            58  WORLD BANK GRIEVANCE REDRESS
+            57  Rationale for restructuring
+            57  National-Level Project Details: South Sudan
+            56  Technical Analysis
+            55  Project Strategic Context
+  JUNK      54  IMPLEMENTATION ARRANGEMENTS
+            53  Environmental, Social and Legal Operational Policies
+  JUNK      52  Description of Proposed Changes
+            51  Climate Annex
+  JUNK      50  IMPLEMENTATION ARRANGEMENTS AND SUPPORT PLAN
+            50  Climate
+            50  Parent Project Description and Current Status
+            50  Multiphase Programmatic Approach (MPA)
+            49  Regional-Level Project Details
+            49  Environmental & Social
+  JUNK      48  Procurement and Financial Management
+            47  Changes in components and costs
+            46  Gender
+            46  Project Economic and Financial Analysis
+            44  Safeguards
+            44  Multiphase Programmatic Approach
+            43  Climate Change Technical Note
+            43  Program Pillars
+            42  BACKGROUND AND RATIONALE FOR ADDITIONAL FINANCING
+            40  Regional Level Program Details
+            39  Proposed Changes and AF activities
+  JUNK      39  Lessons Learned and Reflected in Project Design
+            37  RESULT FRAMEWORK AND MONITORING
+            36  SUMMARY OF CHANGES
+            36  Project Financing and Components
+            35  Line 100 and Line 911 interconnection and benefits for Line 100
+            35  Technical Project Description
+            35  Partial cancellation - including withdrawal of PBCs - and changes in cost allocations of c
+            34  APPRAISAL SUMMARY
+            34  GRIEVANCE MECHANISMS
+            34  Project status
+            34  Proposed Changes
+            34  Technical Note: Support for Climate Change Adaptation and Mitigation
+            33  Development Impact
+  JUNK      33  Financial Management
+            32  Project Background
+            32  1]
+  JUNK      31  Implementation Arrangements
+            31  Introduction
+            31  Detailed Description of the 911 Center and Integrated Platform
+  JUNK      31  As part of the Procurement Risk Assessment Management System (PRAMS) exercise carried out
+            31  Changes in Components and Costs
+            30  Legal Operational Policies
+            30  Rationale for Additional Financing (AF)
+            30  Climate Change Adaptation and Mitigation
+            29  Technical
+            28  Corporate Commitments
+  JUNK      27  Implementation Arrangement and Support Plan
+            27  Details on Performance-Based Conditions
+  JUNK      26  Financial Management Assessment
+  JUNK      26  RESULTS FRAMEWORK AND MONITORING MONITORING
+            26  Estimating the Impact of the Project on Household Welfare
+            26  Gender Analysis, Proposed Actions, and Relevant Indicators
+            26  Identified Climate Risks and Proposed Actions Aligned with Paris Commitments
+            26  Theory of Change and PDO Indicators
+            26  Integration of new low-risk and high impact activities in response to changing needs
+            25  Effective Inclusion and Beneficiary Engagement
+  JUNK      25  Procurement
+            25  Detailed Sectoral and Institutional Context
+            25  Indicators and Benchmarks
+            25  How Digital Ethiopia will contribute to developing a digital response to the COVID-19 pand
+            25  Identified Climate Change Related Risks and Proposed Actions
+  JUNK      24  Effectiveness and Disbursement Conditions
+            24  World Bank Group Response to COVID-19 in Ethiopia
+  JUNK      24  Environmental and Social Standards
+  JUNK      24  Disbursement Arrangements
+            24  Updated Theory of Change
+            23  Regional Context
+  JUNK      23  Changes in results framework
+            23  Contribution to IDA19 Digital Commitments
+            23  Climate Co-Benefits
+            23  Common Market for Eastern and Southern Africa (COMESA)
+            22  Gender Equality
+            22  Digital Sector Policy Letter
+            21  Country Climate Risk Profile to Natural Hazards and Climate Change
+            21  SUMMARY OF PROJECT STATUS AND PROPOSED CHANGES
+            21  Role of Partners
+            20  Status of Project Components
+            20  Digital Inclusion for Women
+            20  Background
+            20  Results Monitoring, Evaluation, and Verification Arrangements
+            19  Project design and performance
+            19  IDENTIFIED GENDER GAPS AND PROPOSED ACTIONS
+            18  Detailed Financial and Economic Analysis
+            18  Addressing Gender Gaps in DTfA/WARDIP
+            18  Risk Mitigation for Fayda Implementation
+            18  Private Capital Enabling (PCE)
+  JUNK      18  Updated Results Framework (RF) and Theory of Change (ToC)
+  JUNK      18  Changes to the Results Framework
+            17  DETAILED ACTIVITIES BY COMPONENT AND COUNTRY
+            17  TOGO COUNTRY PROGRAM ADJUSTMENT RESPONDING TO COVID-19
+            17  Assessment of Financial Intermediary
+            16  Summary
+            16  Identification of gender barriers and opportunities and targeted actions
+            16  Financial Analysis
+            16  Support for Climate Change and Adaptation
+            16  GENDER ANALYSIS AND PROPOSED ACTIONS
+  JUNK      16  Changes to the Results Framework (RF)
+            15  World Bank Group COVID-19 Country Program Response Note - Tanzania
+            15  Information on CIRAS
+  JUNK      15  Lessons Learned and Progress on Learning Agenda
+            15  Reallocation of project proceeds
+            14  Technical leads and partner agencies involved in implementation
+            14  IDA 19 Digital Commitments Applicable to the Project
+            14  Baseline Assessment of Liberia's Country Service Centers
+            13  WBG Uganda COVID-19 Country Program and Project Response Note
+            13  Rationale for a Regional Series of Projects
+            13  Rationale for World Bank Involvement and the Role of Partners
+            13  Addressing Gender Gaps
+            13  Project Progress and update
+            13  PDO Indicators and Theory of Change
+            12  Examples from Evaluations of E-agricultural Services
+            12  Status of Project Implementation and Performance to Date
+            12  Rationale for Bank involvement and role of partners
+  JUNK      12  Environmental and Social Safeguards
+            12  GHG Emissions and Transport - Mozambique EDGE Project
+            12  The proposed changes are twofold
+            12  Detailed Description of Component 1
+            12  Synergies within the World Bank Portfolio and with Development Partners
+            12  Financing Details
+            11  Country and Sector Context
+            11  Social and Environment (including Safeguards)
+            11  COVID-19-related activities under modified UDAP-GovNet project design
+            11  Citizen Engagement
+            11  Country Program Adjustment Responding to COVID-19
+            11  Relevance to Higher-Level Objectives
+            11  Revision of project result framework
+            10  Gender Equality Assessment in Cabo Verde
+  JUNK      10  Executive Summary for Procurement Plan and PPSD
+            10  IDA19 Digital Commitments Applicable to the Project
+  JUNK      10  Environmental and Social (E&S)
+  JUNK      10  REVISED IMPLEMENTATION ARRANGEMENTS AND SUPPORT PLAN
+            10  Summary of Cost-Benefit Analysis (CBA)
+            10  Addressing the Gender Gap
+            10  FGN PUBLIC CONNECTIVITY INITIATIVES
+            10  Additional measures taken to ensure timely implementation
+             9  Climate Change Co-Benefits
+             9  How Digital Ethiopia will contribute to meeting IDA-19 digital commitments
+             9  Climate Co-Benefits Assessment
+             9  Climate Co-Benefits Table
+             9  Rationale for a Regional SOP
+             9  Sectoral Context
+  JUNK       9  Results Framework and Monitoring for the COMESA IDEA Project
+             9  BASIC DATA
+             9  PROJECT IMPLEMENTATION
+             9  SUMMARY OF PROPOSED CHANGES AND GUARANTEE OF TIMELY IMPLEMENTATION
+             8  Contribution to IDA-19 Digital Commitments
+             8  Gender Barriers and Proposed Actions
+             8  Climate Adaptation and Mitigation Aspects
+             8  Contribution to IDA-20 Digital Commitments
+             8  Gender Analysis, Proposed Actions and Relevant Indicators
+             8  Rationale of the Restructuring
+             8  Allocation of CERC funding to projects and agencies
+             8  Theory of Change (ToC) and PDO Indicators
+             8  Climate Vulnerability Context and Paris Alignment
+             8  ONE WORLD BANK GROUP APPROACH
+             8  ANNEX: ACTION PLAN
+             7  Additional Financing. The letter of request from the Ministry of Finance states that the f
+             7  Scope adjustment through removal and budget reallocations of project activities
+             7  Parent Project Design and Current Status
+             7  Header
+             6  Technical, Financial and Economic Analysis
+             6  Legal Framework, Data Protection and Cybersecurity Assessment
+             6  Cross-Cutting Technology Policy Commitments under IDA-20
+             6  Rational for restructuring
+             6  Addressing Gender Gaps in Digital Cabo Verde AF
+             6  ECONOMIC AND FINANCIAL ANALYSIS
+             6  Scope of restructuring
+             6  Activities removed or modified from scope
+             6  7]
+             5  Value Added of the Bank
+             5  Environment (including Safeguards)
+             5  Introduction and Country Context
+             5  Project Development Objectives
+             5  Results Monitoring and M&E Arrangements
+  JUNK       5  Secondly, it is proposed to change the disbursement category concerning Window 2 (Digital 
+             5  Actions table
+  JUNK       5  Lessons Learned
+             5  IFC Start-up Catalyst Program Overview
+             5  Rationale for the Proposed Additional Financing
+             5  Climate Adaptation and Mitigation
+  JUNK       5  Revision of Disbursement Conditions
+             5  Revised component structure to support strategic objectives
+             5  RESULTS
+             4  Maps of Agriculture Development Zones
+             4  Corporate Requirements
+             4  Rationale for WBG Involvement and Role of Partners
+             4  Maps
+             4  SUMMARY TABLE OF CHANGES
+             4  CONTRIBUTION TO IDA19 DIGITAL COMMITMENTS
+             4  Project synergies with other WB projects
+             4  ANNEX 1
+  JUNK       4  Lessons learned and Reflected in the Project Design
+             4  Contribution to IDA20 Digital Commitments*
+             4  Data and Map of Provinces for Subcomponent 1.2
+             4  Security Management Approach
+             4  Country and State Context
+             4  In addition, the project team proposes to add a new intermediate indicator under Component
+  JUNK       4  Financial Management (FM)
+             4  Program Beneficiaries
+  JUNK       4  The disbursement categories were already simplified under restructuring 1, in December 202
+  JUNK       4  As a result of these proposed cancellations, modifications to the Results Framework are re
+             4  In addition, the project team proposes to align other indicators with the new corporate sc
+             4  Contribution to IDA20 Commitments
+             4  Paris Alignment
+             4  PRIVATE CAPITAL ENABLING (PCE) Template
+  JUNK       4  Changes to Disbursement Estimates
+             4  Rationale for Additional Financing
+             4  Changes to the Performance-Based Conditions (PBCs)
+             3  Social (including Safeguards)
+  JUNK       3  Results monitoring and evaluation arrangements
+             3  Consistency with the Country Partnership Framework (CPF) and Togo's national strategy
+             3  How Digital Tanzania Project will contribute to meeting IDA-19 digital commitments
+             3  Summary of Performance of E&S Risk Compliance
+             3  Rationale for SOPII
+             3  Addressing the Gender Gap under EARDIP-SOP-II
+             3  Gender Analysis and Action Plan
+             3  Glossary
+             3  Detailed Change - Project Components
+             3  Project Context
+             3  List of Potential Public Services for Digitalization
+             3  Restructuring Request number 2
+             3  Maximizing Finance for Development
+  JUNK       3  Implementation Arrangement
+  JUNK       3  Reallocation between disbursement categories
+             3  Other changes
+             3  Consistency with Country Partnership Framework and Rwanda's national strategies
+             3  Maintenance of the PDO
+             3  Closing date extension
+             3  Project Status and background
+             2  Project Progress
+             2  Overall Approach
+             2  Diagram of the phased approach for activity implementation (components 1, 2, 3)
+             2  Linkages/synergies with other projects
+  JUNK       2  Environmental and Social Safeguards. Some actions have been taken to implement the project
+  JUNK       2  Financial Mangment: A review of the financial management was conducted for the restructuri
+  JUNK       2  Procurement Mangement: The proposed change envisages additional procurement activitites wh
+             2  Consistency with the Country Partnership Framework (CPF) and Kyrgyz Republic's national
+             2  Revised Cost Categories table - Status of Cost Category
+             2  Executive Summary of Proposed Restructuring
+             2  DETAILED CHANGES
+             2  The Project Development Objective (PDO) is not directly affected by these changes to Compo
+  JUNK       2  Environmental and Social Risk Management (ESRM). The project's environmental and social st
+  JUNK       2  Financial Mangment: A review of the financial management was conducted , in accordance wit
+  JUNK       2  Procurement Mangement: The proposed change envisage a reduction in the procurement activit
+             2  PCE/PCM. In addition to the changes desacribed above, the project is now tagged for both P
+             2  Results M&E, and Verification Arrangements
+  JUNK       2  Procurement Thresholds, Procurement Methods, and Prior Review
+             2  Implementation Action Plan
+             2  THEORY OF CHANGE
+             2  Overall Risk Rating
+             2  GRIEVANCE REDRESS SERVICE
+  JUNK       2  Procurement. The procurement process for the Additional Financing (AF) will continue to us
+  JUNK       2  Environmental & Social. The Environmental and Social Risk Classification (ESRC) for the Ad
+  JUNK       2  Changes in Disbursement Estimates and Categories
+             2  Change in Client Designation
+             1  PROJECT DEVELOPMENT OBJECTIVES
+             1  Results Chain and Theory of Change
+             1  IMPLEMENTATION
+             1  Institutional Arrangements
+             1  Map of Federated States of Micronesia
+             1  a: Map of Federated States of Micronesia - Yap State
+             1  b: Map of Federated States of Micronesia - Chuuk State
+             1  c: Map of Federated States of Micronesia - Pohnpei State
+             1  Grievance Redress Services
+             1  Uganda's Strategy Note on Support to Refugees and Host Communities
+             1  Sequencing and identification management reforms
+             1  Results Chain (see figure on next page)
+             1  The Project Development Objective (PDO) is not affected by these changes to Component 1 an
+             1  Overview
+             1  PROGRAM DESCRIPTION
+             1  Citizen engagement
+             1  DESCRIPTION OF ADDITIONAL FINANCING AND RESTRUCTURING
+             1  Overview of Restructuring
+             1  POLICY LETTER ON DIGITAL SECTOR REFORM
+             1  Proposed Change
+
+  340 distinct section titles, 34,005 paragraphs
+
+PROSE ONLY — the scope the sieve can actually act on
+------------------------------------------------------------------------------
+junk_section_share is computed over a community's clauses, and a
+clause exists only for a narrative or annex paragraph. A JUNK flag on
+a section holding no prose cannot move any community's verdict; it is
+listed here separately so the two scopes are not read as one.
+
+          2648  Project Components
+  JUNK    2019  Implementation Arrangements and Support Plan
+          1003  Sectoral and Institutional Context
+           692  DETAILED CHANGE(S)
+  JUNK     628  DESCRIPTION OF PROPOSED CHANGES
+           597  Detailed Project Description
+  JUNK     496  KEY RISKS
+  JUNK     450  Fiduciary
+  JUNK     410  RESULTS FRAMEWORK AND MONITORING
+           359  Relevance to Higher Level Objectives
+           354  Technical, Economic and Financial Analysis
+           312  Country Context
+           286  Project Beneficiaries
+           282  Project Development Objective
+  JUNK     278  Institutional and Implementation Arrangements
+  JUNK     277  Lessons Learned and Reflected in the Project Design
+  JUNK     275  PROJECT STATUS AND RATIONALE FOR RESTRUCTURING
+           229  Technical Design and Component Descriptions
+  JUNK     223  Environmental and Social
+           202  DESCRIPTION OF ADDITIONAL FINANCING
+           199  Sustainability
+           192  Economic and Financial Analysis
+           175  Project Status
+           142  National Level Program Details - Grenada
+           124  Rationale for Bank Involvement and Role of Partners
+           116  Rationale for Restructuring
+           115  Technical, Economic and Financial Analysis (if applicable)
+           114  Detailed changes in activities and funds allocation, by component (in US$m)
+           105  Technical, Economic, and Financial Analysis
+           103  Timelines and Additional Details of Project Activities
+            99  Project Development Objective (PDO)
+  JUNK      86  Results Monitoring and Evaluation Arrangements
+            86  Technical and Economic Analysis
+            84  Specific Project Design Analysis
+            80  Results Chain
+            80  Support for Climate Change Adaptation and Mitigation
+            79  Detailed Economic and Financial Analysis
+            78  Project Implementation Status
+            77  Climate Action Supported by the IDEA MPA
+  JUNK      68  PROJECT STATUS AND RATIONALE
+            66  Economic Analysis
+  JUNK      64  Implementation Arrangements and Project Support
+            62  National Level Program Details - Dominica
+            59  Detailed Technical Justification and Design
+            55  PROPOSED CHANGES
+            54  Gender Assessment
+            53  GRIEVANCE REDRESS SERVICES
+            51  Gender Analysis
+            51  Rationale for restructuring
+            51  National-Level Project Details: Somalia
+            50  Rationale for World Bank Involvement and Role of Partners
+            49  National-Level Project Details: South Sudan
+            48  Technical Analysis
+            46  Project Strategic Context
+            46  Environmental & Social
+  JUNK      45  IMPLEMENTATION ARRANGEMENTS AND SUPPORT PLAN
+            45  Parent Project Description and Current Status
+            44  Changes in components and costs
+  JUNK      43  Description of Proposed Changes
+            43  Regional-Level Project Details
+            42  Safeguards
+  JUNK      42  Procurement and Financial Management
+            42  Program Pillars
+            41  Project Economic and Financial Analysis
+            38  Regional Level Program Details
+            37  Climate
+            36  Multiphase Programmatic Approach
+            35  Proposed Changes and AF activities
+            34  Project status
+            34  Proposed Changes
+            34  Climate Annex
+            33  Gender
+            32  Project Background
+  JUNK      32  Financial Management
+            32  Line 100 and Line 911 interconnection and benefits for Line 100
+            31  Project Financing and Components
+            31  BACKGROUND AND RATIONALE FOR ADDITIONAL FINANCING
+  JUNK      31  Lessons Learned and Reflected in Project Design
+            30  Introduction
+            30  Technical Project Description
+  JUNK      29  Implementation Arrangements
+            29  Technical
+            29  Changes in Components and Costs
+  JUNK      28  As part of the Procurement Risk Assessment Management System (PRAMS) exercise carried out
+            28  Corporate Commitments
+            28  Multiphase Programmatic Approach (MPA)
+            26  Development Impact
+            26  Detailed Description of the 911 Center and Integrated Platform
+            25  Estimating the Impact of the Project on Household Welfare
+            25  Details on Performance-Based Conditions
+  JUNK      24  Procurement
+  JUNK      23  Effectiveness and Disbursement Conditions
+            23  Rationale for Additional Financing (AF)
+            23  Updated Theory of Change
+  JUNK      22  Financial Management Assessment
+  JUNK      22  Changes in results framework
+            22  How Digital Ethiopia will contribute to developing a digital response to the COVID-19 pand
+  JUNK      22  Environmental and Social Standards
+            22  Climate Co-Benefits
+            22  Identified Gender Barriers and Proposed Actions
+            21  Effective Inclusion and Beneficiary Engagement
+            21  APPRAISAL SUMMARY
+  JUNK      21  Implementation Arrangement and Support Plan
+            21  World Bank Group Response to COVID-19 in Ethiopia
+            21  Climate Change Technical Note
+            20  Regional Context
+            20  SUMMARY OF PROJECT STATUS AND PROPOSED CHANGES
+            19  Country Climate Risk Profile to Natural Hazards and Climate Change
+            19  Background
+            19  Technical Note: Support for Climate Change Adaptation and Mitigation
+            19  Common Market for Eastern and Southern Africa (COMESA)
+            19  Digital Sector Policy Letter
+            18  WORLD BANK GRIEVANCE REDRESS
+  JUNK      18  Disbursement Arrangements
+            18  Theory of Change and PDO Indicators
+            18  Climate Change Adaptation and Mitigation
+            17  Status of Project Components
+            17  Detailed Sectoral and Institutional Context
+            17  Partial cancellation - including withdrawal of PBCs - and changes in cost allocations of c
+  JUNK      17  Changes to the Results Framework
+            16  Summary
+  JUNK      16  Updated Results Framework (RF) and Theory of Change (ToC)
+            15  Detailed Financial and Economic Analysis
+            15  Project design and performance
+            15  TOGO COUNTRY PROGRAM ADJUSTMENT RESPONDING TO COVID-19
+            15  Integration of new low-risk and high impact activities in response to changing needs
+            14  Risk Mitigation for Fayda Implementation
+            14  Role of Partners
+  JUNK      14  Changes to the Results Framework (RF)
+            13  World Bank Group COVID-19 Country Program Response Note - Tanzania
+            13  Assessment of Financial Intermediary
+            13  Financial Analysis
+            12  Information on CIRAS
+            12  Financing Details
+            12  PDO Indicators and Theory of Change
+            11  Status of Project Implementation and Performance to Date
+            11  Digital Inclusion for Women
+  JUNK      11  Environmental and Social Safeguards
+            11  WBG Uganda COVID-19 Country Program and Project Response Note
+            11  Results Monitoring, Evaluation, and Verification Arrangements
+            11  Private Capital Enabling (PCE)
+            10  COVID-19-related activities under modified UDAP-GovNet project design
+            10  Country Program Adjustment Responding to COVID-19
+            10  Identified Climate Change Related Risks and Proposed Actions
+  JUNK      10  Lessons Learned and Progress on Learning Agenda
+            10  Rationale for World Bank Involvement and the Role of Partners
+            10  Detailed Description of Component 1
+            10  Gender Analysis, Proposed Actions, and Relevant Indicators
+  JUNK       9  Executive Summary for Procurement Plan and PPSD
+             9  Citizen Engagement
+             9  GHG Emissions and Transport - Mozambique EDGE Project
+             9  Relevance to Higher-Level Objectives
+             9  Rationale for a Regional Series of Projects
+  JUNK       9  REVISED IMPLEMENTATION ARRANGEMENTS AND SUPPORT PLAN
+             9  Summary of Cost-Benefit Analysis (CBA)
+             9  Identified Climate Risks and Proposed Actions Aligned with Paris Commitments
+             9  Additional measures taken to ensure timely implementation
+             8  Examples from Evaluations of E-agricultural Services
+             8  Country and Sector Context
+             8  Gender Equality Assessment in Cabo Verde
+             8  Rationale for Bank involvement and role of partners
+             8  Identification of gender barriers and opportunities and targeted actions
+  JUNK       8  Environmental and Social (E&S)
+             8  FGN PUBLIC CONNECTIVITY INITIATIVES
+             8  Reallocation of project proceeds
+             7  Contribution to IDA19 Digital Commitments
+             7  Social and Environment (including Safeguards)
+             7  Technical leads and partner agencies involved in implementation
+             7  Support for Climate Change and Adaptation
+             7  Addressing Gender Gaps in DTfA/WARDIP
+             7  Sectoral Context
+             7  Rationale of the Restructuring
+             7  Theory of Change (ToC) and PDO Indicators
+             7  Header
+             6  Climate Change Co-Benefits
+             6  The proposed changes are twofold
+             6  PROJECT DESCRIPTION
+             6  Additional Financing. The letter of request from the Ministry of Finance states that the f
+             6  Project Progress and update
+             6  Climate Vulnerability Context and Paris Alignment
+             6  IDENTIFIED GENDER GAPS AND PROPOSED ACTIONS
+             6  SUMMARY OF PROPOSED CHANGES AND GUARANTEE OF TIMELY IMPLEMENTATION
+             6  Environmental, Social and Legal Operational Policies
+             6  Scope of restructuring
+             6  Scope adjustment through removal and budget reallocations of project activities
+             6  ONE WORLD BANK GROUP APPROACH
+             6  Parent Project Design and Current Status
+             6  7]
+             5  Environment (including Safeguards)
+             5  GRIEVANCE MECHANISMS
+  JUNK       5  RESULTS FRAMEWORK AND MONITORING MONITORING
+             5  Project Development Objectives
+             5  Climate Co-Benefits Table
+             5  Rationale for a Regional SOP
+             5  Rational for restructuring
+             5  Baseline Assessment of Liberia's Country Service Centers
+             5  ECONOMIC AND FINANCIAL ANALYSIS
+             5  GENDER ANALYSIS AND PROPOSED ACTIONS
+             4  Value Added of the Bank
+             4  Corporate Requirements
+             4  Technical, Financial and Economic Analysis
+             4  Indicators and Benchmarks
+             4  Results Monitoring and M&E Arrangements
+             4  Legal Framework, Data Protection and Cybersecurity Assessment
+             4  Program Beneficiaries
+  JUNK       4  Lessons Learned
+             4  Gender Equality
+             4  IFC Start-up Catalyst Program Overview
+             4  Paris Alignment
+  JUNK       4  Revision of Disbursement Conditions
+             4  Revised component structure to support strategic objectives
+             3  Maps of Agriculture Development Zones
+             3  Social (including Safeguards)
+             3  DETAILED ACTIVITIES BY COMPONENT AND COUNTRY
+             3  Introduction and Country Context
+             3  Rationale for WBG Involvement and Role of Partners
+             3  IDA 19 Digital Commitments Applicable to the Project
+             3  ANNEX 1
+             3  Climate Adaptation and Mitigation Aspects
+             3  Security Management Approach
+             3  Addressing Gender Gaps
+             3  Project Context
+             3  Synergies within the World Bank Portfolio and with Development Partners
+             3  Rationale for the Proposed Additional Financing
+             3  Climate Adaptation and Mitigation
+  JUNK       3  Financial Management (FM)
+  JUNK       3  Implementation Arrangement
+             3  PRIVATE CAPITAL ENABLING (PCE) Template
+             3  STRATEGIC CONTEXT
+             3  Other changes
+             3  Rationale for Additional Financing
+             3  Revision of project result framework
+             3  Changes to the Performance-Based Conditions (PBCs)
+             3  Closing date extension
+             2  Overall Approach
+             2  Maps
+  JUNK       2  Results monitoring and evaluation arrangements
+             2  CONTRIBUTION TO IDA19 DIGITAL COMMITMENTS
+             2  Climate Co-Benefits Assessment
+             2  IDA19 Digital Commitments Applicable to the Project
+  JUNK       2  Lessons learned and Reflected in the Project Design
+             2  Summary of Performance of E&S Risk Compliance
+             2  Country and State Context
+  JUNK       2  Secondly, it is proposed to change the disbursement category concerning Window 2 (Digital 
+             2  In addition, the project team proposes to add a new intermediate indicator under Component
+             2  BASIC DATA
+  JUNK       2  The disbursement categories were already simplified under restructuring 1, in December 202
+  JUNK       2  As a result of these proposed cancellations, modifications to the Results Framework are re
+             2  Allocation of CERC funding to projects and agencies
+             2  Addressing the Gender Gap
+             2  Restructuring Request number 2
+             2  Overall Risk Rating
+  JUNK       2  Changes to Disbursement Estimates
+             2  Consistency with Country Partnership Framework and Rwanda's national strategies
+             2  Activities removed or modified from scope
+             2  Maintenance of the PDO
+             2  Project Status and background
+             1  Project Progress
+             1  Institutional Arrangements
+             1  Grievance Redress Services
+             1  How Digital Ethiopia will contribute to meeting IDA-19 digital commitments
+             1  Consistency with the Country Partnership Framework (CPF) and Togo's national strategy
+             1  How Digital Tanzania Project will contribute to meeting IDA-19 digital commitments
+             1  Gender Barriers and Proposed Actions
+             1  Contribution to IDA20 Digital Commitments*
+             1  Data and Map of Provinces for Subcomponent 1.2
+  JUNK       1  Environmental and Social Safeguards. Some actions have been taken to implement the project
+  JUNK       1  Financial Mangment: A review of the financial management was conducted for the restructuri
+  JUNK       1  Procurement Mangement: The proposed change envisages additional procurement activitites wh
+             1  Rationale for SOPII
+             1  Glossary
+             1  Consistency with the Country Partnership Framework (CPF) and Kyrgyz Republic's national
+             1  Detailed Change - Project Components
+             1  Actions table
+             1  Executive Summary of Proposed Restructuring
+             1  Overview
+             1  List of Potential Public Services for Digitalization
+             1  Democratic Republic of Congo
+             1  Republic of Angola
+             1  Republic of Malawi
+             1  In addition, the project team proposes to align other indicators with the new corporate sc
+             1  The Project Development Objective (PDO) is not directly affected by these changes to Compo
+  JUNK       1  Environmental and Social Risk Management (ESRM). The project's environmental and social st
+  JUNK       1  Financial Mangment: A review of the financial management was conducted , in accordance wit
+  JUNK       1  Procurement Mangement: The proposed change envisage a reduction in the procurement activit
+             1  PCE/PCM. In addition to the changes desacribed above, the project is now tagged for both P
+             1  Contribution to IDA-20 Digital Commitments
+             1  Results M&E, and Verification Arrangements
+             1  Addressing Gender Gaps in Digital Cabo Verde AF
+             1  Maximizing Finance for Development
+             1  Citizen engagement
+             1  THEORY OF CHANGE
+  JUNK       1  Reallocation between disbursement categories
+             1  Overview of Restructuring
+             1  GRIEVANCE REDRESS SERVICE
+             1  Proposed Change
+  JUNK       1  Procurement. The procurement process for the Additional Financing (AF) will continue to us
+  JUNK       1  Changes in Disbursement Estimates and Categories
+             1  Change in Client Designation
+             1  1]
+
+  300 distinct section titles, 17,719 prose paragraphs
+
+LOG
+------------------------------------------------------------------------------
+
+  run_id 20260918T0131-7dd1a33  discovery_version discover-1  seed 1
+  clauses 119,591  vectors (119591, 3072)  paragraphs 34,005
+  clustering 119,591 clauses
+  reduction cache hit reduced_53727a0096629217.npy
+  HDBSCAN min_cluster_size=25 min_samples=5
+  communities 818  noise 46.0%
+  resolved text for 119,591 of 119,591 clauses
+  wrote communities.csv (818) and stoplist.csv (207)

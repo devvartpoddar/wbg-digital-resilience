@@ -60,6 +60,11 @@ sys.path.insert(0, os.path.join(ROOT, "src"))
 SEED = 1
 DISCOVERY_VERSION = "discover-1"
 
+# The prose set, named as src/segment.py and embed_clauses.py name it. A clause
+# exists only for these blocks, so this is the scope the junk sieve can act on;
+# the section inventory is printed once over every paragraph and once over this.
+PROSE_BLOCKS = ("narrative", "annex")
+
 # Sections whose prose cannot carry a financed commitment. This is a list of
 # SECTION NAMES, not of words to look for in clause text: where a document puts
 # a paragraph is a fact about the document, and the inventory of distinct
@@ -361,12 +366,24 @@ def embed_anchors(texts, data_dir, key_file, log):
         if v is None:
             todo.append((t, s))
         else:
-            out[s] = v
+            # read_cached returns the stored BYTES, not a vector; src/embed.py's
+            # assemble unpacks them the same way. np.asarray(bytes) yields a
+            # 0-d array, so a cached anchor and a freshly fetched one cannot be
+            # stacked - and vstack is what reports it, after the fetch has been
+            # paid for.
+            out[s] = np.frombuffer(v, dtype="<f4")
     if todo:
         log(f"embedding {len(todo)} anchor texts (of {len(texts)})")
         key = E.read_key(key_file)
-        vecs = E.embed_texts([t for t, _ in todo], model=model, api_key=key,
-                             base_url=manifest["base_url"], dimensions=dim)
+        # embed_texts returns (vectors, meta), as src/embed.py's own
+        # fetch_missing unpacks it. Taking the tuple for the vector list packs
+        # the list itself as one vector and dies on the first anchor with
+        # "expected 3072 dimensions, got 10" - which the caller below catches,
+        # so the failure is silent: every community loses its hazard score and
+        # the shortlist falls back to size.
+        vecs, _meta = E.embed_texts([t for t, _ in todo], model=model,
+                                    api_key=key, base_url=manifest["base_url"],
+                                    dimensions=dim)
         for (t, s), v in zip(todo, vecs):
             E.write_cached(root, s, E.pack(v, dim))
             out[s] = np.asarray(v, dtype=np.float32)
@@ -571,6 +588,20 @@ def write_report(rows, labels, paras, args, run_id, n_comm, noise, cache, log_li
            "   the pattern list can be audited.", "",
            "4. template_score never decides alone: measures recur across documents",
            "   too. It ranks, and section provenance separates.", "",
+           "5. The section inventory below is printed in FULL - every distinct",
+           "   title, over all paragraphs and again over prose only - because the",
+           "   audit is of the pattern list, and a section that carries a financed",
+           "   commitment while being flagged junk need not be a large one. A",
+           "   section title is a column of paragraphs.csv rather than clause text,",
+           "   and the tail of that column holds a document's first sentence rather",
+           "   than a title, which is itself part of what the audit has to see. IF",
+           "   NO DOCUMENT-DERIVED STRING WAS MEANT TO BE COMMITTED, this inventory",
+           "   belongs in a gitignored file beside shortlist.md and the audit reads",
+           "   it there; every JUNK flag and every count would be unchanged.", "",
+           "6. The two scopes are printed separately because they are not the same",
+           "   set: junk_section_share is computed over a community's clauses, and",
+           "   a clause exists only for a narrative or annex paragraph. A JUNK flag",
+           "   on a section holding no prose cannot move a verdict.", "",
            "RUN", "-" * 78, ""]
     out.append(f"run_id              {run_id}")
     out.append(f"discovery_version   {DISCOVERY_VERSION}")
@@ -595,10 +626,29 @@ def write_report(rows, labels, paras, args, run_id, n_comm, noise, cache, log_li
                    f"haz={r['hazard_proximity']:.3f}  commit={r['commitment_share']}  "
                    f"{str(r['top_section'])[:34]}")
     out += ["", "SECTION INVENTORY — audit the junk pattern list against this",
-            "-" * 78, ""]
+            "-" * 78, "",
+            "Every distinct section title in paragraphs.csv, with the JUNK flag the",
+            "sieve applies to it. The full list, not the top of it: a section that",
+            "carries a financed commitment and is flagged junk is the one failure",
+            "this list exists to make visible, and it need not be a large one.",
+            ""]
     inv = Counter(m[2] for m in paras.values())
-    for sec, n in inv.most_common(40):
-        out.append(f"  {'JUNK' if is_junk_section(sec) else '    '}  {n:>6}  {sec[:60]}")
+    for sec, n in inv.most_common():
+        out.append(f"  {'JUNK' if is_junk_section(sec) else '    '}  {n:>6}  {sec[:90]}")
+    out += ["", f"  {len(inv):,} distinct section titles, "
+            f"{len(paras):,} paragraphs", "",
+            "PROSE ONLY — the scope the sieve can actually act on",
+            "-" * 78,
+            "junk_section_share is computed over a community's clauses, and a",
+            "clause exists only for a narrative or annex paragraph. A JUNK flag on",
+            "a section holding no prose cannot move any community's verdict; it is",
+            "listed here separately so the two scopes are not read as one.",
+            ""]
+    prose_inv = Counter(m[2] for m in paras.values() if m[1] in PROSE_BLOCKS)
+    for sec, n in prose_inv.most_common():
+        out.append(f"  {'JUNK' if is_junk_section(sec) else '    '}  {n:>6}  {sec[:90]}")
+    out += ["", f"  {len(prose_inv):,} distinct section titles, "
+            f"{sum(prose_inv.values()):,} prose paragraphs"]
     out += ["", "LOG", "-" * 78, ""] + [f"  {l}" for l in log_lines]
     path = os.path.join(args.out_dir, "discovery_report.txt")
     open(path, "w", encoding="utf-8").write("\n".join(out) + "\n")

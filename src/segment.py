@@ -392,6 +392,11 @@ def write_rows(path, rows):
 
 
 def main():
+    # Declared first, and deliberately so. SPLITTER_VERSION is the default of
+    # --splitter-version below, and reading a name before its `global`
+    # statement in the same function is a SyntaxError - it stops the module
+    # importing at all, so nobody notices until the stage is run.
+    global SPLITTER_VERSION, VERB_SUBTREE_DEPS
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=os.path.join(ROOT, "data"))
     ap.add_argument("--model", default="en_core_web_sm")
@@ -410,7 +415,6 @@ def main():
     # The variant NAMES the splitter version, so a narrowed boundary set can
     # never be mistaken for split-1 output: clause_id carries the version, and
     # the resume checksum folds it in.
-    global SPLITTER_VERSION, VERB_SUBTREE_DEPS
     SPLITTER_VERSION = args.splitter_version
     VERB_SUBTREE_DEPS = VERB_SUBTREE_VARIANTS[SPLITTER_VERSION]
 

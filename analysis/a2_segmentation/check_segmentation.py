@@ -118,13 +118,17 @@ def main():
    objective.
 
 8. The splitter over-splits rather than under-splits, deliberately. On this
-   check set the median margin is +3 clauses and the worst case is
-   32108178:p00207 at 14 clauses against 4 measures. Over-splitting is the
-   cheap direction: an extra clause costs one row in clause_measure, while a
-   missed boundary merges two measures into one unit and loses a measure from
-   discovery permanently. IF THE INTENT WAS a unit close to one measure each,
+   check set the median margin is +3 clauses under split-1 and +2.5 under
+   split-2, and the worst case is 32108178:p00207 at 14 clauses against 4
+   measures counted by hand under split-1 and 12 under split-2. The
+   per-paragraph table below is authoritative for whichever variant produced
+   it. Over-splitting is the cheap direction: an extra clause costs one row in
+   clause_measure, while a missed boundary merges two measures into one unit and
+   loses a measure from discovery permanently. IF THE INTENT WAS a unit close to
+   one measure each,
    this splitter is too aggressive and the `verb_subtree` condition is the one
-   to narrow - it produces 30.2% of all clauses on its own.
+   to narrow - it produced 30.2% of all clauses on its own under split-1 and
+   22.7% under split-2.
 """)
 
     out.append("RESULT")

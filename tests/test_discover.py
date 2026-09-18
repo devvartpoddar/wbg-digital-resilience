@@ -204,3 +204,40 @@ def test_non_prose_blocks_are_skipped(tmp_path):
     order, unique, _ = embed_clauses.resolve_clauses(
         str(data), str(cl), paras, lambda _m: None)
     assert order == [] and unique == {}
+
+
+# --------------------------------------------------------------- the anchors
+
+def test_anchor_embedding_unpacks_the_transport_tuple_and_the_cache(
+        tmp_path, monkeypatch):
+    """Two unpacking steps, and each fails in a way the caller swallows.
+
+    embed_texts returns (vectors, meta), so taking the tuple for the vector list
+    hands `pack` ten vectors where one is expected and the first anchor fails
+    its dimension check. read_cached returns the stored BYTES, so a cached
+    anchor arrives as a 0-d array and cannot be stacked with a fetched one -
+    vstack says so, after the fetch has been paid for. Either way the run
+    completes, every community scores hazard 0.0, and the shortlist silently
+    falls back to size.
+    """
+    numpy = pytest.importorskip("numpy")
+    import hashlib
+    import embed as E
+
+    unit = numpy.full(3072, 1.0 / numpy.sqrt(3072), dtype="<f4")
+    texts = ["first anchor", "second anchor"]
+    first_sha = hashlib.sha256(texts[0].encode("utf-8")).hexdigest()
+    written = {}
+    monkeypatch.setattr(E, "read_cached", lambda root, sha, dim:
+                        unit.tobytes() if sha == first_sha else None)
+    monkeypatch.setattr(E, "write_cached",
+                        lambda root, sha, blob: written.__setitem__(sha, blob))
+    monkeypatch.setattr(E, "read_key", lambda key_file: "a-test-key")
+    monkeypatch.setattr(E, "embed_texts", lambda texts, **kw: (
+        [unit for _ in texts],
+        {"tokens": 0, "model": "text-embedding-3-large", "rate_limit": {}}))
+
+    out = discover.embed_anchors(texts, str(tmp_path / "data"), "", lambda _m: None)
+    assert out.shape == (2, 3072)
+    assert numpy.allclose(out, unit)
+    assert len(written) == 1, "only the uncached anchor should have been fetched"

@@ -13,6 +13,16 @@ __pycache__/
 # carry ids and numbers and do commit.
 analysis/discovery/shortlist.md
 
+# The stoplist's counterpart to shortlist.md: the medoids of communities the
+# sieve discarded, which is clause text. Same rule, same reason - and the
+# audit is only meaningful if the clauses can actually be read.
+analysis/discovery/stoplist_audit.md
+
+# Per-run shortlists under sensitivity/ are shortlist.md under another name and
+# carry the same clause text. The tables beside them (communities_*.csv,
+# stoplist_*.csv, discovery_report_*.txt) are ids and numbers and do commit.
+analysis/discovery/sensitivity/*.md
+
 # Reduced vectors, cached on a checksum of the inputs and the settings so the
 # scoring can be re-run without redoing UMAP. Re-derivable, and *.npy above
 # already covers them; named here so the reason is written down.
