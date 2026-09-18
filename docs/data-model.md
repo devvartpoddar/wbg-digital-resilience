@@ -95,6 +95,23 @@ Hand-maintained. No script writes here, except `sample.py` to `labels/samples/` 
 | `active` | boolean |
 | `version` | string |
 
+### `inputs/taxonomy/reference_measures.csv`
+
+Hand-written by the advisory team, not derived from the corpus. It is a
+non-exhaustive prompt list spanning sectors the digital cohort does not finance,
+so an entry with no corpus instances is an expected result and not a defect. It
+is never a retrieval target and never a source of `measure_id`: discovered
+measures land in `measures.csv`, and this table is the scorecard the discovered
+set is compared against.
+
+| Column | Type |
+|---|---|
+| `reference_measure_id` | string, primary key, `REF` plus three digits |
+| `measure_name` | string |
+| `definition` | string |
+| `direction` | enum, `resilience_of_asset` or `digital_for_resilience` |
+| `version` | string |
+
 ### `inputs/taxonomy/measures.csv`
 
 | Column | Type |

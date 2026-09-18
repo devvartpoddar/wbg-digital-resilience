@@ -37,6 +37,16 @@ Closed set. A ninth class requires a new classifier and a version bump.
 
 Changing a measure's `definition` invalidates every label drawn under the old definition. Such a change requires a `version` bump; a split or merge additionally requires the old row to be `retired` with `superseded_by` set, and the affected label rows re-drawn. Adding a new measure has no such cost.
 
+### A1.2a `reference_measures.direction`
+
+| Value | Meaning |
+|---|---|
+| `resilience_of_asset` | The measure makes a digital asset itself withstand a hazard |
+| `digital_for_resilience` | The digital system serves resilience somewhere else — early warning, shock-responsive payments, agricultural advisory |
+
+The two are reported separately and are not merged. A discovered measure inherits
+its direction from the family it is named into, not from this table.
+
 ### A1.3 `terms_*.match_mode`
 
 | Value | Meaning |
@@ -302,7 +312,7 @@ Never null: any primary key, any `run_id`, any version stamp including `clean_ve
 
 | Table | Key |
 |---|---|
-| `assets`, `measures`, `measure_families`, `cohort` | Single identifier column |
+| `assets`, `measures`, `measure_families`, `reference_measures`, `cohort` | Single identifier column |
 | `terms_asset`, `terms_measure` | `term_id` |
 | `thresholds` | `model_id` |
 | `modality_lexicon` | `lemma` |
