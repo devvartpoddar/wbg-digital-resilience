@@ -34,3 +34,13 @@ analysis/discovery/reduced_*.npy
 # gitignored does not mean deletable (AGENTS.md rule 2).
 analysis/a3_clusters/
 analysis/a4_package_assets/
+
+# Hand-labelling owned by the task team. Never committed: the 89-measure list in
+# inputs/taxonomy/ is the shareable part, the worksheet itself is not.
+Portfolio_tracker.xlsx
+*Portfolio_tracker*.xlsx
+inputs/tracker/
+# The annotation workbook carries verbatim PAD text plus hand labels; it is
+# handed over directly, not through the repository.
+goldset_sample*.xlsx
+analysis/goldset/*.xlsx
