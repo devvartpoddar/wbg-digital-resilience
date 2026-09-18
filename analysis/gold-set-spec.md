@@ -133,13 +133,28 @@ precision, but they cap it identically for all methods, so the ranking between
 methods survives. The CRS work (arXiv:2211.16947) found expert adaptation labels
 disagreeing on identical text about half the time; see `analysis/prior-art.md`.
 
-## Sample
+## Sample, and the rule that governs it
 
-| slice | paragraphs | expected rows |
-|---|---|---|
-| matched to the portfolio tracker's climate-flagged fragments | 80 | ~280 |
-| projects chosen for cybersecurity, DPI, data centres | 40 | ~120 |
-| random, unfiltered, from Project Components and annexes | 60 | ~10 |
+| slice | selected by | paragraphs | expected rows |
+|---|---|---|---|
+| `climate` | section headings naming climate, resilience, adaptation or co-benefits | 80 | ~280 |
+| `targeted` | section headings naming cybersecurity, data centres, DPI or identification | 40 | ~120 |
+| `random` | a seeded RNG over prose paragraphs | 60 | ~10 |
+
+**No slice may be selected by any method under test.** The sample's only job is
+to rank five candidate methods against each other, and a slice drawn by dense
+retrieval or by clustering hands that method recall it did not earn. All three
+slices above select on document structure or on a random number, so none of
+them does.
+
+**The portfolio tracker is not a sampling source.** It is hand-labelling owned
+by the task team and stays on the annotator's own machine: neither this
+repository nor the server holds anything but publicly disclosed PAD text. Its
+one role is `analysis/goldset/prefill.py`, which runs on that machine and fills
+the `asset` and `direction` suggestion columns by matching its excerpts against
+the paragraph text already in the workbook. That match is also a measurement -
+the share of the workbook's climate-section paragraphs the existing
+hand-labelling had already caught.
 
 ## What is deliberately left out
 
