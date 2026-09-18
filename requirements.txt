@@ -3,6 +3,7 @@ pytest==9.1.1
 numpy==2.5.3
 spacy==3.8.16
 scikit-learn==1.9.1
+umap-learn==0.5.12
 openpyxl==3.1.5
 
 # The clause parser's model is not on PyPI under this name, so it is not a

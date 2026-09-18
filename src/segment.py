@@ -97,7 +97,30 @@ RULE_PRIORITY = {"sentence": 0, "verb_subtree": 1, "relative": 2,
 RELATIVE_TAGS = ("WDT", "WP", "WP$", "WRB")
 RELATIVE_DEPS = ("nsubj", "nsubjpass", "dobj", "pobj", "pcomp", "advmod",
                  "npadvmod", "attr", "acomp", "appos")
-VERB_SUBTREE_DEPS = ("advcl", "xcomp", "ccomp", "acl", "relcl")
+# Which dependency relations count as a verb heading its own proposition.
+# Two named variants, because this is the one boundary condition measured to
+# over-split: verb_subtree alone produces 30.2% of all boundaries and 14.8% of
+# clauses come out at four tokens or fewer, which have an embedding but no
+# proposition.
+#
+# split-1 is what the probe ran. split-2 drops the two COMPLEMENT relations:
+# xcomp and ccomp complete the governing verb rather than stating something
+# separate, so "required to build towers" is one proposition and splitting it
+# severs the modal from what it governs - which destroys the modality signal
+# that the commitment score depends on. relcl goes too, because the `relative`
+# condition already names those boundaries. advcl stays: an adverbial clause is
+# an adjunct and a genuinely separate proposition ("by choosing sites which are
+# not subject to flooding"). acl stays: a participial modifier often carries a
+# distinct design property.
+#
+# WHICH ONE IS RIGHT IS A MEASUREMENT, NOT AN OPINION. Run both against
+# analysis/a2_segmentation/check_set.csv and keep the variant that cuts the
+# four-token share without falling below 16 of 20 on the check set.
+VERB_SUBTREE_VARIANTS = {
+    "split-1": ("advcl", "xcomp", "ccomp", "acl", "relcl"),
+    "split-2": ("advcl", "acl"),
+}
+VERB_SUBTREE_DEPS = VERB_SUBTREE_VARIANTS[SPLITTER_VERSION]
 VERB_POS = ("VERB", "AUX")
 
 
@@ -277,8 +300,12 @@ def segment_text(nlp, text):
     return clause_spans(doc, find_boundaries(doc))
 
 
-def clause_id(paragraph_id, ordinal, splitter_version=SPLITTER_VERSION):
-    return f"{paragraph_id}:c{ordinal:02d}:{splitter_version}"
+def clause_id(paragraph_id, ordinal, splitter_version=None):
+    # Resolved at CALL time, not at definition time. A default argument would
+    # bind whatever SPLITTER_VERSION held when this module was imported, so
+    # --splitter-version would silently mint split-1 ids for split-2 boundaries.
+    sv = SPLITTER_VERSION if splitter_version is None else splitter_version
+    return f"{paragraph_id}:c{ordinal:02d}:{sv}"
 
 
 # ------------------------------------------------------------------------ I/O
@@ -374,7 +401,18 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--restart", action="store_true", help="ignore resume state")
     ap.add_argument("--run-id", default="")
+    ap.add_argument("--splitter-version", default=SPLITTER_VERSION,
+                    choices=sorted(VERB_SUBTREE_VARIANTS),
+                    help="which verb_subtree variant to use; it names the "
+                         "splitter version because the boundaries move with it")
     args = ap.parse_args()
+
+    # The variant NAMES the splitter version, so a narrowed boundary set can
+    # never be mistaken for split-1 output: clause_id carries the version, and
+    # the resume checksum folds it in.
+    global SPLITTER_VERSION, VERB_SUBTREE_DEPS
+    SPLITTER_VERSION = args.splitter_version
+    VERB_SUBTREE_DEPS = VERB_SUBTREE_VARIANTS[SPLITTER_VERSION]
 
     rows, by_doc = read_paragraphs(os.path.join(args.data, "paragraphs.csv"))
     prose = [r for r in rows if r[2] in PROSE_BLOCKS]

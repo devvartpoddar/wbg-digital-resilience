@@ -7,20 +7,20 @@ data/
 __pycache__/
 .venv/
 
-# The A3 naming worksheet carries clause text, so it is not committed. No
-# document text is committed anywhere in this repository; the one committed
-# place is inputs/labels/samples/. The worksheet's path is named in the PR body.
-analysis/a3_clusters/naming_worksheet.xlsx
+# shortlist.md is the naming surface and it quotes clause text, so it is not
+# committed. No document text is committed in this repository; the one
+# committed place is inputs/labels/samples/. communities.csv and stoplist.csv
+# carry ids and numbers and do commit.
+analysis/discovery/shortlist.md
 
-# The A4 de-glue examples are package descriptions - source text - so they are
-# not committed either. Same rule, same reason.
-analysis/a4_package_assets/deglue_examples.txt
+# Reduced vectors, cached on a checksum of the inputs and the settings so the
+# scoring can be re-run without redoing UMAP. Re-derivable, and *.npy above
+# already covers them; named here so the reason is written down.
+analysis/discovery/reduced_*.npy
 
-# Probe intermediates: one row per clause or per package, all of them
-# re-derivable by re-running the script beside them. They carry no text -
-# ids, offsets and hashes only - so the reason they are not committed is
-# size, not disclosure. 34 MB of the 35 MB this branch would otherwise add.
-# They stay on the server, as everything under data/ does.
-analysis/a3_clusters/pool.csv
-analysis/a3_clusters/pool_dropped.csv
-analysis/a4_package_assets/package_resolution.csv
+# Output of the retired k-means probe and the retired procurement probe. The
+# scripts are gone from this branch and these are their leftovers - large,
+# re-derivable by nothing that still exists, and kept on the server because
+# gitignored does not mean deletable (AGENTS.md rule 2).
+analysis/a3_clusters/
+analysis/a4_package_assets/
