@@ -191,6 +191,17 @@ def test_category_hint_maps_to_asset_and_direction():
     assert bs.hint_for(["Something nobody defined"]) == ("", "")
 
 
+def test_a_deliberately_empty_hint_does_not_shadow_a_real_one():
+    """`enabling environment` is listed with no values on purpose. Returning
+    them and stopping discarded a real hint from a second category on the same
+    row - four rows on the first live run."""
+    assert bs.hint_for(["Enabling Environment1"]) == ("", "")
+    assert bs.hint_for(["Enabling Environment1", "Resilient telecom"]) == \
+        ("telecom network", "resilience_of_asset")
+    assert bs.hint_for(["Resilient telecom", "Enabling Environment1"]) == \
+        ("telecom network", "resilience_of_asset")
+
+
 def test_on_disk_schema_is_read_when_the_modelled_columns_are_absent(tmp_path):
     """The crash was span_project.csv; the silent one was the column names.
 

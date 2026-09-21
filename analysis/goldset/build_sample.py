@@ -274,10 +274,20 @@ def read_tracker(path, log):
 
 
 def hint_for(categories):
+    """The first category that yields an actual hint, not the first that matches.
+
+    Some categories are listed in CATEGORY_HINTS with empty values on purpose -
+    `enabling environment` is policy work and its direction is genuinely
+    ambiguous, so guessing one would be inventing a label. Returning that empty
+    pair and stopping would then discard a real hint from a second category on
+    the same row, which is what happened on the first live run: four rows
+    tagged both `Enabling Environment` and `Resilient telecom` were reported as
+    having no hint at all.
+    """
     for cat in categories:
         low = cat.lower()
         for key, asset, direction in CATEGORY_HINTS:
-            if key in low:
+            if key in low and (asset or direction):
                 return asset, direction
     return "", ""
 
