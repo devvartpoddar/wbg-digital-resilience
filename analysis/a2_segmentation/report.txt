@@ -1,0 +1,184 @@
+A2 - clause segmentation: acceptance check
+==============================================================================
+
+ASSUMPTIONS
+------------------------------------------------------------------------------
+
+1. SCOPE CONFLICT, DELIBERATE. methodology Stage 4 says segmentation "runs only
+   on paragraphs where at least one asset fired", and business-rule 31 says
+   clauses rows exist only for such paragraphs. This probe segments every
+   paragraph whose block_type is narrative or annex - 17,719 paragraphs - as the
+   task specifies, because A3's pool is defined that way and an asset gate
+   would silently drop fiber prose (the fiber classifier fires on ~1% of prose).
+   CONSEQUENCE: clauses.csv currently violates business-rule 31. That rule and
+   the pool definition in methodology Stage 4 have to be reconciled before this
+   table is consumed downstream. Numbers that move if the gate is restored:
+   every count in this report, and the whole A3 pool.
+
+2. `block_type` and `section_label` do not exist in paragraphs.csv. The table on
+   disk carries `block` (values narrative, annex, heading, table, footnote,
+   frontmatter, template:*) and `section_title`/`section_path`. business-rules
+   A1.10 says the column is `block_type` with values prose/heading/bullet/
+   table_cell/footnote. segment.py reads either name, so it keeps working when
+   the schema and the table are reconciled; the divergence is reported, not
+   fixed.
+
+3. `clean_version` is not stamped by src/clean.py on documents.csv or
+   paragraphs.csv, so there is nothing to inherit. segment.py writes "clean-1",
+   the first version of the cleaning rules, so business-rule 14 has a value to
+   check against. IF THE CLEANING STAGE INTENDS A DIFFERENT VALUE, every clause
+   row is stamped wrong - a stamp correction, not a boundary change.
+
+4. A clause is accepted only if it contains at least one letter. Without this a
+   numbered list's "1." becomes a one-character clause. The effect is small
+   (see the count below) but it is a judgement, and it is cheaper than leaving
+   132k rows with list markers among them.
+
+5. Clause offsets are relative to the parent paragraph, per business-rule 23.
+   The absolute position is paragraph.char_start + clause.char_start. A clause
+   is trimmed of leading and trailing tokens carrying no alphanumeric character,
+   so a bullet glyph does not open a clause and a trailing comma does not close
+   one. A trailing ")" is trimmed with them, which is cosmetic.
+
+6. Hand counts are one person's reading. `basis` in check_set.csv records what
+   was counted per row. Where a row is arguable, the argument is about one
+   paragraph, not about the method.
+
+7. Two check-set paragraphs are results-framework objective statements rather
+   than commitments. They are included because the task asks for
+   results-framework text; for those rows the counted unit is a distinct stated
+   objective.
+
+8. The splitter over-splits rather than under-splits, deliberately. On this
+   check set the median margin is +3 clauses under split-1 and +2.5 under
+   split-2, and the worst case is 32108178:p00207 at 14 clauses against 4
+   measures counted by hand under split-1 and 12 under split-2. The
+   per-paragraph table below is authoritative for whichever variant produced
+   it. Over-splitting is the cheap direction: an extra clause costs one row in
+   clause_measure, while a missed boundary merges two measures into one unit and
+   loses a measure from discovery permanently. IF THE INTENT WAS a unit close to
+   one measure each,
+   this splitter is too aggressive and the `verb_subtree` condition is the one
+   to narrow - it produced 30.2% of all clauses on its own under split-1 and
+   22.7% under split-2.
+
+RESULT
+------------------------------------------------------------------------------
+check set        20 paragraphs
+criterion        clause count >= hand count - 1 on >= 16 of 20
+met              20 of 20
+VERDICT          PASS
+
+no paragraph fell below the criterion.
+
+Per paragraph
+------------------------------------------------------------------------------
+paragraph_id            stratum              hand  clauses  margin  rules
+34338772:p00680         annex_bullet            5        5       0  semicolon,sentence,verb_subtree
+31167658:p00523         annex_short_bullet      1        1       0  sentence
+33835348:p00198         components_list         6        6       0  relative,semicolon,sentence
+33118666:p00331         results_framework       3        3       0  coord_conj,sentence
+31338295:p00317         annex_list              2        3       1  coord_conj,sentence,verb_subtree
+33835349:p00223         components              6        7       1  semicolon,sentence,subord_conj
+33819612:p00269         results_framework       3        4       1  coord_conj,sentence,verb_subtree
+33602788:p00474         annex_list              6        8       2  semicolon,sentence,verb_subtree
+33602788:p00497         annex_list              3        5       2  coord_conj,semicolon,sentence,verb_sub
+33602788:p00473         annex_list              3        5       2  semicolon,sentence,verb_subtree
+32971756:p00518         annex_bullet            2        4       2  coord_conj,relative,sentence,verb_subt
+32108178:p00635         annex_list              2        5       3  coord_conj,sentence,verb_subtree
+31167658:p00620         annex_activity          1        5       4  coord_conj,relative,sentence
+33107441:p00488         annex_activity          2        6       4  sentence,verb_subtree
+33786588:p00199         components              4        8       4  semicolon,sentence,verb_subtree
+31167658:p00616         annex_list              2        7       5  coord_conj,relative,semicolon,sentence
+33822742:p00405         annex_subcomponent      1        6       5  coord_conj,semicolon,sentence,verb_sub
+33753850:p00212         components_list         4       10       6  coord_conj,semicolon,sentence,verb_sub
+33862093:p00214         components              4       11       7  coord_conj,semicolon,sentence,verb_sub
+32108178:p00207         components              4       12       8  coord_conj,sentence,verb_subtree
+
+The worked example
+------------------------------------------------------------------------------
+34338772:p00680 (Angola, ANNEX 6) produced 5 clauses against 5 measures counted by hand.
+The task required at least four. It yields at least four.
+  c01  sentence
+  c02  verb_subtree
+  c03  semicolon
+  c04  semicolon
+  c05  verb_subtree
+
+The known limit, restated
+------------------------------------------------------------------------------
+A coordinated object noun phrase still bundles. One clause of
+34338772:p00680 holds two measures at once: the deploy verb governs a
+weather-resistant cable and then a list of passive plant - ducts, poles,
+switches, sockets, appliances - under a second verb, and the splitter
+leaves them together. That is intended: clause_measure keys on
+clause_id + measure_id and is multi-label by design. Noun-phrase
+splitting was not added.
+
+NO CLAUSE TEXT IS QUOTED IN THIS REPORT. No document text is committed
+in this repository. The clauses are resolved from data/clean/ at read
+time, and the offsets in clauses.csv are what makes that possible.
+
+Clause-count distribution (whole prose corpus)
+------------------------------------------------------------------------------
+    1 clauses     3,205   18.1%   cumulative  18.1%
+    2 clauses     2,330   13.2%   cumulative  31.3%
+    3 clauses     1,536    8.7%   cumulative  39.9%
+    4 clauses     1,161    6.6%   cumulative  46.5%
+    5 clauses     1,047    5.9%   cumulative  52.4%
+    6 clauses     1,033    5.8%   cumulative  58.2%
+    7 clauses       983    5.6%   cumulative  63.8%
+    8 clauses       847    4.8%   cumulative  68.6%
+    9 clauses       861    4.9%   cumulative  73.4%
+   10 clauses       713    4.0%   cumulative  77.5%
+   11 clauses       645    3.6%   cumulative  81.1%
+   12 clauses       548    3.1%   cumulative  84.2%
+   13 clauses       495    2.8%   cumulative  87.0%
+   14 clauses       391    2.2%   cumulative  89.2%
+   15 clauses       343    1.9%   cumulative  91.1%
+   16 clauses       315    1.8%   cumulative  92.9%
+   17 clauses       241    1.4%   cumulative  94.3%
+   18 clauses       186    1.1%   cumulative  95.3%
+   19 clauses       186    1.1%   cumulative  96.4%
+   20 clauses       124    0.7%   cumulative  97.1%
+   21 clauses       103    0.6%   cumulative  97.7%
+   22 clauses        94    0.5%   cumulative  98.2%
+   23 clauses        50    0.3%   cumulative  98.5%
+   24 clauses        61    0.3%   cumulative  98.8%
+   25 clauses        40    0.2%   cumulative  99.0%
+   26 clauses        33    0.2%   cumulative  99.2%
+   27 clauses        24    0.1%   cumulative  99.4%
+   28 clauses        16    0.1%   cumulative  99.5%
+   29 clauses        19    0.1%   cumulative  99.6%
+   30 clauses         8    0.0%   cumulative  99.6%
+   31 clauses         8    0.0%   cumulative  99.7%
+   32 clauses         9    0.1%   cumulative  99.7%
+   33 clauses         7    0.0%   cumulative  99.7%
+   34 clauses         7    0.0%   cumulative  99.8%
+   35 clauses         3    0.0%   cumulative  99.8%
+   36 clauses         1    0.0%   cumulative  99.8%
+   37 clauses         4    0.0%   cumulative  99.8%
+   38 clauses         2    0.0%   cumulative  99.8%
+   39 clauses         5    0.0%   cumulative  99.9%
+   40 clauses         3    0.0%   cumulative  99.9%
+   41 clauses         3    0.0%   cumulative  99.9%
+   42 clauses         2    0.0%   cumulative  99.9%
+   43 clauses         3    0.0%   cumulative  99.9%
+   46 clauses         1    0.0%   cumulative  99.9%
+   47 clauses         1    0.0%   cumulative  99.9%
+   48 clauses         1    0.0%   cumulative  99.9%
+   49 clauses         3    0.0%   cumulative 100.0%
+   52 clauses         2    0.0%   cumulative 100.0%
+   56 clauses         1    0.0%   cumulative 100.0%
+   64 clauses         1    0.0%   cumulative 100.0%
+   71 clauses         1    0.0%   cumulative 100.0%
+   87 clauses         1    0.0%   cumulative 100.0%
+
+split_rule tally (whole prose corpus)
+------------------------------------------------------------------------------
+  sentence         54,200   45.3%
+  verb_subtree     27,173   22.7%
+  coord_conj       15,682   13.1%
+  relative          9,860    8.2%
+  semicolon         6,441    5.4%
+  subord_conj       6,235    5.2%

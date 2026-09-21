@@ -1,0 +1,58 @@
+A2b - splitter variant choice
+==============================================================================
+
+ASSUMPTIONS
+------------------------------------------------------------------------------
+1. A token here is a whitespace-delimited token of the clause as it
+   resolves from data/clean/. clauses.csv carries offsets, not text, and
+   no token count. Both variants are counted the same way, so the
+   comparison holds even if the absolute share differs from the probe's
+   by a few points. If the parser's token count was meant instead, the
+   <=4 column moves and the ranking does not.
+
+2. The acceptance half of the criterion is check_segmentation.py's, run
+   as a subprocess once per variant against that variant's own table.
+   Its report lands beside that table under data/scratch/, not in the
+   repository; the variant that is kept is re-scored into
+   analysis/a2_segmentation/report.txt so the committed report describes
+   the splitter that is actually in the tree.
+
+3. The four-token cut is the probe's, not a threshold anyone tuned.
+
+MEASUREMENT
+------------------------------------------------------------------------------
+variant split-1  data/scratch/seg1/data/intermediate/prepared/clauses.csv
+  clauses 132,376  paragraphs 17,707  clauses/paragraph 7.48
+  <= 4 tokens 26,249  (19.8%)  median 9 tokens
+  check set met 20 of 20  verdict PASS
+  split_rule tally
+    sentence         54,155   40.9%
+    verb_subtree     40,004   30.2%
+    coord_conj       15,682   11.8%
+    relative          9,860    7.4%
+    semicolon         6,440    4.9%
+    subord_conj       6,235    4.7%
+
+variant split-2  data/scratch/seg2/data/intermediate/prepared/clauses.csv
+  clauses 119,591  paragraphs 17,707  clauses/paragraph 6.75
+  <= 4 tokens 18,486  (15.5%)  median 10 tokens
+  check set met 20 of 20  verdict PASS
+  split_rule tally
+    sentence         54,200   45.3%
+    verb_subtree     27,173   22.7%
+    coord_conj       15,682   13.1%
+    relative          9,860    8.2%
+    semicolon         6,441    5.4%
+    subord_conj       6,235    5.2%
+
+TABLE
+------------------------------------------------------------------------------
+variant      clauses    paras  cl/para   <=4 tok  <=4 share  met/20  verdict
+split-1      132,376   17,707     7.48    26,249      19.8%   20/20  PASS
+split-2      119,591   17,707     6.75    18,486      15.5%   20/20  PASS
+
+CHOICE
+------------------------------------------------------------------------------
+split-2 - it passes 20 of 20 and has the lower four-token share at 15.5%
+  (also passing: split-1 at 19.8%, met 20 of 20)
+
