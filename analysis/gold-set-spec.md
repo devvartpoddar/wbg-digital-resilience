@@ -133,28 +133,76 @@ precision, but they cap it identically for all methods, so the ranking between
 methods survives. The CRS work (arXiv:2211.16947) found expert adaptation labels
 disagreeing on identical text about half the time; see `analysis/prior-art.md`.
 
-## Sample, and the rule that governs it
+## Sample
 
-| slice | selected by | paragraphs | expected rows |
+**The sample is a miniature of the corpus, not three separate experiments.** The
+winning method runs bank-wide, so the sample it is chosen on has to look like
+what it will face. Every prose paragraph falls into exactly one stratum, by
+section heading and nothing else, first match wins:
+
+| stratum | section heading names | corpus | drawn |
 |---|---|---|---|
-| `climate` | section headings naming climate, resilience, adaptation or co-benefits | 80 | ~280 |
-| `targeted` | section headings naming cybersecurity, data centres, DPI or identification | 40 | ~120 |
-| `random` | a seeded RNG over prose paragraphs | 60 | ~10 |
+| `climate` | climate, adaptation, co-benefit, resilience, disaster, hazard | ~400 | **60** |
+| `components` | component, project description, technical design, annex, changes | ~5,800 | **70** |
+| `other` | everything else - fiduciary, implementation, results, risks | ~11,500 | **50** |
+| `probe` | *selected by body keyword, see below* | - | **20** |
 
-**No slice may be selected by any method under test.** The sample's only job is
-to rank five candidate methods against each other, and a slice drawn by dense
-retrieval or by clustering hands that method recall it did not earn. All three
-slices above select on document structure or on a random number, so none of
-them does.
+**No PAD heading names cybersecurity, data centres or digital public
+infrastructure.** Of 17,719 prose paragraphs, four sit under a heading naming
+any of them, and all four are consecutive paragraphs of one document.
+`climate` appears in 378. That is a fact about how PADs are titled, not a
+tuning problem: headings name the document's structure, not its subject. Those
+topics live in `components`, in running prose, which is why that stratum is the
+largest draw.
+
+**Every stratum caps paragraphs per project at three.** Four consecutive
+paragraphs of one document is one observation wearing four hats, and it is how
+a sample silently stops measuring anything. The draw goes round-robin over
+projects.
+
+**The draw over-weights `climate` and `components` on purpose**, because
+reading a hundred empty paragraphs wastes a day. **Precision is therefore
+estimated stratum-weighted against the corpus counts above, never raw.**
+
+### The probe is not part of the ranking
+
+Twenty paragraphs are selected by keywords **in the paragraph body** - CSIRT,
+security operations centre, data centre, disaster recovery, digital public
+infrastructure and their variants - capped at two per project. They answer one
+question the stratified sample leaves to chance: **is a method blind to these
+topics?**
+
+It is enriched by construction, so it cannot give an unbiased recall figure and
+is never pooled into one. Keyword selection is safe here only because **no
+candidate method is keyword matching**; the bias it carries - toward paragraphs
+that name the topic outright - is conservative, since a method that fails on
+the explicit cases will not do better on the implicit ones.
+
+**No group is selected by an embedding, a cluster or a classifier.** That rule
+holds because the sample's whole job is to rank five candidate methods against
+each other, and a group drawn by one of them would hand it recall it did not
+earn.
+
+### Where to be exhaustive
+
+| stratum | record |
+|---|---|
+| `components`, `other` | **all four kinds** - these carry the hard negatives |
+| `climate`, `probe` | `measure` and `asset` only |
+
+`activity` is the hard negative class: "the Project will finance training of 200
+civil servants" has a measure's exact shape and no resilience content, and it
+lives in `components`. Precision is estimated on `components` and `other`,
+which is why those two are annotated in full.
 
 **The portfolio tracker is not a sampling source.** It is hand-labelling owned
 by the task team and stays on the annotator's own machine: neither this
 repository nor the server holds anything but publicly disclosed PAD text. Its
-one role is `analysis/goldset/prefill.py`, which runs on that machine and fills
-the `asset` and `direction` suggestion columns by matching its excerpts against
-the paragraph text already in the workbook. That match is also a measurement -
-the share of the workbook's climate-section paragraphs the existing
-hand-labelling had already caught.
+one role is `analysis/goldset/prefill.py`, which fills the `asset` and
+`direction` suggestion columns by matching its excerpts against the paragraph
+text already in the workbook. That match is also a measurement - the share of
+the workbook's climate paragraphs the existing hand-labelling had already
+caught.
 
 ## What is deliberately left out
 

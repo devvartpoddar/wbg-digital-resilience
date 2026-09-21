@@ -8,18 +8,39 @@ carry the right `paragraph_id`, so the annotator never types an id and the
 join back to the corpus cannot silently fail. Column layout is fixed by
 analysis/gold-set-spec.md.
 
-THE SAMPLING RULE THAT MATTERS. No slice may be selected by any method under
-test. The comparison in gold-set-spec.md ranks five candidate methods against
-each other, and a sample drawn by embedding retrieval or by clustering would
-hand whichever method drew it a recall advantage it did not earn. So:
+THE SAMPLE IS A MINIATURE OF THE CORPUS, NOT THREE EXPERIMENTS. The winning
+method runs bank-wide, so the sample it is chosen on has to look like what it
+will face. Every prose paragraph falls into exactly one stratum, by section
+heading and nothing else:
 
-  flagged   selected by a human (the portfolio tracker), which biases toward
-            climate language - disclosed, not hidden
-  targeted  selected by section heading and project, which are facts about
-            document structure
-  random    selected by a seeded RNG over prose paragraphs
+  climate     climate, adaptation, co-benefit, resilience, disaster or hazard
+              in the heading - the co-benefit annexes, where measures are
+              enumerated explicitly
+  components  component, project description, technical design or annex - where
+              the financed activity is described in running prose, and where
+              cybersecurity, data centres and digital public infrastructure
+              actually live, because no PAD heading names them
+  other       everything else - fiduciary, implementation arrangements, results
+              frameworks, risks. Mostly empty, and that is the point
 
-None of the three consults an embedding, a cluster or a classifier.
+Strata are assigned first-match-wins, so they are disjoint. The draw is
+over-weighted toward `climate` and `components` because reading a hundred empty
+paragraphs wastes a day, so **precision must be estimated stratum-weighted**,
+never raw. Every stratum caps paragraphs per project, because a slice of four
+consecutive paragraphs from one document is one sample, not four.
+
+THE PROBE IS NOT PART OF THE RANKING. One extra group is selected by keywords
+in the paragraph body, to answer a different question: is a method blind to
+cybersecurity, data centres or digital public infrastructure? It is enriched by
+construction, so it cannot give an unbiased recall figure and is never pooled
+into one. It can catch a method that returns nothing there at all, which the
+stratified sample alone would leave to chance. Keyword selection is safe here
+only because no candidate method is keyword matching; the bias it carries -
+toward paragraphs that name the topic outright - is disclosed in
+gold-set-spec.md and is conservative, since a method that fails on the explicit
+cases will not do better on the implicit ones.
+
+No group is selected by an embedding, a cluster or a classifier.
 
 THE HASH CHECK IS THE POINT, as it is in analysis/discovery/embed_clauses.py.
 paragraphs.csv stores offsets, not text. If a clean file moved, the offsets
@@ -55,6 +76,28 @@ CATEGORY_HINTS = [
     ("devices and internet",         "access/connectivity",  "digital_for_resilience"),
     ("enabling environment",         "",                     ""),
 ]
+
+# Strata, first match wins, so they are disjoint. The order is the design: a
+# climate co-benefit annex is a climate paragraph, not a component one.
+STRATA = (
+    ("climate", r"climate|adapt|co-?benefit|resilien|disaster|hazard"),
+    ("components", r"component|project description|technical design|"
+                   r"detailed change|proposed change|annex|results chain"),
+    ("other", None),
+)
+
+# Selection terms for the blind-spot probe ONLY - never a detector, never part
+# of a ranking figure. Two regexes because the acronyms must stay case
+# sensitive: a case-insensitive \bcert\b matches "certification" and \bsoc\b
+# matches "social" once the boundary is gone.
+PROBE_PHRASES = (r"cyber\s*security|cyber-security|security operations cent|"
+                 r"incident response|computer emergency response|"
+                 r"data\s*cent(er|re)|data hosting|colocation|co-location|"
+                 r"server room|disaster recovery|business continuity|"
+                 r"digital public infrastructure|digital identity|"
+                 r"digital identification|foundational id|interoperability layer|"
+                 r"payment switch")
+PROBE_ACRONYMS = r"\bCSIRT\b|\bCERT\b|\bCIRT\b|\bSOC\b|\bDPI\b|\bPKI\b"
 
 ROW_COLUMNS = ["paragraph_id", "where", "kind", "quote", "label", "direction",
                "asset", "asset_in_para", "hazard", "stem"]
@@ -239,44 +282,6 @@ def hint_for(categories):
     return "", ""
 
 
-def match_excerpts(excerpts, paras, log):
-    """paragraph_id -> (categories, had_no_category) for matched paragraphs."""
-    by_project = defaultdict(list)
-    for p in paras:
-        by_project[p["project_id"]].append(p)
-
-    index = {}
-    for proj, plist in by_project.items():
-        inv = defaultdict(set)
-        for p in plist:
-            for g in ngrams(norm_words(p["text"])):
-                inv[g].add(p["paragraph_id"])
-        index[proj] = inv
-
-    hits, matched_excerpts = {}, 0
-    for proj, text, cats in excerpts:
-        inv = index.get(proj)
-        if inv is None:
-            continue
-        counts = Counter()
-        for g in ngrams(norm_words(text)):
-            for pid in inv.get(g, ()):
-                counts[pid] += 1
-        found = [pid for pid, n in counts.items() if n >= MIN_NGRAM_HITS]
-        if found:
-            matched_excerpts += 1
-        for pid in found:
-            prev_cats, prev_none = hits.get(pid, ([], True))
-            hits[pid] = (sorted(set(prev_cats) | set(cats)),
-                         prev_none and not cats)
-    log(f"  excerpts matched to >=1 paragraph: {matched_excerpts}/{len(excerpts)}"
-        f"  ({matched_excerpts / max(1, len(excerpts)):.0%})")
-    log(f"  distinct paragraphs matched: {len(hits):,}")
-    log(f"  of those, from excerpts with no category: "
-        f"{sum(1 for _, none in hits.values() if none):,}")
-    return hits
-
-
 def targeted_pool(paras, args, log):
     """The paragraphs the targeted slice may draw from, and how they were found.
 
@@ -328,63 +333,127 @@ def pick(pool, n, rng, exclude):
     return avail[:n]
 
 
+def stratum_of(paragraph, compiled):
+    """The first stratum whose heading regex matches; `other` catches the rest."""
+    label = paragraph["section_label"] or ""
+    for name, rx in compiled:
+        if rx is None or rx.search(label):
+            return name
+    return "other"
+
+
+def draw(pool, n, cap, rng, taken, log, what):
+    """Up to n paragraphs, at most `cap` from any one project.
+
+    THE CAP IS THE POINT. A first attempt at this sample returned four
+    consecutive paragraphs of one document as its cybersecurity slice; that is
+    one observation wearing four hats, and it is how a sample silently stops
+    measuring anything. Drawing round-robin over projects also spreads the
+    draw without needing a second pass.
+    """
+    by_project = defaultdict(list)
+    for p in sorted(pool, key=lambda p: p["paragraph_id"]):
+        if p["paragraph_id"] not in taken:
+            by_project[p["project_id"]].append(p)
+    for plist in by_project.values():
+        rng.shuffle(plist)
+    projects = sorted(by_project)
+    rng.shuffle(projects)
+
+    got = []
+    for round_i in range(cap):
+        for proj in projects:
+            if len(got) >= n:
+                break
+            plist = by_project[proj]
+            if round_i < len(plist):
+                got.append(plist[round_i])
+        if len(got) >= n:
+            break
+    taken |= {p["paragraph_id"] for p in got}
+
+    spread = Counter(p["project_id"] for p in got)
+    worst = spread.most_common(1)[0] if spread else ("-", 0)
+    log(f"{what}: {len(got)} of {len(pool):,} available, "
+        f"{len(spread)} projects, at most {worst[1]} from any one")
+    if len(got) < n:
+        log(f"  SHORT by {n - len(got)}")
+    return got
+
+
+def probe_pool(paras, log):
+    """Paragraphs whose BODY names cybersecurity, data centres or DPI.
+
+    Body text, deliberately, and the one place in this file that reads it. See
+    the module docstring: this group answers whether a method is blind to these
+    topics, and never contributes to a recall or precision figure.
+    """
+    import re as _re
+    phr = _re.compile(PROBE_PHRASES, _re.I)
+    acr = _re.compile(PROBE_ACRONYMS)
+    hit = [p for p in paras if phr.search(p["text"]) or acr.search(p["text"])]
+    log(f"probe pool: {len(hit):,} paragraphs name one of the probe topics "
+        f"({len(hit) / max(1, len(paras)):.1%} of prose)")
+    return hit
+
+
 def build(args, log):
     log("corpus")
     paras = load_corpus(args.data, log)
-    by_id = {p["paragraph_id"]: p for p in paras}
     rng = random.Random(args.seed)
-    chosen, slice_of, hint_of = [], {}, {}
+    compiled = [(name, re.compile(rx, re.I) if rx else None) for name, rx in STRATA]
 
-    hits = {}
-    if args.tracker:
-        log("tracker")
-        excerpts = read_tracker(args.tracker, log)
-        log("matching excerpts to paragraphs")
-        hits = match_excerpts(excerpts, paras, log)
-        # paragraphs from uncategorised excerpts first: candidate climate
-        # content her taxonomy had no bucket for, and so the likeliest place
-        # for a measure type with no name yet.
-        priority = sorted(pid for pid, (_, none) in hits.items() if none)
-        rest = sorted(pid for pid, (_, none) in hits.items() if not none)
-        rng.shuffle(priority); rng.shuffle(rest)
-        take = [pid for pid in priority + rest if pid in by_id][:args.flagged]
-        for pid in take:
-            chosen.append(by_id[pid]); slice_of[pid] = "flagged"
-            hint_of[pid] = hint_for(hits[pid][0])
-        log(f"  flagged slice: {len(take)} paragraphs "
-            f"({sum(1 for pid in take if hits[pid][1])} from uncategorised excerpts)")
-    else:
-        log("tracker: not supplied - the flagged slice is SKIPPED")
+    buckets = defaultdict(list)
+    for p in paras:
+        buckets[stratum_of(p, compiled)].append(p)
+    log("\nstrata over the whole corpus (first match wins)")
+    for name, _ in STRATA:
+        log(f"  {len(buckets[name]):6,}  {name}")
 
-    taken = {p["paragraph_id"] for p in chosen}
-    pool, why = targeted_pool(paras, args, log)
-    if pool:
-        got = pick(pool, args.targeted, rng, taken)
+    wanted = {"climate": args.n_climate, "components": args.n_components,
+              "other": args.n_other}
+    chosen, slice_of, taken = [], {}, set()
+    log("\ndrawing")
+    for name, _ in STRATA:
+        got = draw(buckets[name], wanted[name], args.per_project_cap, rng,
+                   taken, log, f"  {name}")
         for p in got:
-            chosen.append(p); slice_of[p["paragraph_id"]] = "targeted"
-        taken |= {p["paragraph_id"] for p in got}
-        log(f"targeted slice: {len(got)} of {len(pool):,} available ({why})")
-        if len(got) < args.targeted:
-            log(f"  SHORT by {args.targeted - len(got)}. Name projects with "
-                f"--targeted-projects rather than widening the heading regex: "
-                f"PAD headings do not name these topics, so a wider regex buys "
-                f"paragraphs that are off-topic.")
+            chosen.append(p); slice_of[p["paragraph_id"]] = name
 
-    got = pick(paras, args.random_n, rng, taken)
-    for p in got:
-        chosen.append(p); slice_of[p["paragraph_id"]] = "random"
-    log(f"random slice: {len(got)} paragraphs, uniform over prose, seed {args.seed}")
+    if args.n_probe:
+        got = draw(probe_pool(paras, log), args.n_probe, args.probe_cap, rng,
+                   taken, log, "  probe")
+        for p in got:
+            chosen.append(p); slice_of[p["paragraph_id"]] = "probe"
 
-    write_workbook(args.out, chosen, slice_of, hint_of, args, log)
-    log(f"\ntotal paragraphs in the workbook: {len(chosen)}")
+    # A person named projects: top up `components` from them, still by section.
+    if args.targeted_projects:
+        pool, why = targeted_pool(paras, args, log)
+        got = draw(pool, args.targeted, args.per_project_cap, rng, taken, log,
+                   f"  named projects ({why})")
+        for p in got:
+            chosen.append(p); slice_of[p["paragraph_id"]] = "components"
+
+    write_workbook(args.out, chosen, slice_of, {}, args, log)
+
+    log(f"\ntotal paragraphs: {len(chosen)}")
     counts = Counter(slice_of.values())
-    log(f"  by slice: " + ", ".join(f"{k} {v}" for k, v in sorted(counts.items())))
-    log(f"blank annotation rows: {sum(blank_rows(slice_of[p['paragraph_id']], args) for p in chosen)}")
+    for name in [s[0] for s in STRATA] + ["probe"]:
+        if counts.get(name):
+            sub = [p for p in chosen if slice_of[p["paragraph_id"]] == name]
+            sp = Counter(p["project_id"] for p in sub)
+            log(f"  {counts[name]:4d}  {name:<11} {len(sp)} projects, "
+                f"max {sp.most_common(1)[0][1]} per project")
+    log(f"blank annotation rows: "
+        f"{sum(blank_rows(slice_of[p['paragraph_id']], args) for p in chosen)}")
+    log("\nPrecision must be estimated stratum-weighted against the corpus "
+        "counts above, never raw: the draw over-weights climate and components "
+        "on purpose. The probe group is excluded from every ranking figure.")
     return 0
 
 
 def blank_rows(slice_name, args):
-    return args.rows_random if slice_name == "random" else args.rows_rich
+    return args.rows_sparse if slice_name == "other" else args.rows_rich
 
 
 def write_workbook(path, chosen, slice_of, hint_of, args, log):
@@ -479,15 +548,22 @@ def inspect(args, log):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default="data")
-    ap.add_argument("--tracker", default="",
-                    help="Portfolio_tracker.xlsx; omit to skip the flagged slice")
     ap.add_argument("--out", default="goldset_sample.xlsx")
     ap.add_argument("--seed", type=int, default=20260918)
-    ap.add_argument("--flagged", type=int, default=80)
-    ap.add_argument("--targeted", type=int, default=40)
-    ap.add_argument("--random-n", type=int, default=60)
+    ap.add_argument("--n-climate", type=int, default=60)
+    ap.add_argument("--n-components", type=int, default=70)
+    ap.add_argument("--n-other", type=int, default=50)
+    ap.add_argument("--n-probe", type=int, default=20,
+                    help="blind-spot probe; excluded from every ranking figure")
+    ap.add_argument("--per-project-cap", type=int, default=3,
+                    help="most paragraphs any one project may contribute to a "
+                         "stratum; four consecutive paragraphs of one document "
+                         "is one observation, not four")
+    ap.add_argument("--probe-cap", type=int, default=2)
+    ap.add_argument("--targeted", type=int, default=0,
+                    help="extra component paragraphs from --targeted-projects")
     ap.add_argument("--targeted-sections", default="",
-                    help="regex over section_label; set it after --inspect")
+                    help="regex over section_label for the named-project top-up")
     ap.add_argument("--targeted-projects", default="",
                     help="comma-separated project ids a person named; their "
                          "paragraphs are drawn uniformly from the sections "
@@ -497,8 +573,9 @@ def main():
                             r"technical design",
                     help="which sections of a named project may be drawn from")
     ap.add_argument("--rows-rich", type=int, default=4,
-                    help="blank annotation rows per flagged/targeted paragraph")
-    ap.add_argument("--rows-random", type=int, default=2)
+                    help="blank annotation rows per climate/components/probe row")
+    ap.add_argument("--rows-sparse", type=int, default=2,
+                    help="blank rows for `other`, which is mostly empty")
     ap.add_argument("--inspect", action="store_true",
                     help="report section labels and tracker shape; writes nothing")
     args = ap.parse_args()

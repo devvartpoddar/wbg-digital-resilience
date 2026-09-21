@@ -5,7 +5,8 @@ The point of the fixture is that the real run happens on the box against a
 has to be reachable here instead: a moved clean file, a reordered tracker
 column, a slice that overlaps another, a workbook whose ids do not join.
 """
-import csv, hashlib, importlib.util, os, sys
+import csv, hashlib, importlib.util, os, random, re, sys
+from collections import Counter
 
 import pytest
 
@@ -111,10 +112,11 @@ def write_tracker(path, entries, extra_col=False):
 
 
 def args(**kw):
-    base = dict(data="", tracker="", out="", seed=7, flagged=2, targeted=1,
-                random_n=1, targeted_sections="", targeted_projects="",
+    base = dict(data="", out="", seed=7, n_climate=1, n_components=1,
+                n_other=1, n_probe=0, per_project_cap=3, probe_cap=2,
+                targeted=0, targeted_sections="", targeted_projects="",
                 targeted_project_sections="component|annex", rows_rich=3,
-                rows_random=2, inspect=False)
+                rows_sparse=2, inspect=False)
     base.update(kw)
     return type("A", (), base)()
 
@@ -183,93 +185,10 @@ def test_tracker_categories_stop_at_the_mitigation_flag(tmp_path):
     assert cats == ["Climate applications1"]
 
 
-def test_match_finds_the_right_paragraph_and_not_the_others(tmp_path):
-    data = corpus_fixture(tmp_path)
-    paras = bs.load_corpus(str(data), lambda m: None)
-    hits = bs.match_excerpts(
-        [("P100001", MEASURE, ["Resilient telecom"])], paras, lambda m: None)
-    assert set(hits) == {"d1:p000"}
-    assert hits["d1:p000"] == (["Resilient telecom"], False)
-
-
-def test_match_does_not_cross_project_boundaries(tmp_path):
-    data = corpus_fixture(tmp_path)
-    paras = bs.load_corpus(str(data), lambda m: None)
-    hits = bs.match_excerpts([("P100002", MEASURE, [])], paras, lambda m: None)
-    assert all(pid.startswith("d2:") for pid in hits)
-
-
-def test_uncategorised_excerpts_are_flagged_for_priority(tmp_path):
-    data = corpus_fixture(tmp_path)
-    paras = bs.load_corpus(str(data), lambda m: None)
-    hits = bs.match_excerpts([("P100001", MEASURE, [])], paras, lambda m: None)
-    assert hits["d1:p000"][1] is True
-
-
 def test_category_hint_maps_to_asset_and_direction():
     assert bs.hint_for(["Resilient telecom"]) == ("telecom network", "resilience_of_asset")
     assert bs.hint_for(["Climate applications1"])[1] == "digital_for_resilience"
     assert bs.hint_for(["Something nobody defined"]) == ("", "")
-
-
-def test_slices_are_disjoint_and_the_run_is_deterministic(tmp_path):
-    data = corpus_fixture(tmp_path)
-    tracker = tmp_path / "t.xlsx"
-    write_tracker(tracker, [("P100001", MEASURE, {"Resilient telecom": "Yes"}),
-                            ("P100002", THIRD + " Again.", {})])
-    outs = []
-    for i in range(2):
-        out = tmp_path / f"o{i}.xlsx"
-        bs.build(args(data=str(data), tracker=str(tracker), out=str(out),
-                      targeted_sections="cyber|climate"), lambda m: None)
-        wb = openpyxl.load_workbook(out)
-        rows = [[c.value for c in r] for r in wb["paragraphs"].iter_rows(min_row=2)]
-        outs.append(rows)
-    assert outs[0] == outs[1], "same seed must give the same sample"
-    ids = [r[0] for r in outs[0]]
-    assert len(ids) == len(set(ids)), "a paragraph appears in two slices"
-    assert {r[4] for r in outs[0]} <= {"flagged", "targeted", "random"}
-
-
-def test_workbook_ids_join_back_and_rows_carry_the_hints(tmp_path):
-    data = corpus_fixture(tmp_path)
-    tracker = tmp_path / "t.xlsx"
-    write_tracker(tracker, [("P100001", MEASURE, {"Resilient telecom": "Yes"})])
-    out = tmp_path / "o.xlsx"
-    bs.build(args(data=str(data), tracker=str(tracker), out=str(out),
-                  flagged=1, targeted=0, random_n=1), lambda m: None)
-    wb = openpyxl.load_workbook(out)
-    pids = {r[0].value for r in wb["paragraphs"].iter_rows(min_row=2)}
-    assert wb["paragraphs"].max_column == 8
-    rows = [[c.value for c in r] for r in wb["rows"].iter_rows(min_row=2)]
-    assert rows, "no blank annotation rows were written"
-    assert {r[0] for r in rows} <= pids, "a rows entry has no paragraph"
-    assert [c.value for c in wb["rows"][1]] == bs.ROW_COLUMNS
-    flagged = [r for r in rows if r[0] == "d1:p000"]
-    assert flagged and flagged[0][6] == "telecom network"
-    assert flagged[0][5] == "resilience_of_asset"
-    assert all(r[1] for r in rows), "the locator preview is empty"
-    assert all(r[2] in (None, "") for r in rows), "kind must start blank"
-
-
-def test_blank_row_counts_follow_the_slice(tmp_path):
-    data = corpus_fixture(tmp_path)
-    out = tmp_path / "o.xlsx"
-    bs.build(args(data=str(data), out=str(out), targeted=0, random_n=2,
-                  rows_random=2), lambda m: None)
-    wb = openpyxl.load_workbook(out)
-    rows = [[c.value for c in r] for r in wb["rows"].iter_rows(min_row=2)]
-    assert len(rows) == 4
-
-
-def test_missing_tracker_skips_the_flagged_slice(tmp_path, capsys):
-    data = corpus_fixture(tmp_path)
-    out = tmp_path / "o.xlsx"
-    bs.build(args(data=str(data), out=str(out), targeted=0, random_n=2),
-             lambda m: print(m))
-    assert "SKIPPED" in capsys.readouterr().out
-    wb = openpyxl.load_workbook(out)
-    assert {r[4].value for r in wb["paragraphs"].iter_rows(min_row=2)} == {"random"}
 
 
 def test_on_disk_schema_is_read_when_the_modelled_columns_are_absent(tmp_path):
@@ -310,18 +229,6 @@ def test_pipe_delimited_project_ids_link_to_the_first_project(tmp_path):
     assert {p["project_id"] for p in paras} == {"P100001", "P100002", "P100003"}
 
 
-def test_build_writes_paragraphs_from_the_on_disk_table(tmp_path):
-    data = rewrite_on_disk_schema(corpus_fixture(tmp_path))
-    out = tmp_path / "o.xlsx"
-    bs.build(args(data=str(data), out=str(out), targeted=0, random_n=2),
-             lambda m: None)
-    wb = openpyxl.load_workbook(out)
-    rows = [[c.value for c in r] for r in wb["paragraphs"].iter_rows(min_row=2)]
-    assert len(rows) == 2, "the sample came out empty"
-    assert all(r[3] for r in rows), "the section label did not ride through"
-    assert all(r[1].startswith("P100") for r in rows), "no project id"
-
-
 def test_named_projects_fill_the_targeted_slice_when_headings_do_not(tmp_path):
     """On the real corpus four paragraphs sit under a heading naming these
     topics, so the named-project selector is what makes the slice possible."""
@@ -360,3 +267,114 @@ def test_an_unknown_project_id_is_reported_not_swallowed(tmp_path, capsys):
                                  targeted_project_sections="component"),
                      lambda m: print(m))
     assert "P404040" in capsys.readouterr().out
+
+
+# --- strata, caps and the probe -------------------------------------------
+
+CYBER = ("The project will establish a national computer security incident "
+         "response team, CSIRT, and a security operations centre covering all "
+         "line ministries, with incident response procedures and drills.")
+
+
+def wide_corpus(tmp, n_projects=8, per_project=6):
+    """Enough projects that a per-project cap can actually bind."""
+    rows = []
+    for i in range(n_projects):
+        proj = f"P{100000 + i}"
+        for j in range(per_project):
+            section = ("Annex 4 Climate Co-Benefits" if j == 0 else
+                       "Project Components" if j < 4 else "Fiduciary")
+            body = CYBER if j == 3 else MEASURE if j < 3 else OTHER
+            rows.append((f"d{i}", proj, section, "narrative",
+                         f"{body} Sentence {i}-{j} keeps the text distinct."))
+    return write_corpus(tmp, rows)
+
+
+def test_strata_are_disjoint_and_first_match_wins():
+    compiled = [(n, re.compile(rx, re.I) if rx else None)
+                for n, rx in bs.STRATA]
+    # a climate co-benefit ANNEX is climate, not components, though both match
+    assert bs.stratum_of({"section_label": "Annex 4 Climate Co-Benefits"},
+                         compiled) == "climate"
+    assert bs.stratum_of({"section_label": "Project Components"},
+                         compiled) == "components"
+    assert bs.stratum_of({"section_label": "Fiduciary"}, compiled) == "other"
+    assert bs.stratum_of({"section_label": ""}, compiled) == "other"
+
+
+def test_the_per_project_cap_binds(tmp_path):
+    """The failure this cap exists for: four consecutive paragraphs of one
+    document reported as a four-paragraph sample."""
+    data = wide_corpus(tmp_path)
+    paras = bs.load_corpus(str(data), lambda m: None)
+    pool = [p for p in paras if "Components" in p["section_label"]]
+    got = bs.draw(pool, 12, 2, random.Random(1), set(),
+                  lambda m: None, "t")
+    spread = Counter(p["project_id"] for p in got)
+    assert spread.most_common(1)[0][1] <= 2
+    assert len(spread) >= 6, "the draw must spread over projects, not stack"
+
+
+def test_the_cap_limits_the_total_when_projects_run_out(tmp_path):
+    data = wide_corpus(tmp_path, n_projects=2, per_project=6)
+    paras = bs.load_corpus(str(data), lambda m: None)
+    pool = [p for p in paras if "Components" in p["section_label"]]
+    got = bs.draw(pool, 12, 2, random.Random(1), set(),
+                  lambda m: None, "t")
+    assert len(got) == 4, "2 projects x cap 2"
+
+
+def test_draw_never_returns_an_already_taken_paragraph(tmp_path):
+    data = wide_corpus(tmp_path)
+    paras = bs.load_corpus(str(data), lambda m: None)
+    rng = random.Random(3)
+    taken = set()
+    a = bs.draw(paras, 6, 3, rng, taken, lambda m: None, "a")
+    b = bs.draw(paras, 6, 3, rng, taken, lambda m: None, "b")
+    assert not ({p["paragraph_id"] for p in a} & {p["paragraph_id"] for p in b})
+
+
+def test_probe_matches_bodies_and_not_certification_or_social(tmp_path):
+    data = write_corpus(tmp_path, [
+        ("d1", "P1", "Project Components", "narrative", CYBER),
+        ("d1", "P1", "Project Components", "narrative",
+         "The certification of social protection beneficiaries will proceed."),
+    ])
+    paras = bs.load_corpus(str(data), lambda m: None)
+    hit = bs.probe_pool(paras, lambda m: None)
+    assert [p["paragraph_id"] for p in hit] == ["d1:p000"], \
+        "case-insensitive CERT/SOC would match certification and social"
+
+
+def test_probe_is_its_own_group_and_the_strata_are_untouched(tmp_path):
+    data = wide_corpus(tmp_path)
+    out = tmp_path / "o.xlsx"
+    bs.build(args(data=str(data), out=str(out), n_climate=4, n_components=6,
+                  n_other=4, n_probe=4), lambda m: None)
+    wb = openpyxl.load_workbook(out)
+    slices = Counter(r[4].value for r in wb["paragraphs"].iter_rows(min_row=2))
+    assert slices["probe"] == 4
+    assert set(slices) == {"climate", "components", "other", "probe"}
+
+
+def test_the_whole_build_is_deterministic_and_joins(tmp_path):
+    data = wide_corpus(tmp_path)
+    seen = []
+    for i in range(2):
+        out = tmp_path / f"o{i}.xlsx"
+        bs.build(args(data=str(data), out=str(out), n_climate=4,
+                      n_components=6, n_other=4, n_probe=3), lambda m: None)
+        wb = openpyxl.load_workbook(out)
+        pids = [r[0].value for r in wb["paragraphs"].iter_rows(min_row=2)]
+        rows = [r[0].value for r in wb["rows"].iter_rows(min_row=2)]
+        assert len(pids) == len(set(pids)), "a paragraph appears twice"
+        assert set(rows) <= set(pids), "a rows entry has no paragraph"
+        seen.append((pids, rows))
+    assert seen[0] == seen[1]
+
+
+def test_other_gets_fewer_blank_rows_than_the_rest():
+    a = args(rows_rich=4, rows_sparse=2)
+    assert bs.blank_rows("other", a) == 2
+    for name in ("climate", "components", "probe"):
+        assert bs.blank_rows(name, a) == 4
