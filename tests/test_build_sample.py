@@ -112,8 +112,9 @@ def write_tracker(path, entries, extra_col=False):
 
 def args(**kw):
     base = dict(data="", tracker="", out="", seed=7, flagged=2, targeted=1,
-                random_n=1, targeted_sections="", rows_rich=3, rows_random=2,
-                inspect=False)
+                random_n=1, targeted_sections="", targeted_projects="",
+                targeted_project_sections="component|annex", rows_rich=3,
+                rows_random=2, inspect=False)
     base.update(kw)
     return type("A", (), base)()
 
@@ -319,3 +320,43 @@ def test_build_writes_paragraphs_from_the_on_disk_table(tmp_path):
     assert len(rows) == 2, "the sample came out empty"
     assert all(r[3] for r in rows), "the section label did not ride through"
     assert all(r[1].startswith("P100") for r in rows), "no project id"
+
+
+def test_named_projects_fill_the_targeted_slice_when_headings_do_not(tmp_path):
+    """On the real corpus four paragraphs sit under a heading naming these
+    topics, so the named-project selector is what makes the slice possible."""
+    data = write_corpus(tmp_path, [
+        ("d1", "P100001", "Project Components", "narrative", MEASURE),
+        ("d1", "P100001", "Fiduciary", "narrative", OTHER),
+        ("d2", "P100002", "Project Components", "narrative", THIRD),
+    ])
+    paras = bs.load_corpus(str(data), lambda m: None)
+    pool, why = bs.targeted_pool(
+        paras, args(targeted_projects="p100001",
+                    targeted_project_sections="component"), lambda m: None)
+    assert [p["paragraph_id"] for p in pool] == ["d1:p000"]
+    assert "1 of 1 named projects" in why
+
+
+def test_named_projects_and_headings_union_without_duplicating(tmp_path):
+    data = write_corpus(tmp_path, [
+        ("d1", "P100001", "Project Components", "narrative", MEASURE),
+        ("d2", "P100002", "Cybersecurity annex", "annex", THIRD),
+    ])
+    paras = bs.load_corpus(str(data), lambda m: None)
+    pool, _ = bs.targeted_pool(
+        paras, args(targeted_sections="cyber|component",
+                    targeted_projects="P100001",
+                    targeted_project_sections="component"), lambda m: None)
+    ids = [p["paragraph_id"] for p in pool]
+    assert ids == sorted(set(ids)) and len(ids) == 2
+
+
+def test_an_unknown_project_id_is_reported_not_swallowed(tmp_path, capsys):
+    data = write_corpus(tmp_path, [
+        ("d1", "P100001", "Project Components", "narrative", MEASURE)])
+    paras = bs.load_corpus(str(data), lambda m: None)
+    bs.targeted_pool(paras, args(targeted_projects="P100001,P404040",
+                                 targeted_project_sections="component"),
+                     lambda m: print(m))
+    assert "P404040" in capsys.readouterr().out

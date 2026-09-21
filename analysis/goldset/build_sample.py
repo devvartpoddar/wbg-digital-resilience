@@ -277,6 +277,49 @@ def match_excerpts(excerpts, paras, log):
     return hits
 
 
+def targeted_pool(paras, args, log):
+    """The paragraphs the targeted slice may draw from, and how they were found.
+
+    Two location-based selectors, unioned. Neither reads paragraph text, so
+    neither hands a method under test an advantage it did not earn.
+
+    SECTION HEADINGS BARELY WORK ON THIS CORPUS and that is a finding, not a
+    tuning problem. Of 17,719 prose paragraphs, four sit under a heading naming
+    cybersecurity, data centres, digital public infrastructure or digital
+    identification; `climate` appears in 378. PAD headings name the document's
+    structure, not its subject matter, so the topics that never got a heading
+    need the second selector.
+
+    NAMED PROJECTS ARE THE SECOND SELECTOR, and the list is a person's
+    judgement, never a script's: which operations finance a security operations
+    centre or a data centre is exactly the expert call AGENTS.md says lives
+    with people. Within those projects the draw is uniform over the sections
+    that describe what is financed, so the slice is still selected by location.
+    """
+    pool, why = {}, []
+    if args.targeted_sections:
+        rx = re.compile(args.targeted_sections, re.I)
+        hit = [p for p in paras if rx.search(p["section_label"] or "")]
+        for p in hit:
+            pool[p["paragraph_id"]] = p
+        why.append(f"{len(hit)} by heading /{args.targeted_sections}/")
+    if args.targeted_projects:
+        want = {s.strip().upper() for s in args.targeted_projects.split(",") if s.strip()}
+        rx = re.compile(args.targeted_project_sections, re.I)
+        hit = [p for p in paras if p["project_id"].upper() in want
+               and rx.search(p["section_label"] or "")]
+        for p in hit:
+            pool[p["paragraph_id"]] = p
+        seen = {p["project_id"] for p in hit}
+        why.append(f"{len(hit)} from {len(seen)} of {len(want)} named projects")
+        for pid in sorted(want - seen):
+            log(f"  no paragraphs for named project {pid} - check the id")
+    if not pool:
+        log("targeted slice: nothing selected "
+            "(pass --targeted-sections and/or --targeted-projects)")
+    return sorted(pool.values(), key=lambda p: p["paragraph_id"]), "; ".join(why)
+
+
 def pick(pool, n, rng, exclude):
     """Deterministic sample of up to n, skipping already-taken ids."""
     avail = sorted((p for p in pool if p["paragraph_id"] not in exclude),
@@ -314,18 +357,18 @@ def build(args, log):
         log("tracker: not supplied - the flagged slice is SKIPPED")
 
     taken = {p["paragraph_id"] for p in chosen}
-    sect = re.compile(args.targeted_sections, re.I) if args.targeted_sections else None
-    if sect:
-        pool = [p for p in paras if sect.search(p["section_label"] or "")]
+    pool, why = targeted_pool(paras, args, log)
+    if pool:
         got = pick(pool, args.targeted, rng, taken)
         for p in got:
             chosen.append(p); slice_of[p["paragraph_id"]] = "targeted"
         taken |= {p["paragraph_id"] for p in got}
-        log(f"targeted slice: {len(got)} of {len(pool):,} paragraphs whose "
-            f"section heading matches /{args.targeted_sections}/")
+        log(f"targeted slice: {len(got)} of {len(pool):,} available ({why})")
         if len(got) < args.targeted:
-            log(f"  SHORT by {args.targeted - len(got)} - widen "
-                f"--targeted-sections or lower --targeted")
+            log(f"  SHORT by {args.targeted - len(got)}. Name projects with "
+                f"--targeted-projects rather than widening the heading regex: "
+                f"PAD headings do not name these topics, so a wider regex buys "
+                f"paragraphs that are off-topic.")
 
     got = pick(paras, args.random_n, rng, taken)
     for p in got:
@@ -445,6 +488,14 @@ def main():
     ap.add_argument("--random-n", type=int, default=60)
     ap.add_argument("--targeted-sections", default="",
                     help="regex over section_label; set it after --inspect")
+    ap.add_argument("--targeted-projects", default="",
+                    help="comma-separated project ids a person named; their "
+                         "paragraphs are drawn uniformly from the sections "
+                         "matching --targeted-project-sections")
+    ap.add_argument("--targeted-project-sections",
+                    default=r"component|detailed project description|annex|"
+                            r"technical design",
+                    help="which sections of a named project may be drawn from")
     ap.add_argument("--rows-rich", type=int, default=4,
                     help="blank annotation rows per flagged/targeted paragraph")
     ap.add_argument("--rows-random", type=int, default=2)
