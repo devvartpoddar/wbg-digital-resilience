@@ -16,6 +16,8 @@ corpus without resolving them. This does that.
 import argparse, csv, os, random, re, sys, textwrap
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 
 
 def load(data):
@@ -29,9 +31,28 @@ def load(data):
     return rows, docs
 
 
+def draw(pool, n, seed, key="doc_id"):
+    """Seeded draw spread across groups (documents, projects), so one long
+    document cannot dominate and the same seed reproduces the same rows."""
+    rng = random.Random(seed)
+    by_group = {}
+    for r in pool:
+        by_group.setdefault(r[key], []).append(r)
+    order = sorted(by_group)
+    rng.shuffle(order)
+    buckets = {g: list(by_group[g]) for g in order}
+    picked, i = [], 0
+    while len(picked) < min(n, len(pool)):
+        bucket = buckets[order[i % len(order)]]
+        if bucket:
+            picked.append(bucket.pop(rng.randrange(len(bucket))))
+        i += 1
+    return picked
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.join(ROOT, "data"))
+    ap.add_argument("--data", default=data_root())
     ap.add_argument("--n", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0, help="same seed gives the same draw")
     ap.add_argument("--block", default="", help="narrative | annex | frontmatter | template:*")
@@ -68,23 +89,7 @@ def main():
         print("no paragraphs matched", file=sys.stderr)
         return 1
 
-    # Spread the draw across documents rather than letting one long document
-    # dominate, then take a seeded sample so the same command reproduces it.
-    rng = random.Random(args.seed)
-    by_doc = {}
-    for r in pool:
-        by_doc.setdefault(r["doc_id"], []).append(r)
-    order = sorted(by_doc)
-    rng.shuffle(order)
-    picked, i = [], 0
-    while len(picked) < min(args.n, len(pool)):
-        did = order[i % len(order)]
-        bucket = by_doc[did]
-        if bucket:
-            picked.append(bucket.pop(rng.randrange(len(bucket))))
-        i += 1
-        if i > len(order) * 200:
-            break
+    picked = draw(pool, args.n, args.seed)
 
     out = []
     out.append(f"{len(picked)} paragraphs drawn from {len(pool)} matching "

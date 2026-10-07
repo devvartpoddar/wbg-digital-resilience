@@ -1,8 +1,8 @@
-# All data lives on the server, not in git. Nothing here is deleted -
-# gitignored does not mean deletable. Read it through raven at
-# /srv/yggdrasil/work/wbg-digital-resilience/data/
+# All data lives on the box in the main checkout's data/ folder, not in git.
+# Gitignored does not mean deletable. Board cards work in .worktrees/.
 data/
 *.npy
 *.pdf
 __pycache__/
 .venv/
+.worktrees/

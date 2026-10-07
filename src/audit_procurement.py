@@ -20,6 +20,7 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 
 from clean import CHAR_MAP                                # noqa: E402
 from clean_procurement import norm_ref, is_placeholder     # noqa: E402
@@ -268,7 +269,7 @@ def load(data, table):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.join(ROOT, "data"))
+    ap.add_argument("--data", default=data_root())
     ap.add_argument("--examples", type=int, default=5)
     ap.add_argument("--out", default="")
     args = ap.parse_args()

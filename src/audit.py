@@ -19,6 +19,8 @@ import argparse, csv, os, re, sys, unicodedata
 from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 
 # Blocks that are meant to read as prose. Table and template blocks are
 # deliberately not prose, so prose checks would only produce noise there.
@@ -36,7 +38,7 @@ PROSE_BLOCKS = ("narrative", "annex")
 #
 # This holds for THIS tokeniser on THIS kind of text. A different model, or a
 # corpus in another language, needs its own number - take it from the
-# tokens_reported field of meta/embedding_manifest.json, which records what the
+# tokens_reported field of data/embedding_manifest.json, which records what the
 # API actually billed rather than what anyone predicted.
 TOKENS_PER_WORD = 3_027_632 / 2_287_945
 
@@ -150,7 +152,7 @@ def _private_use(t):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.join(ROOT, "data"))
+    ap.add_argument("--data", default=data_root())
     ap.add_argument("--examples", type=int, default=4)
     ap.add_argument("--block", default="")
     ap.add_argument("--out", default="")

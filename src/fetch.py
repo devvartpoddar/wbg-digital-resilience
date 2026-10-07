@@ -14,6 +14,8 @@ import urllib.parse
 import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 WDS = "https://search.worldbank.org/api/v3/wds"
 
 # Identify the caller rather than arriving as an anonymous script.
@@ -119,7 +121,7 @@ def read_cohort(path):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cohort", default=os.path.join(ROOT, "inputs/config/cohort.csv"))
-    ap.add_argument("--out", default=os.path.join(ROOT, "data"))
+    ap.add_argument("--out", default=data_root())
     ap.add_argument("--limit", type=int, default=0, help="first N projects only (for a smoke run)")
     ap.add_argument("--delay", type=float, default=0.5, help="seconds between requests")
     args = ap.parse_args()

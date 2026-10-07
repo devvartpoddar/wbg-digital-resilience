@@ -22,6 +22,8 @@ import argparse, csv, hashlib, os, re, sys, unicodedata
 from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 
 # A contents-page line ends in dot leaders and a page number, or in a run of
 # spaces and a page number. A body heading ends in neither. Verified against
@@ -594,7 +596,7 @@ def clean_document(raw):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.join(ROOT, "data"))
+    ap.add_argument("--data", default=data_root())
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--min-tokens", type=int, default=5)
     args = ap.parse_args()

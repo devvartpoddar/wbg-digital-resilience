@@ -6,7 +6,7 @@ Reads  inputs/config/cohort.csv
        data/raw/notices/{project_id}.json       cached notice responses
        data/raw/awards/{project_id}.json        cached award responses
 Writes data/raw/...                              (gitignored raw artefacts)
-       meta/api_fetch_log.csv                    every interface call, per data model s5
+       data/api_fetch_log.csv                    every interface call
        data/intermediate/procurement/packages_raw.csv
        data/intermediate/procurement/notices_raw.csv
        data/intermediate/procurement/awards_raw.csv
@@ -41,6 +41,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 
 import plan_table                                     # noqa: E402
 from fetch import get, HEADERS, read_cohort            # noqa: E402
@@ -1107,8 +1108,8 @@ def _change(project, key, basis, ref, change, field, frm, to, from_v, to_v, stam
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cohort", default=os.path.join(ROOT, "inputs/config/cohort.csv"))
-    ap.add_argument("--data", default=os.path.join(ROOT, "data"))
-    ap.add_argument("--meta", default=os.path.join(ROOT, "meta"))
+    ap.add_argument("--data", default=data_root())
+    ap.add_argument("--meta", default=data_root())
     ap.add_argument("--limit", type=int, default=0, help="first N projects (smoke run)")
     ap.add_argument("--delay", type=float, default=0.3)
     ap.add_argument("--workers", type=int, default=6,

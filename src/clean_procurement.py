@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Prepare procurement text: the ten steps of methodology section 5, Stage 2b.
+"""Prepare procurement text: the ten steps in docs/cleaning.md, procurement.
 
 Reads  data/intermediate/procurement/packages_raw.csv
        data/intermediate/procurement/notices_raw.csv
@@ -39,6 +39,7 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 
 from clean import CHAR_MAP, fold_chars                  # noqa: E402  (step 1)
 
@@ -453,7 +454,7 @@ def desc_sha256(text):
 
 def extract_amount_and_date(text):
     """Amounts and dates sometimes sit inside the description string. Pull them
-    out so they are not matched as text later (methodology 2b, final note)."""
+    out so they are not matched as text later (docs/cleaning.md)."""
     amount = ""
     m = MONEY_RE.search(text or "")
     if m:
@@ -779,7 +780,7 @@ def clean_awards(rows, counters):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.join(ROOT, "data"))
+    ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
 
     proc = os.path.join(args.data, PROC_DIR)

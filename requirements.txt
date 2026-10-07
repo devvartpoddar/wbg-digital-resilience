@@ -1,3 +1,8 @@
-requests==2.32.3
-pytest==9.1.1
+# Pinned to match the box's worker venv (/opt/yggdrasil/venvs/work), which is
+# what runs this code there. pytest is for local test runs only; the box's
+# worker venv does not carry it.
+requests==2.34.2
 numpy==2.5.3
+openpyxl==3.1.5
+psycopg[binary]==3.3.6
+pytest==9.1.1

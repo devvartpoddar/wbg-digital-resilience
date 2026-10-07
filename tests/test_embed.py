@@ -3,8 +3,8 @@
 Two rules shape this file.
 
 The first is the same one that governs tests/test_clean_rules.py: the paragraph
-text below is invented for this test. Real document text is permitted in
-exactly one committed place (inputs/labels/samples/), and tests/ is not it.
+text below is invented for this test. No document text is ever
+committed.
 
 The second is specific to this stage. An autouse fixture replaces the requests
 module inside src/embed.py with an object that raises on any attribute access,

@@ -5,8 +5,8 @@ one file between them rather than one each: the rendition can separate a
 borrower reference from the description it belongs to, and the closed value sets
 the parser matches against were written in English while the plans are not.
 
-Every fixture below is invented. Real plan text is permitted in exactly one
-committed place (inputs/labels/samples/) and tests/ is not it. What these
+Every fixture below is invented. No document text is ever
+committed. What these
 reproduce is the SHAPE of the rendition - where it breaks a line, what it puts
 in the gap - not any borrower's words.
 """

@@ -1,8 +1,7 @@
 """Unit tests for the cleaning rules, on a synthetic document.
 
 The fixture below is written for this test. It is NOT taken from a World Bank
-document: paragraph text is permitted in exactly one committed place
-(inputs/labels/samples/), and tests/ is not it. Every hazard the cleaner has hit
+document: no document text is ever committed. Every hazard the cleaner has hit
 in the real corpus is reproduced here in invented prose, so a regression fails
 here rather than being found by reading output months later.
 """

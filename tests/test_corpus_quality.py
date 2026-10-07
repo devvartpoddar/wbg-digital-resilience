@@ -19,8 +19,9 @@ import sys
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, "data")
 sys.path.insert(0, os.path.join(ROOT, "src"))
+from paths import data_root  # noqa: E402
+DATA = data_root()
 
 import audit as A  # noqa: E402
 

@@ -30,6 +30,7 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 
 from clean_procurement import norm_ref                     # noqa: E402
 
@@ -101,7 +102,7 @@ def near_pairs(unmatched, candidates, limit=20, floor=0.55):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.join(ROOT, "data"))
+    ap.add_argument("--data", default=data_root())
     ap.add_argument("--examples", type=int, default=20)
     args = ap.parse_args()
 

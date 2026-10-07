@@ -1,8 +1,7 @@
 """Unit tests for the procurement cleaning rules, then gates on the real tables.
 
-The fixtures are invented. Paragraph text is permitted in exactly one committed
-place (inputs/labels/samples/) and tests/ is not it, so no description below is
-taken from a World Bank plan. What they reproduce is the SHAPE of the real thing:
+The fixtures are invented. No document text is ever committed, so no
+description below is taken from a World Bank plan. What they reproduce is the SHAPE of the real thing:
 the wrap artefacts the plan rendition produces, the lot/phase/rebid markers, the
 four languages, and the placeholder forms.
 
@@ -24,8 +23,9 @@ from collections import Counter
 import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-DATA = os.path.join(ROOT, "data")
 sys.path.insert(0, os.path.join(ROOT, "src"))
+from paths import data_root  # noqa: E402
+DATA = data_root()
 
 import clean_procurement as P  # noqa: E402
 import audit_procurement as AP  # noqa: E402

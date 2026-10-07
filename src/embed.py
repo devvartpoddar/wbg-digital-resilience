@@ -6,7 +6,7 @@ Writes data/emb_cache/{model}.{dim}/{aa}/{sha256}.f32   one vector per unique te
        data/paragraph_emb.npy                           (rows, dim) float32
        data/emb_index.csv                               row -> paragraph_id
        data/embed_report.txt
-       meta/embedding_manifest.json                     committed; the provenance record
+       data/embedding_manifest.json                     the provenance record
 
 The cache is content-addressed on the SHA-256 of the exact text embedded, under
 a directory named for the model and dimension count. So a re-run costs nothing,
@@ -23,6 +23,8 @@ import numpy
 import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
 
 DEFAULT_MODEL = "openai/text-embedding-3-large"
 DEFAULT_DIM = 3072
@@ -394,8 +396,8 @@ def token_range(words, chars):
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--data", default=os.path.join(ROOT, "data"))
-    ap.add_argument("--meta", default=os.path.join(ROOT, "meta"))
+    ap.add_argument("--data", default=data_root())
+    ap.add_argument("--meta", default=data_root())
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--dim", type=int, default=DEFAULT_DIM)
     ap.add_argument("--base-url", default=DEFAULT_BASE)
