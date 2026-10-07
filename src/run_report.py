@@ -76,7 +76,7 @@ def build(data, topic, today):
         ("Paragraphs kept", grab(clean, "paragraphs kept")),
         ("Paragraphs dropped", grab(clean, "paragraphs dropped")),
         ("Sentences", grab(clean, "sentences")),
-        ("Procurement packages", grab(pclean, "packages")),
+        ("Procurement packages", grab(pclean, "packages kept (latest only)")),
         ("Notices", grab(pfetch, "notices rows")),
         ("Awards", grab(pfetch, "awards rows")),
     ]
