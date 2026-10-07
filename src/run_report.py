@@ -1,0 +1,150 @@
+#!/usr/bin/env python3
+"""Draft the run report as a note for the project folder in Dev's notes vault.
+
+Reads  data/fetch_report.txt, data/clean_report.txt, data/audit_report.txt,
+       data/intermediate/procurement/{fetch_procurement,clean_procurement,
+       audit_procurement}_report.txt
+Writes data/reports/{date} {topic}.md
+
+Reports do not belong in the repository. This writes a Markdown note in the
+shape of Projects/WBG Digital Resilience/_template.md, into data/ (never
+committed). The agent that ran the pipeline then copies it into the vault with
+the notes tools - Projects/WBG Digital Resilience/Reports/ - and adds a line to
+that folder's README index. The pipeline itself never writes outside its own
+folder.
+
+The note carries numbers only. "Decisions needed" is left for whoever read the
+output, because a script cannot know what is surprising.
+
+  python3 src/run_report.py --topic "Cleaning run"
+"""
+import argparse, os, re, subprocess, sys
+from datetime import date
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from paths import data_root  # noqa: E402
+
+CHECK_ROW = re.compile(r"^(.+?)\s{2,}(\d[\d,]*)\s+([\d.]+)%\s+(defect|soft)\s*$")
+
+
+def read(path):
+    try:
+        with open(path, encoding="utf-8") as fh:
+            return fh.read()
+    except OSError:
+        return ""
+
+
+def grab(text, label):
+    m = re.search(rf"^\s*{re.escape(label)}\s*:?\s*([\d,]+)", text, re.M)
+    return m.group(1) if m else "?"
+
+
+def checks(text):
+    """(name, hits, share, severity) for every audit check row."""
+    out = []
+    for line in text.splitlines():
+        m = CHECK_ROW.match(line.rstrip())
+        if m:
+            out.append((m.group(1).strip(), int(m.group(2).replace(",", "")),
+                        float(m.group(3)), m.group(4)))
+    return out
+
+
+def commit():
+    try:
+        return subprocess.run(["git", "-C", ROOT, "rev-parse", "--short", "HEAD"],
+                              capture_output=True, text=True, check=True).stdout.strip()
+    except (OSError, subprocess.SubprocessError):
+        return ""
+
+
+def build(data, topic, today):
+    fetch = read(os.path.join(data, "fetch_report.txt"))
+    clean = read(os.path.join(data, "clean_report.txt"))
+    audit = read(os.path.join(data, "audit_report.txt"))
+    proc = os.path.join(data, "intermediate", "procurement")
+    pfetch = read(os.path.join(proc, "fetch_procurement_report.txt"))
+    pclean = read(os.path.join(proc, "clean_procurement_report.txt"))
+    paudit = read(os.path.join(proc, "audit_procurement_report.txt"))
+
+    rows = [
+        ("Appraisal documents", grab(fetch, "documents written")),
+        ("  read from PDF", grab(clean, "read from PDF")),
+        ("  read from text rendition", grab(clean, "read from text")),
+        ("Paragraphs kept", grab(clean, "paragraphs kept")),
+        ("Paragraphs dropped", grab(clean, "paragraphs dropped")),
+        ("Sentences", grab(clean, "sentences")),
+        ("Procurement packages", grab(pclean, "packages")),
+        ("Notices", grab(pfetch, "notices rows")),
+        ("Awards", grab(pfetch, "awards rows")),
+    ]
+    problems = []
+    for name, text in (("appraisal", audit), ("procurement", paudit)):
+        for check, hits, share, sev in checks(text):
+            if hits:
+                problems.append(f"- {name}, {sev}: {check}: {hits:,} ({share:.2f}%)")
+    defects = sum(1 for p in problems if ", defect:" in p)
+
+    lines = [
+        "---",
+        f"date: {today}",
+        "type: report",
+        "project: wbg-digital-resilience",
+        "workstream: infra-resilience",
+        f"run: {today}",
+        f"commit: {commit()}",
+        "tags: [report, project/wbg-digital-resilience, ws/infra-resilience]",
+        "---",
+        "",
+        f"# {topic}",
+        "",
+        "## Summary",
+        f"- {rows[0][1]} appraisal documents, {rows[3][1]} paragraphs and {rows[5][1]} "
+        f"sentences; {rows[6][1]} procurement packages.",
+        f"- {defects} defect-level audit checks with hits"
+        + (" - see Problems found." if defects else "."),
+        "",
+        "## What ran",
+        "- `./run.sh` on the box, from `/ygg/projects/wbg-digital-resilience`.",
+        "",
+        "## Numbers",
+        "| | Count |",
+        "|---|---|",
+    ] + [f"| {k} | {v} |" for k, v in rows] + [
+        "",
+        "## Problems found",
+    ] + (problems or ["- None: every audit check is at zero."]) + [
+        "",
+        "## Decisions needed",
+        "- (for the reader to fill in)",
+        "",
+        "## Files",
+        "- Review sheets: `data/review/` in the project folder.",
+        "- Full reports: `data/*_report.txt` and `data/intermediate/procurement/*_report.txt`.",
+        "- Postgres: database `work`, schema `wbg`.",
+        "",
+    ]
+    return "\n".join(lines)
+
+
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--data", default=data_root())
+    ap.add_argument("--topic", default="Pipeline run")
+    ap.add_argument("--date", default=date.today().isoformat())
+    args = ap.parse_args()
+    out_dir = os.path.join(args.data, "reports")
+    os.makedirs(out_dir, exist_ok=True)
+    dest = os.path.join(out_dir, f"{args.date} {args.topic}.md")
+    with open(dest, "w", encoding="utf-8") as fh:
+        fh.write(build(args.data, args.topic, args.date))
+    print(f"wrote {dest}")
+    print("next: copy it to the notes vault at "
+          f"Projects/WBG Digital Resilience/Reports/{os.path.basename(dest)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

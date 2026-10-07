@@ -23,3 +23,4 @@ step src/clean_procurement.py
 step src/audit_procurement.py | tail -3
 step src/load_pg.py
 step src/review_sheets.py
+step src/run_report.py --topic "Pipeline run"

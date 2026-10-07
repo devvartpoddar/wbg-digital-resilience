@@ -3,7 +3,8 @@
 
 Reads  data/paragraphs.csv, data/clean/{doc_id}.txt, data/raw/{doc_id}.txt
        data/intermediate/procurement/packages.csv
-Writes data/review/paragraphs_s{seed}.xlsx    100 paragraphs, cleaned next to raw
+Writes data/review/paragraphs_s{seed}.xlsx    100 paragraphs: cleaned, split into
+                                              sentences, and the raw text beside them
        data/review/packages_s{seed}.xlsx      100 packages, raw next to cleaned
 
 One sheet each, one row per unit, and two empty columns - ok, note - for the
@@ -31,14 +32,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root                    # noqa: E402
 from clean import CHAR_MAP, decode_raw         # noqa: E402
 from review import draw                        # noqa: E402
+import sentences                               # noqa: E402
 
 CELL_MAX = 32_000          # Excel refuses a cell over 32,767 characters
 ANCHOR = 20                # letters matched at each end of a paragraph; short,
                            # so a header cut into the paragraph rarely splits one
 
-PARA_COLS = [("paragraph_id", 18), ("project_ids", 12), ("section_path", 12),
-             ("block", 12), ("n_tokens", 8), ("cleaned", 70), ("raw", 70),
-             ("ok", 6), ("note", 30)]
+PARA_COLS = [("paragraph_id", 18), ("project_ids", 12), ("page_from", 6),
+             ("section_path", 12), ("block", 12), ("n_tokens", 8),
+             ("cleaned", 70), ("sentences", 70), ("raw", 70), ("ok", 6), ("note", 30)]
 PKG_COLS = [("package_id", 18), ("project_id", 10), ("plan_version", 10),
             ("category", 12), ("borrower_ref", 18), ("description", 45),
             ("description_clean", 45), ("lot", 6), ("phase", 6), ("is_rebid", 7),
@@ -142,9 +144,17 @@ def paragraph_rows(data, n, seed):
         body = clean_cache[did][int(r["char_start"]):int(r["char_end"])]
         raw, raw_letters = raw_cache[did]
         found = locate_raw(body, raw, raw_letters)
-        if found is None:
+        if found is None and r["block"] == "table":
+            # A table row read from the PDF joins its cells with " | "; the text
+            # rendition flattens the same table its own way, so the two rarely
+            # line up. Not a miss - the page number says where to look.
+            found = "(table row: compare with the PDF page)"
+        elif found is None:
             missed += 1
+        cuts = sentences.split(body)
         out.append(dict(r, cleaned=body,
+                        sentences="\n".join(f"[{k}] {body[a:b]}" for k, (a, b)
+                                             in enumerate(cuts, 1)),
                         raw=found if found is not None else "(not located in the raw file)"))
     return out, missed
 

@@ -27,26 +27,26 @@ import audit as A  # noqa: E402
 
 PROSE = A.PROSE_BLOCKS
 
-# check name -> maximum share of its scope, as a percentage
+# check name -> maximum share of its scope, as a percentage. Measured on the
+# 147-document corpus read from PDF (October 2026), each gate just above it.
 MAX_RATE = {
-    "footnote marker glued to a word": 1.0,
-    "paragraph opens as a footnote body": 0.5,
-    "page number left inline": 0.5,
+    "footnote marker glued to a word": 0.1,              # 0.03%
+    "paragraph opens as a footnote body": 0.05,          # 0.01%
+    "page number left inline": 0.05,                     # 0.00%
     "whitespace run of 3-5 spaces": 0.0,
     "whitespace run of 6+ spaces (column gutter)": 0.0,
-    "tabular: numeric tokens over a third": 1.5,
+    "tabular: numeric tokens over a third": 0.2,         # 0.08%
     "unicode replacement character": 0.0,
     "control or format character": 0.0,
     "smart quote, ligature or hyphen left unfolded": 0.0,
     "private use area character": 0.0,
-    # Soft checks. A paragraph starting mid-sentence is usually a split that
-    # should not have happened; one without terminal punctuation is often a
-    # legitimate bullet. Both are capped loosely to catch a collapse.
-    "starts mid-sentence": 6.0,
-    "no sentence-ending punctuation": 25.0,
+    # Soft. A paragraph starting mid-sentence is a split that should not have
+    # happened; one without terminal punctuation is usually a list item.
+    "starts mid-sentence": 0.5,                          # 0.33%
+    "no sentence-ending punctuation": 6.0,               # 5.03%
 }
 
-MIN_CLEAN_PROSE_PCT = 97.0
+MIN_CLEAN_PROSE_PCT = 99.8                           # 99.9%
 
 
 def _load():

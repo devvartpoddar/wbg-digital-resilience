@@ -33,7 +33,8 @@ Every decision the pipeline makes must be **repeatable** (same text, same answer
 5. **Identifiers are deterministic.** A re-run on unchanged input produces byte-identical identifiers and outputs.
 6. **Stages are resumable and skip unchanged work**, keyed on content checksums. On this hardware, reprocessing everything is expensive in hours, not just in principle.
 7. **The parse must be reproducible.** Identifiers are positional, so pin tool versions and check `text_sha256` on re-parse. A silent boundary shift repoints every label.
-8. **Labels change often.** Key them by the SHA-256 of the unit's text plus the name of the label set, never by position alone, and let nothing but evaluation read them.
+8. **Reports go to the notes vault, never the repository.** Run `src/run_report.py`, then copy the note it writes in `data/reports/` to `Projects/WBG Digital Resilience/Reports/` with the notes tools and add a line to that folder's `README.md` index. Git holds code, hand-maintained inputs and docs, nothing else.
+9. **Labels change often.** Key them by the SHA-256 of the unit's text plus the name of the label set, never by position alone, and let nothing but evaluation read them.
 
 ## Language in anything a person reads
 

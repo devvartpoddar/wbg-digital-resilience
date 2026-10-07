@@ -2,7 +2,8 @@
 """Fetch World Bank appraisal documents (text renditions) for the cohort.
 
 Reads  inputs/config/cohort.csv  (hand-maintained; included=true rows only)
-Writes data/raw/{doc_id}.txt     (gitignored)
+Writes data/raw/{doc_id}.txt     the Bank's text rendition (gitignored)
+       data/raw/pdf/{doc_id}.pdf the PDF itself, which src/pdf_layout.py reads
        data/documents.csv        (one row per fetched document)
        data/fetch_report.txt     (what was skipped and why)
 
@@ -36,7 +37,7 @@ MIN_BYTES = 3_000
 # emit duplicate paragraph identifiers downstream.
 DOC_COLS = ["doc_id", "project_ids", "doc_type", "doc_kind", "title",
             "disclosure_date", "lang", "source_url", "bytes", "content_sha256",
-            "has_markers", "fetched_at"]
+            "has_markers", "fetched_at", "pdf_url", "pdf_bytes", "pdf_sha256"]
 
 
 def looks_like_error_page(blob):
@@ -109,8 +110,42 @@ def list_docs(project_id, doc_type):
             "disclosure_date": (val.get("disclosure_date") or "")[:10],
             "lang": val.get("lang") or "",
             "txturl": val.get("txturl") or "",
+            "pdfurl": val.get("pdfurl") or "",
         })
     return [d for d in out if d["doc_id"]]
+
+
+def fetch_pdf(doc, pdf_dir, counts, notes, pid, delay):
+    """The PDF behind a document, cached on disk. Returns its bytes, or None.
+
+    The text rendition stays the fallback: a PDF that is missing, refused, or
+    not a PDF leaves the document readable, just by the older cleaner."""
+    dest = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
+    if os.path.exists(dest):
+        counts["pdf_cached"] += 1
+        with open(dest, "rb") as fh:
+            return fh.read()
+    if not doc.get("pdfurl"):
+        counts["pdf_missing"] += 1
+        notes.append(f"{pid}\t{doc['doc_id']}\tno pdfurl published")
+        return None
+    try:
+        blob = get(doc["pdfurl"], timeout=120).content
+    except Exception as exc:
+        counts["pdf_missing"] += 1
+        notes.append(f"{pid}\t{doc['doc_id']}\tPDF FETCH FAILED\t{exc}")
+        return None
+    if not blob.startswith(b"%PDF"):
+        counts["pdf_missing"] += 1
+        notes.append(f"{pid}\t{doc['doc_id']}\tpdfurl did not return a PDF")
+        return None
+    tmp = dest + ".part"
+    with open(tmp, "wb") as fh:
+        fh.write(blob)
+    os.replace(tmp, dest)
+    counts["pdf_fetched"] += 1
+    time.sleep(delay)
+    return blob
 
 
 def read_cohort(path):
@@ -136,7 +171,10 @@ def main():
 
     by_doc, notes = {}, []
     counts = {"fetched": 0, "cached": 0, "too_small": 0, "no_txturl": 0,
-              "no_docs": 0, "error": 0}
+              "no_docs": 0, "error": 0, "pdf_fetched": 0, "pdf_cached": 0,
+              "pdf_missing": 0}
+    pdf_dir = os.path.join(raw_dir, "pdf")
+    os.makedirs(pdf_dir, exist_ok=True)
 
     for n, proj in enumerate(projects, 1):
         pid = proj["project_id"]
@@ -190,6 +228,8 @@ def main():
                 counts["fetched"] += 1
                 time.sleep(args.delay)
 
+            pdf_blob = fetch_pdf(doc, pdf_dir, counts, notes, pid, args.delay)
+
             text = blob.decode("utf-8", errors="replace")
             if doc["doc_id"] in by_doc:
                 by_doc[doc["doc_id"]]["_projects"].add(pid)
@@ -203,6 +243,9 @@ def main():
                 "content_sha256": hashlib.sha256(blob).hexdigest(),
                 "has_markers": "true" if "@#&OPS" in text else "false",
                 "fetched_at": stamp,
+                "pdf_url": doc["pdfurl"] if pdf_blob else "",
+                "pdf_bytes": len(pdf_blob) if pdf_blob else "",
+                "pdf_sha256": hashlib.sha256(pdf_blob).hexdigest() if pdf_blob else "",
             }
 
         if n % 10 == 0:

@@ -299,51 +299,44 @@ def _load(table):
 # advance. The measured rate is in the comment. If one trips after a re-fetch,
 # read the examples the audit prints before moving it.
 #
-# The two high soft gates are not slack: the plan rendition leaves the method and
-# status cells empty for most older rows (STEP puts the method in the reference
-# suffix instead, and norm_method recovers what it can from there). They are
-# gated at all so a change that makes them worse is noticed.
+# Measured on the 70-project corpus after the October 2026 cleaning pass
+# (glue repair, stitched-record cut, status and method resolution). Each gate
+# sits just above the measured rate, so a regression fails and ordinary
+# variation as plans are re-published does not.
+#
+# Checks marked "source" describe the published data, not the cleaning: a plan
+# that prints a planned date after its revised date, an award whose supplier
+# amount exceeds the contract, a notice published with no description. They are
+# reported, and gated against getting worse, but cleaning cannot fix them.
 MAX_RATE = {
-    "private use area character": 0.05,          # 0.02% - 2 rows, see note below
-    "unicode replacement character": 0.0,        # 0.00% - removed at cleaning
+    "private use area character": 0.0,           # 0.00% - U+F076 now folded
+    "unicode replacement character": 0.0,        # 0.00%
     "control or format character": 0.0,          # 0.00%
     "whitespace not collapsed": 0.0,             # 0.00%
-    "description carries a second borrower reference": 5.5,   # 5.11%, see note below
-    "description ends mid-word": 1.0,            # 0.22%
-    # Not a defect we repair - it cannot be repaired without guessing, and the
-    # matching copy makes it harmless (see match_key). The gate is a ceiling
-    # that would catch the parser getting WORSE, not a target to drive to zero.
-    # The true rate is higher than this check can see: it finds a case boundary,
-    # so "DataCenter" shows and "studyfor" does not.
-    "word glued to the next inside the description": 40.0,   # 29.91% of 14,478
+    "description carries a second borrower reference": 0.1,   # 0.05% - cut at clean
+    "description ends mid-word": 0.1,            # 0.05%
+    "word glued to the next inside the description": 0.1,    # 0.03% - names left whole
+    "word broken by a space inside the description": 0.15,   # 0.07%
     "borrower reference absent": 0.0,            # 0.00%
     "borrower reference not normalised": 0.0,    # 0.00%
-    "category unmapped": 0.5,                    # 0.00%
-    "method unmapped": 90.0,                     # 83.91% (soft)
-    "status unmapped": 90.0,                     # 83.27% (soft)
+    "category unmapped": 0.0,                    # 0.00%
+    "method unmapped": 4.0,                      # 3.16% (soft)
+    "status unmapped": 6.0,                      # 5.15% (soft) - no evidence anywhere
+    "status raw present but unmapped": 0.2,      # 0.07% (soft)
     "language not determined": 0.0,              # 0.00%
-    "planned date after revised date": 0.5,      # 0.25%
-    "lot or phase marker left in the matching copy": 3.0,     # 0.74%
-    "table header text leaked into a description": 2.0,       # 0.59%
-    "supplier amount exceeds the contract amount": 1.0,       # 0.56% - source
-    "notice with no description": 2.0,           # 0.64%
+    "planned date after revised date": 0.5,      # 0.28% - source
+    "lot or phase marker left in the matching copy": 0.5,     # 0.40%
+    "table header text leaked into a description": 0.0,       # 0.00%
+    "supplier amount exceeds the contract amount": 1.0,       # 0.55% - source
+    "notice with no description": 1.0,           # 0.64% - source
 }
-# The two private-use rows are U+F076 in an award's supplier name: a Wingdings
-# code point nobody has read yet, so it is reported rather than guessed at.
-# CHAR_MAP in clean.py folds the ten the appraisal corpus taught us, including
-# U+F0D8, which was the other one here.
-#
-# "second borrower reference" moved from 3.61% to 5.11% when the plan parser
-# stopped losing records whose reference wrapped across two lines. The increase
-# is not the defect getting worse: in the plans that always parsed it is 3.60%
-# (156 of 4,330), unchanged, and the rest is 113 of 937 rows in the plans the
-# merge recovered, which are the messiest renditions in the corpus. The gate is
-# above 5.11% and still below anything that would read as a regression.
 
 
 @pytest.mark.parametrize("name", sorted(MAX_RATE))
 def test_audit_check_is_within_its_gate(name):
     tables = {t: _load(t) for t in ("packages", "notices", "awards")}
+    if not AP.VOCAB:
+        AP.load_vocab(DATA)
     spec = [c for c in AP.CHECKS if c[0] == name]
     assert spec, f"{name} is not a check in audit_procurement.py"
     _n, wanted, _sev, fn = spec[0]
@@ -360,7 +353,7 @@ def test_audit_check_is_within_its_gate(name):
 def test_every_check_has_a_gate():
     """A check with no threshold is a check nobody is held to."""
     missing = [c[0] for c in AP.CHECKS
-               if c[0] not in MAX_RATE and c[2] == "defect"]
+               if c[0] not in MAX_RATE and c[2] in ("defect", "source")]
     assert missing == [], f"defect checks without a gate: {missing}"
 
 
@@ -670,3 +663,62 @@ class TestCarryForward:
 ])
 def test_absent_decides_what_counts_as_not_stated(field, value, expected):
     assert P.absent(field, value) is expected
+
+
+# --- glued words and status sources (invented descriptions) -------------------
+
+import glue  # noqa: E402
+
+
+def _vocab():
+    words = ("supply of digital equipment for the centre design and build "
+             "radio programs national data base database statistics auditeur "
+             "parties drone de la mise en place une plateforme")
+    return glue.build_vocab([words] * 5)
+
+
+@pytest.mark.parametrize("glued,fixed", [
+    ("Design and Build ofDigital Equipment", "Design and Build of Digital Equipment"),
+    ("TV andRadio Programs", "TV and Radio Programs"),
+    ("supply ofequipment", "supply of equipment"),
+    ("misede place", "mise de place"),
+    ("Equipment,Supply", "Equipment, Supply"),
+    ("Centre(NDC) design", "Centre (NDC) design"),
+])
+def test_glued_words_are_split(glued, fixed):
+    assert glue.repair(glued, _vocab())[0] == fixed
+
+
+@pytest.mark.parametrize("word", ["database", "Auditeur", "parties", "drone",
+                                  "UNOPS", "ZoneI", "Zanzibarr"])
+def test_real_words_and_acronyms_are_left_whole(word):
+    assert glue.repair(word, _vocab()) == (word, 0)
+
+
+def _pkg(status, disclosed, ref="R-1", earlier=None):
+    return {"project_id": "P1", "borrower_ref_norm": ref, "status": status,
+            "_disclosed": disclosed, "_earlier_status": earlier}
+
+
+def test_status_from_a_later_signed_award_beats_an_older_plan():
+    rows = [_pkg("planned", "2023-01-01")]
+    P.resolve_status(rows, [{"project_id": "P1", "borrower_ref_norm": "R-1",
+                             "signed_date": "2024-05-01"}], Counter())
+    assert (rows[0]["status"], rows[0]["status_source"], rows[0]["status_as_of"]) == \
+        ("signed", "award", "2024-05-01")
+
+
+def test_an_earlier_plan_status_is_used_only_when_nothing_newer_says_anything():
+    rows = [_pkg("unknown", "2024-01-01", earlier=("under_execution", "2022-03-01", "v3")),
+            _pkg("cancelled", "2024-01-01", ref="R-2",
+                 earlier=("planned", "2021-01-01", "v1"))]
+    P.resolve_status(rows, [], Counter())
+    assert (rows[0]["status"], rows[0]["status_source"], rows[0]["status_as_of"]) == \
+        ("under_execution", "earlier_plan", "2022-03-01")
+    assert (rows[1]["status"], rows[1]["status_source"]) == ("cancelled", "plan")
+
+
+def test_no_evidence_stays_unknown_and_says_so():
+    rows = [_pkg("unknown", "2024-01-01")]
+    P.resolve_status(rows, [], Counter())
+    assert (rows[0]["status"], rows[0]["status_source"]) == ("unknown", "none")

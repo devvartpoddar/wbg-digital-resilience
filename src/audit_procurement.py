@@ -23,7 +23,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root  # noqa: E402
 
 from clean import CHAR_MAP                                # noqa: E402
-from clean_procurement import norm_ref, is_placeholder     # noqa: E402
+from clean_procurement import norm_ref, is_placeholder, REF_INLINE  # noqa: E402
+import glue                                                # noqa: E402
+
+# Set in main(): the run's vocabulary, so the word checks judge by the same
+# words the cleaner used.
+VOCAB, NAMES = {}, None
 
 PROC_DIR = os.path.join("intermediate", "procurement")
 
@@ -86,8 +91,6 @@ def _spacing(row):
 # A second borrower reference inside a description means the record boundary was
 # missed and two packages were stitched into one. It is the only check that can
 # see the plan parser's worst failure, and it is exact rather than heuristic.
-REF_INLINE = re.compile(r"[A-Z]{2,}-[A-Z0-9]{1,12}-[0-9]{2,10}-(?:CW|GD|GO|CS|NC)-\w{2,5}"
-                        r"|\b(?=[A-Z0-9-]*[0-9])[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){1,5}\s*/\s")
 REF_SHAPE = re.compile(r"^[A-Z0-9][A-Z0-9\u2013-]*$")
 
 
@@ -110,7 +113,23 @@ def _glued_inside(row):
     """
     field = "bid_description_clean" if "bid_description_clean" in row else "description_clean"
     d = row.get(field) or ""
-    return [m.group(0) for m in re.finditer(r"\b\w*[a-z][A-Z]\w*\b", d)][:3]
+    v = VOCAB if (row.get("description_lang") or "en") == "en" else \
+        getattr(VOCAB, "foreign", VOCAB)
+    return [m.group(0) for m in re.finditer(r"\b\w*[a-z][A-Z]\w*\b", d)
+            if glue._best_cut(m.group(0), v, NAMES) is not None][:3]
+
+
+@check("word broken by a space inside the description",
+       tables=("packages", "notices", "awards"))
+def _broken_word(row):
+    """'S upply', 'Ca pacity': two fragments that are one word the corpus uses.
+    The same test glue.rejoin repairs by, so a hit is one it declined."""
+    field = "bid_description_clean" if "bid_description_clean" in row else "description_clean"
+    d = row.get(field) or ""
+    v = VOCAB if (row.get("description_lang") or "en") == "en" else \
+        getattr(VOCAB, "foreign", VOCAB)
+    fixed, n = glue.rejoin(d, v)
+    return [f"{n} fragment pair(s)"] if n else []
 
 
 @check("description carries a second borrower reference")
@@ -126,7 +145,8 @@ def _double_ref(row):
 def _midword(row):
     """A wrap join that dropped a space: 'Toolsfor'. Detected by a trailing
     word-shaped token with no vowel, which is a fragment rather than a word.
-    The system word list is not assumed to exist, so this is shape-based."""
+    The system word list is not assumed to exist, so this is shape-based. An
+    all-capitals token is an acronym - PDPC, FTTX - not a fragment."""
     d = (row.get("description_clean") or "").rstrip(" .()")
     if len(d) < 3:
         return []
@@ -134,6 +154,8 @@ def _midword(row):
     if not toks:
         return []
     last = toks[-1]
+    if last.isupper():
+        return []
     if len(last) > 3 and not re.search(r"[aeiouAEIOU]", last):
         return [last]
     return []
@@ -195,7 +217,7 @@ def _lang(row):
 
 # ----------------------------------------------------------- cross-field
 
-@check("planned date after revised date")
+@check("planned date after revised date", severity="source")
 def _dates(row):
     p, r = (row.get("planned_date") or ""), (row.get("revised_date") or "")
     if re.match(r"^\d{4}-\d{2}-\d{2}$", p) and re.match(r"^\d{4}-\d{2}-\d{2}$", r):
@@ -217,10 +239,16 @@ def _marker_left(row):
     information, not noise - so this reads the matching copy, where a leftover
     marker means step 4 missed a form."""
     d = (row.get("description_clean") or "")
-    return re.findall(r"\(\s*RE-?BID\s*\)|(?:\bLOT\b|\bPHASE\b)\s*[-#:]?\s*\w", d, re.I)
+    found = re.findall(r"\(\s*RE-?BID\s*\)|\bLOT\b\s*[-#:]?\s*\w"
+                       r"|\bPHASE\b\s*[-#:]?\s*(?:\d|[IVX]+\b)", d, re.I)
+    # A package that lists its several lots - 'LOT 1: ... LOT 2: ...' - is
+    # describing its content, not carrying a marker that belongs in a column.
+    if len(re.findall(r"\bLOT\b", d, re.I)) >= 2:
+        return []
+    return found
 
 
-@check("supplier amount exceeds the contract amount", tables=("awards",))
+@check("supplier amount exceeds the contract amount", tables=("awards",), severity="source")
 def _supplier_over(row):
     try:
         total = float(row.get("total_amount") or 0)
@@ -241,7 +269,7 @@ def _header_leak(row):
                       r"Project Implementation agency|Loan / Credit No)", d)
 
 
-@check("notice with no description", tables=("notices",))
+@check("notice with no description", tables=("notices",), severity="source")
 def _notice_desc(row):
     return [] if (row.get("bid_description") or "").strip() else ["empty"]
 
@@ -267,6 +295,20 @@ def load(data, table):
         return list(csv.DictReader(fh))
 
 
+def load_vocab(data):
+    """Build the run's vocabulary exactly as clean_procurement does."""
+    global VOCAB, NAMES
+    proc = os.path.join(data, "intermediate", "procurement")
+    raw = []
+    for name, field in (("packages_raw", "description"), ("notices_raw", "bid_description"),
+                        ("awards_raw", "description")):
+        path = os.path.join(proc, f"{name}.csv")
+        if os.path.exists(path):
+            with open(path, newline="", encoding="utf-8") as fh:
+                raw += [r.get(field) or "" for r in csv.DictReader(fh)]
+    VOCAB, NAMES = glue.corpus_vocab(raw, data)
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=data_root())
@@ -277,6 +319,7 @@ def main():
     tables = {t: load(args.data, t) for t in ("packages", "notices", "awards")}
     if any(v is None for v in tables.values()):
         raise SystemExit("audit_procurement: run src/clean_procurement.py first")
+    load_vocab(args.data)
 
     hits = defaultdict(list)
     scope = Counter()
@@ -289,8 +332,8 @@ def main():
                     key = row.get("package_id") or row.get("notice_id") or \
                         row.get("contract_id") or "?"
                     hits[name].append((t, key, str(found[:3]),
-                                       (row.get("description")
-                                        or row.get("bid_description") or "")[:160]))
+                                       (row.get("description_clean")
+                                        or row.get("bid_description_clean") or "")[:160]))
     out = []
     out.append("procurement audit - prepared tables")
     out.append("")

@@ -33,7 +33,7 @@ rather than two that drift.
 The only file this stage ever writes that is not derived here is nothing - every
 output is rebuilt from the raw tables in one pass, so a re-run is byte-identical.
 """
-import argparse, csv, hashlib, os, re, sys
+import argparse, csv, glob, hashlib, os, re, sys
 import unicodedata
 from collections import Counter, defaultdict
 
@@ -42,8 +42,15 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root  # noqa: E402
 
 from clean import CHAR_MAP, fold_chars                  # noqa: E402  (step 1)
+import glue                                              # noqa: E402
 
-CLEAN_VERSION = "proc-clean-1"
+CLEAN_VERSION = "proc-clean-2"
+
+# Another package's borrower reference inside a description: the parser missed
+# a record boundary and stitched the next record on. Used to cut it off here and
+# to count what is left in audit_procurement.
+REF_INLINE = re.compile(r"[A-Z]{2,}-[A-Z0-9]{1,12}-[0-9]{2,10}-(?:CW|GD|GO|CS|NC)-\w{2,5}"
+                        r"|\b(?=[A-Z0-9-]*[0-9])[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){1,5}\s*/\s")
 
 
 PROC_DIR = os.path.join("intermediate", "procurement")
@@ -237,6 +244,11 @@ PLACEHOLDER_CATEGORY = {"goods", "works", "services", "consultancy", "consulting
 REF_ONLY_RE = re.compile(r"^[A-Z]{2}-[A-Z0-9]{1,12}-\d{2,10}-[A-Z]{2}-[A-Z0-9]{2,6}$")
 
 
+CELL_WORDS_ONLY = re.compile(
+    r"^(?:\s|post(?:erior)?|prior|open|limited|direct|national|international|"
+    r"individual|single|stage|one|two|envelope|[-/,.()])+$", re.I)
+
+
 def is_placeholder(description):
     """Step 7. Flag, never drop.
 
@@ -252,6 +264,10 @@ def is_placeholder(description):
     if key in PLACEHOLDER_EXACT or key in PLACEHOLDER_CATEGORY:
         return True
     if REF_ONLY_RE.match(s.upper().replace(" ", "")):
+        return True
+    # The parser took the wrong cells: the 'description' is the review type,
+    # method and market approach - 'Posterior Individual Open - National'.
+    if CELL_WORDS_ONLY.match(s):
         return True
     words = [w for w in re.findall(r"[A-Za-zÀ-ÿ]{2,}", s)]
     return len(words) < 2
@@ -297,6 +313,22 @@ STATUS_MAP = {
     "assinado": "signed",
     "em execucao": "under_execution",
     "em preparacao": "under_preparation",
+    # Spanish
+    "firmado": "signed",
+    "anulado": "cancelled",
+    "en ejecucion": "under_execution",
+    "en evaluacion": "under_execution",
+    "en preparacion": "under_preparation",
+    "pendiente": "planned",
+    "planificado": "planned",
+    "ejecucion pendiente": "planned",
+    "implementacao pendente": "planned",
+    "em fase de implementacao": "under_execution",
+    # Signed, then ended early. Neither signed nor cancelled is true of it, so
+    # it has its own value rather than falling into unknown.
+    "terminated": "terminated",
+    "resilie": "terminated",
+    "rescindido": "terminated",
 }
 
 METHOD_MAP = {
@@ -376,23 +408,30 @@ def enum_key(value):
 
 
 def norm_status(value):
-    """Step 9 for packages.status (A1.24). Unmapped goes to `unknown`.
+    """Step 9 for packages.status. Unmapped goes to `unknown`, counted.
 
-    'Terminated' and its French 'Résilié' are deliberately absent from
-    STATUS_MAP and so land in `unknown`, which A1.24 says is what happens to a
-    value that does not map, counted rather than silently assigned. They are
-    1,209 rows of the eight-country corpus and neither `signed` nor `cancelled`
-    is true of them: the contract was signed and then ended early. The enum has
-    no value for that. `status_raw` keeps the borrower's own word.
+    'Terminated' (French 'Résilié', Portuguese and Spanish 'Rescindido') maps to
+    its own value, `terminated`: the contract was signed and then ended early,
+    and neither `signed` nor `cancelled` is true of it. `status_raw` keeps the
+    borrower's own word either way.
     """
     key = enum_key(value)
     if not key:
         return "unknown"
     if key in STATUS_MAP:
         return STATUS_MAP[key]
-    for k, v in STATUS_MAP.items():
-        if key.startswith(k):
+    # The clipped cell can also INSERT a space mid-word - 'Under Implement
+    # ation', "En cours d'exécut ion" - so compare with every space removed.
+    flat = key.replace(" ", "")
+    for k, v in sorted(STATUS_MAP.items(), key=lambda kv: -len(kv[0])):
+        fk = k.replace(" ", "")
+        if flat == fk or flat.startswith(fk):
             return v
+    # A clipped word: "En attente d'" is the start of exactly one status.
+    if len(flat) >= 8:
+        hits = {v for k, v in STATUS_MAP.items() if k.replace(" ", "").startswith(flat)}
+        if len(hits) == 1:
+            return hits.pop()
     return "unknown"
 
 
@@ -436,6 +475,52 @@ def norm_method(method_raw, market_approach=""):
     return "unknown"
 
 
+def cut_stitched(desc, own_ref, counters):
+    """Drop a stitched-on record: everything from the first borrower reference
+    that is not this package's own. The text before it is this package's
+    description; the stitched record is another package, with its own row in
+    another plan version, and does not belong here."""
+    for m in REF_INLINE.finditer(desc):
+        if norm_ref(m.group(0).split("/")[0].strip()) == norm_ref(own_ref):
+            continue
+        # A borrower reference has at least three parts; 'COVID-19 / ' has two
+        # and is ordinary text.
+        if len(re.split(r"[-–]", m.group(0).split("/")[0].strip())) < 3:
+            continue
+        # The glued-on reference may be preceded by a stray word fragment
+        # ('WarehouseFM-...', 'PATNUCCM-...'); cut at the reference itself.
+        start = m.start()
+        head = desc[:start].rstrip(" /-;,–")
+        # The front of the stitched reference can stay glued to the last word:
+        # 'l'internetCG-PATN-0029', 'NetworkMV', 'Emergências1'.
+        head = re.sub(r"(?<=[a-zà-ÿ).])(?:[A-Z]{2,}[A-Z0-9]*(?:[-–/][A-Z0-9]+)*|\d{1,2})$",
+                      "", head).rstrip(" /-;,–")
+        if len(head.split()) >= 3:
+            counters["stitched_records_cut"] += 1
+            return head
+    return desc
+
+
+def resolve_method(r):
+    """packages.method, re-mapped at clean time from the plan's own cells.
+
+    In order: the method and market-approach cells; then the borrower
+    reference, whose suffix names the method on almost every STEP package
+    ('...-GO-RFB', '...-CS-QCBS'); then, for the older plans that print only a
+    market approach, that approach alone - 'Open' becomes `open`, which says
+    what was printed without guessing national or international."""
+    m = norm_method(r.get("method_raw") or "", r.get("market_approach") or "")
+    if m == "unknown":
+        m = norm_method(r.get("borrower_ref") or "")
+    if m == "unknown":
+        m = APPROACH_ONLY.get(enum_key(r.get("market_approach") or ""), "unknown")
+    return m
+
+
+APPROACH_ONLY = {"open": "open", "limited": "other", "direct": "direct_selection",
+                 "ouvert": "open", "aberto": "open", "abierto": "open"}
+
+
 # ------------------------------------------------------------------ step 10
 
 DATELINE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|"
@@ -475,22 +560,23 @@ def extract_amount_and_date(text):
 PACKAGE_COLS = [
     "package_id", "project_id", "borrower_ref", "borrower_ref_norm", "description",
     "description_clean", "description_match", "description_sha256",
-    "description_lang", "lot", "phase",
+    "description_lang", "lot", "phase", "glue_repairs",
     "is_rebid", "is_placeholder", "superseded_by", "clean_version", "category",
-    "method", "status", "status_raw", "planned_date", "revised_date",
+    "method", "status", "status_raw", "status_source", "status_as_of",
+    "planned_date", "revised_date",
     "estimated_amount", "currency", "actual_amount", "plan_version",
     "plan_disclosure_date", "carried_from", "fetched_at",
 ]
 NOTICE_COLS = [
     "notice_id", "project_id", "notice_type", "publication_date", "deadline_date",
     "bid_description", "bid_description_clean", "bid_description_match",
-    "description_lang", "is_placeholder",
+    "description_lang", "is_placeholder", "glue_repairs",
     "clean_version", "procurement_category", "country_code", "sector", "url",
 ]
 AWARD_COLS = [
     "contract_id", "project_id", "borrower_ref", "borrower_ref_norm", "description",
     "description_clean", "description_match", "description_sha256",
-    "description_lang", "is_placeholder",
+    "description_lang", "is_placeholder", "glue_repairs",
     "clean_version", "signed_date", "no_objection_date", "total_amount", "currency",
     "procurement_group", "method", "review_type", "supplier_name", "supplier_country",
     "supplier_amount", "region", "sector",
@@ -519,12 +605,16 @@ def write_csv(path, cols, rows):
     os.replace(tmp, path)
 
 
-def clean_packages(rows, counters):
+def clean_packages(rows, counters, vocab=None, names=None):
+    vocab = vocab or {}
     out = []
     for r in rows:
         raw_desc = collapse(r["description"])
         marks = split_markers(r["description"])
-        clean = collapse(marks["description"])
+        lang = r.get("description_lang") or detect_lang(raw_desc)
+        clean, repairs = glue.repair(collapse(marks["description"]), vocab, names, lang)
+        counters["glue_repairs_packages"] += repairs
+        clean = cut_stitched(clean, r.get("borrower_ref") or "", counters)
         stored_amount = r.get("estimated_amount") or ""
         amount_in_text, date_in_text = extract_amount_and_date(raw_desc)
         if not stored_amount and amount_in_text:
@@ -543,15 +633,17 @@ def clean_packages(rows, counters):
             "description_clean": clean,
             "description_match": match_key(clean),
             "description_sha256": desc_sha256(clean),
-            "description_lang": r.get("description_lang") or detect_lang(clean),
-            "lot": marks["lot"], "phase": marks["phase"],
+            "description_lang": lang,
+            "lot": marks["lot"], "phase": marks["phase"], "glue_repairs": repairs,
             "is_rebid": str(marks["is_rebid"]).lower(),
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "superseded_by": "",
             "clean_version": CLEAN_VERSION,
             "category": r.get("category") or "unknown",
-            "method": r.get("method") or "unknown",
-            "status": r.get("status") or "unknown",
+            "method": resolve_method(r),
+            # Re-mapped here from the borrower's own word, so a change to
+            # STATUS_MAP needs a re-clean, not a re-fetch.
+            "status": norm_status(r.get("status_raw") or ""),
             "status_raw": r.get("status_raw") or "",
             "planned_date": planned,
             "revised_date": r.get("revised_date") or "",
@@ -696,6 +788,15 @@ def dedupe_packages(rows, counters):
                     counters[f"carried_{field}"] += 1
                     break
         newest["carried_from"] = "|".join(carried)
+        # The last status an EARLIER version stated, with that version's date.
+        # Not written into `status`: resolve_status decides, and labels it.
+        newest["_earlier_status"] = None
+        for older in reversed(versions[:-1]):
+            if not absent("status", older.get("status")):
+                newest["_earlier_status"] = (older["status"],
+                                             older.get("_plan_disclosure_date", ""),
+                                             older.get("plan_version", ""))
+                break
         if carried:
             counters["packages_with_a_carried_field"] += 1
         kept.append(newest)
@@ -713,18 +814,65 @@ def dedupe_packages(rows, counters):
             counters["packages_seen_in_more_than_one_version"] += 1
             counters["package_versions_superseded"] += len(versions) - 1
     for r in kept:
-        r.pop("_plan_disclosure_date", None)
+        r["_disclosed"] = r.pop("_plan_disclosure_date", None) or ""
     kept.sort(key=lambda r: (r["project_id"], r["package_id"], r["plan_version"]))
     superseded.sort(key=lambda r: (r["project_id"], r["package_id"], r["plan_version"]))
     counters["packages_out"] = len(kept)
     return kept, superseded
 
 
-def clean_notices(rows, counters):
+def resolve_status(kept, awards, counters):
+    """Give every package the best-evidenced status there is, and say where it
+    came from and as of when.
+
+    Three sources, the most recent dated evidence winning:
+
+      plan          the newest plan version's own status, as of its disclosure
+      award         a signed contract in the awards data whose normalised
+                    borrower reference matches the package's, as of signing
+      earlier_plan  only when neither of the above says anything: the last
+                    status an older plan version printed, as of THAT plan
+
+    `status_as_of` is what keeps the third one honest. A status is a fact at a
+    point in time; carrying it forward silently would turn 'Under
+    Implementation, 2021' into a claim about today. Labelled with its source and
+    its date it is the best available statement, and reads as what it is.
+    """
+    signed = {}
+    for a in awards:
+        key = (a["project_id"], a["borrower_ref_norm"])
+        d = a.get("signed_date") or ""
+        if a["borrower_ref_norm"] and d and d > signed.get(key, ""):
+            signed[key] = d
+    for r in kept:
+        cands = []
+        if r["status"] != "unknown":
+            cands.append((r.get("_disclosed", ""), r["status"], "plan"))
+        d = signed.get((r["project_id"], r["borrower_ref_norm"]))
+        if d and r["status"] not in ("signed", "terminated"):
+            cands.append((d, "signed", "award"))
+        if not cands and r.get("_earlier_status"):
+            st, when, _ = r["_earlier_status"]
+            cands.append((when, st, "earlier_plan"))
+        if cands:
+            when, st, src = max(cands)
+            r["status"], r["status_source"], r["status_as_of"] = st, src, when
+        else:
+            r["status_source"], r["status_as_of"] = "none", ""
+        counters[f"status_source_{r['status_source']}"] += 1
+        r.pop("_earlier_status", None)
+        r.pop("_disclosed", None)
+
+
+def clean_notices(rows, counters, vocab=None, names=None):
+    vocab = vocab or {}
     out = []
     for r in rows:
         raw = collapse(r["bid_description"])
-        clean = collapse(split_markers(r["bid_description"])["description"])
+        clean, repairs = glue.repair(
+            collapse(split_markers(r["bid_description"])["description"]), vocab, names,
+            r.get("description_lang") or detect_lang(raw))
+        counters["glue_repairs_notices"] += repairs
         counters["notices_in"] += 1
         counters["replacement_chars_removed"] += count_replacement_chars(
             r.get("bid_description"))
@@ -737,6 +885,7 @@ def clean_notices(rows, counters):
             "bid_description_match": match_key(clean),
             "description_lang": r.get("description_lang") or detect_lang(clean),
             "is_placeholder": str(is_placeholder(clean)).lower(),
+            "glue_repairs": repairs,
             "clean_version": CLEAN_VERSION,
             "procurement_category": r.get("procurement_category") or "unknown",
             "country_code": r.get("country_code") or "",
@@ -745,11 +894,15 @@ def clean_notices(rows, counters):
     return out
 
 
-def clean_awards(rows, counters):
+def clean_awards(rows, counters, vocab=None, names=None):
+    vocab = vocab or {}
     out = []
     for r in rows:
         raw = collapse(r["description"])
-        clean = collapse(split_markers(r["description"])["description"])
+        clean, repairs = glue.repair(
+            collapse(split_markers(r["description"])["description"]), vocab, names,
+            r.get("description_lang") or detect_lang(raw))
+        counters["glue_repairs_awards"] += repairs
         counters["awards_in"] += 1
         counters["replacement_chars_removed"] += count_replacement_chars(
             r.get("description"))
@@ -762,6 +915,7 @@ def clean_awards(rows, counters):
             "description_sha256": desc_sha256(clean),
             "description_lang": r.get("description_lang") or detect_lang(clean),
             "is_placeholder": str(is_placeholder(clean)).lower(),
+            "glue_repairs": repairs,
             "clean_version": CLEAN_VERSION,
             "signed_date": r.get("signed_date") or "",
             "no_objection_date": r.get("no_objection_date") or "",
@@ -789,7 +943,11 @@ def main():
     awards_raw = read_csv(os.path.join(proc, "awards_raw.csv"))
 
     counters = Counter()
-    packages = clean_packages(pkg_raw, counters)
+    vocab, names = glue.corpus_vocab(
+        [r["description"] for r in pkg_raw]
+        + [r["bid_description"] for r in notices_raw]
+        + [r["description"] for r in awards_raw], args.data)
+    packages = clean_packages(pkg_raw, counters, vocab, names)
     # step 9's unmapped counts, before dedup so the whole raw corpus is measured
     for field in ("status", "method", "category"):
         c = Counter(r[field] for r in packages)
@@ -797,8 +955,9 @@ def main():
         counters[f"{field}_unknown"] = c.get("unknown", 0)
 
     kept, superseded = dedupe_packages(packages, counters)
-    notices = clean_notices(notices_raw, counters)
-    awards = clean_awards(awards_raw, counters)
+    notices = clean_notices(notices_raw, counters, vocab, names)
+    awards = clean_awards(awards_raw, counters, vocab, names)
+    resolve_status(kept, awards, counters)
 
     write_csv(os.path.join(proc, "packages.csv"), PACKAGE_COLS, kept)
     write_csv(os.path.join(proc, "notices.csv"), NOTICE_COLS, notices)

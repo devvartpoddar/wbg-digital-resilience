@@ -1,18 +1,26 @@
 #!/usr/bin/env python3
-"""Turn raw appraisal-document text renditions into clean, addressable paragraphs.
+"""Turn appraisal documents into clean, addressable paragraphs and sentences.
 
-Reads  data/raw/{doc_id}.txt      (as fetched, never modified)
+Reads  data/raw/pdf/{doc_id}.pdf  the PDF, read by layout (src/pdf_layout.py)
+       data/raw/{doc_id}.txt      the Bank's text rendition: the fallback, and
+                                  the reference the review sheet compares with
        data/documents.csv
 Writes data/clean/{doc_id}.txt    the cleaned reference text
+       data/clean/{doc_id}.layout.json  cached PDF read, keyed on PDF checksum
        data/paragraphs.csv        one row per paragraph, offsets into the clean file
+       data/sentences.csv         one row per sentence, offsets into the same file
        data/rejected.csv          everything dropped, with a reason
        data/clean_report.txt
 
 Paragraph text is not stored in the table. To read a paragraph, slice its clean
-file with char_start:char_end. The raw file stays on disk untouched, so nothing
-needs an offset map back to it.
+file with char_start:char_end. The raw files stay on disk untouched.
 
-Two document formats exist and both are handled:
+Which reader. The PDF carries what the text rendition throws away - font size,
+position, bold, raised characters - so it is read first. The text-rendition
+cleaner below (clean_document) is kept for any document whose PDF is missing,
+unreadable or image-only, and the row's `source` column says which was used.
+
+The text-rendition cleaner handles two formats:
   - Documents disclosed from about 2022 carry '@#&OPS...#doctemplate' markers
     naming each structured block (results framework, risk matrix, financing).
   - Older ones carry no markers. Form feeds, roman headings and a dot-leader
@@ -102,6 +110,8 @@ CHAR_MAP = {
     "\uf0b7": "\u2022", "\uf06c": "\u2022",
     "\uf0a7": "\u2022", "\uf0d8": "\u2022",
     "\uf05b": "[", "\uf05d": "]", "\uf020": " ", "\uf02e": ".",
+    # Wingdings 0x76, a diamond bullet: found in two award supplier names.
+    "\uf076": "\u2022",
 }
 
 NUMERIC_TOKEN = re.compile(r"^[\d.,%()$-]+$")
@@ -139,7 +149,7 @@ def looks_tabular(body):
 
 PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
              "section_title", "block", "char_start", "char_end", "n_tokens",
-             "text_sha256"]
+             "text_sha256", "page_from", "page_to", "source", "parser"]
 REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
 
 
@@ -594,11 +604,93 @@ def clean_document(raw):
     return "".join(clean_parts), spans, state
 
 
+PARSER_TXT = "clean-txt-1"
+# Below this share of the text rendition's characters, a PDF read is treated as
+# failed (a scanned or image-only PDF) and the text rendition is used instead.
+PDF_MIN_SHARE = 0.5
+SENTENCE_BLOCKS = {"narrative", "annex", "footnote"}
+SENT_COLS = ["sentence_id", "paragraph_id", "doc_id", "ordinal", "char_start",
+             "char_end", "n_tokens", "text_sha256"]
+
+
+def parser_version():
+    """The PDF reader's identity: pdfplumber's version plus a checksum of the
+    layout code itself, so any change to the rules invalidates the cache and is
+    recorded on every row it produced - no version number to forget to bump."""
+    import pdfplumber
+    here = os.path.dirname(os.path.abspath(__file__))
+    h = hashlib.sha256()
+    for name in ("pdf_layout.py", "clean.py"):
+        with open(os.path.join(here, name), "rb") as fh:
+            h.update(fh.read())
+    return f"pdf-layout-{h.hexdigest()[:10]}/pdfplumber-{pdfplumber.__version__}"
+
+
+def _layout_job(args):
+    """Worker: read one PDF. Runs in a separate process."""
+    doc_id, path = args
+    import pdfplumber
+    import pdf_layout
+    try:
+        with pdfplumber.open(path) as pdf:
+            text, spans, stats = pdf_layout.extract(pdf)
+        return doc_id, text, [list(s) for s in spans], dict(stats), ""
+    except Exception as exc:                       # a broken PDF is a fallback, not a crash
+        return doc_id, "", [], {}, f"{type(exc).__name__}: {exc}"
+
+
+def layout_cached(data, docs, workers):
+    """{doc_id: (text, spans, stats, error)} for every document with a PDF.
+
+    Each result is cached in data/clean/{doc_id}.layout.json, keyed on the PDF's
+    SHA-256 and the parser version, so a re-run reads the cache and only a
+    changed PDF or a changed parser costs a re-read."""
+    import json
+    from concurrent.futures import ProcessPoolExecutor
+    version = parser_version()
+    out, todo = {}, []
+    for doc in docs:
+        pdf = os.path.join(data, "raw", "pdf", f"{doc['doc_id']}.pdf")
+        if not os.path.exists(pdf):
+            continue
+        sha = doc.get("pdf_sha256") or hashlib.sha256(open(pdf, "rb").read()).hexdigest()
+        cache = os.path.join(data, "clean", f"{doc['doc_id']}.layout.json")
+        if os.path.exists(cache):
+            with open(cache, encoding="utf-8") as fh:
+                c = json.load(fh)
+            if c.get("pdf_sha256") == sha and c.get("parser") == version:
+                out[doc["doc_id"]] = (c["text"], c["spans"], c["stats"], c.get("error", ""))
+                continue
+        todo.append((doc["doc_id"], pdf, sha, cache))
+    if todo:
+        print(f"  reading {len(todo)} PDFs with {workers} workers "
+              f"({len(out)} cached)", flush=True)
+        meta = {d: (sha, cache) for d, _, sha, cache in todo}
+        with ProcessPoolExecutor(max_workers=workers) as ex:
+            for n, (did, text, spans, stats, err) in enumerate(
+                    ex.map(_layout_job, [(d, p) for d, p, _, _ in todo]), 1):
+                sha, cache = meta[did]
+                tmp = cache + ".part"
+                with open(tmp, "w", encoding="utf-8") as fh:
+                    json.dump({"pdf_sha256": sha, "parser": version, "text": text,
+                               "spans": spans, "stats": stats, "error": err}, fh)
+                os.replace(tmp, cache)
+                out[did] = (text, spans, stats, err)
+                if n % 10 == 0:
+                    print(f"    ...{n}/{len(todo)} PDFs read", flush=True)
+    return out
+
+
 def main():
+    import sentences
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--limit", type=int, default=0)
     ap.add_argument("--min-tokens", type=int, default=5)
+    ap.add_argument("--workers", type=int, default=3,
+                    help="PDF reading processes; the box has four cores")
+    ap.add_argument("--txt-only", action="store_true",
+                    help="ignore PDFs and use the text renditions (the old path)")
     args = ap.parse_args()
 
     raw_dir = os.path.join(args.data, "raw")
@@ -610,29 +702,55 @@ def main():
     if args.limit:
         docs = docs[:args.limit]
 
-    paras, rejected, stats = [], [], Counter()
+    layouts = {} if args.txt_only else layout_cached(args.data, docs, args.workers)
+    version = None if args.txt_only else parser_version()
+
+    paras, rejected, sents, stats = [], [], [], Counter()
     per_doc = []
 
     for n, doc in enumerate(docs, 1):
         src = os.path.join(raw_dir, f"{doc['doc_id']}.txt")
-        if not os.path.exists(src):
-            stats["missing_raw"] += 1
-            continue
-        with open(src, "rb") as fh:
-            blob = fh.read()
-        raw, undecodable = decode_raw(blob)
-        stats["undecodable_bytes_dropped"] += undecodable
-        clean, spans, fn = clean_document(raw)
+        raw = ""
+        if os.path.exists(src):
+            with open(src, "rb") as fh:
+                raw, undecodable = decode_raw(fh.read())
+            stats["undecodable_bytes_dropped"] += undecodable
+
+        source, parser = "txt", PARSER_TXT
+        lay = layouts.get(doc["doc_id"])
+        if lay and not lay[3]:
+            text, spans, lstats, _ = lay
+            rn = len(re.sub(r"\s", "", raw))
+            if not rn or len(re.sub(r"\s", "", text)) >= PDF_MIN_SHARE * rn:
+                clean, source, parser = text, "pdf", version
+                spans = [tuple(s) for s in spans]
+                for k, v in lstats.items():
+                    stats["pdf_" + k] += v
+            else:
+                stats["pdf_too_little_text"] += 1
+        elif lay and lay[3]:
+            stats["pdf_unreadable"] += 1
+        if source == "txt":
+            if not raw:
+                stats["missing_raw"] += 1
+                continue
+            clean, spans, fn = clean_document(raw)
+            spans = [tuple(s) + ("", "") for s in spans]
+            stats["footnote_marks_stripped"] += fn["hits"]
+            stats["footnote_marks_rejected"] += fn["misses"]
+            stats["docs_without_page_breaks"] += fn.get("unpaged", 0)
+        stats["source_" + source] += 1
 
         with open(os.path.join(clean_dir, f"{doc['doc_id']}.txt"), "w", encoding="utf-8") as fh:
             fh.write(clean)
 
         kept = 0
-        for ordinal, (a, b, path, title, block) in enumerate(spans, 1):
+        for ordinal, (a, b, path, title, block, p0, p1) in enumerate(spans, 1):
             body = clean[a:b]
             pid = f"{doc['doc_id']}:p{ordinal:05d}"
             ntok = len(TOKEN.findall(body))
-            if ntok < args.min_tokens and not (ROMAN.match(body) or annex_match(body)):
+            if ntok < args.min_tokens and block != "heading" \
+                    and not (ROMAN.match(body) or annex_match(body)):
                 rejected.append({"unit_id": pid, "doc_id": doc["doc_id"],
                                  "reason": "too_short", "n_chars": len(body)})
                 stats["too_short"] += 1
@@ -643,11 +761,19 @@ def main():
                 "section_path": path, "section_title": title[:120], "block": block,
                 "char_start": a, "char_end": b, "n_tokens": ntok,
                 "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                "page_from": p0, "page_to": p1, "source": source, "parser": parser,
             })
             kept += 1
-        stats["footnote_marks_stripped"] += fn["hits"]
-        stats["footnote_marks_rejected"] += fn["misses"]
-        stats["docs_without_page_breaks"] += fn.get("unpaged", 0)
+            if block in SENTENCE_BLOCKS:
+                for k, (sa, sb) in enumerate(sentences.split(body), 1):
+                    st = body[sa:sb]
+                    sents.append({
+                        "sentence_id": f"{pid}:s{k:03d}", "paragraph_id": pid,
+                        "doc_id": doc["doc_id"], "ordinal": k,
+                        "char_start": a + sa, "char_end": a + sb,
+                        "n_tokens": len(TOKEN.findall(st)),
+                        "text_sha256": hashlib.sha256(st.encode("utf-8")).hexdigest(),
+                    })
         # Retention is the cheapest honest signal that cleaning has not eaten
         # something it should have kept. Headers, page numbers and contents
         # lines are a few per cent; anything much lower wants looking at.
@@ -655,12 +781,13 @@ def main():
         cn = len(re.sub(r"\s", "", clean))
         per_doc.append((doc["doc_id"], doc["doc_kind"], len(spans), kept,
                         sum(1 for s in spans if s[4] == "narrative"),
-                        100.0 * cn / rn if rn else 0.0))
+                        100.0 * cn / rn if rn else 0.0, source))
         if n % 25 == 0:
             print(f"  ...{n}/{len(docs)} documents, {len(paras)} paragraphs", flush=True)
 
     for name, rows, cols in (("paragraphs.csv", paras, PARA_COLS),
-                             ("rejected.csv", rejected, REJ_COLS)):
+                             ("rejected.csv", rejected, REJ_COLS),
+                             ("sentences.csv", sents, SENT_COLS)):
         with open(os.path.join(args.data, name), "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")
             w.writeheader()
@@ -680,8 +807,11 @@ def main():
     sections = Counter(p["section_path"] for p in paras)
     with open(os.path.join(args.data, "clean_report.txt"), "w", encoding="utf-8") as fh:
         fh.write(f"documents cleaned: {len(per_doc)}\n")
+        fh.write(f"  read from PDF:   {stats['source_pdf']}\n")
+        fh.write(f"  read from text:  {stats['source_txt']}\n")
         fh.write(f"paragraphs kept:   {len(paras)}\n")
-        fh.write(f"paragraphs dropped:{len(rejected)}\n\n")
+        fh.write(f"paragraphs dropped:{len(rejected)}\n")
+        fh.write(f"sentences:         {len(sents)}\n\n")
         fh.write("counters:\n")
         for k in sorted(stats):
             fh.write(f"  {k}: {stats[k]}\n")
@@ -692,21 +822,24 @@ def main():
         for k, v in sections.most_common(30):
             fh.write(f"  {v:>7}  {k or '(none)'}\n")
         fh.write("\ndocuments with no narrative paragraphs:\n")
-        for d, kind, total, kept, narr, pct in per_doc:
+        for d, kind, total, kept, narr, pct, src in per_doc:
             if narr == 0:
-                fh.write(f"  {d}  kind={kind}  spans={total} kept={kept}\n")
-        low = sorted((p, d, k) for d, k, t, kp, n, p in per_doc)
-        fh.write("\ntext retention, lowest 15 (non-whitespace chars kept):\n")
-        for pct, d, kind in low[:15]:
-            fh.write(f"  {pct:5.1f}%  {d}  {kind}\n")
+                fh.write(f"  {d}  kind={kind}  source={src}  spans={total} kept={kept}\n")
+        fh.write("\ndocuments read from the text rendition:\n")
+        for d, kind, total, kept, narr, pct, src in per_doc:
+            if src == "txt":
+                fh.write(f"  {d}  kind={kind}\n")
+        low = sorted((p, d, k, src) for d, k, t, kp, n, p, src in per_doc)
+        fh.write("\ntext retention against the text rendition, lowest 15:\n")
+        for pct, d, kind, src in low[:15]:
+            fh.write(f"  {pct:5.1f}%  {d}  {kind}  {src}\n")
         if low:
-            fh.write(f"  median {sorted(p for p, _, _ in low)[len(low)//2]:.1f}%\n")
+            fh.write(f"  median {sorted(p for p, *_ in low)[len(low)//2]:.1f}%\n")
 
-    print(f"\n{len(paras)} paragraphs from {len(per_doc)} documents "
-          f"({len(rejected)} dropped)")
+    print(f"\n{len(paras)} paragraphs, {len(sents)} sentences from {len(per_doc)} documents "
+          f"({len(rejected)} dropped; {stats['source_pdf']} from PDF, "
+          f"{stats['source_txt']} from text)")
     print("  blocks: " + "  ".join(f"{k}={v}" for k, v in blocks.most_common()))
-    print(f"  footnote marks: {stats['footnote_marks_stripped']} stripped, "
-          f"{stats['footnote_marks_rejected']} left alone")
     return 0
 
 

@@ -117,12 +117,18 @@ class TestNormalisationOfForeignValues:
     def test_a_foreign_status_reaches_the_closed_set(self, raw, expected):
         assert C.norm_status(raw) == expected
 
-    @pytest.mark.parametrize("raw", ["Terminated", "Résilié"])
-    def test_termination_is_unknown_rather_than_guessed(self, raw):
-        """A1.24 has no value for a contract that was signed and then ended
-        early, and neither `signed` nor `cancelled` is true of one. An unmapped
-        value goes to `unknown` and is counted; `status_raw` keeps the word."""
-        assert C.norm_status(raw) == "unknown"
+    @pytest.mark.parametrize("raw", ["Terminated", "Résilié", "Rescindido"])
+    def test_termination_has_its_own_value(self, raw):
+        """A contract signed and then ended early is neither `signed` nor
+        `cancelled`, so it gets its own value rather than being guessed into
+        one of those or left as `unknown`."""
+        assert C.norm_status(raw) == "terminated"
+
+    @pytest.mark.parametrize("raw,expected", [
+        ("Firmado", "signed"), ("En ejecución", "under_execution"),
+        ("Anulado", "cancelled"), ("Pendiente", "planned")])
+    def test_a_spanish_status_reaches_the_closed_set(self, raw, expected):
+        assert C.norm_status(raw) == expected
 
     def test_a_french_method_reaches_the_closed_set(self):
         assert C.norm_method("Demande de prix") == "request_for_quotations"

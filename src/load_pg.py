@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Load the cleaned tables into Postgres, schema wbg, so they can be queried.
 
-Reads  data/documents.csv, data/paragraphs.csv (+ data/clean/ for the text),
+Reads  data/documents.csv, data/paragraphs.csv, data/sentences.csv
+       (+ data/clean/ for their text),
        data/rejected.csv, data/intermediate/procurement/*.csv
 Writes Postgres: wbg.<table> for each, and wbg.loads (one row per load)
 
@@ -34,15 +35,17 @@ DEFAULT_DSN = "postgresql:///work"
 TABLES = [
     ("documents", "documents.csv"),
     ("paragraphs", "paragraphs.csv"),
+    ("sentences", "sentences.csv"),
     ("rejected", "rejected.csv"),
     ("packages", "intermediate/procurement/packages.csv"),
     ("superseded_packages", "intermediate/procurement/superseded_packages.csv"),
     ("notices", "intermediate/procurement/notices.csv"),
     ("awards", "intermediate/procurement/awards.csv"),
 ]
-INTEGER = {"ordinal", "char_start", "char_end", "n_tokens", "n_chars"}
+INTEGER = {"ordinal", "char_start", "char_end", "n_tokens", "n_chars",
+           "page_from", "page_to"}
 NUMERIC = {"estimated_amount", "actual_amount", "total_amount", "supplier_amount"}
-INDEXED = {"doc_id", "paragraph_id", "project_id", "package_id", "notice_id",
+INDEXED = {"doc_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
            "contract_id", "unit_id", "borrower_ref_norm"}
 
 
@@ -78,8 +81,11 @@ def convert(name, value, bad):
     return value
 
 
+TEXT_TABLES = {"paragraphs", "sentences"}
+
+
 def rows_with_text(data, rows):
-    """Paragraph rows plus the text their offsets point at."""
+    """Paragraph or sentence rows plus the text their offsets point at."""
     cache = {}
     for r in rows:
         did = r["doc_id"]
@@ -96,8 +102,8 @@ def load_table(conn, data, table, rel):
     with open(path, newline="", encoding="utf-8") as fh:
         reader = csv.DictReader(fh)
         cols = list(reader.fieldnames or [])
-        rows = reader if table != "paragraphs" else rows_with_text(data, reader)
-        if table == "paragraphs":
+        rows = reader if table not in TEXT_TABLES else rows_with_text(data, reader)
+        if table in TEXT_TABLES:
             cols.append("text")
         bad = {}
         ident = f"{SCHEMA}.{table}"

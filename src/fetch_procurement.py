@@ -122,7 +122,11 @@ STATUS_TOKENS = ("Pending Implementation", "Under Implementation", "Under Prepar
                  "En cours de preparation", "En cours d'evaluation",
                  "Acheve", "Annule", "Resilie", "Signe", "Planifie",
                  # Portuguese
-                 "Em execucao", "Em preparacao", "Concluido", "Cancelado", "Assinado")
+                 "Em execucao", "Em preparacao", "Concluido", "Cancelado", "Assinado",
+                 "Rescindido",
+                 # Spanish
+                 "En ejecucion", "En preparacion", "En evaluacion", "Firmado",
+                 "Pendiente", "Planificado", "Rescindido", "Anulado")
 
 PACKAGE_COLS = [
     "package_version_id", "package_id", "project_id", "plan_version", "plan_doc_id",

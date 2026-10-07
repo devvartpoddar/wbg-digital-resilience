@@ -28,7 +28,8 @@ Any model that meets all three may be used, including an external one. For an ex
 | Stage | State |
 |---|---|
 | Fetch appraisal documents and procurement | Built |
-| Clean and split into paragraphs; clean procurement tables | Built; **quality under review now** |
+| Clean appraisal documents into paragraphs and sentences, read from the PDF | Built; **quality under review now** |
+| Clean procurement tables: glued words repaired, status resolved with its source | Built; **quality under review now** |
 | Load into Postgres, write review sheets | Built |
 | Embed paragraphs into pgvector | Next, once cleaning is accepted |
 | Judge paragraphs for assets and measures | Next: a test of a pinned decision model (Jev) returning a yes probability |
@@ -40,8 +41,8 @@ Two corpora, cleaned separately. Appraisal documents are long prose recovered fr
 
 | | Appraisal documents | Procurement text |
 |---|---|---|
-| Unit | Paragraph, hundreds of words | One field, five to fifteen words |
-| Noise comes from | Layout recovery — the extractor guessing at reading order | Human entry — abbreviation, codes, placeholders |
+| Unit | Paragraph, split again into sentences | One field, five to fifteen words |
+| Noise comes from | Layout recovery: what a line is (heading, footnote, header) is lost in plain text | Human entry, and cells clipped at the column edge |
 | Typical defect | Word split across a line break; running header inside a paragraph | `FIBER OPTIC CABLE SUPPLY - LOT 2 (REBID)` |
 | Case folding | Not applied. Case is informative, and the classifier handles it | Applied for matching. Entry is inconsistently capitalised |
 | Short unit | Almost always a heading or a stray fragment — drop | The entire record — keep |
@@ -50,15 +51,28 @@ Two corpora, cleaned separately. Appraisal documents are long prose recovered fr
 
 ### Appraisal documents
 
-1. Parse to text with a pinned tool and version. Record tool, version and settings on the document row.
-2. Normalise characters: ligatures, smart quotes, non-breaking spaces, soft hyphens, bullet glyphs.
-3. Rejoin words split across line breaks. Distinguish a line-break hyphen from a real one — `climate-resilient` must survive.
-4. Remove running headers, footers and page numbers by detecting text repeating at the same position across pages.
-5. Rejoin paragraphs split across a page boundary.
-6. Split to paragraphs; assign ordinals in document order, before any filtering.
-7. Classify block type: prose, bullet, heading, table cell, footnote.
-8. Drop boilerplate: standard annexes, disclaimers, acronym glossaries, signature blocks. Record every drop with a reason and count them.
-10. Hash the raw text and the cleaned text separately. On re-parse, verify both and fail loudly on mismatch.
+**Read from the PDF, by layout.** The World Bank's text rendition of a document throws away everything that says what a line is: its font size, its position on the page, whether it is bold, whether a character is raised. The old cleaner had to guess all of that back from line patterns, and its leftover defects were exactly where the guess failed: a footnote number fused to a word ("202024"), a running header inside a paragraph, a footnote read as body text. `src/pdf_layout.py` reads the PDF instead and measures:
+
+| What | How it is recognised |
+|---|---|
+| Running header and footer | A line repeating at the same height on many pages; page-number lines; the rotated "Disclosure Authorized" stamp |
+| Footnote marker | A digit set smaller than its line and raised above the line's baseline. Small alone is not enough: the 2 in CO2 is small but lowered, and stays |
+| Footnote | The run of small-type lines at the foot of a page |
+| Heading | A short line, set in bold, italic or larger type, not ending in punctuation. A full-width bold line is emphasised prose, not a heading |
+| Table | A region ruled as a table; each row becomes one unit, cells joined by " \| " |
+| Paragraph | A vertical gap larger than the line pitch, or a numbered paragraph or bullet. An enumerator such as "(ii)" only starts a new unit when the text before it had reached a stopping point, because a wrapped cross-reference looks the same |
+| Across a page | A paragraph that had not finished its sentence continues on the next page, past any footnotes and header in between |
+| Word broken at a line end | Joined without the hyphen when the document uses the whole word elsewhere; otherwise the hyphen is real and kept (`climate-resilient`) |
+
+Every threshold is relative to the document's own body type size and line pitch. Each document's result is cached against the PDF's checksum and a checksum of the reader's code, so a re-run costs nothing and any change to the rules re-reads everything it affects. The text rendition is kept as the fallback for a PDF that is missing, unreadable or image-only, and every row's `source` says which was used.
+
+**Paragraphs and sentences, both.** The paragraph is the unit for what a passage is about: an asset is often named in one sentence and qualified in the next, and the paragraph keeps them together. The sentence is the unit for what a passage commits to: "will finance fiber" and "sites are expected to avoid flood zones" are two claims of different firmness. `src/sentences.py` splits by rule, with no model: a boundary is a full stop, question or exclamation mark followed by a capital, digit or opening bracket, except after an abbreviation ("e.g.", "No.", "U.S."), an initial, or a paragraph number. Sentences are stored as offsets inside their paragraph, never as copies.
+
+Remaining steps, unchanged:
+
+1. Normalise characters: ligatures, smart quotes, non-breaking spaces, soft hyphens, bullet glyphs.
+2. Assign ordinals in document order, before any filtering. Units under five words that are not headings are dropped and counted.
+3. Hash each paragraph and sentence. On re-parse, verify and fail loudly on mismatch.
 
 **Cleaning is replace-in-place, never delete-in-place.** Removing characters shifts every offset after them, and localisation spans are offsets. Where text must be removed, record the offset map or treat the cleaned text as the reference and keep the raw alongside.
 
@@ -73,6 +87,7 @@ Two corpora, cleaned separately. Appraisal documents are long prose recovered fr
 1. Normalise characters and collapse whitespace.
 2. Case-fold a matching copy. Keep the original for display.
 3. Strip the borrower reference code where it is embedded in the description field; it already has its own column.
+3a. Repair words run together where a clipped cell was rejoined (`src/glue.py`): "ofDigital" becomes "of Digital". A token is split only when it is not itself a word the corpus uses, both halves are, a two-letter half is a function word, the right half is not a common ending ("Auditeur" is not "Audit eur"), and it is not a short all-capitals acronym. The vocabulary is the descriptions plus the cleaned appraisal text, so the same rule covers French, Portuguese and Spanish. The repair only ever inserts a space; `description` keeps the original and `glue_repairs` counts the insertions.
 4. Separate lot, phase and rebid markers into their own fields rather than leaving them in the matching text.
 5. Normalise the borrower reference: case, whitespace, separators. The plan-to-award join depends on it.
 6. Detect the language of the description.
@@ -133,11 +148,22 @@ from the same version as the amount, so the pair is always one that was actually
 published. `carried_from` names the source version per field, so nothing is
 taken on trust.
 
-**Status is never carried forward.** A status is a fact at a point in time, and
-inheriting it manufactures a present-tense claim out of a stale one: Nigeria read
-97.9% populated on statuses that were four years old. With carry-forward removed
-the honest figure is 23.2%. An unknown status stays unknown and is confirmed with
-the project team.
+**Status comes with its source and its date.** A status is a fact at a point in
+time, and silently inheriting an old one manufactures a present-tense claim:
+Nigeria read 97.9% populated on statuses that were four years old. So `status`
+is resolved from evidence and labelled, in `status_source` and `status_as_of`:
+
+| Source | Meaning |
+|---|---|
+| `plan` | The newest plan version's own status, as of its disclosure date |
+| `award` | A signed contract whose normalised borrower reference matches the package, as of signing. Wins over an older plan status |
+| `earlier_plan` | Used only when neither of the above says anything: the last status an older plan version printed, as of that plan's date |
+| `none` | No evidence at all; status stays `unknown` |
+
+`terminated` is its own value: a contract signed and then ended early is neither
+signed nor cancelled. The status vocabulary covers English, French, Portuguese and
+Spanish, and status is re-mapped from the borrower's own word at clean time, so a
+mapping change needs a re-clean rather than a re-fetch.
 
 **Amounts and dates sometimes appear inside the description string.** Extract them to their own columns rather than leaving them to be matched as text.
 
@@ -148,17 +174,29 @@ the project team.
 
 Automated checks count known defects across every paragraph (`src/audit.py`, `src/audit_procurement.py`). They only find what someone already thought of. The rest is found by reading.
 
-`src/review_sheets.py` writes two plain spreadsheets to `data/review/`: 100 paragraphs with the cleaned text next to the raw text it came from, and 100 procurement packages with the raw description next to the cleaned fields. Each has empty `ok` and `note` columns. A sheet that already exists is never overwritten, since it may hold notes.
+`src/review_sheets.py` writes two plain spreadsheets to `data/review/`: 100 paragraphs with the cleaned text, the same text split into sentences, the page it came from, and the raw text-rendition lines beside it; and 100 procurement packages with the raw description next to the cleaned fields. Each has empty `ok` and `note` columns. A sheet that already exists is never overwritten, since it may hold notes.
 
 The raw column shows whole raw lines, including anything cleaning removed from the middle of the paragraph, such as a running header. A paragraph whose raw text cannot be found says so; that is usually a table, and worth a look.
+
+## Reports
+
+Reports do not go in the repository. `src/run_report.py` drafts a run report as a Markdown note in `data/reports/`, and the agent that ran the pipeline copies it into Dev's notes vault at `Projects/WBG Digital Resilience/Reports/`, adding a line to that folder's README index. The note follows the folder's `_template.md`.
 
 ## Storage
 
 - **Files**: `data/` in the main checkout, `/ygg/projects/wbg-digital-resilience/data/` on the box. Raw renditions, cleaned text, CSV tables, reports and review sheets. Gitignored, never deleted.
-- **Postgres**: schema `wbg` in database `work`, loaded from the CSV files by `src/load_pg.py`. Paragraph text is a column there. `wbg.loads` records what was loaded from which file version.
+- **Postgres**: schema `wbg` in database `work`, loaded from the CSV files by `src/load_pg.py`. Paragraph and sentence text are columns there. `wbg.loads` records what was loaded from which file version.
 - **Embeddings, when they come**: `halfvec(3072)` with an HNSW index on cosine distance. Plain `vector` cannot be indexed past 2,000 dimensions; `halfvec` can up to 4,000, at half the storage and no meaningful loss for similarity search. The full-precision vectors the API returns stay in the on-disk cache as the record.
 
 ## Known limits
+
+**Tables without ruling lines read as text.** A table the PDF draws without lines is not found as a table, and its cells are read in page order. One annex table (document 33835349) interleaves row numbers with cell text this way. Narrative is unaffected.
+
+**One appraisal document is six pages long.** 34295176 is a PAD as published, not a parse failure; it carries no body sections.
+
+**Some Spanish fragments survive.** The word-repair rules lean on the appraisal prose to judge English; French, Portuguese and Spanish are judged from the descriptions alone, which is weaker. The Honduras and Peru plans keep a handful of broken words ("present ación"), counted by the audit.
+
+**Clipped words stay clipped.** Where the plan rendition cut a cell and the rest of the word is gone ("Project Management Suppor"), there is nothing to restore it from.
 
 **Parse quality on converted documents.** Sentence segmentation is imperfect on clean text and worse on documents converted from PDF.
 
