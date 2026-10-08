@@ -342,7 +342,7 @@ MAX_RATE = {
     "description carries a second borrower reference": 0.1,   # 0.05% - cut at clean
     "description ends mid-word": 0.1,            # 0.05%
     "word glued to the next inside the description": 0.1,    # 0.03% - names left whole
-    "word broken by a space inside the description": 0.15,   # 0.07%
+    "word broken by a space inside the description": 0.15,   # 0.00% after the second join pass
     "borrower reference absent": 0.0,            # 0.00%
     "borrower reference not normalised": 0.0,    # 0.00%
     "category unmapped": 0.0,                    # 0.00%

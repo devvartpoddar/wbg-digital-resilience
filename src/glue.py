@@ -258,6 +258,13 @@ def rejoin(text, vocab):
             if parts[-1][mb.end():mb.end() + 1] in ("'", "\u2019") and \
                     mb.group(1).lower() in ("d", "l", "qu", "j", "n", "s", "c", "m", "t"):
                 continue
+            # A code ends in its own letters: 'ID4D Project' stays two.
+            if ma.start() > 0 and parts[0][ma.start() - 1].isalnum():
+                continue
+            # The first piece of a hyphenated word stays its own: 'for
+            # e-commerce' is not 'fore-commerce'.
+            if parts[-1][mb.end():mb.end() + 1] == "-":
+                continue
             words = [ma.group(1)] + parts[1:-1] + [mb.group(1)]
             # A capital opening a later fragment starts a new word ('TV And').
             if any(w[:1].isupper() and not words[0].isupper() for w in words[1:]):
@@ -266,8 +273,9 @@ def rejoin(text, vocab):
             verdicts = [_prose_word(w, vocab) for w in words]
             # An acronym before a lower-case word is two words: 'I T equipment'
             # is 'IT equipment', never 'ITequipment'.
-            if words[0].isupper() and words[-1].islower() and len(words[-1]) >= 3 \
-                    and verdicts[-1]:
+            head = "".join(words[:-1])
+            if head.isupper() and len(head) >= 2 and words[-1].islower() \
+                    and len(words[-1]) >= 3 and verdicts[-1]:
                 continue
             if all(v is None for v in verdicts):
                 # No prose: a fragment is a single letter that is not a word,
@@ -362,4 +370,8 @@ def repair(text, vocab, names=None, lang="en"):
     # '(TPC)Buildings', 'Equipment,Servers'.
     out, k = re.subn(r"(?<=[)\],;])(?=[^\W\d_])", " ", out)
     out, j = re.subn(r"(?<=[^\W\d_]{2})\((?=[^\W\d_])", " (", out)
-    return out, n + k + j
+    # A split can leave a fragment that only now has a neighbour to join
+    # ('Consult ancyServices' -> 'Consult ancy Services'), or a space one
+    # letter out ('forthe' -> 'fort he'), so the join pass runs once more.
+    out, m = rejoin(out, vocab)
+    return out, n + k + j + m
