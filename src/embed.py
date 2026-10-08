@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """Embed every cleaned paragraph once, and cache the vectors so it stays once.
 
-Reads  data/paragraphs.csv, data/clean/{doc_id}.txt
-Writes data/emb_cache/{model}.{dim}/{aa}/{sha256}.f32   one vector per unique text
-       data/paragraph_emb.npy                           (rows, dim) float32
-       data/emb_index.csv                               row -> paragraph_id
-       data/embed_report.txt
-       data/embedding_manifest.json                     the provenance record
+Reads  data/appraisal/paragraphs.csv, data/appraisal/text/{doc_id}.txt
+Writes data/embeddings/cache/{model}.{dim}/{aa}/{sha256}.f32  one vector per text
+       data/embeddings/paragraph_emb.npy                 (rows, dim) float32
+       data/embeddings/emb_index.csv                     row -> paragraph_id
+       data/reports/embed.txt
+       data/embeddings/embedding_manifest.json           the provenance record
 
 The cache is content-addressed on the SHA-256 of the exact text embedded, under
 a directory named for the model and dimension count. So a re-run costs nothing,
@@ -24,7 +24,7 @@ import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 DEFAULT_MODEL = "openai/text-embedding-3-large"
 DEFAULT_DIM = 3072
@@ -203,7 +203,7 @@ def read_key(key_file):
 
 def cache_root(data_dir, model, dim):
     slug = model.replace("/", "__").replace(":", "_") + f".{dim}"
-    return os.path.join(data_dir, "emb_cache", slug)
+    return where(data_dir, "embeddings", "cache", slug)
 
 
 def cache_path(root, sha):
@@ -281,7 +281,7 @@ def resolve(data_dir, rows):
     for row in rows:
         did = row["doc_id"]
         if did not in cache:
-            path = os.path.join(data_dir, "clean", f"{did}.txt")
+            path = where(data_dir, "text", f"{did}.txt")
             with open(path, encoding="utf-8") as fh:
                 cache[did] = fh.read()
         body = cache[did][int(row["char_start"]):int(row["char_end"])]
@@ -289,7 +289,7 @@ def resolve(data_dir, rows):
         if sha != row["text_sha256"]:
             raise SystemExit(
                 f"embed: {row['paragraph_id']} does not match its recorded hash.\n"
-                f"  paragraphs.csv and data/clean/ have diverged - re-run "
+                f"  paragraphs.csv and data/appraisal/text/ have diverged - re-run "
                 f"src/clean.py before embedding.")
         if not body.strip():
             empty.append(row["paragraph_id"])
@@ -413,7 +413,7 @@ def main():
     def log(msg):
         print(msg, flush=True)
 
-    with open(os.path.join(args.data, "paragraphs.csv"), newline="",
+    with open(where(args.data, "appraisal", "paragraphs.csv"), newline="",
               encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     words_by_sha = {}
@@ -469,9 +469,11 @@ def main():
     dropped = [pid for pid, sha in order if sha not in have]
 
     prefix = "smoke_" if args.limit else ""
-    npy_path = os.path.join(args.data, f"{prefix}paragraph_emb.npy")
-    idx_path = os.path.join(args.data, f"{prefix}emb_index.csv")
-    rep_path = os.path.join(args.data, f"{prefix}embed_report.txt")
+    npy_path = where(args.data, "embeddings", f"{prefix}paragraph_emb.npy")
+    idx_path = where(args.data, "embeddings", f"{prefix}emb_index.csv")
+    rep_path = where(args.data, "reports", f"{prefix}embed.txt")
+    for d in (os.path.dirname(npy_path), os.path.dirname(rep_path)):
+        os.makedirs(d, exist_ok=True)
 
     log("")
     assemble(npy_path, index, root, args.dim, log)
@@ -503,10 +505,10 @@ def main():
         "host": socket.gethostname(),
     }
     if args.limit:
-        man_path = os.path.join(args.data, "smoke_embedding_manifest.json")
+        man_path = where(args.data, "embeddings", "smoke_embedding_manifest.json")
     else:
-        os.makedirs(args.meta, exist_ok=True)
-        man_path = os.path.join(args.meta, "embedding_manifest.json")
+        man_path = where(args.meta, "embeddings", "embedding_manifest.json")
+        os.makedirs(os.path.dirname(man_path), exist_ok=True)
     with open(man_path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
         fh.write("\n")

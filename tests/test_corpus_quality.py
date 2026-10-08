@@ -50,7 +50,7 @@ MIN_CLEAN_PROSE_PCT = 99.8                           # 99.9%
 
 
 def _load():
-    path = os.path.join(DATA, "paragraphs.csv")
+    path = os.path.join(DATA, "appraisal", "paragraphs.csv")
     if not os.path.exists(path):
         pytest.skip("no corpus on disk; run src/fetch.py and src/clean.py first")
     with open(path, newline="", encoding="utf-8") as fh:
@@ -68,7 +68,7 @@ def scanned():
     def text_of(row):
         did = row["doc_id"]
         if did not in cache:
-            with open(os.path.join(DATA, "clean", f"{did}.txt"), encoding="utf-8") as fh:
+            with open(os.path.join(DATA, "appraisal", "text", f"{did}.txt"), encoding="utf-8") as fh:
                 cache[did] = fh.read()
         return cache[did][int(row["char_start"]):int(row["char_end"])]
 

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Dump cleaned paragraphs in a readable form, for reading by a person.
 
-Reads  data/paragraphs.csv, data/clean/{doc_id}.txt, data/documents.csv
-Writes data/review_sample.txt
+Reads  data/appraisal/paragraphs.csv, data/appraisal/text/{doc_id}.txt, data/raw/documents.csv
+Writes data/review/review_sample.txt
 
 The paragraph tables carry offsets, not text, so there is no way to eyeball the
 corpus without resolving them. This does that.
@@ -17,14 +17,14 @@ import argparse, csv, os, random, re, sys, textwrap
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 
 def load(data):
-    with open(os.path.join(data, "paragraphs.csv"), newline="", encoding="utf-8") as fh:
+    with open(where(data, "appraisal", "paragraphs.csv"), newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     docs = {}
-    path = os.path.join(data, "documents.csv")
+    path = where(data, "documents")
     if os.path.exists(path):
         with open(path, newline="", encoding="utf-8") as fh:
             docs = {r["doc_id"]: r for r in csv.DictReader(fh)}
@@ -77,7 +77,7 @@ def main():
     def text_of(row):
         did = row["doc_id"]
         if did not in cache:
-            with open(os.path.join(args.data, "clean", f"{did}.txt"), encoding="utf-8") as fh:
+            with open(where(args.data, "text", f"{did}.txt"), encoding="utf-8") as fh:
                 cache[did] = fh.read()
         return cache[did][int(row["char_start"]):int(row["char_end"])]
 
@@ -113,7 +113,7 @@ def main():
         out.append("")
 
     body = "\n".join(out)
-    dest = args.out or os.path.join(args.data, "review_sample.txt")
+    dest = args.out or where(args.data, "review", "review_sample.txt")
     with open(dest, "w", encoding="utf-8") as fh:
         fh.write(body + "\n")
     print(body)

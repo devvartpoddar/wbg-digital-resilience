@@ -2,10 +2,10 @@
 """Fetch World Bank appraisal documents (text renditions) for the cohort.
 
 Reads  inputs/config/cohort.csv  (hand-maintained; included=true rows only)
-Writes data/raw/{doc_id}.txt     the Bank's text rendition (gitignored)
-       data/raw/pdf/{doc_id}.pdf the PDF itself, which src/pdf_layout.py reads
-       data/documents.csv        (one row per fetched document)
-       data/fetch_report.txt     (what was skipped and why)
+Writes data/raw/text/{doc_id}.txt  the Bank's text rendition (gitignored)
+       data/raw/pdf/{doc_id}.pdf   the PDF itself, which src/pdf_layout.py reads
+       data/raw/documents.csv      (one row per fetched document)
+       data/reports/fetch.txt      (what was skipped and why)
 
 Resumable: a document whose raw file already exists is not re-fetched.
 Run again after an interruption and it picks up where it stopped.
@@ -16,7 +16,7 @@ import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 WDS = "https://search.worldbank.org/api/v3/wds"
 
 # Identify the caller rather than arriving as an anonymous script.
@@ -161,7 +161,7 @@ def main():
     ap.add_argument("--delay", type=float, default=0.5, help="seconds between requests")
     args = ap.parse_args()
 
-    raw_dir = os.path.join(args.out, "raw")
+    raw_dir = where(args.out, "rendition")
     os.makedirs(raw_dir, exist_ok=True)
 
     projects = read_cohort(args.cohort)
@@ -173,7 +173,7 @@ def main():
     counts = {"fetched": 0, "cached": 0, "too_small": 0, "no_txturl": 0,
               "no_docs": 0, "error": 0, "pdf_fetched": 0, "pdf_cached": 0,
               "pdf_missing": 0}
-    pdf_dir = os.path.join(raw_dir, "pdf")
+    pdf_dir = where(args.out, "pdf")
     os.makedirs(pdf_dir, exist_ok=True)
 
     for n, proj in enumerate(projects, 1):
@@ -258,7 +258,7 @@ def main():
         rows.append(row)
     # Deterministic order so a re-run produces the same file.
     rows.sort(key=lambda r: r["doc_id"])
-    docs_csv = os.path.join(args.out, "documents.csv")
+    docs_csv = where(args.out, "documents")
     with open(docs_csv, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=DOC_COLS, lineterminator="\n")
         w.writeheader()
@@ -266,7 +266,8 @@ def main():
 
     seen = {p for r in rows for p in r["project_ids"].split("|")}
     missing = [p["project_id"] for p in projects if p["project_id"] not in seen]
-    report = os.path.join(args.out, "fetch_report.txt")
+    report = where(args.out, "reports", "fetch.txt")
+    os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:
         fh.write(f"projects in cohort (included): {len(projects)}\n")
         fh.write(f"projects with >=1 document:    {len(seen)}\n")

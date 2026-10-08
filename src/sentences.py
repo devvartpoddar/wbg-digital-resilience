@@ -16,6 +16,8 @@ rule below exists because one of them did:
   numbering             "38. Component 3 seeks ..." - the paragraph number
   decimals              "US$3.2 million" - no whitespace after the period
   enumerations          "(a) ...; (b) ..." are clauses of ONE sentence
+  fragments             "ITU. 2021. Global ..." - under three words is not a
+                        sentence, so no boundary is placed after one
 
 A boundary is a ., ! or ? followed by whitespace and then something that can
 open a sentence: an uppercase letter, a digit, an opening quote or bracket.
@@ -46,6 +48,10 @@ def split(text):
         if end <= floor:
             continue
         before = text[start:b.start()]
+        # Too short to be a sentence: 'ITU.', '2021.' in a reference, 'Annex
+        # 2.' as a label. Fewer than three words do not stand alone.
+        if len(re.findall(r"\w+", text[max(start, floor):b.start()])) < 3:
+            continue
         w = WORD_BEFORE.search(before)
         if w:
             word = w.group(1).lower().rstrip(".")

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """Load the cleaned tables into Postgres, schema wbg, so they can be queried.
 
-Reads  data/documents.csv, data/paragraphs.csv, data/sentences.csv
-       (+ data/clean/ for their text),
-       data/rejected.csv, data/intermediate/procurement/*.csv
+Reads  data/raw/documents.csv, data/appraisal/{paragraphs,sentences,rejected,
+       components}.csv (+ data/appraisal/text/ for their text),
+       data/procurement/*.csv
 Writes Postgres: wbg.<table> for each, and wbg.loads (one row per load)
 
 The CSV files stay the source; these tables are a queryable copy of them, and
 can be rebuilt from them at any time. Paragraph text, which the CSV leaves out
-(it is an offset into data/clean/), is resolved here into a text column - the
+(it is an offset into data/appraisal/text/), is resolved here into a text column - the
 database is on the box, and text never leaves the box.
 
 Each table is replaced inside one transaction, so a reader never sees half a
@@ -26,21 +26,22 @@ from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 SCHEMA = "wbg"
 DEFAULT_DSN = "postgresql:///work"
 
 # (table, path under data/). Everything is text unless typed below.
 TABLES = [
-    ("documents", "documents.csv"),
-    ("paragraphs", "paragraphs.csv"),
-    ("sentences", "sentences.csv"),
-    ("rejected", "rejected.csv"),
-    ("packages", "intermediate/procurement/packages.csv"),
-    ("superseded_packages", "intermediate/procurement/superseded_packages.csv"),
-    ("notices", "intermediate/procurement/notices.csv"),
-    ("awards", "intermediate/procurement/awards.csv"),
+    ("documents", "raw/documents.csv"),
+    ("paragraphs", "appraisal/paragraphs.csv"),
+    ("sentences", "appraisal/sentences.csv"),
+    ("rejected", "appraisal/rejected.csv"),
+    ("components", "appraisal/components.csv"),
+    ("packages", "procurement/packages.csv"),
+    ("superseded_packages", "procurement/superseded_packages.csv"),
+    ("notices", "procurement/notices.csv"),
+    ("awards", "procurement/awards.csv"),
 ]
 INTEGER = {"ordinal", "char_start", "char_end", "n_tokens", "n_chars",
            "page_from", "page_to"}
@@ -90,7 +91,7 @@ def rows_with_text(data, rows):
     for r in rows:
         did = r["doc_id"]
         if did not in cache:
-            with open(os.path.join(data, "clean", f"{did}.txt"), encoding="utf-8") as fh:
+            with open(where(data, "text", f"{did}.txt"), encoding="utf-8") as fh:
                 cache = {did: fh.read()}        # one document at a time
         r = dict(r)
         r["text"] = cache[did][int(r["char_start"]):int(r["char_end"])]

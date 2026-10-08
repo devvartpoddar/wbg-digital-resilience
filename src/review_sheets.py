@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Write two plain spreadsheets for reading the cleaning by eye.
 
-Reads  data/paragraphs.csv, data/clean/{doc_id}.txt, data/raw/{doc_id}.txt
-       data/intermediate/procurement/packages.csv
+Reads  data/appraisal/paragraphs.csv, data/appraisal/text/{doc_id}.txt,
+       data/raw/text/{doc_id}.txt, data/procurement/packages.csv
 Writes data/review/paragraphs_s{seed}.xlsx    100 paragraphs: cleaned, split into
                                               sentences, and the raw text beside them
        data/review/packages_s{seed}.xlsx      100 packages, raw next to cleaned
@@ -29,7 +29,7 @@ import argparse, csv, os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root                    # noqa: E402
+from paths import data_root, where                    # noqa: E402
 from clean import CHAR_MAP, decode_raw         # noqa: E402
 from review import draw                        # noqa: E402
 import sentences                               # noqa: E402
@@ -43,10 +43,13 @@ PARA_COLS = [("paragraph_id", 18), ("project_ids", 12), ("page_from", 6),
              ("cleaned", 70), ("sentences", 70), ("raw", 70), ("ok", 6), ("note", 30)]
 PKG_COLS = [("package_id", 18), ("project_id", 10), ("plan_version", 10),
             ("category", 12), ("borrower_ref", 18), ("description", 45),
-            ("description_clean", 45), ("lot", 6), ("phase", 6), ("is_rebid", 7),
-            ("is_placeholder", 8), ("method", 10), ("status_raw", 14), ("status", 12),
-            ("estimated_amount", 12), ("actual_amount", 12), ("currency", 7),
-            ("planned_date", 11), ("carried_from", 14), ("ok", 6), ("note", 30)]
+            ("description_clean", 45), ("lot_or_phase", 10), ("component_number", 6),
+            ("component", 24), ("component_source", 10), ("is_rebid", 7),
+            ("is_placeholder", 8), ("method", 8), ("method_name", 18),
+            ("method_source", 10), ("market_approach", 14), ("status_raw", 14),
+            ("status", 14), ("status_source", 10), ("status_as_of", 11),
+            ("estimated_amount", 12), ("currency", 7), ("amount_source", 10),
+            ("amount_as_of", 11), ("planned_date", 11), ("ok", 6), ("note", 30)]
 
 
 def letters(text):
@@ -60,34 +63,54 @@ def letters(text):
     return "".join(out), idx
 
 
-def locate_raw(clean_para, raw, raw_letters):
-    """The stretch of the raw text this cleaned paragraph came from, or None."""
+def page_window(raw, page_from, page_to, margin=1):
+    """(start, end) of the raw text from page_from-margin to page_to+margin.
+    The rendition marks each page end with a form feed, one per PDF page."""
+    if not page_from:
+        return 0, len(raw)
+    breaks = [i for i, ch in enumerate(raw) if ch == "\f"]
+    first = max(1, page_from - margin)
+    last = (page_to or page_from) + margin
+    start = breaks[first - 2] + 1 if first >= 2 and first - 2 < len(breaks) else 0
+    end = breaks[last - 1] if last - 1 < len(breaks) else len(raw)
+    return start, end
+
+
+def locate_raw(clean_para, raw, raw_letters, page_from=0, page_to=0):
+    """The stretch of the raw text this cleaned paragraph came from, or None.
+
+    Searched only on the paragraph's own pages (one either side), so a
+    sentence the document repeats elsewhere is not picked up; and the match
+    must span about as many letters as the paragraph has, so a head and a tail
+    found far apart are not taken for one paragraph."""
     norm, idx = raw_letters
     para, _ = letters(clean_para)
     if not para:
         return None
-    head = para[:ANCHOR]
-    limit = 3 * len(para) + 400
-    start = norm.find(head)
-    while start >= 0:                      # a short head can repeat: take the
-        end = -1                           # first one whose tail follows close
-        for k in (ANCHOR, 12, 8):          # behind; shorten the tail in case a
-            tail = para[-k:]               # page header was cut into it
-            end = norm.find(tail, start + (len(para) - k) // 2)
-            if 0 <= end - start <= limit:
-                break
-            end = -1
-        if end >= 0:
+    w0, w1 = page_window(raw, page_from, page_to)
+    lo = next((i for i, at in enumerate(idx) if at >= w0), len(idx))
+    hi = next((i for i, at in enumerate(idx) if at >= w1), len(idx))
+    n = len(para)
+    for skip in (0, 2, 4, 8):             # the head may open on a figure or a
+        head = para[skip:skip + ANCHOR]    # marker the raw prints differently
+        if len(head) < min(ANCHOR, n):
             break
-        start = norm.find(head, start + 1)
-    if start < 0:
-        return None
-    a, b = idx[start], idx[end + len(tail) - 1] + 1
-    # Widen to whole lines: the match is on letters, so a leading number or a
-    # trailing figure would otherwise be cut off - and those are what go wrong.
-    a = raw.rfind("\n", 0, a) + 1
-    b = raw.find("\n", b)
-    return raw[a:b if b >= 0 else len(raw)]
+        start = norm.find(head, lo, hi)
+        while start >= 0:
+            for k in (ANCHOR, 12):
+                tail = para[-k:] if n > k else para
+                end = norm.find(tail, start + max(0, int(0.6 * n) - k - skip), hi)
+                span = end + len(tail) - start
+                if end >= 0 and 0.6 * n <= span + skip <= 2.5 * n + min(300, 2 * n):
+                    a, b = idx[start], idx[end + len(tail) - 1] + 1
+                    # Widen to whole lines: the match is on letters, so a
+                    # leading number or a trailing figure would otherwise be
+                    # cut off - and those are what go wrong.
+                    a = raw.rfind("\n", 0, a) + 1
+                    b = raw.find("\n", b)
+                    return raw[a:b if b >= 0 else len(raw)]
+            start = norm.find(head, start + 1, hi)
+    return None
 
 
 def cell_text(value):
@@ -126,16 +149,16 @@ def read_csv(path):
 
 
 def paragraph_rows(data, n, seed):
-    paras = read_csv(os.path.join(data, "paragraphs.csv"))
+    paras = read_csv(where(data, "appraisal", "paragraphs.csv"))
     picked = draw(paras, n, seed)
     clean_cache, raw_cache = {}, {}
     out, missed = [], 0
     for r in sorted(picked, key=lambda r: r["paragraph_id"]):
         did = r["doc_id"]
         if did not in clean_cache:
-            with open(os.path.join(data, "clean", f"{did}.txt"), encoding="utf-8") as fh:
+            with open(where(data, "text", f"{did}.txt"), encoding="utf-8") as fh:
                 clean_cache[did] = fh.read()
-            raw_path = os.path.join(data, "raw", f"{did}.txt")
+            raw_path = where(data, "rendition", f"{did}.txt")
             raw = ""
             if os.path.exists(raw_path):
                 with open(raw_path, "rb") as fh:
@@ -143,7 +166,9 @@ def paragraph_rows(data, n, seed):
             raw_cache[did] = (raw, letters(raw))
         body = clean_cache[did][int(r["char_start"]):int(r["char_end"])]
         raw, raw_letters = raw_cache[did]
-        found = locate_raw(body, raw, raw_letters)
+        found = locate_raw(body.split(" \u2014 ", 1)[-1] if r.get("table_id") else body,
+                           raw, raw_letters, int(r.get("page_from") or 0),
+                           int(r.get("page_to") or 0))
         if found is None and r["block"] == "table":
             # A table row read from the PDF joins its cells with " | "; the text
             # rendition flattens the same table its own way, so the two rarely
@@ -160,7 +185,7 @@ def paragraph_rows(data, n, seed):
 
 
 def package_rows(data, n, seed):
-    path = os.path.join(data, "intermediate", "procurement", "packages.csv")
+    path = where(data, "procurement", "packages.csv")
     if not os.path.exists(path):
         return None
     picked = draw(read_csv(path), n, seed, key="project_id")
@@ -175,7 +200,7 @@ def main():
     ap.add_argument("--force", action="store_true", help="overwrite existing files")
     args = ap.parse_args()
 
-    out_dir = os.path.join(args.data, "review")
+    out_dir = where(args.data, "review")
     os.makedirs(out_dir, exist_ok=True)
     jobs = [("paragraphs", PARA_COLS), ("packages", PKG_COLS)]
     for name, cols in jobs:

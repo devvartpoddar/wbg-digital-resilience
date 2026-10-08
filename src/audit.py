@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Scan every cleaned paragraph for known text defects and count them.
 
-Reads  data/paragraphs.csv, data/clean/{doc_id}.txt
-Writes data/audit_report.txt
+Reads  data/appraisal/paragraphs.csv, data/appraisal/text/{doc_id}.txt
+Writes data/reports/audit.txt
 
 Sampling a handful of paragraphs finds obvious defects and misses rare ones.
 This checks all of them, so a defect affecting 0.2% of the corpus is a number
@@ -20,7 +20,7 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 # Blocks that are meant to read as prose. Table and template blocks are
 # deliberately not prose, so prose checks would only produce noise there.
@@ -158,7 +158,8 @@ def main():
     ap.add_argument("--out", default="")
     args = ap.parse_args()
 
-    with open(os.path.join(args.data, "paragraphs.csv"), newline="", encoding="utf-8") as fh:
+    with open(where(args.data, "appraisal", "paragraphs.csv"), newline="",
+              encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     if args.block:
         rows = [r for r in rows if r["block"] == args.block]
@@ -168,7 +169,7 @@ def main():
     def text_of(row):
         did = row["doc_id"]
         if did not in cache:
-            with open(os.path.join(args.data, "clean", f"{did}.txt"), encoding="utf-8") as fh:
+            with open(where(args.data, "text", f"{did}.txt"), encoding="utf-8") as fh:
                 cache[did] = fh.read()
         return cache[did][int(row["char_start"]):int(row["char_end"])]
 
@@ -261,7 +262,7 @@ def main():
             out.append(f"    {snippet}")
 
     body = "\n".join(out)
-    dest = args.out or os.path.join(args.data, "audit_report.txt")
+    dest = args.out or where(args.data, "reports", "audit.txt")
     with open(dest, "w", encoding="utf-8") as fh:
         fh.write(body + "\n")
     print(body)

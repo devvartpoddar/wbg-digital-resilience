@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """V6: do borrower package references actually join plans to awards?
 
-Reads  data/intermediate/procurement/packages.csv
-       data/intermediate/procurement/awards.csv
-Writes data/intermediate/procurement/v6_link_test.txt
+Reads  data/procurement/packages.csv
+       data/procurement/awards.csv
+Writes data/reports/v6_link_test.txt
 
 Methodology section 5, Stage 8 step 4 asks whether the borrower reference can
 link a plan package to a signed award, and the default there is 'reference,
@@ -30,11 +30,11 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 from clean_procurement import norm_ref                     # noqa: E402
 
-PROC_DIR = os.path.join("intermediate", "procurement")
+PROC_DIR = "procurement"
 
 # Climate-resilience language, used only for the note the card asks for: a prior
 # crosstabulation found none of it in the most exposed package classes. This is a
@@ -332,7 +332,7 @@ def main():
         out.append(f"  {label:<6}" + "  ".join(f"{k}seg:{v}" for k, v in sorted(segs.items())))
 
     report = "\n".join(out) + "\n"
-    path = os.path.join(args.data, PROC_DIR, "v6_link_test.txt")
+    path = where(args.data, "reports", "v6_link_test.txt")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(report)
     print(report)

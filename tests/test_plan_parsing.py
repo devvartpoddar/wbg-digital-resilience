@@ -106,35 +106,33 @@ class TestClosedValueSets:
 class TestNormalisationOfForeignValues:
 
     @pytest.mark.parametrize("raw,expected", [
-        ("Achevé", "signed"),
-        ("Annulé", "cancelled"),
-        ("Signé", "signed"),
-        ("En cours d’exécution", "under_execution"),
-        ("En attente d'exécution", "planned"),
-        ("Concluído", "signed"),
-        ("Cancelado", "cancelled"),
+        ("Achevé", "Completed"),
+        ("Annulé", "Canceled"),
+        ("Signé", "Signed"),
+        ("En cours d’exécution", "Under Implementation"),
+        ("En attente d'exécution", "Pending Implementation"),
+        ("Concluído", "Completed"),
+        ("Cancelado", "Canceled"),
     ])
-    def test_a_foreign_status_reaches_the_closed_set(self, raw, expected):
+    def test_a_foreign_status_becomes_the_step_label(self, raw, expected):
         assert C.norm_status(raw) == expected
 
     @pytest.mark.parametrize("raw", ["Terminated", "Résilié", "Rescindido"])
     def test_termination_has_its_own_value(self, raw):
-        """A contract signed and then ended early is neither `signed` nor
-        `cancelled`, so it gets its own value rather than being guessed into
-        one of those or left as `unknown`."""
-        assert C.norm_status(raw) == "terminated"
+        """A contract signed and then ended early is neither signed nor
+        canceled: STEP has its own value for it, and so does this."""
+        assert C.norm_status(raw) == "Terminated"
 
     @pytest.mark.parametrize("raw,expected", [
-        ("Firmado", "signed"), ("En ejecución", "under_execution"),
-        ("Anulado", "cancelled"), ("Pendiente", "planned")])
-    def test_a_spanish_status_reaches_the_closed_set(self, raw, expected):
+        ("Firmado", "Signed"), ("En ejecución", "Under Implementation"),
+        ("Anulado", "Canceled"), ("Pendiente", "Pending")])
+    def test_a_spanish_status_becomes_the_step_label(self, raw, expected):
         assert C.norm_status(raw) == expected
 
-    def test_a_french_method_reaches_the_closed_set(self):
-        assert C.norm_method("Demande de prix") == "request_for_quotations"
+    def test_a_french_method_becomes_the_bank_code(self):
+        assert C.norm_method("Demande de prix") == "RFQ"
         assert C.norm_method(
-            "Sélection fondée sur les qualifications des consultants"
-        ) == "consultant_qualification"
+            "Sélection fondée sur les qualifications des consultants") == "CQS"
 
     def test_enum_folding_does_not_touch_the_stored_description(self):
         """enum_key exists so that folding accents for a map lookup never

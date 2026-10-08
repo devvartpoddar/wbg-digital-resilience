@@ -45,6 +45,8 @@ PAGE_NUM = re.compile(r"^\s*(?:Page\s+)?\d{1,4}(?:\s+of\s+\d{1,4})?\s*$", re.I)
 FURNITURE_TEXT = re.compile(
     r"^(?:for\s+)?official\s+use\s+only(?:\s+page\s+\d+(?:\s+of\s+\d+)?)?$"
     r"|@#&OPS"
+    # Hidden template codes left in the text layer: RESULT_FRAME_TBL_PDO.
+    r"|^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}$"
     # A dated footer: 'Oct 12, 2023 Page 27 of 29'.
     r"|^[A-Z][a-z]{2,8}\.? \d{1,2}, \d{4}\s+Page \d+ of \d+$", re.I)
 # A footnote reference that was not set raised: digits run onto the end of a
@@ -55,8 +57,11 @@ TITLE_LINE = re.compile(r"^(?:Sub-?component|Component|Figure|Table|Box|Map|Char
 BULLET_OPEN = re.compile(r"^\s*(?:[•●▪■◦\-–]|\(?[ivxlc]{1,5}[\).]|\(?[a-z][\).]|\d{1,2}\))\s+\S")
 
 
+TEMPLATE_CODE = re.compile(r"\s*\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}\b|\s*\b[A-Z]{2,} Table SPACE\b")
+
+
 def _norm(text):
-    return re.sub(r"\s+", " ", C.fold_chars(text)).strip()
+    return re.sub(r"\s+", " ", TEMPLATE_CODE.sub("", C.fold_chars(text))).strip()
 
 
 def _line_text(line, chars, line_size):
@@ -115,6 +120,16 @@ def _line_text(line, chars, line_size):
     return re.sub(r" {2,}", " ", "".join(out))
 
 
+def _not_rotated(obj):
+    """Drop characters set at an angle: the 'Public Disclosure Authorized'
+    stamp down the page margin. pdfplumber still calls them upright, so the
+    text matrix is read directly; its shear terms are zero for level text."""
+    if obj.get("object_type") != "char":
+        return True
+    m = obj.get("matrix") or (1, 0, 0, 1)
+    return abs(m[1]) < 0.1 and abs(m[2]) < 0.1
+
+
 def _page_lines(page):
     """(top, bottom, x0, x1, size, bold, text) for every upright line on a page."""
     lines = []
@@ -151,6 +166,162 @@ def _tables(page):
             continue
         out.append((tb.bbox, rows))
     return out
+
+
+NUMERIC_CELL = re.compile(r"^[\s\d.,%$()+\-–/:]*\d[\s\d.,%$()+\-–/:]*[A-Za-z]{0,4}$")
+
+
+def _is_numeric(cell):
+    return bool(NUMERIC_CELL.match(cell))
+
+
+def _clean_table(rows, vocab):
+    """A pdfplumber table -> (header or None, data rows, caption or None).
+
+    - a cell that wraps keeps its line breaks in pdfplumber's output; they are
+      joined, with a word broken at a hyphen mended as in prose
+    - hidden template text in a cell ('@#&OPS...', 'RESULT_FRAME_TBL_PDO') goes
+    - columns empty in every row go: merged cells leave many of them
+    - the header is the first row of two or more labels that some later row
+      answers with a figure; single-cell rows above it are titles, and the last
+      of them is the table's caption ('Project Development Objective
+      Indicators')
+    - a row of small numbers under the header is a sub-header: 'Intermediate
+      Targets' over '1  2' becomes 'Intermediate Targets 1', '... 2'
+    - a table ruled only around its edge yields one row per printed line, so a
+      label wrapping over three lines with its figures on the middle one is
+      three rows. They are regrouped: label fragments and figures gather into
+      one row until a new label opens with a capital after figures were seen
+    """
+    def cell(c):
+        if not c:
+            return ""
+        parts = [p for p in (c or "").split("\n") if "@#&OPS" not in p]
+        out = ""
+        for p in parts:
+            p = _norm(p)
+            if not p:
+                continue
+            out = _dehyphenate(out, p, vocab) if out else p
+        return out
+
+    grid = [[cell(c) for c in r] for r in rows]
+    grid = [r for r in grid if any(r)]
+    if not grid:
+        return None, [], None
+    width = max(len(r) for r in grid)
+    grid = [r + [""] * (width - len(r)) for r in grid]
+    keep = [j for j in range(width) if any(r[j] for r in grid)]
+    grid = [[r[j] for j in keep] for r in grid]
+
+    def numeric_cells(r):
+        return [j for j, v in enumerate(r) if v and _is_numeric(v)]
+
+    def text_cells(r):
+        return [j for j, v in enumerate(r) if v and not _is_numeric(v)]
+
+    h = None
+    for i, r in enumerate(grid[:12]):
+        if len(text_cells(r)) >= 2 and not numeric_cells(r) and \
+                any(numeric_cells(x) for x in grid[i + 1:]):
+            h = i
+            break
+    if h is None:
+        # No header: only fold single-cell continuation rows into the row above.
+        merged = []
+        for r in grid:
+            filled = [j for j, v in enumerate(r) if v]
+            if merged and len(filled) == 1 and not _is_numeric(r[filled[0]]) \
+                    and merged[-1][filled[0]]:
+                j = filled[0]
+                merged[-1][j] = _dehyphenate(merged[-1][j], r[j], vocab)
+                continue
+            merged.append(list(r))
+        return None, [(r, None) for r in merged], None
+
+    titles = [r for r in grid[:h] if len([v for v in r if v]) == 1]
+    caption = next((v for v in titles[-1] if v), None) if titles else None
+    header_row = list(grid[h])
+    header = list(header_row)
+    body = grid[h + 1:]
+
+    def is_subheader(r):
+        return bool(r) and all(len(v) <= 3 for v in r if v) and not text_cells(r) \
+            and len([v for v in r if v]) >= 2
+
+    if body and is_subheader(body[0]):
+        sub = body.pop(0)
+        top = list(header)
+        for j, v in enumerate(sub):
+            if v:
+                parent = next((top[k] for k in range(j, -1, -1) if top[k]), "")
+                header[j] = f"{parent} {v}".strip()
+
+    # A frame can hold several tables with the same columns, each reprinting the
+    # header under its own title ('Intermediate Results Indicators by
+    # Components'). Split there; the single-cell rows just above a repeated
+    # header are the next table's title, not part of the last indicator.
+    segments, seg, cap = [], [], caption
+    for r in body:
+        if r == header_row:
+            titles = []
+            while seg and len([v for v in seg[-1] if v]) == 1 and not numeric_cells(seg[-1]):
+                titles.insert(0, seg.pop())
+            segments.append((seg, cap))
+            cap = next((v for v in titles[-1] if v), cap) if titles else cap
+            seg = []
+            continue
+        if not seg and is_subheader(r):
+            continue
+        seg.append(r)
+    segments.append((seg, cap))
+
+    out = [(list(r), caption) for r in grid[:h] if len([v for v in r if v]) > 1]
+    for seg, cap in segments:
+        groups = []
+        for r in seg:
+            has_num = bool(numeric_cells(r))
+            labels = text_cells(r)
+            cur = groups[-1] if groups else None
+            first = r[labels[0]] if labels else ""
+            # An objective heading inside the framework, '1. to increase access
+            # ...', stands on its own row and closes the indicator before it.
+            if re.match(r"^\d{1,2}\.\s+\S", first) and not has_num:
+                groups.append({"cells": list(r), "has_num": False, "closed": True})
+                continue
+            starts_new = labels and cur is not None and cur["has_num"] and \
+                first[:1].isupper()
+            if cur is None or starts_new or cur.get("closed"):
+                cur = {"cells": [""] * len(r), "has_num": False}
+                groups.append(cur)
+            for j, v in enumerate(r):
+                if not v:
+                    continue
+                if cur["cells"][j] and not _is_numeric(v):
+                    cur["cells"][j] = _dehyphenate(cur["cells"][j], v, vocab)
+                elif not cur["cells"][j]:
+                    cur["cells"][j] = v
+                else:
+                    # A second figure for a cell already filled: a new record.
+                    cur = {"cells": [""] * len(r), "has_num": False}
+                    groups.append(cur)
+                    cur["cells"][j] = v
+            cur["has_num"] = cur["has_num"] or has_num
+        out += [(g["cells"], cap) for g in groups]
+    return header, out, caption
+
+
+def _row_text(cells, header, caption):
+    """'Caption - Header: value · Header: value', or the cells joined by ' | '
+    when the table has no header to name them."""
+    if header and len(header) == len(cells):
+        parts = [f"{h}: {v}" if h else v for h, v in zip(header, cells) if v]
+        body = " · ".join(parts)
+    else:
+        body = " | ".join(v for v in cells if v)
+    if caption and body:
+        return f"{caption} — {body}"
+    return body
 
 
 def _in_box(line, box):
@@ -193,7 +364,7 @@ def _contents_entry(text):
     return bool(C.ROMAN.match(text) or C.ANNEX.match(text) or C.LETTER.match(text))
 
 
-GLYPH_BULLET = re.compile(r"^\s*[•●▪■◦]\s")
+GLYPH_BULLET = re.compile(r"^\s*[•●▪■◦](?:\s+|(?=[A-Z]))")
 
 
 def _opens_block(line, before):
@@ -213,11 +384,15 @@ def _opens_block(line, before):
 def extract(pdf):
     """An open pdfplumber PDF -> (clean_text, spans, stats).
 
-    spans: (start, end, section_path, section_title, block, page_from, page_to)
+    spans: (start, end, section_path, section_title, block, page_from, page_to,
+            meta) - meta holds, where they apply: list_item, lead_in (index of
+            the span that introduces the list), and for a table row its table
+            number, row, cells, header and caption
     """
     stats = Counter()
     pages, tables = [], []
     for page in pdf.pages:
+        page = page.filter(_not_rotated)
         lines = _page_lines(page)
         tabs = _tables(page)
         pages.append(lines)
@@ -275,6 +450,9 @@ def extract(pdf):
         defined_by_page.append({int(m.group(1)) for x in keep[fn_from:]
                                 for m in [re.match(r"^(\d{1,3})", x["text"])] if m})
 
+    table_no = [0]
+    last_header = [None, ""]     # (header, caption) of the last headed table
+    last_caption = ["", 0]       # the latest heading or short title line, and its page
     for pno, (keep, tabs) in enumerate(zip(kept_pages, tables), 1):
         fn_from = fn_starts[pno - 1]
         # Footnote numbers for markers that were not set raised: this page's,
@@ -298,11 +476,32 @@ def extract(pdf):
                 key = id(box)
                 if key not in emitted_tables:
                     emitted_tables.add(key)
-                    for row in box[1]:
-                        cells = [_norm(c or "") for c in row]
-                        text = " | ".join(c for c in cells if c)
+                    table_no[0] += 1
+                    header, data, own_caption = _clean_table(box[1], vocab)
+                    width = len(data[0][0]) if data else 0
+                    # A table running on from the previous page reprints no
+                    # header: borrow the last one when the column count agrees
+                    # and the table starts the page's content.
+                    if header is None and last_header[0] and \
+                            len(last_header[0]) == width and i <= 2:
+                        header = last_header[0]
+                        caption = last_header[1]
+                        stats["table_headers_carried"] += 1
+                    else:
+                        # A title more than a page back belongs to something else.
+                        recent = last_caption[0] if pno - last_caption[1] <= 1 else ""
+                        caption = own_caption or recent
+                    if header:
+                        last_header[0], last_header[1] = header, caption
+                        stats["tables_with_header"] += 1
+                    stats["tables"] += 1
+                    for r_i, (row, row_cap) in enumerate(data):
+                        row_caption = row_cap or caption
+                        text = _row_text(row, header, row_caption)
                         if text:
-                            items.append(("table", pno, text, None))
+                            items.append(("table", pno, text, {
+                                "table": table_no[0], "row": r_i, "cells": row,
+                                "header": header, "caption": row_caption}))
                 stats["table_lines"] += 1
                 continue
             if i >= fn_from:
@@ -314,7 +513,11 @@ def extract(pdf):
             heading = (l["bold"] or l["italic"] or l["size"] > body + 0.5) \
                 and len(l["text"].split()) <= 14 and not re.search(r"[.;,:]$", l["text"]) \
                 and (l["x1"] - l["x0"]) < 0.8 * page_measure[pno - 1]
-            items.append(("heading" if heading else "body", pno, unmark(l["text"]), l))
+            text = unmark(l["text"])
+            if heading or TITLE_LINE.match(text):
+                last_caption[0], last_caption[1] = text, pno
+                last_header[0] = None   # a new title ends the previous table
+            items.append(("heading" if heading else "body", pno, text, l))
             if i and keep[i - 1] is not None:
                 gap = l["top"] - keep[i - 1]["top"]
                 if 0 < gap < 3 * body:
@@ -327,11 +530,15 @@ def extract(pdf):
     last_body = None    # index in units of the last body unit
     last_body_line = None
 
-    def start(kind, text, pno):
-        units.append([kind, text, pno, pno])
+    def start(kind, text, pno, meta=None):
+        units.append([kind, text, pno, pno, meta or {}])
 
     for kind, pno, text, l in items:
-        if kind in ("table", "heading"):
+        if kind == "table":
+            start(kind, text, pno, l)
+            prev = kind
+            continue
+        if kind == "heading":
             # A figure caption, a table or a sub-heading can interrupt a
             # paragraph that carries on below it. last_body is kept so that a
             # lowercase continuation can still find its paragraph; prev is
@@ -386,8 +593,17 @@ def extract(pdf):
     clean_parts, spans, cursor = [], [], 0
     sec_path, sec_title = "", ""
     annex_seen = roman_seen = False
-    for kind, text, p0, p1 in units:
+    lead_in = None                  # index in spans of the sentence that opens a list
+    for kind, text, p0, p1, meta in units:
         text = text.strip()
+        meta = dict(meta)
+        # A bullet glyph is layout, not text: strip it and record that the
+        # unit is a list item, with the sentence that introduced the list.
+        if GLYPH_BULLET.match(text):
+            text = GLYPH_BULLET.sub("", text, count=1).strip()
+            meta["list_item"] = True
+        elif kind == "body" and BULLET_OPEN.match(text):
+            meta["list_item"] = True
         if not text:
             continue
         block = kind
@@ -417,8 +633,15 @@ def extract(pdf):
                 block = "table"
         elif block == "table" and not roman_seen:
             block = "frontmatter"
+        if meta.get("list_item") and lead_in is not None:
+            meta["lead_in"] = lead_in
+        elif kind == "body" and not meta.get("list_item"):
+            lead_in = len(spans) if re.search(r":$", text) else None
+        if block == "heading":
+            lead_in = None
         clean_parts.append(text + "\n\n")
-        spans.append((cursor, cursor + len(text), sec_path, sec_title[:120], block, p0, p1))
+        spans.append((cursor, cursor + len(text), sec_path, sec_title[:120], block, p0, p1,
+                      meta))
         cursor += len(text) + 2
     stats["units"] = len(spans)
     return "".join(clean_parts), spans, stats

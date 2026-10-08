@@ -96,6 +96,11 @@ def test_sentence_split(text, expected):
 
 
 def test_sentence_offsets_index_the_paragraph():
-    text = "First one. Second one."
+    text = "This is the first one. This is the second one."
     spans = S.split(text)
-    assert spans == [(0, 10), (11, 22)]
+    assert spans == [(0, 22), (23, 46)]
+
+
+def test_a_sentence_of_fewer_than_three_words_is_not_cut_off():
+    text = "See above. The project will finance towers."
+    assert [text[a:b] for a, b in S.split(text)] == [text]

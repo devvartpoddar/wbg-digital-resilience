@@ -6,12 +6,12 @@ Reads  inputs/config/cohort.csv
        data/raw/notices/{project_id}.json       cached notice responses
        data/raw/awards/{project_id}.json        cached award responses
 Writes data/raw/...                              (gitignored raw artefacts)
-       data/api_fetch_log.csv                    every interface call
-       data/intermediate/procurement/packages_raw.csv
-       data/intermediate/procurement/notices_raw.csv
-       data/intermediate/procurement/awards_raw.csv
-       data/intermediate/procurement/package_changes.csv
-       data/intermediate/procurement/fetch_procurement_report.txt
+       data/raw/fetch_log.csv                    every interface call
+       data/procurement/packages_raw.csv
+       data/procurement/notices_raw.csv
+       data/procurement/awards_raw.csv
+       data/procurement/package_changes.csv
+       data/reports/fetch_procurement.txt
 
 Built for re-running, because the procurement plan is the document that recurs.
 Three disciplines, all from the card and all load-bearing:
@@ -41,7 +41,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 import plan_table                                     # noqa: E402
 from fetch import get, HEADERS, read_cohort            # noqa: E402
@@ -57,7 +57,6 @@ AWARDS = "https://search.worldbank.org/api/contractdata"
 PLAN_DOCTY = "Procurement Plan"
 PAGE = 500
 
-PROC_DIR = "intermediate/procurement"
 
 # The metadata columns of the STEP plan table, in the order the header prints
 # them. Only the pairs we can locate reliably are used; see parse_plan_text.
@@ -134,7 +133,7 @@ PACKAGE_COLS = [
     "description_lang", "is_placeholder", "category", "category_raw", "method",
     "method_raw", "market_approach", "status", "status_raw", "planned_date",
     "revised_date", "estimated_amount", "currency", "content_sha256", "fetched_at",
-    "section", "record_index",
+    "section", "record_index", "cells_raw",
 ]
 NOTICE_COLS = [
     "notice_id", "project_id", "notice_type", "publication_date", "deadline_date",
@@ -144,7 +143,7 @@ NOTICE_COLS = [
 AWARD_COLS = [
     "contract_id", "project_id", "borrower_ref", "description", "description_sha256",
     "description_lang", "is_placeholder", "signed_date", "no_objection_date",
-    "total_amount", "currency", "procurement_group", "method", "review_type",
+    "total_amount", "currency", "procurement_group", "method", "method_raw", "review_type",
     "supplier_name", "supplier_country", "supplier_amount", "region", "sector",
 ]
 FETCH_LOG_COLS = ["fetch_id", "source", "endpoint", "query_params", "fetched_at",
@@ -555,6 +554,7 @@ def _parse_collapsed(tables, doc_meta):
                 "method_raw": "" if refused else _first_token(block, METHOD_TOKENS),
                 "market_approach": "" if refused else _first_token(block, APPROACH_TOKENS),
                 "status_raw": "" if refused else rec["status_raw"],
+                "cells_raw": rec["cells"],
                 "planned_date": dates[0] if dates else "",
                 "revised_date": dates[-1] if len(dates) > 1 else "",
                 "estimated_amount": ""
@@ -702,6 +702,7 @@ def _plan_row(rec, section, has_estimated, doc_meta, index):
         "method_raw": _first_token(body, METHOD_TOKENS),
         "market_approach": _first_token(body, APPROACH_TOKENS),
         "status_raw": _first_token(body, STATUS_TOKENS),
+        "cells_raw": _cells_text(body),
         "planned_date": numbers[0] if numbers else "",
         "revised_date": numbers[-1] if len(numbers) > 1 else "",
         "estimated_amount": "" if amount is None else f"{amount:.2f}",
@@ -715,6 +716,13 @@ def _plan_row(rec, section, has_estimated, doc_meta, index):
         "_columns": "",
         "_no_est": False,
     }
+
+
+def _cells_text(body):
+    """The record's other cells as one string, figures and dates taken out:
+    the text the component is read from at clean time (clean_procurement)."""
+    text = re.sub(r"\b\d{4}-\d{2}-\d{2}\b|\b[\d,]+\.\d{2}\b", " ", body)
+    return collapse_ws(text)
 
 
 def _clip_tail(cell):
@@ -780,7 +788,7 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
     Parsing stays serial and in a deterministic order, so a re-run produces the
     same rows whatever order the downloads completed in.
     """
-    raw_dir = os.path.join(data, "raw", "plans")
+    raw_dir = where(data, "plans")
     os.makedirs(raw_dir, exist_ok=True)
     listing_failures, no_plan, tasks = [], [], []
     total = len(projects)
@@ -878,7 +886,7 @@ def _fetch_plan_file(path, url, refresh, delay):
 
 
 def collect_notices(projects, data, log, refresh, delay):
-    raw_dir = os.path.join(data, "raw", "notices")
+    raw_dir = where(data, "notices_json")
     os.makedirs(raw_dir, exist_ok=True)
     rows, failures = [], []
     for proj in projects:
@@ -935,7 +943,7 @@ def collect_notices(projects, data, log, refresh, delay):
 
 
 def collect_awards(projects, data, log, refresh, delay):
-    raw_dir = os.path.join(data, "raw", "awards")
+    raw_dir = where(data, "awards_json")
     os.makedirs(raw_dir, exist_ok=True)
     rows, failures = [], []
     for proj in projects:
@@ -999,7 +1007,9 @@ def collect_awards(projects, data, log, refresh, delay):
                 "total_amount": _num(rec.get("total_contr_amnt")),
                 "currency": "USD",
                 "procurement_group": norm_category(rec.get("procurement_group")),
-                "method": norm_method(rec.get("procu_meth_text") or ""),
+                "method": norm_method(rec.get("procu_meth_text") or "",
+                                      norm_category(rec.get("procurement_group"))),
+                "method_raw": (rec.get("procu_meth_text") or "").strip(),
                 "review_type": (rec.get("rvw_type") or "").strip().lower(),
                 "supplier_name": "|".join(dict.fromkeys(n for n in names if n)),
                 "supplier_country": "|".join(dict.fromkeys(countries)),
@@ -1126,10 +1136,10 @@ def main():
     projects = read_cohort(args.cohort)
     if args.limit:
         projects = projects[:args.limit]
-    proc_dir = os.path.join(args.data, PROC_DIR)
+    proc_dir = where(args.data, "procurement")
     os.makedirs(proc_dir, exist_ok=True)
 
-    log = FetchLog(os.path.join(args.meta, "api_fetch_log.csv"))
+    log = FetchLog(where(args.meta, "fetch_log"))
     t0 = time.time()
 
     plan_rows, listing_fail, no_plan, plan_fail, free_chars = [], [], [], [], []
@@ -1152,7 +1162,7 @@ def main():
         row["description_lang"] = lang
         row["is_placeholder"] = str(is_placeholder(desc)).lower()
         row["category"] = norm_category(r["category_raw"])
-        row["method"] = norm_method(r["method_raw"], r["market_approach"])
+        row["method"] = norm_method(r["method_raw"], row["category"])
         row["status"] = norm_status(r["status_raw"])
         row["planned_date"] = r["planned_date"]
         row["revised_date"] = r["revised_date"]
@@ -1183,7 +1193,8 @@ def main():
     for r in prep:
         by_project.setdefault(r["project_id"], set()).add(r["plan_version"])
 
-    report = os.path.join(proc_dir, "fetch_procurement_report.txt")
+    report = where(args.data, "reports", "fetch_procurement.txt")
+    os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:
         fh.write(f"run at            {now_stamp()}   ({time.time() - t0:.0f}s)\n")
         fh.write(f"projects included {len(projects)}\n")

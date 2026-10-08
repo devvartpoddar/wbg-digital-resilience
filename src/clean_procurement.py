@@ -1,14 +1,10 @@
 #!/usr/bin/env python3
 """Prepare procurement text: the ten steps in docs/cleaning.md, procurement.
 
-Reads  data/intermediate/procurement/packages_raw.csv
-       data/intermediate/procurement/notices_raw.csv
-       data/intermediate/procurement/awards_raw.csv
-Writes data/intermediate/procurement/packages.csv
-       data/intermediate/procurement/notices.csv
-       data/intermediate/procurement/awards.csv
-       data/intermediate/procurement/superseded_packages.csv
-       data/intermediate/procurement/clean_procurement_report.txt
+Reads  data/procurement/{packages_raw,notices_raw,awards_raw}.csv
+       data/appraisal/components.csv   to name each package's component
+Writes data/procurement/{packages,notices,awards,superseded_packages}.csv
+       data/reports/clean_procurement.txt
 
 The rules here are deliberately the opposite of src/clean.py section 5:
 
@@ -39,12 +35,12 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 from clean import CHAR_MAP, fold_chars                  # noqa: E402  (step 1)
 import glue                                              # noqa: E402
 
-CLEAN_VERSION = "proc-clean-2"
+CLEAN_VERSION = "proc-clean-3"
 
 # Another package's borrower reference inside a description: the parser missed
 # a record boundary and stitched the next record on. Used to cut it off here and
@@ -53,7 +49,7 @@ REF_INLINE = re.compile(r"[A-Z]{2,}-[A-Z0-9]{1,12}-[0-9]{2,10}-(?:CW|GD|GO|CS|NC
                         r"|\b(?=[A-Z0-9-]*[0-9])[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){1,5}\s*/\s")
 
 
-PROC_DIR = os.path.join("intermediate", "procurement")
+PROC_DIR = "procurement"
 
 # ------------------------------------------------------------------ step 1, 2
 
@@ -125,10 +121,15 @@ def match_key(text):
 REF_IN_TEXT = re.compile(
     r"^\s*([A-Z]{2}-[A-Z0-9]{1,12}-\d{2,10}-[A-Z]{2}-[A-Z0-9]{2,6})\s*[-:/\u2013]?\s*")
 
-LOT_RE = re.compile(r"(?:\bLOTS?\b|\bLOTE)\s*(?:N[O\u00ba.\u00b0]?\s*)?"
-                    r"[-#:/\u2013]?\s*([A-Z0-9]{1,4})\b", re.I)
-PHASE_RE = re.compile(r"\b(?:PHASE|FASE|ETAPA|TRANCHE)\s*(?:N[O\u00ba.\u00b0]?\s*)?"
-                      r"[-#:/\u2013]?\s*([A-Z0-9IVX]{1,4})\b", re.I)
+# 'Lot 2', 'Lots 1-3', 'Phase II', 'Lote 3', 'Tranche 2'. The value must look
+# like a lot or phase number - digits, a Roman numeral or a single capital - so
+# that 'Phase of the project' or a clipped 'Phase s' is not read as one.
+_MARK_NO = r"(?:\d{1,3}|[IVX]{1,4}|[A-H])"
+_MARK_RUN = (rf"{_MARK_NO}(?:\s*(?:-|\u2013|&|,|to|and|et|e|y|\u00e0|a)\s*{_MARK_NO})*"
+             r"(?![\w-])")
+LOT_PHASE_RE = re.compile(
+    r"(?i:\b(LOTS?|LOTES?|PHASES?|FASES?|ETAPAS?|TRANCHES?))\s*"
+    r"(?i:N[O\u00ba\u00b0]?\.?\s*)?[-#:/\u2013]?\s*(" + _MARK_RUN + ")")
 REBID_RE = re.compile(r"[\(\[]?\s*\b(RE-?BID(?:DING)?|RE-?TENDER|RELANCE)\b\s*[\)\]]?"
                       r"|\(?\bREBID\b\)?", re.I)
 
@@ -152,21 +153,161 @@ def split_markers(description):
     if m:
         ref = m.group(1)
         text = text[m.end():].strip()
-    lot = phase = ""
-    m = LOT_RE.search(text)
-    if m:
-        lot = m.group(1)
-        text = (text[:m.start()] + " " + text[m.end():]).strip()
-    m = PHASE_RE.search(text)
-    if m:
-        phase = m.group(1)
-        text = (text[:m.start()] + " " + text[m.end():]).strip()
+    marks = []
+    for m in LOT_PHASE_RE.finditer(text):
+        word = m.group(1).lower()
+        kind = "Lot" if word.startswith("lot") else "Phase"
+        plural = "s" if re.search(r"[-\u2013&,]|\b(?:to|and|et|e|y|a|\u00e0)\b", m.group(2)) else ""
+        marks.append(f"{kind}{plural} {WS_RE.sub(' ', m.group(2))}")
     rebid = bool(REBID_RE.search(text))
     if rebid:
         text = REBID_RE.sub(" ", text)
+    # Taken out of the text only where it opens or closes it, so what is left
+    # still reads: 'Phase 1 and Phase 2 works' keeps its words.
+    edge = re.compile(r"^\s*\(?(?:" + LOT_PHASE_RE.pattern + r")\)?\s*[-\u2013:.]\s*"
+                      r"|\s*(?:[-\u2013:,]\s*|\()(?:" + LOT_PHASE_RE.pattern + r")\s*\)?\s*$")
+    for _ in range(2):
+        text = edge.sub(" ", text).strip()
     text = re.sub(r"\s*[-\u2013]\s*$", "", WS_RE.sub(" ", text)).strip(" -\u2013,.;")
     return {"description": text or raw, "ref_in_text": ref,
-            "lot": lot, "phase": phase, "is_rebid": rebid}
+            "lot_or_phase": "; ".join(dict.fromkeys(marks)), "is_rebid": rebid}
+
+
+# ------------------------------------------------------------ other cells
+
+# A plan row's other cells can end up inside the description: the Loan /
+# Credit number between two wrapped lines ('Rur IDA / 12345 al radio'), and on
+# some layouts the component, review type, method and market approach after
+# it. They are cut out here and the component is kept, in its own column.
+LOAN_IN_TEXT = re.compile(r"\s*\b(?:IDA|IBRD|TF|GRANT|CREDIT|DON|PRET|COFN)\s*/\s*"
+                          r"[A-Z]?\s?\d[\dA-Z-]*\s*")
+_METHOD_WORDS = (r"(?:Request for (?:Bids|Quota|Propos)|Direct Selection|Quality And Cost|"
+                 r"Quality Based Selection|Consultant Qualification|Least Cost Selection|"
+                 r"Individual Consult|S[eé]lection fond|S[eé]lection au moindre|"
+                 r"Demande de prix|Appel d'offres|Entente directe|Passation de march|"
+                 r"Consultant individuel)")
+_APPROACH_WORDS = r"(?:(?:Open|Limited|Direct)\s*-\s*(?:National|Internationa)|Single Stage)"
+_REVIEW_WORDS = r"(?:Post|Prior|A posteriori|A priori)"
+CELL_TAIL = re.compile(
+    rf"\s(?:{_REVIEW_WORDS}\s+(?=.*?(?:{_METHOD_WORDS}|{_APPROACH_WORDS}))"
+    rf"|{_METHOD_WORDS}(?=.*?{_APPROACH_WORDS})|{_APPROACH_WORDS}|{_REVIEW_WORDS}$"
+    r"|Estimated\s+Actual)")
+COMP_NUMBER = re.compile(r"^(?:(?:Component|Composante|Componente|Comp\.?)\s*)?"
+                         r"(\d{1,2}(?:\.\d{1,2})?)\s*[.:)\-–]?\s+(?=\S)", re.I)
+COMP_NAMED = re.compile(r"\b(?:Component|Composante|Componente|Comp\.)\s*"
+                        r"(\d{1,2}(?:\.\d{1,2})?)\b", re.I)
+
+
+def split_cells(desc):
+    """(description, text of the other cells that had run into it)."""
+    tail = []
+    out = desc
+    while True:
+        m = LOAN_IN_TEXT.search(out)
+        if not m:
+            break
+        after = out[m.end():]
+        if after[:1].islower():
+            out = out[:m.start()] + " " + after       # the line wrapped round it
+        else:
+            tail.insert(0, after)
+            out = out[:m.start()]
+    m = CELL_TAIL.search(out)
+    if m:
+        tail.insert(0, out[m.start():])
+        out = out[:m.start()]
+    return WS_RE.sub(" ", out).strip(), WS_RE.sub(" ", " ".join(tail)).strip()
+
+
+def _flat(text):
+    return re.sub(r"[\W_]+", "", enum_key(text))
+
+
+class Components:
+    """The components of each project, from the appraisal side
+    (components.csv), to name the component a procurement package belongs to.
+
+    A restructuring can renumber components, so each name takes its number
+    from the most recent document that lists it."""
+
+    def __init__(self, rows=()):
+        self.by_project = defaultdict(list)
+        seen = set()
+        for r in sorted(rows, key=lambda r: (r.get("disclosure_date") or ""), reverse=True):
+            name = re.sub(r"^(?:Component|Sub-?component)\s*\d+(?:\.\d+)?\s*[.:\-\u2013]?\s*",
+                          "", r.get("name") or "", flags=re.I).strip()
+            for pid in (r.get("project_ids") or "").split("|"):
+                key = (pid, _flat(name))
+                if not pid or len(key[1]) < 4 or key in seen:
+                    continue
+                seen.add(key)
+                self.by_project[pid].append((r.get("number") or "", name, _flat(name)))
+
+    def _by_name(self, pid, flat, partial_ok):
+        """The one component whose name the text carries, as (number, name)."""
+        best, found = 0, {}
+        for num, name, f in self.by_project.get(pid, ()):
+            if partial_ok:
+                n = len(f)
+                while n >= 12 and f[:n] not in flat:
+                    n -= 1
+                if n < 12 or (n < len(f) and n < 15):
+                    continue
+            else:
+                n = len(f) if f.startswith(flat) and len(flat) >= 12 else 0
+                if not n:
+                    continue
+            if n > best:
+                best, found = n, {num: name}
+            elif n == best:
+                found.setdefault(num, name)
+        return next(iter(found.items())) if len(found) == 1 else None
+
+    def strip_tail(self, pid, desc):
+        """A component at the end of a description: (description, component).
+
+        The component is (number, name, source) or None."""
+        starts = [m.start() for m in re.finditer(r"(?:(?<=\s)|^)\S", desc)]
+        for p in starts[2:]:
+            seg = desc[p:]
+            m = COMP_NUMBER.match(seg)
+            rest = seg[m.end():] if m else seg
+            flat = _flat(rest)
+            if len(flat) < 12:
+                continue
+            hit = self._by_name(pid, flat, partial_ok=False)
+            if hit:
+                return desc[:p].rstrip(" -\u2013,;:/("), (hit[0], hit[1], "appraisal")
+            if m and re.match(r"(?:Component|Composante|Componente|Comp\.)", seg, re.I):
+                return desc[:p].rstrip(" -\u2013,;:/("), (m.group(1), "", "plan")
+        return desc, None
+
+    def in_cells(self, pid, cells):
+        """The component a row's other cells name: by the longest stretch of a
+        component's name they carry, else by the number the plan prints."""
+        hit = self._by_name(pid, _flat(cells), partial_ok=True)
+        if hit:
+            return hit[0], hit[1], "appraisal"
+        m = COMP_NAMED.search(cells) or COMP_NUMBER.match(cells)
+        if not m:
+            return None
+        # The plan's own number. When the words after it open the name the
+        # appraisal side gives that same number, it is that component; the
+        # name itself is usually clipped and interleaved with other cells,
+        # so it is not repeated from the plan.
+        head = _flat(cells[m.end():])[:12]
+        for num, name, f in self.by_project.get(pid, ()):
+            if num == m.group(1) and len(head) >= 8 and f.startswith(head[:min(len(head), len(f))]):
+                return num, name, "appraisal"
+        return m.group(1), "", "plan"
+
+
+def read_components(data):
+    path = where(data, "appraisal", "components.csv")
+    if not os.path.exists(path):
+        return Components()
+    with open(path, newline="", encoding="utf-8") as fh:
+        return Components(list(csv.DictReader(fh)))
 
 
 # ------------------------------------------------------------------ step 5
@@ -275,96 +416,105 @@ def is_placeholder(description):
 
 # ------------------------------------------------------------------ step 9
 
+# The status as STEP prints it, in STEP's own English words. The plans are
+# published in four languages; each foreign word is mapped to the English label
+# STEP prints for the same state, so the column has one vocabulary. Nothing is
+# merged: 'Pending' and 'Pending Implementation' are different STEP values and
+# stay different, and 'Completed' is not folded into 'Signed'. Every key below
+# was mined from the corpus, not translated at a desk; `collapse` and enum_key
+# fold accents first, so the keys are ASCII ('Achevé' arrives as 'acheve').
+STATUS_LABELS = ("Pending", "Pending Implementation", "Under Implementation",
+                 "Under Review", "Signed", "Completed", "Canceled", "Terminated",
+                 "Planned")
 STATUS_MAP = {
-    "signed": "signed",
-    "contract signed": "signed",
-    "canceled": "cancelled", "cancelled": "cancelled", "cancelled/": "cancelled",
-    "under implementation": "under_execution",
-    "under execution": "under_execution",
-    "under way": "under_execution",
-    "implementation": "under_execution",
-    "in progress": "under_execution",
-    "under evaluation": "under_execution",
-    "advertised": "under_execution",
-    "under preparation": "under_preparation",
-    "in preparation": "under_preparation",
-    "planned": "planned",
-    "not started": "planned",
-    "pending": "planned",
-    "completed": "signed",
-    "contract completed": "signed",
-    "under review": "under_execution",
-    "pending implementation": "planned",
-    # French. Mined from the corpus, not translated at a desk - see the note on
-    # METHOD_TOKENS in fetch_procurement. `collapse` folds accents before the
-    # lookup, so the keys here are ASCII and 'Achevé' arrives as 'acheve'.
-    "acheve": "signed",
-    "annule": "cancelled",
-    "signe": "signed",
-    "planifie": "planned",
-    "en cours d'execution": "under_execution",
-    "en attente d'execution": "planned",
-    "en cours d'examen": "under_execution",
-    "en cours d'evaluation": "under_execution",
-    "en cours de preparation": "under_preparation",
-    # Portuguese
-    "concluido": "signed",
-    "cancelado": "cancelled",
-    "assinado": "signed",
-    "em execucao": "under_execution",
-    "em preparacao": "under_preparation",
-    # Spanish
-    "firmado": "signed",
-    "anulado": "cancelled",
-    "en ejecucion": "under_execution",
-    "en evaluacion": "under_execution",
-    "en preparacion": "under_preparation",
-    "pendiente": "planned",
-    "planificado": "planned",
-    "ejecucion pendiente": "planned",
-    "implementacao pendente": "planned",
-    "em fase de implementacao": "under_execution",
-    # Signed, then ended early. Neither signed nor cancelled is true of it, so
-    # it has its own value rather than falling into unknown.
-    "terminated": "terminated",
-    "resilie": "terminated",
-    "rescindido": "terminated",
+    "pending": "Pending",
+    "pendiente": "Pending",
+    "pending implementation": "Pending Implementation",
+    "en attente d'execution": "Pending Implementation",
+    "ejecucion pendiente": "Pending Implementation",
+    "implementacao pendente": "Pending Implementation",
+    "under implementation": "Under Implementation",
+    "en cours d'execution": "Under Implementation",
+    "en ejecucion": "Under Implementation",
+    "em fase de implementacao": "Under Implementation",
+    "em execucao": "Under Implementation",
+    "under review": "Under Review",
+    "en cours d'examen": "Under Review",
+    "em analise": "Under Review",
+    "signed": "Signed",
+    "signe": "Signed",
+    "assinado": "Signed",
+    "firmado": "Signed",
+    "completed": "Completed",
+    "acheve": "Completed",
+    "concluido": "Completed",
+    "finalizado": "Completed",
+    "canceled": "Canceled",
+    "cancelled": "Canceled",
+    "annule": "Canceled",
+    "cancelado": "Canceled",
+    "anulado": "Canceled",
+    # Signed, then ended early: its own STEP value, neither signed nor canceled.
+    "terminated": "Terminated",
+    "resilie": "Terminated",
+    "rescindido": "Terminated",
+    "planned": "Planned",
+    "planifie": "Planned",
 }
+# A status that says the contract exists. An award in the contracts data is not
+# allowed to overwrite one of these with a bare 'Signed'.
+CONTRACT_EXISTS = {"Signed", "Completed", "Terminated"}
 
-METHOD_MAP = {
-    "open - international": ("open_international", "request for bids"),
-    "open - national": ("open_national", "request for bids"),
-    "limited - international": ("other", "limited"),
-    "limited - national": ("other", "limited"),
-    "request for bids": ("open_national", "request for bids"),
-    "request for quotations": ("request_for_quotations", "request for quotations"),
-    "direct selection": ("direct_selection", "direct selection"),
-    "direct contracting": ("direct_selection", "direct contracting"),
-    "consultant qualification selection": ("consultant_qualification", ""),
-    "consultant qualification  selection": ("consultant_qualification", ""),
-    "quality and cost based selection": ("quality_cost_based", ""),
-    "quality cost based": ("quality_cost_based", ""),
-    "least cost selection": ("least_cost", ""),
-    "individual consultant selection": ("other", "individual consultant"),
-    "single source selection": ("direct_selection", "single source"),
-    "framework agreement": ("other", "framework"),
-    "competitive dialogue": ("other", "competitive dialogue"),
-    "quality and cost-based selection": ("quality_cost_based", ""),
-    # French, mined from the corpus.
-    "demande de prix": ("request_for_quotations", "request for quotations"),
-    "appel d'offres": ("open_national", "request for bids"),
-    "entente directe": ("direct_selection", "direct selection"),
-    "passation de marche de gre a gre": ("direct_selection", "direct selection"),
-    "selection fondee sur les qualifications des consultants":
-        ("consultant_qualification", ""),
-    "selection fondee sur la qualite et le cout": ("quality_cost_based", ""),
-    "selection au moindre cout": ("least_cost", ""),
-    "consultant individuel": ("other", "individual consultant"),
-    "individuel": ("other", "individual consultant"),
-    "direct - national": ("direct_selection", "direct"),
-    "direct - international": ("direct_selection", "direct"),
-    "open / national": ("open_national", "request for bids"),
+# The Bank's own procurement method codes, as STEP writes them in the borrower
+# reference ('...-GO-RFB', '...-CS-QCBS'), with the name the Procurement
+# Regulations give each. The plan's Method cell is mapped to the same code, so
+# `method` has one vocabulary whichever of the two supplied it.
+METHOD_NAMES = {
+    "RFB": "Request for Bids",
+    "RFQ": "Request for Quotations",
+    "RFP": "Request for Proposals",
+    "DIR": "Direct Selection",
+    "CDS": "Direct Selection (consulting services)",
+    "QCBS": "Quality and Cost-Based Selection",
+    "QBS": "Quality-Based Selection",
+    "FBS": "Fixed Budget Selection",
+    "LCS": "Least Cost Selection",
+    "CQS": "Consultant's Qualification-Based Selection",
+    "INDV": "Individual Consultant Selection",
+    "UN": "Procurement from United Nations agencies",
+    "FA": "Framework Agreement",
 }
+# The Method cell's words, in the four languages the plans use. 'Direct
+# Selection' is DIR for goods, works and non-consulting services and CDS for
+# consulting services; that is how STEP itself numbers them, and the corpus
+# bears it out (4,516 consulting references end in CDS, 103 in DIR).
+METHOD_TEXT = {
+    "request for bids": "RFB", "appel d'offres": "RFB",
+    "request for quotations": "RFQ", "demande de prix": "RFQ",
+    "request for proposals": "RFP",
+    "direct selection": "DIR", "direct contracting": "DIR",
+    "entente directe": "DIR", "passation de marche de gre a gre": "DIR",
+    "un agencies (direct)": "UN",
+    "quality and cost-based selection": "QCBS",
+    "quality and cost based selection": "QCBS",
+    "selection fondee sur la qualite et le cout": "QCBS",
+    "quality based selection": "QBS",
+    "fixed budget selection": "FBS",
+    "least cost selection": "LCS", "selection au moindre cout": "LCS",
+    "consultant qualification selection": "CQS",
+    "consultant qualification  selection": "CQS",
+    "selection fondee sur les qualifications des consultants": "CQS",
+    "individual consultant selection": "INDV", "consultant individuel": "INDV",
+    "individuel": "INDV",
+    "framework agreement": "FA",
+}
+# The code at the end of a borrower reference, including the older and
+# French spellings the corpus carries. 'RF' is a clipped RFB, RFQ or RFP and
+# is left unread rather than guessed.
+REF_METHOD = {code: code for code in METHOD_NAMES}
+REF_METHOD.update({"CI": "INDV", "IC": "INDV", "IND": "INDV", "QCB": "QCBS",
+                   "SFQC": "QCBS", "SQC": "CQS", "ED": "DIR"})
+REF_METHOD_RE = re.compile(r"(?:^|-)(?:CW|GO|CS|NC)-?([A-Z]{2,5})(?=\d|\b)")
 
 CATEGORY_MAP = {
     "goods": "goods", "go": "goods", "g": "goods",
@@ -408,71 +558,46 @@ def enum_key(value):
 
 
 def norm_status(value):
-    """Step 9 for packages.status. Unmapped goes to `unknown`, counted.
+    """Step 9 for packages.status: the STEP label, or `unknown`, counted.
 
-    'Terminated' (French 'Résilié', Portuguese and Spanish 'Rescindido') maps to
-    its own value, `terminated`: the contract was signed and then ended early,
-    and neither `signed` nor `cancelled` is true of it. `status_raw` keeps the
-    borrower's own word either way.
-    """
+    `status_raw` keeps the borrower's own word either way."""
     key = enum_key(value)
     if not key:
         return "unknown"
     if key in STATUS_MAP:
         return STATUS_MAP[key]
-    # The clipped cell can also INSERT a space mid-word - 'Under Implement
-    # ation', "En cours d'exécut ion" - so compare with every space removed.
+    # The clipped cell can INSERT a space mid-word - 'Under Implement ation',
+    # "En cours d'exécut ion" - so compare with every space removed.
     flat = key.replace(" ", "")
-    for k, v in sorted(STATUS_MAP.items(), key=lambda kv: -len(kv[0])):
-        fk = k.replace(" ", "")
-        if flat == fk or flat.startswith(fk):
-            return v
-    # A clipped word: "En attente d'" is the start of exactly one status.
-    if len(flat) >= 8:
-        hits = {v for k, v in STATUS_MAP.items() if k.replace(" ", "").startswith(flat)}
+    flat_map = {k.replace(" ", ""): v for k, v in STATUS_MAP.items()}
+    if flat in flat_map:
+        return flat_map[flat]
+    # A cell clipped at the column edge: "En attente d'" or 'Pending Impleme'
+    # is the start of exactly one status.
+    if len(flat) >= 6:
+        hits = {v for k, v in flat_map.items() if k.startswith(flat)}
         if len(hits) == 1:
             return hits.pop()
     return "unknown"
 
 
-def norm_method(method_raw, market_approach=""):
-    """Step 9 for packages.method and awards.method (A1.25).
-
-    STEP splits the answer across two cells - a method name and a market
-    approach - and neither alone reaches a value in the closed set: 'Request for
-    Bids' is open national or open international depending on the approach cell
-    beside it.
-    """
-    m = enum_key(method_raw)
-    a = enum_key(market_approach)
-    if a in METHOD_MAP:
-        base, flavour = METHOD_MAP[a]
-        if not m:
-            return base
-        if flavour and flavour not in m and m not in ("", "other"):
-            return base if base != "other" else "other"
-        return base
-    if m in METHOD_MAP:
-        return METHOD_MAP[m][0]
-    for k, v in METHOD_MAP.items():
-        if k in m:
-            return v[0]
-    m2 = collapse(method_raw).upper()
-    if m2.endswith("-RFB") or m2.endswith("-GO-RFB") or m2.endswith("-CW-RFB"):
-        return "open_national"
-    if m2.endswith("-RFQ"):
-        return "request_for_quotations"
-    if m2.endswith("-DIR"):
-        return "direct_selection"
-    if m2.endswith("-QCBS"):
-        return "quality_cost_based"
-    if m2.endswith("-LCS"):
-        return "least_cost"
-    if m2.endswith("-INDV"):
-        return "other"
-    if m2.endswith("-QBS") or m2.endswith("-CQS"):
-        return "consultant_qualification"
-    return "unknown"
+def norm_method(method_raw, category=""):
+    """Step 9 for method: the Bank's code (RFB, RFQ, QCBS, INDV ...) or
+    `unknown`. Reads the Method cell's words, or a borrower reference's code
+    when given one. Never 'other': a method the map does not know is unknown,
+    and counted, so the map can be extended from what was actually printed."""
+    m = REF_METHOD_RE.search(collapse(method_raw).upper())
+    if m:
+        return REF_METHOD.get(m.group(1), "unknown")
+    key = enum_key(method_raw)
+    flat = re.sub(r"[\s-]+", "", key)
+    code = METHOD_TEXT.get(key) or next(
+        (v for k, v in METHOD_TEXT.items() if re.sub(r"[\s-]+", "", k) == flat), None)
+    if code is None:
+        return "unknown"
+    if code == "DIR" and category == "consultant_services":
+        return "CDS"
+    return code
 
 
 def cut_stitched(desc, own_ref, counters):
@@ -501,24 +626,57 @@ def cut_stitched(desc, own_ref, counters):
     return desc
 
 
+# The Method cell clipped at its column edge, as it appears among a row's
+# other cells: 'Request for Propo', 'Consultant Qualifi cation'. Compared with
+# every space and hyphen removed, earliest in the row wins.
+METHOD_PREFIX = (
+    ("requestforpropo", "RFP"), ("requestforquota", "RFQ"), ("requestforbid", "RFB"),
+    ("individualconsult", "INDV"), ("consultantqualifi", "CQS"),
+    ("qualityandcost", "QCBS"), ("qualitybasedsel", "QBS"), ("leastcostsel", "LCS"),
+    ("fixedbudgetsel", "FBS"), ("directselection", "DIR"),
+    ("selectionfondeesurlaqualiteetlecout", "QCBS"),
+    ("selectionfondeesurlesqualifications", "CQS"), ("selectionaumoindrecout", "LCS"),
+    ("selectiondeconsultantsparententedirecte", "CDS"),
+    ("demandedeprix", "RFQ"), ("appeldoffres", "RFB"), ("ententedirecte", "DIR"),
+    ("passationdemarchedegreagre", "DIR"), ("consultantindividuel", "INDV"),
+    ("solicituddeoferta", "RFB"), ("seleccionbasadaencalidadycosto", "QCBS"),
+)
+
+
+def method_in_cells(cells, category=""):
+    flat = re.sub(r"[\s\-']+", "", enum_key(cells))
+    hits = [(flat.find(k), code) for k, code in METHOD_PREFIX if k in flat]
+    if not hits:
+        return "unknown"
+    code = min(hits)[1]
+    return "CDS" if code == "DIR" and category == "consultant_services" else code
+
+
 def resolve_method(r):
-    """packages.method, re-mapped at clean time from the plan's own cells.
+    """(method code, where it came from).
 
-    In order: the method and market-approach cells; then the borrower
-    reference, whose suffix names the method on almost every STEP package
-    ('...-GO-RFB', '...-CS-QCBS'); then, for the older plans that print only a
-    market approach, that approach alone - 'Open' becomes `open`, which says
-    what was printed without guessing national or international."""
-    m = norm_method(r.get("method_raw") or "", r.get("market_approach") or "")
-    if m == "unknown":
-        m = norm_method(r.get("borrower_ref") or "")
-    if m == "unknown":
-        m = APPROACH_ONLY.get(enum_key(r.get("market_approach") or ""), "unknown")
-    return m
+    The plan's Method cell first, because it is what the plan says now; then
+    the code in the borrower reference, which STEP writes when the activity is
+    created and which is on almost every package. Both are the Bank's own
+    vocabulary, so nothing is inferred from the market approach."""
+    code = norm_method(r.get("method_raw") or "", r.get("category") or "")
+    if code != "unknown":
+        return code, "method_cell"
+    code = method_in_cells(r.get("cells_raw") or "", r.get("category") or "")
+    if code != "unknown":
+        return code, "method_cell"
+    code = norm_method(r.get("borrower_ref") or "")
+    if code != "unknown":
+        return code, "reference"
+    return "unknown", ""
 
 
-APPROACH_ONLY = {"open": "open", "limited": "other", "direct": "direct_selection",
-                 "ouvert": "open", "aberto": "open", "abierto": "open"}
+def norm_approach(value):
+    """The Market Approach cell as STEP prints it ('Open - National'), with the
+    wrapped 'Open - Internationa l' put back together."""
+    v = collapse(value)
+    v = re.sub(r"Internationa\s+l\b", "International", v)
+    return re.sub(r"\s*[-/]\s*", " - ", v).strip()
 
 
 # ------------------------------------------------------------------ step 10
@@ -560,12 +718,14 @@ def extract_amount_and_date(text):
 PACKAGE_COLS = [
     "package_id", "project_id", "borrower_ref", "borrower_ref_norm", "description",
     "description_clean", "description_match", "description_sha256",
-    "description_lang", "lot", "phase", "glue_repairs",
-    "is_rebid", "is_placeholder", "superseded_by", "clean_version", "category",
-    "method", "status", "status_raw", "status_source", "status_as_of",
-    "planned_date", "revised_date",
-    "estimated_amount", "currency", "actual_amount", "plan_version",
-    "plan_disclosure_date", "carried_from", "fetched_at",
+    "description_lang", "lot_or_phase", "component_number", "component",
+    "component_source",
+    "glue_repairs", "is_rebid", "is_placeholder", "superseded_by", "clean_version",
+    "category", "method", "method_name", "method_source", "method_raw",
+    "market_approach", "status", "status_raw", "status_source", "status_as_of",
+    "planned_date", "revised_date", "estimated_amount", "currency",
+    "amount_source", "amount_as_of", "amount_plan_doc", "actual_amount",
+    "plan_version", "plan_disclosure_date", "fetched_at",
 ]
 NOTICE_COLS = [
     "notice_id", "project_id", "notice_type", "publication_date", "deadline_date",
@@ -578,7 +738,8 @@ AWARD_COLS = [
     "description_clean", "description_match", "description_sha256",
     "description_lang", "is_placeholder", "glue_repairs",
     "clean_version", "signed_date", "no_objection_date", "total_amount", "currency",
-    "procurement_group", "method", "review_type", "supplier_name", "supplier_country",
+    "procurement_group", "method", "method_name", "review_type", "supplier_name",
+    "supplier_country",
     "supplier_amount", "region", "sector",
 ]
 SUPERSEDED_COLS = ["package_id", "project_id", "plan_version", "borrower_ref",
@@ -605,28 +766,58 @@ def write_csv(path, cols, rows):
     os.replace(tmp, path)
 
 
-def clean_packages(rows, counters, vocab=None, names=None):
+def clean_description(text, vocab, names, lang, own_ref, counters, comps=None, pid=""):
+    """The order matters: other cells out, words repaired, then the lot or
+    phase read - a marker read before the repair takes a broken word's last
+    letters for a lot number ('Phase s').
+
+    Returns (clean text, repairs, markers, cells text, component or None)."""
+    text, cells = split_cells(collapse(text))
+    if cells:
+        counters["descriptions_with_other_cells_cut"] += 1
+    text, repairs = glue.repair(text, vocab, names, lang)
+    marks = split_markers(text)
+    text = cut_stitched(collapse(marks["description"]), own_ref, counters)
+    comp = None
+    if comps is not None:
+        text, comp = comps.strip_tail(pid, text)
+        if comp:
+            counters["component_cut_from_description"] += 1
+    return text, repairs, marks, cells, comp
+
+
+def clean_packages(rows, counters, vocab=None, names=None, comps=None):
     vocab = vocab or {}
+    comps = comps or Components()
     out = []
     for r in rows:
         raw_desc = collapse(r["description"])
-        marks = split_markers(r["description"])
         lang = r.get("description_lang") or detect_lang(raw_desc)
-        clean, repairs = glue.repair(collapse(marks["description"]), vocab, names, lang)
+        pid = r["project_id"]
+        clean, repairs, marks, cells, comp = clean_description(
+            r["description"], vocab, names, lang, r.get("borrower_ref") or "",
+            counters, comps, pid)
         counters["glue_repairs_packages"] += repairs
-        clean = cut_stitched(clean, r.get("borrower_ref") or "", counters)
+        if not comp:
+            comp = comps.in_cells(pid, " ".join(
+                x for x in (cells, r.get("cells_raw") or "") if x))
+        number, comp_name, comp_source = comp or ("", "", "")
+        counters[f"component_source_{comp_source or 'none'}"] += 1
         stored_amount = r.get("estimated_amount") or ""
+        amount_source = "plan" if not absent("estimated_amount", stored_amount) else ""
         amount_in_text, date_in_text = extract_amount_and_date(raw_desc)
         if not stored_amount and amount_in_text:
             stored_amount = amount_in_text
+            amount_source = "description"
             counters["amount_read_from_text"] += 1
         planned = r.get("planned_date") or date_in_text
         if not r.get("planned_date") and date_in_text:
             counters["date_read_from_text"] += 1
         counters["packages_in"] += 1
+        method, method_source = resolve_method(r)
         out.append({
             "package_id": r["borrower_ref"],
-            "project_id": r["project_id"],
+            "project_id": pid,
             "borrower_ref": r["borrower_ref"],
             "borrower_ref_norm": norm_ref(r["borrower_ref"]),
             "description": raw_desc,
@@ -634,13 +825,21 @@ def clean_packages(rows, counters, vocab=None, names=None):
             "description_match": match_key(clean),
             "description_sha256": desc_sha256(clean),
             "description_lang": lang,
-            "lot": marks["lot"], "phase": marks["phase"], "glue_repairs": repairs,
+            "lot_or_phase": marks["lot_or_phase"],
+            "component_number": number,
+            "component": comp_name,
+            "component_source": comp_source,
+            "glue_repairs": repairs,
             "is_rebid": str(marks["is_rebid"]).lower(),
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "superseded_by": "",
             "clean_version": CLEAN_VERSION,
             "category": r.get("category") or "unknown",
-            "method": resolve_method(r),
+            "method": method,
+            "method_name": METHOD_NAMES.get(method, ""),
+            "method_source": method_source,
+            "method_raw": r.get("method_raw") or "",
+            "market_approach": norm_approach(r.get("market_approach") or ""),
             # Re-mapped here from the borrower's own word, so a change to
             # STATUS_MAP needs a re-clean, not a re-fetch.
             "status": norm_status(r.get("status_raw") or ""),
@@ -649,6 +848,9 @@ def clean_packages(rows, counters, vocab=None, names=None):
             "revised_date": r.get("revised_date") or "",
             "estimated_amount": stored_amount,
             "currency": r.get("currency") or "USD",
+            "amount_source": amount_source,
+            "amount_as_of": (r.get("plan_disclosure_date") or "") if amount_source else "",
+            "amount_plan_doc": (r.get("plan_doc_id") or r["plan_version"]) if amount_source else "",
             "actual_amount": "",
             "plan_version": r["plan_version"],
             "fetched_at": r["fetched_at"],
@@ -658,34 +860,26 @@ def clean_packages(rows, counters, vocab=None, names=None):
     return out
 
 
-# Fields carried forward from the most recent plan version that actually
-# carried a value. See dedupe_packages.
-#
-# Two fields only, and the restraint is the point. A carried field is an
-# assertion this table makes on the borrower's behalf, so it has to be one the
-# borrower would still stand behind.
+# The one field carried forward from the most recent plan version that
+# actually printed it. See dedupe_packages.
 #
 #   estimated_amount  A property of the package. Version 9 leaving the cost
 #                     column blank does not retract the 200,000 version 8
 #                     printed; nothing was said, so the last thing said stands.
-#   method            Likewise how the package is to be procured. It can be
-#                     revised, and a revision overwrites the carried value the
-#                     moment it is printed - carrying only fills a silence.
 #
 # Everything else is deliberately NOT carried, status above all. A status is a
 # fact at a point in time, and 'Under Implementation' as of 2021 asserts
 # nothing about 2024; carrying it forward manufactures a present-tense claim
-# out of a stale one. An unknown status stays unknown and is confirmed with the
-# project team. The same reasoning retires planned_date, revised_date,
-# category, category_raw and market_approach: each is either point-in-time or
-# cheap to leave blank, and a blank that is honest beats a value that is stale.
-CARRY_FORWARD = ("estimated_amount", "method")
+# out of a stale one (resolve_status labels an older status instead). The
+# carried amount says where it came from in amount_source ('earlier_plan'),
+# amount_as_of (that plan's disclosure date) and amount_plan_doc (its
+# document), so nothing is taken on trust.
+CARRY_FORWARD = ("estimated_amount",)
 
-# Fields that must travel with a carried field, taken from the SAME plan
-# version, so the pair can never be assembled out of two different ones. An
-# amount carried from version 8 with a currency from version 3 would be a
-# figure nobody ever published.
-CARRY_COMPANIONS = {"estimated_amount": ("currency",), "method": ("method_raw",)}
+# Fields that travel with a carried field, from the SAME plan version, so the
+# set can never be assembled out of two different ones. An amount carried from
+# version 8 with a currency from version 3 would be a figure nobody published.
+CARRY_COMPANIONS = {"estimated_amount": ("currency", "amount_as_of", "amount_plan_doc")}
 
 # Normalised enum values that mean "this version did not tell us" rather than
 # being an answer in their own right.
@@ -705,8 +899,8 @@ def absent(field, value):
     versions before a real figure appears - CS-FIRME-9 ran eight versions at
     zero, then 200,000 - so zero reads as "not costed yet". The cost of the
     judgement is real and worth stating: a package genuinely revised DOWN to
-    zero, defunded rather than un-costed, keeps its old figure. carried_from
-    records which version each surviving value came from, so that case is
+    zero, defunded rather than un-costed, keeps its old figure. amount_source
+    and amount_plan_doc record which version each surviving value came from, so that case is
     visible rather than silent, and packages_raw.csv still holds every version
     verbatim.
     """
@@ -736,7 +930,7 @@ def dedupe_packages(rows, counters):
 
     So the row is assembled field by field. The newest version supplies the
     identity, the description, the plan_version and every field not in
-    CARRY_FORWARD; for the two that are, if the newest version did not state
+    CARRY_FORWARD; for the one that is, if the newest version did not state
     the field, the most recent version that did is used instead. A later real
     value always beats an earlier one - 2,000,000 then blank keeps 2,000,000,
     but 2,000,000 then blank then 1,000,000 keeps 1,000,000.
@@ -745,9 +939,8 @@ def dedupe_packages(rows, counters):
     package whose latest plan does not print a status has an unknown status
     here, which is what is true.
 
-    `carried_from` names the plan version each carried field came from, so
-    nothing is taken on trust. Fields the newest version stated itself do not
-    appear there.
+    amount_source, amount_as_of and amount_plan_doc say which plan version a
+    carried amount came from, so nothing is taken on trust.
 
     Grouped on (project_id, package_id), not on package_id. The borrower
     reference is only unique within a project, and generic ones recur across
@@ -771,7 +964,7 @@ def dedupe_packages(rows, counters):
         newest = dict(versions[-1])
         newest_version = newest.get("plan_version", "")
 
-        carried = []
+        carried = False
         for field in CARRY_FORWARD:
             if field not in newest or not absent(field, newest.get(field)):
                 continue
@@ -784,10 +977,10 @@ def dedupe_packages(rows, counters):
                     for companion in CARRY_COMPANIONS.get(field, ()):
                         if companion in newest:
                             newest[companion] = older.get(companion, "")
-                    carried.append(f"{field}:{older.get('plan_version', '')}")
+                    newest["amount_source"] = "earlier_plan"
                     counters[f"carried_{field}"] += 1
+                    carried = True
                     break
-        newest["carried_from"] = "|".join(carried)
         # The last status an EARLIER version stated, with that version's date.
         # Not written into `status`: resolve_status decides, and labels it.
         newest["_earlier_status"] = None
@@ -849,8 +1042,8 @@ def resolve_status(kept, awards, counters):
         if r["status"] != "unknown":
             cands.append((r.get("_disclosed", ""), r["status"], "plan"))
         d = signed.get((r["project_id"], r["borrower_ref_norm"]))
-        if d and r["status"] not in ("signed", "terminated"):
-            cands.append((d, "signed", "award"))
+        if d and r["status"] not in CONTRACT_EXISTS:
+            cands.append((d, "Signed", "award"))
         if not cands and r.get("_earlier_status"):
             st, when, _ = r["_earlier_status"]
             cands.append((when, st, "earlier_plan"))
@@ -869,9 +1062,9 @@ def clean_notices(rows, counters, vocab=None, names=None):
     out = []
     for r in rows:
         raw = collapse(r["bid_description"])
-        clean, repairs = glue.repair(
-            collapse(split_markers(r["bid_description"])["description"]), vocab, names,
-            r.get("description_lang") or detect_lang(raw))
+        clean, repairs, _, _, _ = clean_description(
+            r["bid_description"], vocab, names,
+            r.get("description_lang") or detect_lang(raw), "", counters)
         counters["glue_repairs_notices"] += repairs
         counters["notices_in"] += 1
         counters["replacement_chars_removed"] += count_replacement_chars(
@@ -899,10 +1092,12 @@ def clean_awards(rows, counters, vocab=None, names=None):
     out = []
     for r in rows:
         raw = collapse(r["description"])
-        clean, repairs = glue.repair(
-            collapse(split_markers(r["description"])["description"]), vocab, names,
-            r.get("description_lang") or detect_lang(raw))
+        clean, repairs, _, _, _ = clean_description(
+            r["description"], vocab, names,
+            r.get("description_lang") or detect_lang(raw), r.get("borrower_ref") or "",
+            counters)
         counters["glue_repairs_awards"] += repairs
+        method = norm_method(r.get("method_raw") or "", r.get("procurement_group") or "")
         counters["awards_in"] += 1
         counters["replacement_chars_removed"] += count_replacement_chars(
             r.get("description"))
@@ -922,7 +1117,8 @@ def clean_awards(rows, counters, vocab=None, names=None):
             "total_amount": r.get("total_amount") or "",
             "currency": r.get("currency") or "USD",
             "procurement_group": r.get("procurement_group") or "unknown",
-            "method": r.get("method") or "unknown",
+            "method": method,
+            "method_name": METHOD_NAMES.get(method, ""),
             "review_type": r.get("review_type") or "",
             "supplier_name": collapse(r.get("supplier_name")),
             "supplier_country": r.get("supplier_country") or "",
@@ -937,7 +1133,7 @@ def main():
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
 
-    proc = os.path.join(args.data, PROC_DIR)
+    proc = where(args.data, "procurement")
     pkg_raw = read_csv(os.path.join(proc, "packages_raw.csv"))
     notices_raw = read_csv(os.path.join(proc, "notices_raw.csv"))
     awards_raw = read_csv(os.path.join(proc, "awards_raw.csv"))
@@ -947,10 +1143,12 @@ def main():
         [r["description"] for r in pkg_raw]
         + [r["bid_description"] for r in notices_raw]
         + [r["description"] for r in awards_raw], args.data)
-    packages = clean_packages(pkg_raw, counters, vocab, names)
+    comps = read_components(args.data)
+    packages = clean_packages(pkg_raw, counters, vocab, names, comps)
     # step 9's unmapped counts, before dedup so the whole raw corpus is measured
     for field in ("status", "method", "category"):
         c = Counter(r[field] for r in packages)
+        counters[f"{field}_values"] = len(c)
         counters[f"{field}_values"] = len(c)
         counters[f"{field}_unknown"] = c.get("unknown", 0)
 
@@ -964,7 +1162,8 @@ def main():
     write_csv(os.path.join(proc, "awards.csv"), AWARD_COLS, awards)
     write_csv(os.path.join(proc, "superseded_packages.csv"), SUPERSEDED_COLS, superseded)
 
-    report = os.path.join(proc, "clean_procurement_report.txt")
+    report = where(args.data, "reports", "clean_procurement.txt")
+    os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:
         fh.write(f"clean_version {CLEAN_VERSION}\n\n")
         fh.write(f"packages raw rows            {counters['packages_in']:,}\n")

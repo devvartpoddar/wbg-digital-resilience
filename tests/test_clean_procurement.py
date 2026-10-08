@@ -65,7 +65,7 @@ def test_step4_splits_lot_phase_and_rebid_into_columns():
     """The card's worked example. One string in, a description, a lot and a
     rebid flag out - which is what V6 depends on."""
     marks = P.split_markers("FIBER OPTIC CABLE SUPPLY - LOT 2 (REBID)")
-    assert marks["lot"] == "2"
+    assert marks["lot_or_phase"] == "Lot 2"
     assert marks["is_rebid"] is True
     assert marks["description"] == "FIBER OPTIC CABLE SUPPLY"
     assert "LOT" not in marks["description"].upper()
@@ -78,12 +78,25 @@ def test_step4_keeps_the_digits_it_has_to():
     them; this must not."""
     marks = P.split_markers("Supply of 3 Desktop Computers")
     assert marks["description"] == "Supply of 3 Desktop Computers"
-    assert marks["lot"] == ""
+    assert marks["lot_or_phase"] == ""
 
 
 def test_step4_reads_phase_and_the_french_lot_forms():
-    assert P.split_markers("Fourniture de materiel - Lote 3")["lot"] == "3"
-    assert P.split_markers("Works - Phase II")["phase"] == "II"
+    assert P.split_markers("Fourniture de materiel - Lote 3")["lot_or_phase"] == "Lot 3"
+    assert P.split_markers("Works - Phase II")["lot_or_phase"] == "Phase II"
+    assert P.split_markers("Lot No. 4: Laptops")["lot_or_phase"] == "Lot 4"
+
+
+def test_step4_takes_a_marker_out_only_at_the_edges():
+    """Taken from the middle, the words left would not read."""
+    marks = P.split_markers("Phase 1 and Phase 2 works")
+    assert marks["description"] == "Phase 1 and Phase 2 works"
+    assert marks["lot_or_phase"] == "Phase 1; Phase 2"
+    assert P.split_markers("Supply of laptops (Lot 2)")["description"] == "Supply of laptops"
+
+
+def test_step4_does_not_read_a_broken_word_as_a_phase():
+    assert P.split_markers("Phase s of works")["lot_or_phase"] == ""
     assert P.split_markers("Travaux de rehabilitation (Re-bidding)")["is_rebid"] is True
 
 
@@ -174,38 +187,51 @@ def test_step7_flags_rather_than_drops():
 # --------------------------------------------------------------- step 9: enums
 
 @pytest.mark.parametrize("raw,want", [
-    ("Signed", "signed"), ("Canceled", "cancelled"), ("Under Implementation",
-                                                       "under_execution"),
-    ("Under Preparation", "under_preparation"), ("Planned", "planned"),
-    ("Cancelled", "cancelled"), ("", "unknown"), ("Whatever", "unknown"),
+    ("Signed", "Signed"), ("Canceled", "Canceled"), ("Cancelled", "Canceled"),
+    ("Under Implementation", "Under Implementation"),
+    ("Under Implement ation", "Under Implementation"),
+    ("Pending Implementation", "Pending Implementation"), ("Pending", "Pending"),
+    ("Pending Impleme", "Pending Implementation"), ("Completed", "Completed"),
+    ("En attente d'", "Pending Implementation"), ("Planned", "Planned"),
+    ("", "unknown"), ("Whatever", "unknown"),
 ])
 def test_step9_normalises_status_and_counts_the_rest(raw, want):
     assert P.norm_status(raw) == want
 
 
-@pytest.mark.parametrize("method,approach,want", [
-    ("Request for Bids", "Open - National", "open_national"),
-    ("Request for Bids", "Open - International", "open_international"),
-    ("Request for Quotations", "", "request_for_quotations"),
-    ("Direct Selection", "", "direct_selection"),
-    ("Quality And Cost Based Selection", "", "quality_cost_based"),
-    ("Least Cost Selection", "", "least_cost"),
-    ("Consultant Qualification Selection", "", "consultant_qualification"),
-    # Not a value in business rule A1.25, so it lands in `other` and is counted
-    # rather than silently promoted to the nearest thing.
-    ("Individual Consultant Selection", "", "other"),
+@pytest.mark.parametrize("method,category,want", [
+    ("Request for Bids", "goods", "RFB"),
+    ("Request for Quotations", "", "RFQ"),
+    ("Direct Selection", "goods", "DIR"),
+    # STEP numbers direct selection of consultants differently.
+    ("Direct Selection", "consultant_services", "CDS"),
+    ("Quality And Cost-Based Selection", "", "QCBS"),
+    ("Quality And Cost Based Selection", "", "QCBS"),
+    ("Least Cost Selection", "", "LCS"),
+    ("Consultant Qualification  Selection", "", "CQS"),
+    # The Bank has no method called 'other': an unknown word stays unknown.
+    ("Individual Consultant Selection", "", "INDV"),
+    ("Something else", "", "unknown"),
     ("", "", "unknown"),
 ])
-def test_step9_normalises_method(method, approach, want):
-    assert P.norm_method(method, approach) == want
+def test_step9_maps_the_method_to_the_bank_code(method, category, want):
+    assert P.norm_method(method, category) == want
 
 
 def test_step9_reads_the_method_out_of_a_step_reference_code():
-    """STEP encodes the method in the reference suffix when the method cell is
-    empty, which is common in the older plan versions."""
-    assert P.norm_method("", "") == "unknown"
-    assert P.norm_method("TZ-MCIT-254784-CW-RFB") == "open_national"
-    assert P.norm_method("TZ-MCIT-461806-CS-INDV") == "other"
+    """STEP writes the method code into the reference, which covers rows whose
+    method cell was not read."""
+    assert P.norm_method("TZ-MCIT-254784-CW-RFB") == "RFB"
+    assert P.norm_method("TZ-MCIT-461806-CS-INDV") == "INDV"
+    assert P.norm_method("AA-AGENCY-123456-GO-RFQ2") == "RFQ"
+    assert P.norm_method("AA-AGENCY-12345-CS-SFQC") == "QCBS"
+    assert P.norm_method("XX-ABC-123-GO-RF") == "unknown"
+
+
+def test_a_clipped_method_cell_is_read_from_the_other_cells():
+    assert P.method_in_cells("Component 2: Rural Radio Request for Propo Open") == "RFP"
+    assert P.method_in_cells("Post Individual Consult ant Selection Open") == "INDV"
+    assert P.method_in_cells("Post Open - National") == "unknown"
 
 
 @pytest.mark.parametrize("raw,want", [
@@ -285,7 +311,7 @@ def test_clean_version_stamp_is_on_every_row():
 # --------------------------------------------------------- gates on the tables
 
 def _load(table):
-    path = os.path.join(DATA, "intermediate", "procurement", f"{table}.csv")
+    path = os.path.join(DATA, "procurement", f"{table}.csv")
     if not os.path.exists(path):
         pytest.skip(f"{table}.csv not present (data/ is gitignored)")
     with open(path, newline="", encoding="utf-8") as fh:
@@ -320,12 +346,14 @@ MAX_RATE = {
     "borrower reference absent": 0.0,            # 0.00%
     "borrower reference not normalised": 0.0,    # 0.00%
     "category unmapped": 0.0,                    # 0.00%
-    "method unmapped": 4.0,                      # 3.16% (soft)
+    "method unmapped": 2.5,                      # 1.82% (soft) - Bank codes, no 'other'
     "status unmapped": 6.0,                      # 5.15% (soft) - no evidence anywhere
     "status raw present but unmapped": 0.2,      # 0.07% (soft)
     "language not determined": 0.0,              # 0.00%
     "planned date after revised date": 0.5,      # 0.28% - source
-    "lot or phase marker left in the matching copy": 0.5,     # 0.40%
+    "lot or phase marker left at the edge of the description": 0.05,  # 0.02%
+    "another cell of the plan row left in the description": 0.05,   # 0.01%
+    "component not found": 25.0,                 # 23.51% (soft) - not every plan prints one
     "table header text leaked into a description": 0.0,       # 0.00%
     "supplier amount exceeds the contract amount": 1.0,       # 0.55% - source
     "notice with no description": 1.0,           # 0.64% - source
@@ -528,8 +556,11 @@ def _version(pv, date, **fields):
             "description": "Supply of fiber", "status": "unknown", "status_raw": "",
             "method": "unknown", "method_raw": "", "category": "goods",
             "category_raw": "Goods", "market_approach": "", "planned_date": "",
-            "revised_date": "", "estimated_amount": "0.00", "currency": ""}
+            "revised_date": "", "estimated_amount": "0.00", "currency": "",
+            "amount_source": "", "amount_as_of": "", "amount_plan_doc": ""}
     base.update(fields)
+    if not P.absent("estimated_amount", base["estimated_amount"]):
+        base.update(amount_source="plan", amount_as_of=date, amount_plan_doc=pv)
     return base
 
 
@@ -550,7 +581,8 @@ class TestCarryForward:
             _version("v2", "2021-01-01", estimated_amount=""),
         ])
         assert row["estimated_amount"] == "2000000.00"
-        assert "estimated_amount:v1" in row["carried_from"]
+        assert (row["amount_source"], row["amount_plan_doc"], row["amount_as_of"]) == \
+            ("earlier_plan", "v1", "2020-01-01")
 
     def test_a_later_real_value_beats_an_earlier_one(self):
         """2,000,000 then blank then 1,000,000 keeps 1,000,000, not 2,000,000."""
@@ -560,7 +592,7 @@ class TestCarryForward:
             _version("v3", "2022-01-01", estimated_amount="1000000.00"),
         ])
         assert row["estimated_amount"] == "1000000.00"
-        assert "estimated_amount" not in row["carried_from"], \
+        assert (row["amount_source"], row["amount_plan_doc"]) == ("plan", "v3"), \
             "the newest version stated it, so nothing was carried"
 
     def test_zero_is_treated_as_not_yet_costed(self):
@@ -587,7 +619,6 @@ class TestCarryForward:
         ])
         assert row["status"] == "unknown"
         assert row["status_raw"] == ""
-        assert "status" not in row["carried_from"]
 
     def test_the_amount_is_still_carried_when_the_status_is_not(self):
         """The two rules meet on one row, so assert them together: a version
@@ -613,7 +644,7 @@ class TestCarryForward:
             _version("v2", "2021-01-01"),
         ])
         assert row["status_raw"] == "" and row["status"] == "unknown"
-        assert "status" not in row["carried_from"]
+        assert row["amount_source"] == "" and row["amount_plan_doc"] == ""
 
     def test_identity_and_description_come_from_the_newest_version(self):
         row = self._run([
@@ -623,16 +654,15 @@ class TestCarryForward:
         assert row["description"] == "Supply of fiber, revised"
         assert row["plan_version"] == "v2"
 
-    def test_carried_from_names_the_version_each_value_came_from(self):
+    def test_a_carried_amount_says_which_plan_it_came_from(self):
         row = self._run([
-            _version("v1", "2020-01-01", estimated_amount="500.00"),
+            _version("v1", "2020-01-01", estimated_amount="500.00", currency="USD"),
             _version("v2", "2021-01-01", status="signed", status_raw="Signed"),
             _version("v3", "2022-01-01"),
         ])
-        carried = dict(p.split(":") for p in row["carried_from"].split("|") if p)
-        assert carried["estimated_amount"] == "v1"
-        assert "status_raw" not in carried
-        assert "status" not in carried
+        assert (row["amount_source"], row["amount_as_of"], row["amount_plan_doc"],
+                row["currency"]) == ("earlier_plan", "2020-01-01", "v1", "USD")
+        assert row["status"] == "unknown"
 
     def test_supersession_points_at_the_row_that_replaced_it(self):
         """superseded_by was previously written as an empty string, so the older
@@ -701,24 +731,86 @@ def _pkg(status, disclosed, ref="R-1", earlier=None):
 
 
 def test_status_from_a_later_signed_award_beats_an_older_plan():
-    rows = [_pkg("planned", "2023-01-01")]
+    rows = [_pkg("Pending Implementation", "2023-01-01")]
     P.resolve_status(rows, [{"project_id": "P1", "borrower_ref_norm": "R-1",
                              "signed_date": "2024-05-01"}], Counter())
     assert (rows[0]["status"], rows[0]["status_source"], rows[0]["status_as_of"]) == \
-        ("signed", "award", "2024-05-01")
+        ("Signed", "award", "2024-05-01")
+
+
+def test_an_award_does_not_turn_completed_back_into_signed():
+    rows = [_pkg("Completed", "2023-01-01")]
+    P.resolve_status(rows, [{"project_id": "P1", "borrower_ref_norm": "R-1",
+                             "signed_date": "2024-05-01"}], Counter())
+    assert (rows[0]["status"], rows[0]["status_source"]) == ("Completed", "plan")
 
 
 def test_an_earlier_plan_status_is_used_only_when_nothing_newer_says_anything():
-    rows = [_pkg("unknown", "2024-01-01", earlier=("under_execution", "2022-03-01", "v3")),
-            _pkg("cancelled", "2024-01-01", ref="R-2",
-                 earlier=("planned", "2021-01-01", "v1"))]
+    rows = [_pkg("unknown", "2024-01-01",
+                 earlier=("Under Implementation", "2022-03-01", "v3")),
+            _pkg("Canceled", "2024-01-01", ref="R-2",
+                 earlier=("Pending", "2021-01-01", "v1"))]
     P.resolve_status(rows, [], Counter())
     assert (rows[0]["status"], rows[0]["status_source"], rows[0]["status_as_of"]) == \
-        ("under_execution", "earlier_plan", "2022-03-01")
-    assert (rows[1]["status"], rows[1]["status_source"]) == ("cancelled", "plan")
+        ("Under Implementation", "earlier_plan", "2022-03-01")
+    assert (rows[1]["status"], rows[1]["status_source"]) == ("Canceled", "plan")
 
 
 def test_no_evidence_stays_unknown_and_says_so():
     rows = [_pkg("unknown", "2024-01-01")]
     P.resolve_status(rows, [], Counter())
     assert (rows[0]["status"], rows[0]["status_source"]) == ("unknown", "none")
+
+
+# ------------------------------------------- other cells, and the component
+
+def test_a_loan_number_between_wrapped_lines_is_taken_out():
+    desc, cells = P.split_cells("Study of solar mini-gr IDA / 12345 ids for clinics")
+    assert desc == "Study of solar mini-gr ids for clinics"
+    assert cells == ""
+
+
+def test_the_cells_after_a_loan_number_are_cut_off():
+    desc, cells = P.split_cells(
+        "Revue annuelle IDA / X1234 1. Cadre favorable A posteriori "
+        "Sélection fondée sur la qualité et le coût Open - National")
+    assert desc == "Revue annuelle"
+    assert cells.startswith("1. Cadre favorable")
+
+
+def test_review_method_and_approach_are_cut_off():
+    desc, cells = P.split_cells("Supply of laptops Post Request for Bids Open - National")
+    assert desc == "Supply of laptops"
+    desc, _ = P.split_cells("Post-disaster needs assessment")
+    assert desc == "Post-disaster needs assessment"
+
+
+COMPONENT_ROWS = [
+    {"project_ids": "P1", "disclosure_date": "2020-01-01", "number": "1",
+     "name": "Rules and Institutions for Rural Radio"},
+    {"project_ids": "P1", "disclosure_date": "2020-01-01", "number": "2",
+     "name": "Shared Weather Stations, Masts and Relays"},
+    # A restructuring renumbered the second component: the latest number wins.
+    {"project_ids": "P1", "disclosure_date": "2023-01-01", "number": "3",
+     "name": "Shared Weather Stations, Masts and Relays"},
+]
+
+
+def test_a_component_is_found_by_the_stretch_of_its_name_the_cells_carry():
+    c = P.Components(COMPONENT_ROWS)
+    got = c.in_cells("P1", "Shared Weather Stati Quality And Cost- Open - "
+                           "Internationa IDA / 12345 ons, Masts and Rela Post")
+    assert got == ("3", "Shared Weather Stations, Masts and Relays", "appraisal")
+
+
+def test_a_numbered_cell_with_no_name_match_keeps_only_the_plans_number():
+    c = P.Components(COMPONENT_ROWS)
+    assert c.in_cells("P1", "Component 4: Something Else Entirely Post") == ("4", "", "plan")
+    assert c.in_cells("P1", "Post Request for Bids Open - National") is None
+
+
+def test_a_component_name_at_the_end_of_a_description_is_cut_off():
+    c = P.Components(COMPONENT_ROWS)
+    desc, comp = c.strip_tail("P1", "Repair of rooftop gauges Shared Weather Stati")
+    assert desc == "Repair of rooftop gauges"
+    assert comp[0] == "3" and comp[2] == "appraisal"

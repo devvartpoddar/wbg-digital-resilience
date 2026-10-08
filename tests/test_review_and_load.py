@@ -77,8 +77,8 @@ def test_existing_sheet_is_not_overwritten(tmp_path, monkeypatch, capsys):
     (data / "review").mkdir()
     keep = data / "review" / "paragraphs_s1.xlsx"
     keep.write_bytes(b"notes")
-    (data / "intermediate" / "procurement").mkdir(parents=True)
-    with open(data / "intermediate" / "procurement" / "packages.csv", "w", newline="") as fh:
+    (data / "procurement").mkdir(parents=True)
+    with open(data / "procurement" / "packages.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=["package_id", "project_id", "description"])
         w.writeheader()
         w.writerow({"package_id": "K1", "project_id": "P1", "description": "x"})
@@ -105,11 +105,13 @@ def test_load_is_idempotent(tmp_path, monkeypatch, capsys):
     with psycopg.connect(os.environ["WBG_PG_TEST"], autocommit=True) as conn:
         conn.execute("DROP SCHEMA IF EXISTS wbg CASCADE")
     data = tmp_path
-    (data / "clean").mkdir()
-    (data / "clean" / "D1.txt").write_text("Alpha beta gamma. Delta epsilon.", encoding="utf-8")
-    with open(data / "documents.csv", "w", newline="") as fh:
+    (data / "appraisal" / "text").mkdir(parents=True)
+    (data / "raw").mkdir()
+    (data / "appraisal" / "text" / "D1.txt").write_text("Alpha beta gamma. Delta epsilon.",
+                                                       encoding="utf-8")
+    with open(data / "raw" / "documents.csv", "w", newline="") as fh:
         fh.write("doc_id,title\nD1,Test\n")
-    with open(data / "paragraphs.csv", "w", newline="") as fh:
+    with open(data / "appraisal" / "paragraphs.csv", "w", newline="") as fh:
         fh.write("paragraph_id,doc_id,char_start,char_end,n_tokens\n"
                  "D1:p00001,D1,0,17,3\nD1:p00002,D1,18,32,2\n")
     argv = ["load_pg.py", "--data", str(data), "--dsn", os.environ["WBG_PG_TEST"]]

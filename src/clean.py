@@ -1,16 +1,16 @@
 #!/usr/bin/env python3
 """Turn appraisal documents into clean, addressable paragraphs and sentences.
 
-Reads  data/raw/pdf/{doc_id}.pdf  the PDF, read by layout (src/pdf_layout.py)
-       data/raw/{doc_id}.txt      the Bank's text rendition: the fallback, and
-                                  the reference the review sheet compares with
-       data/documents.csv
-Writes data/clean/{doc_id}.txt    the cleaned reference text
-       data/clean/{doc_id}.layout.json  cached PDF read, keyed on PDF checksum
-       data/paragraphs.csv        one row per paragraph, offsets into the clean file
-       data/sentences.csv         one row per sentence, offsets into the same file
-       data/rejected.csv          everything dropped, with a reason
-       data/clean_report.txt
+Reads  data/raw/pdf/{doc_id}.pdf   the PDF, read by layout (src/pdf_layout.py)
+       data/raw/text/{doc_id}.txt  the Bank's text rendition: the fallback, and
+                                   the reference the review sheet compares with
+       data/raw/documents.csv
+Writes data/appraisal/text/{doc_id}.txt          the cleaned reference text
+       data/appraisal/cache/{doc_id}.layout.json cached PDF read, keyed on checksums
+       data/appraisal/paragraphs.csv  one row per paragraph, offsets into the clean file
+       data/appraisal/sentences.csv   one row per sentence, offsets into the same file
+       data/appraisal/rejected.csv    everything dropped, with a reason
+       data/reports/clean.txt
 
 Paragraph text is not stored in the table. To read a paragraph, slice its clean
 file with char_start:char_end. The raw files stay on disk untouched.
@@ -31,7 +31,7 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 # A contents-page line ends in dot leaders and a page number, or in a run of
 # spaces and a page number. A body heading ends in neither. Verified against
@@ -149,7 +149,9 @@ def looks_tabular(body):
 
 PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
              "section_title", "block", "char_start", "char_end", "n_tokens",
-             "text_sha256", "page_from", "page_to", "source", "parser"]
+             "text_sha256", "page_from", "page_to", "source", "parser",
+             "for_model", "list_item", "lead_in_id", "table_id",
+             "component", "subcomponent", "component_mentions"]
 REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
 
 
@@ -608,7 +610,13 @@ PARSER_TXT = "clean-txt-1"
 # Below this share of the text rendition's characters, a PDF read is treated as
 # failed (a scanned or image-only PDF) and the text rendition is used instead.
 PDF_MIN_SHARE = 0.5
-SENTENCE_BLOCKS = {"narrative", "annex", "footnote"}
+# Footnotes are mostly references ('ITU. 2021. Global Cybersecurity Index
+# 2020.'), which a sentence splitter can only cut into nonsense.
+SENTENCE_BLOCKS = {"narrative", "annex"}
+# What goes to embedding and to the model test. Front matter (cover, data
+# sheet, acronyms, contents) and headings are kept and cleaned, but are too
+# short and too repetitive to be worth scoring.
+MODEL_BLOCKS = {"narrative", "annex", "table", "footnote"}
 SENT_COLS = ["sentence_id", "paragraph_id", "doc_id", "ordinal", "char_start",
              "char_end", "n_tokens", "text_sha256"]
 
@@ -620,7 +628,7 @@ def parser_version():
     import pdfplumber
     here = os.path.dirname(os.path.abspath(__file__))
     h = hashlib.sha256()
-    for name in ("pdf_layout.py", "clean.py"):
+    for name in ("pdf_layout.py", "clean.py"):   # components.py tags at row time
         with open(os.path.join(here, name), "rb") as fh:
             h.update(fh.read())
     return f"pdf-layout-{h.hexdigest()[:10]}/pdfplumber-{pdfplumber.__version__}"
@@ -642,7 +650,7 @@ def _layout_job(args):
 def layout_cached(data, docs, workers):
     """{doc_id: (text, spans, stats, error)} for every document with a PDF.
 
-    Each result is cached in data/clean/{doc_id}.layout.json, keyed on the PDF's
+    Each result is cached in data/appraisal/cache/{doc_id}.layout.json, keyed on the PDF's
     SHA-256 and the parser version, so a re-run reads the cache and only a
     changed PDF or a changed parser costs a re-read."""
     import json
@@ -650,11 +658,11 @@ def layout_cached(data, docs, workers):
     version = parser_version()
     out, todo = {}, []
     for doc in docs:
-        pdf = os.path.join(data, "raw", "pdf", f"{doc['doc_id']}.pdf")
+        pdf = where(data, "pdf", f"{doc['doc_id']}.pdf")
         if not os.path.exists(pdf):
             continue
         sha = doc.get("pdf_sha256") or hashlib.sha256(open(pdf, "rb").read()).hexdigest()
-        cache = os.path.join(data, "clean", f"{doc['doc_id']}.layout.json")
+        cache = where(data, "cache", f"{doc['doc_id']}.layout.json")
         if os.path.exists(cache):
             with open(cache, encoding="utf-8") as fh:
                 c = json.load(fh)
@@ -683,6 +691,7 @@ def layout_cached(data, docs, workers):
 
 def main():
     import sentences
+    import components
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--limit", type=int, default=0)
@@ -693,11 +702,12 @@ def main():
                     help="ignore PDFs and use the text renditions (the old path)")
     args = ap.parse_args()
 
-    raw_dir = os.path.join(args.data, "raw")
-    clean_dir = os.path.join(args.data, "clean")
-    os.makedirs(clean_dir, exist_ok=True)
+    raw_dir = where(args.data, "rendition")
+    clean_dir = where(args.data, "text")
+    for d in (clean_dir, where(args.data, "cache"), where(args.data, "reports")):
+        os.makedirs(d, exist_ok=True)
 
-    with open(os.path.join(args.data, "documents.csv"), newline="", encoding="utf-8") as fh:
+    with open(where(args.data, "documents"), newline="", encoding="utf-8") as fh:
         docs = list(csv.DictReader(fh))
     if args.limit:
         docs = docs[:args.limit]
@@ -723,7 +733,7 @@ def main():
             rn = len(re.sub(r"\s", "", raw))
             if not rn or len(re.sub(r"\s", "", text)) >= PDF_MIN_SHARE * rn:
                 clean, source, parser = text, "pdf", version
-                spans = [tuple(s) for s in spans]
+                spans = [tuple(s) + (({},) if len(s) == 7 else ()) for s in spans]
                 for k, v in lstats.items():
                     stats["pdf_" + k] += v
             else:
@@ -735,7 +745,7 @@ def main():
                 stats["missing_raw"] += 1
                 continue
             clean, spans, fn = clean_document(raw)
-            spans = [tuple(s) + ("", "") for s in spans]
+            spans = [tuple(s) + ("", "", {}) for s in spans]
             stats["footnote_marks_stripped"] += fn["hits"]
             stats["footnote_marks_rejected"] += fn["misses"]
             stats["docs_without_page_breaks"] += fn.get("unpaged", 0)
@@ -745,9 +755,11 @@ def main():
             fh.write(clean)
 
         kept = 0
-        for ordinal, (a, b, path, title, block, p0, p1) in enumerate(spans, 1):
+        tagger = components.Tagger()
+        for ordinal, (a, b, path, title, block, p0, p1, meta) in enumerate(spans, 1):
             body = clean[a:b]
             pid = f"{doc['doc_id']}:p{ordinal:05d}"
+            comp, sub = tagger.see(body, block, path)
             ntok = len(TOKEN.findall(body))
             if ntok < args.min_tokens and block != "heading" \
                     and not (ROMAN.match(body) or annex_match(body)):
@@ -762,6 +774,14 @@ def main():
                 "char_start": a, "char_end": b, "n_tokens": ntok,
                 "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
                 "page_from": p0, "page_to": p1, "source": source, "parser": parser,
+                "for_model": str(block in MODEL_BLOCKS).lower(),
+                "list_item": str(bool(meta.get("list_item"))).lower(),
+                "lead_in_id": (f"{doc['doc_id']}:p{meta['lead_in'] + 1:05d}"
+                               if "lead_in" in meta else ""),
+                "table_id": (f"{doc['doc_id']}:t{meta['table']:03d}"
+                             if "table" in meta else ""),
+                "component": comp, "subcomponent": sub,
+                "component_mentions": "|".join(components.mentions(body)),
             })
             kept += 1
             if block in SENTENCE_BLOCKS:
@@ -788,7 +808,8 @@ def main():
     for name, rows, cols in (("paragraphs.csv", paras, PARA_COLS),
                              ("rejected.csv", rejected, REJ_COLS),
                              ("sentences.csv", sents, SENT_COLS)):
-        with open(os.path.join(args.data, name), "w", newline="", encoding="utf-8") as fh:
+        with open(where(args.data, "appraisal", name), "w", newline="",
+                  encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")
             w.writeheader()
             w.writerows(rows)
@@ -805,7 +826,7 @@ def main():
 
     blocks = Counter(p["block"] for p in paras)
     sections = Counter(p["section_path"] for p in paras)
-    with open(os.path.join(args.data, "clean_report.txt"), "w", encoding="utf-8") as fh:
+    with open(where(args.data, "reports", "clean.txt"), "w", encoding="utf-8") as fh:
         fh.write(f"documents cleaned: {len(per_doc)}\n")
         fh.write(f"  read from PDF:   {stats['source_pdf']}\n")
         fh.write(f"  read from text:  {stats['source_txt']}\n")

@@ -1,9 +1,8 @@
 #!/usr/bin/env python3
 """Draft the run report as a note for the project folder in Dev's notes vault.
 
-Reads  data/fetch_report.txt, data/clean_report.txt, data/audit_report.txt,
-       data/intermediate/procurement/{fetch_procurement,clean_procurement,
-       audit_procurement}_report.txt
+Reads  data/reports/{fetch,clean,audit,fetch_procurement,clean_procurement,
+       audit_procurement}.txt
 Writes data/reports/{date} {topic}.md
 
 Reports do not belong in the repository. This writes a Markdown note in the
@@ -23,7 +22,7 @@ from datetime import date
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 CHECK_ROW = re.compile(r"^(.+?)\s{2,}(\d[\d,]*)\s+([\d.]+)%\s+(defect|soft)\s*$")
 
@@ -61,13 +60,12 @@ def commit():
 
 
 def build(data, topic, today):
-    fetch = read(os.path.join(data, "fetch_report.txt"))
-    clean = read(os.path.join(data, "clean_report.txt"))
-    audit = read(os.path.join(data, "audit_report.txt"))
-    proc = os.path.join(data, "intermediate", "procurement")
-    pfetch = read(os.path.join(proc, "fetch_procurement_report.txt"))
-    pclean = read(os.path.join(proc, "clean_procurement_report.txt"))
-    paudit = read(os.path.join(proc, "audit_procurement_report.txt"))
+    fetch = read(where(data, "reports", "fetch.txt"))
+    clean = read(where(data, "reports", "clean.txt"))
+    audit = read(where(data, "reports", "audit.txt"))
+    pfetch = read(where(data, "reports", "fetch_procurement.txt"))
+    pclean = read(where(data, "reports", "clean_procurement.txt"))
+    paudit = read(where(data, "reports", "audit_procurement.txt"))
 
     rows = [
         ("Appraisal documents", grab(fetch, "documents written")),
@@ -122,7 +120,7 @@ def build(data, topic, today):
         "",
         "## Files",
         "- Review sheets: `data/review/` in the project folder.",
-        "- Full reports: `data/*_report.txt` and `data/intermediate/procurement/*_report.txt`.",
+        "- Full reports: `data/reports/*.txt`.",
         "- Postgres: database `work`, schema `wbg`.",
         "",
     ]
@@ -135,7 +133,7 @@ def main():
     ap.add_argument("--topic", default="Pipeline run")
     ap.add_argument("--date", default=date.today().isoformat())
     args = ap.parse_args()
-    out_dir = os.path.join(args.data, "reports")
+    out_dir = where(args.data, "reports")
     os.makedirs(out_dir, exist_ok=True)
     dest = os.path.join(out_dir, f"{args.date} {args.topic}.md")
     with open(dest, "w", encoding="utf-8") as fh:

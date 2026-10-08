@@ -297,6 +297,19 @@ def table_span(table):
 # apart by what they contain. These are the shapes that are unambiguous.
 LOAN_RE = re.compile(r"^\s*(IDA|IBRD|TF|GRANT|CREDIT|DON|PRET)\s*/\s*\S", re.I)
 AMOUNT_TOKEN_RE = re.compile(r"[\d,]+\.\d{2}")
+LOAN_INLINE = re.compile(r"\b(?:IDA|IBRD|TF|GRANT|CREDIT|DON|PRET)\s*/\s*[A-Z]?\s?\d[\dA-Z-]*")
+# The first cell after the description in a collapsed row: the review type,
+# the method or the market approach, in the languages the plans use.
+CELL_OPEN = re.compile(
+    r"^(?:Post|Prior|A posteriori|A priori)$|^(?:Post|Prior|A posteriori|A priori)\s+"
+    r"(?=Request|Direct|Quality|Consultant|Least|Individual|S[eé]lection|Demande|"
+    r"Appel|Entente|Passation|Individuel|Open|Limited)"
+    r"|^(?:Request for (?:Bids|Quota|Propos)|Direct Selection|Quality And Cost|"
+    r"Quality Based|Consultant Qualification|Least Cost Selection|"
+    r"Individual Consult|Single Source Selection|Framework Agreement|"
+    r"S[eé]lection fond|S[eé]lection au moindre|Demande de prix|Appel d'offres|"
+    r"Entente directe|Passation de march|Consultant individuel|Individuel$|"
+    r"(?:Open|Limited|Direct)\s*[-/]\s*(?:National|Internationa)|Single Stage)", re.I)
 DATE_TOKEN_RE = re.compile(r"\d{4}-\d{2}-\d{2}")
 
 
@@ -427,12 +440,31 @@ def read_collapsed_table(table, has_estimated=None):
         row["dates"] = [] if interleaved else [t for k, t in stream if k == "date"]
         loan = [t for k, t in stream if k == "text" and LOAN_RE.match(t)]
         row["loan"] = loan[0] if loan else ""
-        # The description runs from the reference to the first structural cell.
-        desc = []
+        # The description runs from the reference to the first structural
+        # cell. The Loan / Credit cell sits between the description's wrapped
+        # lines: when the text after it opens in lower case it is the rest of
+        # a word or sentence ('Rur' IDA / 12345 'al radio masts') and
+        # the description goes on; otherwise the next column has begun.
+        pieces = []
         for kind, text in stream:
-            if kind != "text" or LOAN_RE.match(text):
+            if kind != "text":
                 break
-            desc.append(text)
+            for j, part in enumerate(LOAN_INLINE.split(text)):
+                if j:
+                    pieces.append(None)            # where a loan number stood
+                if part.strip():
+                    pieces.append(part.strip())
+        desc, cells, in_desc = [], [], True
+        for i, piece in enumerate(pieces):
+            if piece is None:
+                if in_desc:
+                    nxt = next((p for p in pieces[i + 1:] if p), "")
+                    in_desc = nxt[:1].islower()
+                continue
+            if in_desc and CELL_OPEN.match(piece):
+                in_desc = False
+            (desc if in_desc else cells).append(piece)
+        row["cells"] = " ".join(cells)
         row["description"] = " ".join(desc)
         rows.append(row)
     return rows

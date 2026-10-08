@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Scan the prepared procurement tables for defects and count them.
 
-Reads  data/intermediate/procurement/{packages,notices,awards}.csv
-Writes data/intermediate/procurement/audit_procurement_report.txt
+Reads  data/procurement/{packages,notices,awards}.csv
+Writes data/reports/audit_procurement.txt
 
 Same shape as src/audit.py: named checks, a count, a share of scope, and a few
 example keys, so the rates can be gated in tests/test_clean_procurement.py and
@@ -20,7 +20,7 @@ from collections import Counter, defaultdict
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root  # noqa: E402
+from paths import data_root, where  # noqa: E402
 
 from clean import CHAR_MAP                                # noqa: E402
 from clean_procurement import norm_ref, is_placeholder, REF_INLINE  # noqa: E402
@@ -30,7 +30,7 @@ import glue                                                # noqa: E402
 # words the cleaner used.
 VOCAB, NAMES = {}, None
 
-PROC_DIR = os.path.join("intermediate", "procurement")
+PROC_DIR = "procurement"
 
 CHECKS = []
 
@@ -227,25 +227,40 @@ def _dates(row):
 
 @check("signed package with no amount", severity="soft")
 def _signed_amount(row):
-    if (row.get("status") or "") != "signed":
+    if (row.get("status") or "") not in ("Signed", "Completed"):
         return []
     amt = (row.get("estimated_amount") or "").strip()
     return ["zero_or_absent"] if amt in ("", "0.00", "0") else []
 
 
-@check("lot or phase marker left in the matching copy")
+@check("lot or phase marker left at the edge of the description")
 def _marker_left(row):
-    """The published string keeps its markers on purpose - lot and phase are
-    information, not noise - so this reads the matching copy, where a leftover
-    marker means step 4 missed a form."""
+    """A marker that opens or closes the description belongs in lot_or_phase
+    and should have been taken out; one in the middle of the words stays, so
+    the description still reads ('Phase 1 and Phase 2 works')."""
     d = (row.get("description_clean") or "")
-    found = re.findall(r"\(\s*RE-?BID\s*\)|\bLOT\b\s*[-#:]?\s*\w"
-                       r"|\bPHASE\b\s*[-#:]?\s*(?:\d|[IVX]+\b)", d, re.I)
-    # A package that lists its several lots - 'LOT 1: ... LOT 2: ...' - is
-    # describing its content, not carrying a marker that belongs in a column.
-    if len(re.findall(r"\bLOT\b", d, re.I)) >= 2:
-        return []
+    found = re.findall(r"\(\s*RE-?BID\s*\)", d, re.I)
+    found += re.findall(r"(?:^|[-\u2013:(]\s*)(?:LOTS?|PHASE)\s*[-#:]?\s*(?:\d+|[IVX]+)\s*\)?\s*$"
+                        r"|^\s*(?:LOTS?|PHASE)\s*[-#:]?\s*(?:\d+|[IVX]+)\s*[-\u2013:]", d, re.I)
     return found
+
+
+@check("another cell of the plan row left in the description", tables=("packages", "awards"))
+def _cells_left(row):
+    """The Loan / Credit number, or the review type, method and market
+    approach, read into the description from a neighbouring column."""
+    d = row.get("description_clean") or row.get("bid_description_clean") or ""
+    found = re.findall(r"\b(?:IDA|IBRD|TF|COFN)\s*/\s*[A-Z]?\d{3,}", d)
+    found += re.findall(r"(?:Open|Limited|Direct)\s*-\s*(?:National|Internationa)"
+                        r"|Single Stage\s*-\s*(?:One|Two)", d)
+    return found
+
+
+@check("component not found", tables=("packages",), severity="soft")
+def _component(row):
+    """Not every plan prints a component column, so this is coverage, not a
+    defect; the count says how many packages cannot be placed in a component."""
+    return [] if row.get("component_number") else ["none"]
 
 
 @check("supplier amount exceeds the contract amount", tables=("awards",), severity="source")
@@ -279,7 +294,8 @@ def _notice_desc(row):
 ENUM_FIELDS = {
     "packages": ["category", "category_raw", "method", "method_raw", "market_approach",
                  "status", "status_raw", "description_lang", "is_placeholder",
-                 "is_rebid", "lot", "phase", "currency"],
+                 "is_rebid", "lot_or_phase", "component_source", "method_source",
+                 "amount_source", "status_source", "currency"],
     "notices": ["notice_type", "procurement_category", "description_lang",
                 "is_placeholder", "country_code"],
     "awards": ["procurement_group", "method", "review_type", "description_lang",
@@ -298,7 +314,7 @@ def load(data, table):
 def load_vocab(data):
     """Build the run's vocabulary exactly as clean_procurement does."""
     global VOCAB, NAMES
-    proc = os.path.join(data, "intermediate", "procurement")
+    proc = where(data, "procurement")
     raw = []
     for name, field in (("packages_raw", "description"), ("notices_raw", "bid_description"),
                         ("awards_raw", "description")):
@@ -397,7 +413,7 @@ def main():
     if args.out:
         path = args.out
     else:
-        path = os.path.join(args.data, PROC_DIR, "audit_procurement_report.txt")
+        path = where(args.data, "reports", "audit_procurement.txt")
     with open(path, "w", encoding="utf-8") as fh:
         fh.write(report)
     print("\n".join(out[:40]))

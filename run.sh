@@ -15,8 +15,10 @@ LIMIT=()
 if [ "${1:-}" = "--limit" ]; then LIMIT=(--limit "$2"); fi
 
 step() { echo; echo "== $*"; "$PY" "$@"; }
+step src/paths.py
 step src/fetch.py "${LIMIT[@]}"
 step src/clean.py
+step src/components.py
 step src/audit.py | tail -3
 step src/fetch_procurement.py "${LIMIT[@]}"
 step src/clean_procurement.py

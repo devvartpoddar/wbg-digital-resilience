@@ -76,7 +76,7 @@ def vector_for(text, dim=DIM):
 def build_corpus(root, docs=DOCS):
     """Write clean files and paragraphs.csv exactly as src/clean.py would."""
     data = os.path.join(root, "data")
-    os.makedirs(os.path.join(data, "clean"), exist_ok=True)
+    os.makedirs(os.path.join(data, "appraisal", "text"), exist_ok=True)
     rows = []
     for doc_id, paras in docs.items():
         text, offsets = "", []
@@ -85,7 +85,7 @@ def build_corpus(root, docs=DOCS):
             text += para
             offsets.append((start, len(text)))
             text += "\n\n"
-        with open(os.path.join(data, "clean", f"{doc_id}.txt"), "w", encoding="utf-8") as fh:
+        with open(os.path.join(data, "appraisal", "text", f"{doc_id}.txt"), "w", encoding="utf-8") as fh:
             fh.write(text)
         for i, ((a, b), para) in enumerate(zip(offsets, paras), 1):
             rows.append({
@@ -95,7 +95,7 @@ def build_corpus(root, docs=DOCS):
                 "char_start": a, "char_end": b, "n_tokens": len(para.split()),
                 "text_sha256": hashlib.sha256(para.encode("utf-8")).hexdigest(),
             })
-    with open(os.path.join(data, "paragraphs.csv"), "w", newline="", encoding="utf-8") as fh:
+    with open(os.path.join(data, "appraisal", "paragraphs.csv"), "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=[
             "paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
             "section_title", "block", "char_start", "char_end", "n_tokens",
@@ -150,7 +150,7 @@ def corpus(tmp_path):
 
 
 def read_index(data):
-    with open(os.path.join(data, "emb_index.csv"), newline="", encoding="utf-8") as fh:
+    with open(os.path.join(data, "embeddings", "emb_index.csv"), newline="", encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
 
 
@@ -160,7 +160,7 @@ def test_dry_run_makes_no_request(corpus, monkeypatch):
     stub = Stub()
     assert run(corpus, stub, monkeypatch, "--dry-run") == 0
     assert stub.calls == [], "--dry-run must not call the transport"
-    assert not os.path.exists(os.path.join(str(corpus), "data", "paragraph_emb.npy"))
+    assert not os.path.exists(os.path.join(str(corpus), "data", "embeddings", "paragraph_emb.npy"))
 
 
 def test_every_paragraph_gets_a_row(corpus, monkeypatch):
@@ -168,7 +168,7 @@ def test_every_paragraph_gets_a_row(corpus, monkeypatch):
     assert run(corpus, Stub(), monkeypatch) == 0
     index = read_index(data)
     assert len(index) == 6, "all six paragraphs should be embedded, boilerplate included"
-    arr = numpy.load(os.path.join(data, "paragraph_emb.npy"), mmap_mode="r")
+    arr = numpy.load(os.path.join(data, "embeddings", "paragraph_emb.npy"), mmap_mode="r")
     assert arr.shape == (6, DIM)
 
 
@@ -242,7 +242,7 @@ def test_a_failed_text_is_omitted_never_zeroed(corpus, monkeypatch):
     root = E.cache_root(data, MODEL, DIM)
     assert not os.path.exists(E.cache_path(root, hashlib.sha256(bad.encode()).hexdigest()))
 
-    arr = numpy.load(os.path.join(data, "paragraph_emb.npy"))
+    arr = numpy.load(os.path.join(data, "embeddings", "paragraph_emb.npy"))
     norms = numpy.linalg.norm(arr, axis=1)
     assert (norms > 0.9).all(), "a zero row reached the matrix"
 
@@ -267,7 +267,7 @@ def test_one_bad_text_does_not_cost_the_rest_their_vectors(corpus, monkeypatch):
 def test_failures_are_named_in_the_report(corpus, monkeypatch):
     data = os.path.join(str(corpus), "data")
     run(corpus, Stub(fail_on=[DOCS["D002"][1]]), monkeypatch)
-    report = open(os.path.join(data, "embed_report.txt"), encoding="utf-8").read()
+    report = open(os.path.join(data, "reports", "embed.txt"), encoding="utf-8").read()
     assert "failed after retries (1)" in report
     assert "paragraphs with no vector:  1" in report
 
@@ -278,7 +278,7 @@ def test_wrong_dimension_is_never_stored(corpus, monkeypatch):
     run(corpus, Stub(wrong_dim_for=[bad]), monkeypatch)
     root = E.cache_root(data, MODEL, DIM)
     assert not os.path.exists(E.cache_path(root, hashlib.sha256(bad.encode()).hexdigest()))
-    arr = numpy.load(os.path.join(data, "paragraph_emb.npy"))
+    arr = numpy.load(os.path.join(data, "embeddings", "paragraph_emb.npy"))
     assert arr.shape == (5, DIM)
 
 
@@ -310,7 +310,7 @@ def test_row_order_matches_the_index(corpus, monkeypatch):
     If it drifts from the matrix, every downstream lookup is silently wrong."""
     data = os.path.join(str(corpus), "data")
     run(corpus, Stub(), monkeypatch)
-    arr = numpy.load(os.path.join(data, "paragraph_emb.npy"))
+    arr = numpy.load(os.path.join(data, "embeddings", "paragraph_emb.npy"))
     by_pid = {}
     for doc, paras in DOCS.items():
         for i, para in enumerate(paras, 1):
@@ -332,7 +332,7 @@ def test_index_rows_are_contiguous_from_zero(corpus, monkeypatch):
 
 def test_manifest_records_what_was_run(corpus, monkeypatch):
     run(corpus, Stub(), monkeypatch)
-    manifest = json.load(open(os.path.join(str(corpus), "meta",
+    manifest = json.load(open(os.path.join(str(corpus), "meta", "embeddings",
                                            "embedding_manifest.json"), encoding="utf-8"))
     assert manifest["model_requested"] == MODEL
     assert manifest["dimensions"] == DIM
@@ -346,7 +346,7 @@ def test_manifest_records_what_was_run(corpus, monkeypatch):
 
 def test_manifest_counts_paragraphs_left_without_a_vector(corpus, monkeypatch):
     run(corpus, Stub(fail_on=[DOCS["D002"][1]]), monkeypatch)
-    manifest = json.load(open(os.path.join(str(corpus), "meta",
+    manifest = json.load(open(os.path.join(str(corpus), "meta", "embeddings",
                                            "embedding_manifest.json"), encoding="utf-8"))
     assert manifest["paragraphs_without_a_vector"] == 1
     assert manifest["rows_embedded"] == 5
@@ -358,7 +358,7 @@ def test_a_changed_clean_file_aborts_the_run(corpus, monkeypatch):
     """paragraphs.csv stores offsets, not text. If the clean files are
     regenerated the offsets still parse and still yield something - just not
     what was audited. That has to stop the run, not colour the corpus."""
-    path = os.path.join(str(corpus), "data", "clean", "D001.txt")
+    path = os.path.join(str(corpus), "data", "appraisal", "text", "D001.txt")
     body = open(path, encoding="utf-8").read()
     open(path, "w", encoding="utf-8").write("x" + body[1:])
     with pytest.raises(SystemExit) as exc:
@@ -385,12 +385,12 @@ def test_an_oversized_paragraph_aborts_rather_than_being_truncated(tmp_path, mon
 def test_limit_writes_smoke_artifacts_and_leaves_the_real_ones(corpus, monkeypatch):
     data = os.path.join(str(corpus), "data")
     run(corpus, Stub(), monkeypatch)
-    full = numpy.load(os.path.join(data, "paragraph_emb.npy")).shape
+    full = numpy.load(os.path.join(data, "embeddings", "paragraph_emb.npy")).shape
     run(corpus, Stub(), monkeypatch, "--limit", "2")
-    assert numpy.load(os.path.join(data, "paragraph_emb.npy")).shape == full, \
+    assert numpy.load(os.path.join(data, "embeddings", "paragraph_emb.npy")).shape == full, \
         "a smoke run overwrote the full matrix"
-    assert numpy.load(os.path.join(data, "smoke_paragraph_emb.npy")).shape == (2, DIM)
-    assert os.path.exists(os.path.join(data, "smoke_embedding_manifest.json"))
+    assert numpy.load(os.path.join(data, "embeddings", "smoke_paragraph_emb.npy")).shape == (2, DIM)
+    assert os.path.exists(os.path.join(data, "embeddings", "smoke_embedding_manifest.json"))
 
 
 # ------------------------------------------------------------------ chunking

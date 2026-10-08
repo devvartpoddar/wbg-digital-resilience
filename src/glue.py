@@ -88,17 +88,17 @@ class Vocab(Counter):
 
 def corpus_vocab(descriptions, data=None):
     """(vocab, names) for a run: words from the descriptions plus the cleaned
-    appraisal text in data/clean/ when it is there, and the mixed-case names
+    appraisal text in data/appraisal/text/ when it is there, and the mixed-case names
     that prose uses whole ('GovNet')."""
     import glob
-    import os
+    from paths import where
     # Each distinct description counted once: a package is re-printed in every
     # plan version, up to dozens of times, and counting every copy lets one
     # repeated glue ('consultantindividuel', 1,035 copies) outvote real words.
     vocab = Vocab(build_vocab(sorted(set(descriptions))))
     names = None
     if data:
-        paths = sorted(glob.glob(os.path.join(data, "clean", "*.txt")))
+        paths = sorted(glob.glob(where(data, "text", "*.txt")))
         if paths:
             names, vocab.prose = Counter(), Counter()
         for path in paths:
@@ -264,6 +264,11 @@ def rejoin(text, vocab):
                 continue
             whole = "".join(words)
             verdicts = [_prose_word(w, vocab) for w in words]
+            # An acronym before a lower-case word is two words: 'I T equipment'
+            # is 'IT equipment', never 'ITequipment'.
+            if words[0].isupper() and words[-1].islower() and len(words[-1]) >= 3 \
+                    and verdicts[-1]:
+                continue
             if all(v is None for v in verdicts):
                 # No prose: a fragment is a single letter that is not a word,
                 # or a part far rarer than the whole it would make.
@@ -276,21 +281,59 @@ def rejoin(text, vocab):
                 all_words = all(bool(v) for v in verdicts)
             # A function word at either end stays its own word: 'Pr ovision
             # of' becomes 'Provision of', not 'Provisionof'.
+            # Only when the rest already stands as a word: 'Commissi on' is
+            # one broken word, and 'an d' is 'and'.
             fw = EN_FUNCTION if getattr(vocab, "prose", None) is not None else FUNCTION_WORDS
-            if words[-1].lower() in fw or \
-                    (len(words[0]) > 1 and words[0].lower() in fw):
+            if words[-1].lower() in fw and _stands("".join(words[:-1]), vocab):
                 continue
-            if len(whole) >= 4 and not all_words and \
+            if len(words[0]) > 1 and words[0].lower() in fw and \
+                    _stands("".join(words[1:]), vocab):
+                continue
+            # Three letters is enough for a function word ('a nd') or for a
+            # word made only of one- and two-letter shards ('E-G ov').
+            short_ok = whole.lower() in fw or (
+                len(whole) == 3 and all(len(w) <= 2 for w in words)
+                and not any(verdicts))
+            if (len(whole) >= 4 or short_ok) and not all_words and \
                     vocab.get(whole.lower(), 0) >= MIN_SEEN:
                 out.append(parts[0] + "".join(parts[1:]))
                 n += k - 1
                 i += k
                 joined = True
                 break
+        if not joined and i + 1 < len(toks) and _moved_space(toks[i], toks[i + 1], vocab):
+            out.extend(_moved_space(toks[i], toks[i + 1], vocab))
+            n += 1
+            i += 2
+            joined = True
         if not joined:
             out.append(toks[i])
             i += 1
     return " ".join(out), n
+
+
+def _stands(word, vocab):
+    """Is this a word in its own right? The prose decides where it has a view;
+    the descriptions' own counts only where it has none, because a word broken
+    often enough ('Commissi') is common in the descriptions themselves."""
+    v = _prose_word(word, vocab)
+    return _known(word, vocab) if v is None else bool(v)
+
+
+def _moved_space(a, b, vocab):
+    """A space one letter out of place: 'forth e' is 'for the'. Only when the
+    second part is not a word, the first new word is a function word and the
+    second is a word the prose uses."""
+    if getattr(vocab, "prose", None) is None or not re.fullmatch(r"[a-z]+", a + b):
+        return None
+    if _prose_word(b, vocab) or len(b) > 2:
+        return None
+    whole = a + b
+    for cut in range(1, len(whole)):
+        x, y = whole[:cut], whole[cut:]
+        if x != a and x in EN_FUNCTION and len(y) >= 2 and _prose_word(y, vocab):
+            return [x, y]
+    return None
 
 
 def repair(text, vocab, names=None, lang="en"):
