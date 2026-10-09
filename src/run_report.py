@@ -79,6 +79,8 @@ def build(data, topic, today):
         ("Notices", grab(pfetch, "notices rows")),
         ("Awards", grab(pfetch, "awards rows")),
     ]
+    # Looked up by label, so adding a row cannot shift what the summary says.
+    got = dict(rows)
     problems = []
     for name, text in (("appraisal", audit), ("procurement", paudit)):
         for check, hits, share, sev in checks(text):
@@ -100,8 +102,9 @@ def build(data, topic, today):
         f"# {topic}",
         "",
         "## Summary",
-        f"- {rows[0][1]} appraisal documents, {rows[3][1]} paragraphs and {rows[5][1]} "
-        f"sentences; {rows[6][1]} procurement packages.",
+        f"- {got['Appraisal documents']} appraisal documents, {got['Paragraphs kept']} "
+        f"paragraphs ({got['  given to the model']} given to the model) and "
+        f"{got['Sentences']} sentences; {got['Procurement packages']} procurement packages.",
         f"- {defects} defect-level audit checks with hits"
         + (" - see Problems found." if defects else "."),
         "",

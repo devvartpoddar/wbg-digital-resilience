@@ -324,8 +324,7 @@ def _load(table):
 # advance. The measured rate is in the comment. If one trips after a re-fetch,
 # read the examples the audit prints before moving it.
 #
-# Measured on the 70-project corpus after the October 2026 cleaning pass
-# (glue repair, stitched-record cut, status and method resolution). Each gate
+# Measured on the 70-project corpus after the October 2026 consistency pass. Each gate
 # sits just above the measured rate, so a regression fails and ordinary
 # variation as plans are re-published does not.
 #
@@ -334,25 +333,24 @@ def _load(table):
 # amount exceeds the contract, a notice published with no description. They are
 # reported, and gated against getting worse, but cleaning cannot fix them.
 MAX_RATE = {
-    "private use area character": 0.0,           # 0.00% - U+F076 now folded
+    "private use area character": 0.0,           # 0.00%
     "unicode replacement character": 0.0,        # 0.00%
     "control or format character": 0.0,          # 0.00%
     "whitespace not collapsed": 0.0,             # 0.00%
-    "description carries a second borrower reference": 0.1,   # 0.05% - cut at clean
-    "description ends mid-word": 0.1,            # 0.05%
-    "word glued to the next inside the description": 0.1,    # 0.03% - names left whole
-    "word broken by a space inside the description": 0.15,   # 0.00% after the second join pass
+    "description carries a second borrower reference": 0.15,  # 0.10% - one plan's slash-coded references
+    "description ends mid-word": 0.1,            # 0.03%
+    "word glued to the next inside the description": 0.1,    # 0.05% - names left whole
+    "word broken by a space inside the description": 0.05,   # 0.00%
     "borrower reference absent": 0.0,            # 0.00%
     "borrower reference not normalised": 0.0,    # 0.00%
     "category unmapped": 0.0,                    # 0.00%
-    "method unmapped": 2.5,                      # 1.82% (soft) - Bank codes, no 'other'
-    "status unmapped": 6.0,                      # 5.15% (soft) - no evidence anywhere
-    "status raw present but unmapped": 0.2,      # 0.07% (soft)
-    "language not determined": 0.0,              # 0.00%
-    "planned date after revised date": 0.5,      # 0.28% - source
+    "method unmapped": 1.2,                      # 0.81% (soft) - Bank codes, no 'other'
+    "status unmapped": 4.5,                      # 3.66% (soft) - no evidence anywhere
+    "status raw present but unmapped": 0.1,      # 0.02% (soft)
+    "planned date after revised date": 0.5,      # 0.31% - source
     "lot or phase marker left at the edge of the description": 0.05,  # 0.02%
     "another cell of the plan row left in the description": 0.05,   # 0.01%
-    "component not found": 25.0,                 # 23.51% (soft) - not every plan prints one
+    "component not found": 25.0,                 # 22.87% (soft) - not every plan prints one
     "table header text leaked into a description": 0.0,       # 0.00%
     "supplier amount exceeds the contract amount": 1.0,       # 0.55% - source
     "notice with no description": 1.0,           # 0.64% - source

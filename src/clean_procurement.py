@@ -189,6 +189,8 @@ CELL_TAIL = re.compile(
     rf"\s(?:{_REVIEW_WORDS}\s+(?=.*?(?:{_METHOD_WORDS}|{_APPROACH_WORDS}))"
     rf"|{_METHOD_WORDS}(?=.*?{_APPROACH_WORDS})|{_APPROACH_WORDS}|{_REVIEW_WORDS}$"
     r"|Estimated\s+Actual)")
+CELL_HEAD = re.compile(
+    rf"^\s*(?:(?:Single Stage\s*-\s*(?:One|Two)(?:\s*E(?:nvelope)?)?|{_APPROACH_WORDS}l?)\s*)+")
 COMP_NUMBER = re.compile(r"^(?:(?:Component|Composante|Componente|Comp\.?)\s*)?"
                          r"(\d{1,2}(?:\.\d{1,2})?)\s*[.:)\-–]?\s+(?=\S)", re.I)
 COMP_NAMED = re.compile(r"\b(?:Component|Composante|Componente|Comp\.)\s*"
@@ -213,6 +215,11 @@ def split_cells(desc):
     if m:
         tail.insert(0, out[m.start():])
         out = out[:m.start()]
+    # The same cells printed before the description on some layouts.
+    m = CELL_HEAD.match(out)
+    if m and out[m.end():].strip():
+        tail.insert(0, out[:m.end()])
+        out = out[m.end():]
     return WS_RE.sub(" ", out).strip(), WS_RE.sub(" ", " ".join(tail)).strip()
 
 
@@ -381,7 +388,7 @@ REF_ONLY_RE = re.compile(r"^[A-Z]{2}-[A-Z0-9]{1,12}-\d{2,10}-[A-Z]{2}-[A-Z0-9]{2
 
 CELL_WORDS_ONLY = re.compile(
     r"^(?:\s|post(?:erior)?|prior|open|limited|direct|national|international|"
-    r"individual|single|stage|one|two|envelope|[-/,.()])+$", re.I)
+    r"individual|single|stage|one|two|envelope|internationa|international|[-/,.()])+$", re.I)
 
 
 def is_placeholder(description):

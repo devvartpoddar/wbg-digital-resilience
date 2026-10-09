@@ -9,7 +9,7 @@ For a lending project, the pipeline answers four questions:
 3. How firm is each commitment?
 4. What procurement is coming up against those same assets?
 
-**Terms.** Project Appraisal Document (PAD): the document the Board approves, describing what a lending operation finances. Task Team Leader (TTL): the World Bank staff member leading that operation, and the person this work is for. Systematic Tracking of Exchanges in Procurement (STEP): the system through which borrowers publish procurement plans.
+**Terms.** Project Appraisal Document (PAD): the document the Board approves, describing what a lending operation finances. Task Team Leader (TTL): the World Bank staff member leading that operation; the output helps an advisor decide which TTLs to talk to, and when. Systematic Tracking of Exchanges in Procurement (STEP): the system through which borrowers publish procurement plans.
 
 **Three statements go with every output.** A commitment in an appraisal document is design intent, not delivery. Nothing here is causal. The pipeline misses real commitments and the miss rate is not known.
 
@@ -27,220 +27,312 @@ Any model that meets all three may be used, including an external one. For an ex
 
 | Stage | State |
 |---|---|
-| Fetch appraisal documents and procurement | Built |
-| Clean appraisal documents into paragraphs and sentences, read from the PDF | Built; **quality under review now** |
-| Clean procurement tables: words repaired, other cells cut out, Bank method codes, STEP status labels with their source, component, amount provenance | Built; **quality under review now** |
-| Components per project, and paragraphs tagged with their component | Built |
-| Load into Postgres, write review sheets | Built |
+| Fetch appraisal documents (PDFs) and procurement records | Built |
+| Clean appraisal documents into paragraphs and sentences | Built; under review |
+| Collect each project's components and costs; tag paragraphs with their component | Built |
+| Clean procurement packages, notices and awards | Built; under review |
+| Load into Postgres, write review sheets and the run report | Built |
 | Embed paragraphs into pgvector | Next, once cleaning is accepted |
-| Judge paragraphs for assets and measures | Next: a test of a pinned decision model (Jev) returning a yes probability |
-| Labels for measuring it | To be drawn fresh. Labels will change often: they are keyed by the SHA-256 of the paragraph text, carry the name and date of the set they belong to, and nothing but evaluation reads them |
+| Judge paragraphs for assets and measures | Next: a test of a pinned external decision model (referred to as Jev) that returns a yes probability |
+| Labels for measuring it | To be drawn fresh. Keyed by the SHA-256 of the unit's text plus the name and date of the label set; nothing but evaluation reads them |
 
-## Cleaning and chunking
+`./run.sh` runs every stage below in this order. Each stage reads only the files the earlier stages wrote, skips work whose inputs have not changed, and writes its own report to `data/reports/`. Every number marked "on the current run" comes from those reports and will move when the documents do.
 
-Two corpora, cleaned separately. Appraisal documents are long prose recovered from page layout; procurement text is short metadata typed into a form. They fail in opposite ways, so a rule that helps one damages the other.
+## 1. What is pulled
 
-| | Appraisal documents | Procurement text |
-|---|---|---|
-| Unit | Paragraph, split again into sentences | One field, five to fifteen words |
-| Noise comes from | Layout recovery: what a line is (heading, footnote, header) is lost in plain text | Human entry, and cells clipped at the column edge |
-| Typical defect | Word split across a line break; running header inside a paragraph | `FIBER OPTIC CABLE SUPPLY - LOT 2 (REBID)` |
-| Case folding | Not applied. Case is informative, and the classifier handles it | Applied for matching. Entry is inconsistently capitalised |
-| Short unit | Almost always a heading or a stray fragment — drop | The entire record — keep |
-| Digits and codes | Usually footnote markers or page numbers — strip | Lot and phase numbers distinguish packages — keep |
-| Boilerplate | Standard annexes, disclaimers, acronym lists — drop | Placeholder descriptions (`TBD`, `Goods`) — flag, do not drop |
+| Source | What | Interface | Kept in |
+|---|---|---|---|
+| The cohort list | The 70 projects to cover. Kept by people, never written by the code | `inputs/config/cohort.csv` | — |
+| Appraisal documents | Every Project Appraisal Document (PAD) and every Project Paper (additional financing or restructuring) disclosed for each project, as PDF | World Bank Documents and Reports interface: document id, type, title, disclosure date, language, PDF address | `data/raw/pdf/` |
+| Procurement plans | Every procurement plan disclosed for each project, as the text rendition the Bank publishes (plans are not read from PDF) | Documents and Reports interface, type "Procurement Plan" | `data/raw/plans/` |
+| Procurement notices | Every notice published for each project | Procurement notices interface | `data/raw/notices/` |
+| Contract awards | Every signed contract recorded for each project | Contract awards interface | `data/raw/awards/` |
 
-### Appraisal documents
+Nothing else is pulled. The Bank's text renditions of appraisal documents are no longer fetched; the ones fetched earlier stay on disk and are not used. Every request is logged in `data/raw/fetch_log.csv`. A file already on disk is not downloaded again; when a forced re-download (`--refresh`) returns different bytes, the old file is kept beside the new one, named by its checksum. Nothing fetched is ever deleted or overwritten.
 
-**Read from the PDF, by layout.** The World Bank's text rendition of a document throws away everything that says what a line is: its font size, its position on the page, whether it is bold, whether a character is raised. The old cleaner had to guess all of that back from line patterns, and its leftover defects were exactly where the guess failed: a footnote number fused to a word ("202024"), a running header inside a paragraph, a footnote read as body text. `src/pdf_layout.py` reads the PDF instead and measures:
+Personal contact details in notices (names, e-mail addresses, telephone numbers) and the staff names in award records are not pulled.
 
-| What | How it is recognised |
-|---|---|
-| Running header and footer | A line repeating at the same height on many pages; page-number lines; hidden template codes. The "Public Disclosure Authorized" stamp down the margin is dropped by its angle, read from each character's text matrix |
-| Footnote marker | A digit set smaller than its line and raised above the line's baseline. Small alone is not enough: the 2 in CO2 is small but lowered, and stays |
-| Footnote | The run of small-type lines at the foot of a page |
-| Heading | A short line, set in bold, italic or larger type, not ending in punctuation. A full-width bold line is emphasised prose, not a heading |
-| Table | A region ruled as a table; each row becomes one unit, written "Caption — Header: value · Header: value", so a row says what its figures are. The header row is found as the first row of labels followed by rows of figures, is carried onto the next page when the table continues there, and a header repeated mid-table starts a new segment |
-| Bullet | The bullet glyph is removed and the unit marked `list_item`; the sentence that introduces a list ("…as follows:") is linked as `lead_in_id` |
-| Paragraph | A vertical gap larger than the line pitch, or a numbered paragraph or bullet. An enumerator such as "(ii)" only starts a new unit when the text before it had reached a stopping point, because a wrapped cross-reference looks the same |
-| Across a page | A paragraph that had not finished its sentence continues on the next page, past any footnotes and header in between |
-| Word broken at a line end | Joined without the hyphen when the document uses the whole word elsewhere; otherwise the hyphen is real and kept (`climate-resilient`) |
+## 2. Appraisal documents
 
-Every threshold is relative to the document's own body type size and line pitch. Each document's result is cached against the PDF's checksum and a checksum of the reader's code (`pdf_layout.py` and the few helpers it uses), so a re-run costs nothing and any change to the rules re-reads everything it affects.
+### 2.1 Fetch (`src/fetch.py`)
 
-**The PDF's own text is kept, and every paragraph points into it.** The reader writes each document's text exactly as the PDF gives it, every line of every page before anything is removed, to `data/raw/pdf_text/`. Each paragraph records the stretch of that file it was built from (`raw_start`, `raw_end`), so the review sheet shows a paragraph's source by slicing, not by searching. The Bank's separate text rendition is no longer fetched; one already on disk is used only for a document whose PDF is missing or is a scan, and every row's `source` says which was used.
+1. For each included project, list its documents of type Project Appraisal Document and Project Paper.
+2. Label each document's kind from its type and title: `pad`; `additional_financing` (a Project Paper whose title says additional financing); `restructuring` (title says restructuring); otherwise `project_paper_other`.
+3. Download the PDF. A document with no PDF, or whose address returns something that is not a PDF, is noted in the report and left out.
+4. Write one row per document to `data/raw/documents.csv`: document id, all the projects it serves (a regional document serves several, joined with "|"), type, kind, title, disclosure date, language, when it was fetched, the PDF's address, size and SHA-256.
+5. A project not listed on this run (outside a `--limit` smoke run, or because its listing failed) keeps the rows an earlier run recorded for it, so a partial run never shrinks the corpus.
 
-**Web addresses become "[link]".** They cost the model many tokens and say nothing about assets or measures. A footnote that is only a reference and a link ("World Bank. 2021. … [link]") is kept for reading and left out of what the model is given.
+On the current run: 147 documents for the 70 projects: 65 PADs, 13 additional financings and 69 restructuring papers.
 
-**Paragraphs and sentences, both.** The paragraph is the unit for what a passage is about: an asset is often named in one sentence and qualified in the next, and the paragraph keeps them together. The sentence is the unit for what a passage commits to: "will finance fiber" and "sites are expected to avoid flood zones" are two claims of different firmness. `src/sentences.py` splits by rule, with no model: a boundary is a full stop, question or exclamation mark followed by a capital, digit or opening bracket, except after an abbreviation ("e.g.", "No.", "U.S."), an initial, or a paragraph number, or where the sentence so far has fewer than three words ("See above." stays with what follows). Sentences are stored as offsets inside their paragraph, never as copies.
+### 2.2 Read the PDF (`src/pdf_layout.py`)
 
-Remaining steps, unchanged:
+Each PDF is read by layout with pdfplumber 0.11.10 (the version is pinned in requirements.txt). Every threshold is measured relative to the document's own body type size and line spacing, so no rule depends on one template. The result for each document is cached (`data/appraisal/cache/`) against the PDF's SHA-256 and a checksum of the reader's code (`pdf_layout.py` and `text_rules.py`), so an unchanged document is never read twice and any change to the rules re-reads every document.
 
-1. Normalise characters: ligatures, smart quotes, non-breaking spaces, soft hyphens, bullet glyphs.
-2. Assign ordinals in document order, before any filtering. Units under five words that are not headings are dropped and counted.
-3. Hash each paragraph and sentence. On re-parse, verify and fail loudly on mismatch.
+**Page by page:**
 
-**Cleaning is replace-in-place, never delete-in-place.** Removing characters shifts every offset after them, and localisation spans are offsets. Where text must be removed, record the offset map or treat the cleaned text as the reference and keep the raw alongside.
+1. Drop every character set at an angle, read from its text matrix. This removes the "Public Disclosure Authorized" stamp down the page margin.
+2. Read the lines of text with their position, size, and whether they are bold or italic. A line made only of characters under 6 points is dropped.
+3. Keep a copy of every line exactly as the PDF gives it. Together these form the document's raw text, written to `data/raw/pdf_text/{doc_id}.txt` (one line per line, a form feed between pages).
+4. Within each line:
+   - remove footnote markers: a digit, comma or asterisk that is both smaller than the line (under 80 per cent of its size) and raised above its baseline. A small digit set lower, as in CO2, stays. The number a footnote itself opens with stays;
+   - turn a bullet drawn from a symbol font (Wingdings, Symbol, a Courier "o") into "•";
+   - fold characters (section 2.4);
+   - remove hidden template codes the Bank's authoring system leaves in the text layer (for example a name made of capitals joined by underscores);
+   - collapse runs of spaces.
+5. Find the ruled tables on the page, ignoring a frame that covers the whole page.
 
-**Only the body prose goes to the model.** `for_model` is true for narrative, annex and footnote paragraphs, and false for front matter, tables and headings. Front matter and tables stay in the tables for reading, but are not cleaned to the standard prose is and are not quality-reviewed; component names and costs are read from the front matter separately, straight from the PDF (`src/components.py`). What is given up, stated rather than hidden: the results framework's indicator rows ("newly built or upgraded digital infrastructure that is resilient to climate-related shocks (percentage)") are tables, so the model does not see them.
+**Across the document:**
 
-**Not only the component sections.** The model reads all body prose, not just paragraphs tagged with a component. On the 70-project run, 1,267 of the 1,817 body paragraphs that use resilience language carry no component tag, and some of the firmest commitments sit there: "all infrastructure financed under the project will be designed…" in the technical analysis, or a climate annex. The component tag is a column to filter or rank by, not a reason to drop a paragraph.
+6. The body type size is the size most characters are set in. The width of a full line of body text is measured per page.
+7. A running header or footer is a line that recurs at the same height (to within 4 points), with the same letters ignoring spaces and digits, on at least 30 per cent of pages (and at least 3). Those lines are removed.
+8. Also removed: page-number lines ("12", "Page 3 of 40"); classification banners ("Official Use Only", with or without a page number); dated footers ("Oct 12, 2023 Page 27 of 29"); lines of hidden template code; contents-page lines (those ending in dot leaders and a page number, or a section or annex heading followed by a bare page number).
+9. The footnotes on a page are the unbroken run of lines at its foot set smaller than 93 per cent of body size. The footnote numbers each page defines are recorded.
+10. A number run onto the end of a word ("hoped44") is removed when the footnotes of this page or the next define that number. A number after a capital letter (IDA19, FY01) is never touched.
 
-**Components, per project.** `src/components.py` reads each document's components and sub-components, with their cost where printed, into `data/appraisal/components.csv`: from the data sheet's component table, a restructuring paper's table of changes, and the body headings ("Component 2: …"). Names are stripped of their number and printed cost. Each paragraph carries the component and sub-component it sits under (`component`, `subcomponent`) and any it mentions (`component_mentions`). A paragraph sits under the last component heading above it, until the first section that is not the one that heading opened in: after the last component in "II.B Project Components", "II.C Project Beneficiaries" belongs to no component. Annexes have no lettered sections, so inside one annex a later heading that is not a component does not close the last one; that is a known limit.
+**Each remaining line is labelled:**
 
-**Footnotes are kept, not dropped.** They carry substantive conditions often enough to matter, and they are cheap to keep as a separate block type.
+11. *Table row*: the line falls inside a ruled table (section 2.3).
+12. *Footnote*: the line is in the footnote run.
+13. *Heading*: the line is bold, italic or larger than body type, has at most 14 words, does not end in . ; , or :, and is narrower than 80 per cent of a full line. A unit opening "Component", "Sub-component", "Figure", "Table", "Box", "Map" or "Chart" followed by a number or capital, with at most 30 words and not ending in . or ;, is also made a heading. Headings and these titles also serve as the caption for a table that follows within a page.
+14. *Body*: everything else.
 
-**Table cells are kept and marked.** They are not prose and no clause parser will read them properly, but dropping them loses quantified targets.
+**Lines are grouped into units (paragraphs):**
 
-**Acronyms are not expanded.** Appraisal documents define them once then use them throughout; expanding introduces errors where the same acronym means different things across countries. The classifier sees the surface form.
+15. A body line continues the paragraph above when it follows at the normal line spacing on the same page (up to 1.45 times the median spacing); or the paragraph had not finished its sentence and the page turned; or the paragraph had not finished its sentence, the line opens in lower case, and a table, heading or footnote came in between; or the paragraph had not finished its sentence, the line opens in lower case, and it sits within three line-spacings (a paragraph set with looser spacing).
+16. A line does not continue the paragraph when it opens a new block: a bullet glyph always does; a paragraph number ("23.") or an enumerator ("(ii)", "a)", "3)") does only when the text before it ended at a stopping point (. : ; ! ? or a closing bracket or quote, or "and"/"or"). A wrapped cross-reference such as "as described in sub-part (ii) above" therefore stays one paragraph.
+17. A word broken by a hyphen at a line end is joined without the hyphen when the document uses the whole word unbroken elsewhere; otherwise the hyphen is real and kept ("climate-resilient").
+18. A footnote line that does not open with a number continues the footnote above; the number a footnote opens with is removed from its text (a year such as 2016 at the start is not mistaken for one).
 
-### Procurement
+**Each unit is then finished:**
 
-1. Normalise characters and collapse whitespace.
-2. Case-fold a matching copy. Keep the original for display.
-3. Strip the borrower reference code where it is embedded in the description field; it already has its own column.
-3a. Take out other cells of the plan row that ran into the description: the Loan / Credit number printed between two wrapped lines ("Rur IDA / 12345 al radio"), and on some layouts the component, review type, method and market approach after it. After a loan number, text that opens in lower case is the rest of the description; anything else is the next column.
-3b. Repair words broken or run together where a clipped cell was rejoined (`src/glue.py`): "ofDigital" becomes "of Digital", "Commissi on" becomes "Commission", "forth e" becomes "for the". A token is split only when it is not itself a word the corpus uses and both halves are; fragments are joined only when the whole is a word the corpus uses and the fragments are not all words in their own right. English is judged against the appraisal prose; French, Portuguese and Spanish against the descriptions. `description` keeps the original and `glue_repairs` counts the changes.
-4. Read lot, phase and rebid markers into `lot_or_phase` ("Lot 2", "Phases 1 and 2") and `is_rebid`. A marker is taken out of the text only where it opens or closes it, so what is left still reads. This runs after the word repair, so a broken word's last letter is never read as a lot.
-4a. Find the package's component. Only the plan's Component column is read, never the description's words: the cell as printed, or, where the layout spilled it onto the end of the description, that spilled tail. It is matched against the project's components from the appraisal side (`components.csv`) by the longest stretch of a component's name it carries, ignoring spaces, because the cell is usually clipped and interleaved with other columns. Each name takes its number from the most recent document that lists it, since restructurings renumber. `component_source` is `name_match` when the cell carries enough of a component's name to identify it (the name shown is the appraisal document's), `number_only` when only the plan's own component number could be read (the name is then left blank rather than shown clipped), and blank when the plan prints no component.
-5. Normalise the borrower reference: case, whitespace, separators. The plan-to-award join depends on it.
-6. Detect the language of the description.
-7. Flag non-descriptive placeholders — `TBD`, a bare category name, a reference with no words. Flag and count; do not drop.
-8. Deduplicate packages across plan versions. The row is assembled field by field, not taken wholesale from the newest version — see **Carry-forward** below. Record the supersession.
-9. Map status and method to the Bank's own vocabularies (see `src/clean_procurement.py`). `method` is the Bank's code (RFB, RFQ, RFP, DIR, CDS, QCBS, QBS, FBS, LCS, CQS, INDV, UN, FA), with `method_name` beside it and `market_approach` as printed ("Open - National"). It is read from the plan's Method cell, then from a clipped Method cell among the row's other cells, then from the code STEP writes into the borrower reference; `method_source` says which. Direct selection is DIR for goods, works and non-consulting services and CDS for consulting services, as STEP numbers them. There is no "other": a word the map does not know stays `unknown` and is counted. `status` is the label STEP prints (Pending, Pending Implementation, Under Implementation, Under Review, Signed, Completed, Canceled, Terminated, Planned); French, Portuguese and Spanish words are mapped to the same English labels, and nothing is merged. The source vocabularies were mined from the corpus — see **The plan is a printed table** below.
-10. Hash the raw and cleaned descriptions separately.
+19. A leading bullet glyph is removed and the unit is marked `list_item`. A unit opening with an enumerator is also marked `list_item`. The last body paragraph ending in ":" before a list is recorded as the list's lead-in (`lead_in_id`).
+20. Every web address becomes "[link]", including the pieces a line break left after a space. (1,881 on the current run.)
+21. A unit with no letter or digit at all (a lone "$" from a logo) is dropped. (113 on the current run.)
+22. Sections: a line such as "II. PROJECT DESCRIPTION" opens a top-level section; "ANNEX 2: ..." opens an annex (only after the first top-level section, so the contents page cannot); a lettered heading "B. Project Components" opens a sub-section. Each unit records its section path ("II.B") and title.
+23. Each unit gets a block:
+    - `heading`;
+    - `frontmatter`: anything before the first top-level section (cover, data sheet, abbreviations);
+    - `narrative`: body text in the main sections;
+    - `annex`: body text in an annex;
+    - `footnote`;
+    - `table`: a table row, or a body unit that reads as a flattened table (at least six tokens, 35 per cent or more of them figures or 20 per cent of its characters digits, and under 45 per cent words of more than three letters). A table before the first top-level section is filed as front matter.
+24. Each unit records the pages it spans and the stretch of the raw PDF text it was built from (`raw_start`, `raw_end`).
 
-**The plan is a printed STEP table, and the parser depends on that.** A plan
-document is two things bolted together: narrative the borrower writes, and five
-tables STEP generates — WORKS, GOODS, NON CONSULTING SERVICES, CONSULTING FIRMS,
-INDIVIDUAL CONSULTANTS. All 496 renditions of the eight-country corpus carry all
-five, each under the same English column headings whatever language the rest of
-the document is in. Records are built from inside those tables and nowhere else,
-each table located by its section heading plus the `Activity Reference No.`
-column heading within three lines. The heading alone is not enough: the same
-words occur in prose, and one rendition reports 3,822 sections without the
-second test.
+### 2.3 Tables (`src/pdf_layout.py`, `_clean_table`)
 
-The section supplies `category_raw`. Taking it from a heading matched anywhere
-in the document mislabelled 562 rows, because a bare "CONSULTING FIRMS" in a
-contents page relabels every record after it.
+1. Cells that wrap keep pdfplumber's line breaks; the pieces are joined, with a word broken at a hyphen mended as in prose.
+2. Hidden template text in a cell is removed. Columns empty in every row are removed.
+3. The header row is the first row of two or more labels that a later row answers with a figure. Single-cell rows above it are titles; the last title is the table's caption.
+4. A row of small numbers under the header is a sub-header: "Intermediate Targets" over "1 2" becomes "Intermediate Targets 1", "Intermediate Targets 2".
+5. A header repeated mid-table starts a new segment, with the title before it as the new caption.
+6. A table ruled only around its edge gives one row per printed line; label fragments and their figures are regrouped into one row.
+7. A table that continues on the next page without reprinting its header borrows the previous page's header when it has the same number of columns and starts the page.
+8. Each row becomes one unit: "Caption — Header: value · Header: value". When no header was found, the cells are joined with " | ".
 
-Each table is asked, of its own heading band, whether it prints an Estimated
-Amount column. 25% of rows come from tables that do not — those renditions are
-old enough that STEP printed only the actual — and on them the single figure on
-the row is the actual amount. It is recorded as such and never as an estimate;
-filing an actual of 0.00 as an estimate of zero is worse than reading nothing,
-because nothing about the result looks wrong.
+Tables are kept in the tables for reading. They are not given to the model and are not quality-reviewed.
 
-Two layouts, and the layout is the text extractor's rather than the borrower's.
-474 renditions print fixed-width columns. 22 have no whitespace left at all,
-one cell per line or a few narrow cells sharing one — and those are the newest
-rendition for six of the eight projects, so they decide what the current-state
-table says. Read as a stream of typed tokens rather than as lines, the two are
-one shape, because the only order STEP prints is its columns, left to right.
+### 2.4 Character folding (`src/text_rules.py`), used on both corpora
 
-**A rendition whose columns came apart gives up its figures.** Some collapsed
-renditions emit each column of a page as its own run, so the reference column
-and the money column end up in different orders — one Niger plan prints the
-third row's description before the first row's amounts. Those keep their
-references and descriptions and contribute no amounts, status or dates: per
-record where a reprinted heading splits it, and wholesale where most records
-lost their money line. A package with no amount is a gap a later plan version
-can fill; a package with another package's amount is wrong and looks right.
+- Non-breaking, thin and zero-width spaces become a space or nothing.
+- Curly quotes become straight ones; en dashes, minus signs and the two Unicode hyphens become "-"; soft hyphens are removed.
+- Ligatures (ﬁ, ﬂ, ﬀ, ﬃ, ﬄ) are spelt out.
+- Bullet glyphs (●, ➢, ▪ and the Symbol and Wingdings bullets left as private-use code points) become "•". Symbol's private-use brackets, space and full stop become "[", "]", " " and ".".
+- Other invisible format characters are removed.
+- Check marks are left alone: in a safeguards table they are data.
+- Not applied: full Unicode compatibility folding (NFKC), which would change the meaning of some symbols.
 
-**A bundled rendition is cut to this project, or skipped.** Some plan documents
-are published with a text rendition concatenating many operations — one 8.9 MB
-rendition returned for Tanzania carries preambles for 59 projects. A rendition
-with more than one preamble is split at the preambles and only this project's
-segment is used; where it cannot be cut it is counted and not parsed. 29
-renditions in the 70-project run.
+### 2.5 Paragraphs and sentences (`src/clean.py`)
 
-**Carry-forward: one field, and the restraint is the point.** Where the newest
-plan version does not state an amount, `estimated_amount` falls back to the most
-recent version that did. `currency` is taken from the same version, so the pair
-is always one that was actually published. Every amount says where it came from:
-`amount_source` is `plan` (the newest version printed it), `earlier_plan`
-(carried), or `description` (read out of the description text), with
-`amount_as_of` (that plan's disclosure date) and `amount_plan_doc` (its
-document). Nothing else is carried.
+1. A document is cleaned only when its PDF was read and holds at least 2,000 characters of text; a scan with no text layer, or an unreadable PDF, is listed in the report and not cleaned. (none on the current run.)
+2. A unit with fewer than 5 words is dropped, unless it is a heading or a section or annex title, and recorded in `data/appraisal/rejected.csv` with its reason. (4,345 on the current run.)
+3. Each kept unit becomes a row of `data/appraisal/paragraphs.csv` with: a positional identifier (`{doc_id}:p00042`), the project(s), section path and title, block, character offsets into the cleaned text file (the text itself is not stored in the table), word count, SHA-256 of the text, pages, the parser's identity, `for_model`, `list_item`, `lead_in_id` (blank when the lead-in was itself dropped), `table_id`, `raw_start`/`raw_end`, and the component tags (section 2.6).
+4. `for_model` is true for `narrative`, `annex` and `footnote` paragraphs, except a footnote that is only a reference and a link (fewer than 15 words besides "[link]"). It is false for front matter, tables and headings. Embedding and the decision model read only these paragraphs. (18,475 of 56,512 paragraphs: 10,394 narrative, 4,193 annex and 3,888 footnotes on the current run.)
+5. Narrative and annex paragraphs are split into sentences, stored in `data/appraisal/sentences.csv` as offsets inside their paragraph. A boundary is a full stop, question or exclamation mark followed by a space and a capital, digit or opening bracket, except:
+   - after an abbreviation (e.g., i.e., etc., No., para., U.S., Mr., Fig., months and about forty others), or a single-letter initial;
+   - inside the leading paragraph number ("38.");
+   - where the sentence so far has fewer than three words ("See above." stays with what follows).
+   Footnotes are not split: they are mostly references.
+6. The re-parse check: before writing, each paragraph is compared with the previous run's. A paragraph whose text changed while the parser did not means the read is not reproducible; the run stops and writes nothing. A change under a new parser is expected and is counted in the report.
+7. A paragraph identifier repeated across documents stops the run (it would mean a regional document was listed twice).
 
-**Status comes with its source and its date.** A status is a fact at a point in
-time, and silently inheriting an old one manufactures a present-tense claim:
-Nigeria read 97.9% populated on statuses that were four years old. So `status`
-is resolved from evidence and labelled, in `status_source` and `status_as_of`:
+### 2.6 Components (`src/components.py`)
 
-| Source | Meaning |
-|---|---|
-| `plan` | The newest plan version's own status, as of its disclosure date |
-| `award` | A signed contract whose normalised borrower reference matches the package, as of signing. Wins over an older plan status |
-| `earlier_plan` | Used only when neither of the above says anything: the last status an older plan version printed, as of that plan's date |
-| `none` | No evidence at all; status stays `unknown` |
+**Collected per project, into `data/appraisal/components.csv`:**
 
-`Terminated` is its own value: a contract signed and then ended early is neither
-signed nor canceled. An award never turns `Completed` or `Terminated` back into
-`Signed`. The status vocabulary covers English, French, Portuguese and
-Spanish, and status is re-mapped from the borrower's own word at clean time, so a
-mapping change needs a re-clean rather than a re-fetch.
+1. Pages that hold a component table are found in the cleaned text, by the column headings "Component Name" or "Current Component".
+2. All tables on that page and the next are read from the PDF, top to bottom, as one grid. A restructuring paper's table of changes is read first (current and proposed names, cost, action); otherwise the data sheet's component table (name and cost). Costs are in millions of US dollars; a figure over 10,000 is read as dollars and converted.
+3. Body headings "Component N: ..." and "Sub-component N.M: ..." add components and sub-components, with any cost printed in the heading.
+4. Each name is cleaned: its number and printed cost removed, a following sentence cut off ("... This component will ..."), figures from neighbouring columns removed, a name read twice collapsed, and a heading that opens in lower case discarded. "Unallocated" and contingency budget lines are kept but not numbered; the Contingent Emergency Response Component (CERC) keeps its number.
+5. One row per component or sub-component per document that states it: projects, document, kind, disclosure date, where it was read (`datasheet`, `restructuring`, `heading`), level, number, name, cost, action, page. The reads are cached against the PDF, the pages searched and the module's code. (946 rows covering all 70 projects: 294 from data sheets, 132 from restructuring tables and 520 from headings on the current run.)
 
-**Amounts and dates sometimes appear inside the description string.** Extract them to their own columns rather than leaving them to be matched as text.
+**Paragraphs are tagged by position:**
 
-**Cleaning quality is verified, not assumed.** Cleaning runs before embedding, so an undetected defect propagates into every vector and every downstream score. The review step below is how it is checked.
+6. A paragraph takes the component of the last "Component N" heading above it, and the sub-component of the last "Sub-component N.M" heading. A long paragraph that opens with "Sub-component 2.2: ..." (or "31. Sub-component 2.2: ...") opens that sub-component too.
+7. The tag closes at the first section that is not the one the component heading was found in, or inside it: after the last component in "II.B Project Components", "II.C Project Beneficiaries" carries no component.
+8. `component_mentions` separately lists every component a paragraph names in its text ("Components 1 and 3").
 
+7,399 paragraphs carry a component tag, 4,824 of them among the paragraphs given to the model on the current run.
 
-## Reviewing the cleaning
+## 3. Procurement
 
-Automated checks count known defects across every paragraph (`src/audit.py`, `src/audit_procurement.py`). They only find what someone already thought of. The rest is found by reading.
+### 3.1 Fetch (`src/fetch_procurement.py`)
 
-`src/review_sheets.py` writes two plain spreadsheets to `data/review/`: 100 paragraphs with the cleaned text, the same text split into sentences, the page it came from, and the raw text-rendition lines beside it; and 100 procurement packages with the raw description next to the cleaned fields. Each has empty `ok` and `note` columns. A sheet that already exists is never overwritten, since it may hold notes.
+1. For each project, list its procurement plans and download each one's text rendition.
+2. **Bundles.** Some renditions concatenate the plans of many operations. A rendition with more than one plan preamble is cut to the segment that names this project. When no segment names it, the rendition is kept on disk, counted, and not parsed. (22 bundles cut to their project's plan, 7 not parsed on the current run.)
+3. **Finding the tables.** A STEP table starts at a line holding only a section name (WORKS, GOODS, NON CONSULTING SERVICES, CONSULTING FIRMS, INDIVIDUAL CONSULTANTS) followed within three lines by the "Activity Reference No." column heading. Records are read only inside those tables; text outside them is counted as free text, never parsed.
+4. **Layout.** A rendition prints a table either at fixed character positions (columns separated by runs of spaces) or collapsed (no column positions). Each is read by its own reader.
+5. **Records (fixed-width).**
+   - A record opens on a line whose first column holds a borrower reference and runs to the next.
+   - A reference split across two lines, or with the row's other cells printed between its halves, is joined back first.
+   - Column zero holds the reference and the description; its fragments are glued with nothing between them, because the cell was clipped mid-word.
+   - A trailing loan number is cut from the fragment.
+   - The rest of the line is the record's other cells, kept as `cells_raw` with dates and figures removed.
+6. **Records (collapsed).**
+   - The record is read as a stream of text, figure and date pieces.
+   - The description runs from the reference to the first cell that is a review type, a method, a market approach or "Single Stage".
+   - A loan number between the description's wrapped lines is skipped when the text after it opens in lower case (the rest of a word); otherwise it ends the description.
+   - The remaining text is `cells_raw`.
+   - When the table's column headings are reprinted inside a record (the page turned there), or the rendition scattered its columns, the record keeps its reference and description and gives up its figures, status and dates.
+7. **The reference chain.** "BJ-UCP / PADA-43641-GO-RFQ / Fourniture ..." gives the last reference-shaped piece that carries a number as the borrower reference, and the rest as the description.
+8. **Cells.**
+   - The method, market approach and status are found among the record's cells by matching STEP's own vocabularies in English, French, Portuguese and Spanish. These are the same word lists the cleaning maps from (section 3.2).
+   - Accents, case and curly apostrophes are ignored when matching.
+   - A word wrapped mid-cell is matched with spaces ignored.
+   - A status wrapped and interleaved with other cells ("Pending Impl … ementat … ion", "Under Imple … mentation") is matched from its head when the head opens exactly one status.
+   - The words are kept as printed.
+9. **Dates.** The first date in the record is the planned date; the last is the revised date.
+10. **Figures.** Where the table has an Estimated Amount column, the first figure is the estimate and the second the actual. Where it has none (older plans), the only figure is the actual, and the estimate is left blank.
+11. **Notices.** Notice id, project, notice type and status, publication and deadline dates, the borrower reference the notice was issued under, description, procurement group, the Bank's method code and name, country, notice language.
+12. **Awards.** Contract id, project, borrower reference, description, signing and no-objection dates, contract amount, procurement group, method name, review type, supplier name, country and amount, region and sector.
+13. **Output.** Written to `data/procurement/{packages_raw,notices_raw,awards_raw}.csv`: one package row per plan version per package, as printed. Nothing is derived at this stage.
 
-The raw column shows whole raw lines, including anything cleaning removed from the middle of the paragraph, such as a running header. It is searched for only on the paragraph's own pages (the rendition marks each page with a form feed, one per PDF page), and the stretch found must be about as long as the paragraph, so a sentence the document repeats elsewhere is not shown in its place. On a sample of 600 paragraphs, 7 were not located and about 6 per cent matched loosely, mostly very short units and tables. A paragraph whose raw text cannot be found says so, and that is worth a look.
+### 3.2 Clean (`src/clean_procurement.py`)
 
-## Reports
+**For every description (packages, notices and awards), in this order:**
 
-Reports do not go in the repository. `src/run_report.py` drafts a run report as a Markdown note in `data/reports/`, and the agent that ran the pipeline copies it into Dev's notes vault at `Projects/WBG Digital Resilience/Reports/`, adding a line to that folder's README index. The note follows the folder's `_template.md`.
+1. Fold characters (section 2.4), remove the replacement character "�" the interfaces emit for a lost byte, and collapse whitespace.
+2. **Other cells cut out.** A loan number ("IDA / 12345") between two wrapped lines is removed when the text after it opens in lower case; otherwise it and everything after it are cut. Then the review type, method, market approach and "Single Stage" tail is cut ("... Post Request for Bids Open - National"), when those cells appear together.
+3. **Words repaired** (`src/glue.py`, section 3.3).
+4. **Markers read.**
+   - A borrower reference opening the description is removed; it has its own column.
+   - "Lot 2", "Lots 1-3", "Lote 3", "Phase II" or "Tranche 2" go to `lot_or_phase`. They are taken out of the text only where they open or close it ("... - Lot 2", "(Phase II)"), so the words left still read.
+   - "(Rebid)", "Re-tender" and "Relance" set `is_rebid` and are removed.
+5. **Stitched records.** If another package's borrower reference appears inside the description (the parser missed a record boundary), the text from it onwards is cut.
+6. **Component name at the end.** A component name spilled from the plan's component column onto the end of the description is cut off and used as the package's component.
 
-## Storage
+**For each package version:**
 
-- **Files**: `data/` in the main checkout, `/ygg/projects/wbg-digital-resilience/data/` on the box. Gitignored, never deleted. Every file has one home, written down once in `src/paths.py`:
-  - `raw/`: what was fetched, as published (`pdf/`, `text/`, `plans/`, `notices/`, `awards/`, `documents.csv`, `fetch_log.csv`)
-  - `appraisal/`: cleaned text (`text/`), per-document caches (`cache/`), `paragraphs.csv`, `sentences.csv`, `rejected.csv`, `components.csv`
-  - `procurement/`: packages, notices and awards, raw and cleaned
-  - `reports/`: every stage's report and the run notes for the vault
-  - `review/`: the review spreadsheets
+7. **Component.** Only the plan's Component column is read, never the description's own words. The cell, or the spilled tail from step 6, is matched against the project's components from `components.csv` by the longest stretch of a component's name it carries, ignoring spaces and punctuation (at least 12 characters, or 15 for a partial name). The match is used only when it identifies one component. Each name takes its number from the most recent document that lists it, since restructurings renumber. Failing that, a numbered cell ("Component 3: ...") is read: when the words after the number open the name the appraisal side gives that number, it is that component; otherwise only the plan's number is kept. `component_source` is `name_match`, `number_only`, or blank when the plan prints no component.
+8. **Category.** The STEP section (or the reference's group code GO, CW, CS, NC) maps to `goods`, `works`, `consultant_services` or `non_consulting_services`.
+9. **Method** is the Bank's code (RFB, RFQ, RFP, DIR, CDS, QCBS, QBS, FBS, LCS, CQS, INDV, UN, FA), with `method_name` beside it. It is taken from the first of these that gives one:
+   - the Method cell's words, in four languages (`method_source` = `method_cell`);
+   - the Method cell clipped at its column edge, found among the row's other cells, such as "Request for Propo" (`clipped_method_cell`);
+   - the code STEP wrote into the borrower reference ("...-GO-RFB"), read from the normalised reference, including older and French spellings (CI/IC/IND → INDV, QCB/SFQC → QCBS, SQC → CQS, ED → DIR) and codes with a suffix ("RFBREBID", "RFQ2") (`reference`).
 
-  `python src/paths.py` moves an older layout into this one. It only moves, never overwrites, and does nothing the second time; `run.sh` runs it first.
-- **Postgres**: schema `wbg` in database `work`, loaded from the CSV files by `src/load_pg.py`. Paragraph and sentence text are columns there. `wbg.loads` records what was loaded from which file version.
-- **Embeddings, when they come**: `halfvec(3072)` with an HNSW index on cosine distance. Plain `vector` cannot be indexed past 2,000 dimensions; `halfvec` can up to 4,000, at half the storage and no meaningful loss for similarity search. The full-precision vectors the API returns stay in the on-disk cache as the record.
+   Direct selection is DIR for goods, works and non-consulting services and CDS for consulting services, as STEP numbers them. There is no "other": a method none of these gives is `unknown`. For notices, the interface's own method code is used.
+10. **Market approach** is the cell as printed, with a wrapped "Internationa l" mended ("Open - National", "Limited - International", "Direct").
+11. **Status** is the label STEP prints: Pending, Pending Implementation, Under Implementation, Under Review, Signed, Completed, Canceled, Terminated, Planned. French, Portuguese and Spanish words map to the same labels (for example Achevé → Completed, Résilié → Terminated, En attente d'exécution → Pending Implementation). A word split by a wrap is matched with its spaces removed; a clipped word ("En attente d'") is matched when it opens exactly one status. Nothing is merged: Pending and Pending Implementation stay different. `status_raw` keeps the word as printed.
+12. **Amounts and dates in the text.** An amount ("US$ 99.00") or date written inside the description fills the estimate or planned date only when the plan's own column is empty (`amount_source` = `description`).
+13. **Flags and keys.**
+    - `is_placeholder` is true for a description that cannot be matched to anything: empty, "TBD", "N/A", a bare category name, a reference only, cell words only ("Post Open - National"), or under two words.
+    - `description_lang` is English, French, Spanish or Portuguese, by marker words; a tie gives English.
+    - `borrower_ref_norm` is the reference upper-cased with every run of separators made one hyphen.
+    - `description_match` is the cleaned description lower-cased with every space removed. It is used for matching, so a lost space never stops a match.
+    - `description_sha256` is the SHA-256 of the cleaned description: the key a label is stored under.
 
-## Known limits
+**Across plan versions (one row per package):**
 
-**Tables without ruling lines read as text.** A table the PDF draws without lines is not found as a table, and its cells are read in page order. One annex table (document 33835349) interleaves row numbers with cell text this way. Narrative is unaffected.
+14. Package versions are grouped by project and normalised reference. A generic reference that one plan uses for several packages ("CS-INDV") is also grouped by description. `package_id` is "project:reference" (plus a short hash of the description for those).
+15. The newest version (by disclosure date) gives the row.
+16. **The estimated amount** is the only field carried from an older version: when the newest version printed no amount, or zero, the most recent version that printed one supplies it, with its currency. `amount_source` says where every amount came from: `plan` (the newest version), `earlier_plan`, `description`, or `earlier_plan_description`. `amount_as_of` and `amount_plan_doc` give that version's date and document. The actual amount is the newest version's.
+17. Older versions are written whole to `superseded_packages.csv`, each pointing at the version that replaced it.
+18. **Status with its evidence.** The most recent dated evidence wins, labelled in `status_source` and `status_as_of`:
+    - `plan`: the newest version's own status, as of its disclosure date;
+    - `award`: a signed contract with the same project and normalised reference, as of signing. It never turns Completed or Terminated back into Signed;
+    - `earlier_plan`: only when neither of the above says anything, the last status an older version printed, as of that version;
+    - `none`: no evidence; the status stays `unknown`.
 
-**One appraisal document is six pages long.** 34295176 is a PAD as published, not a parse failure; it carries no body sections.
+On the current run:
+- 1,930 plan documents from 52 projects (9 projects published no plan); 116,919 package rows, one per plan version per package. 582 renditions parse to no package: 566 carry no reference anywhere (an empty table), 16 are parse failures.
+- 6,143 packages after grouping (110,776 older versions in `superseded_packages.csv`).
+- Method: INDV 1,853, RFQ 1,124, RFB 887, CQS 840, QCBS 685, CDS 269, DIR 219, RFP 136, LCS 47, QBS 27, UN 3, FBS 2, FA 1, unknown 50. Read from the Method cell 4,664, the clipped cell 697, the reference 732.
+- Status: Canceled 1,774, Signed 1,580, Pending Implementation 893, Under Implementation 885, Completed 615, Pending 74, Terminated 50, Under Review 45, Planned 2, unknown 225. Source: plan 5,427, earlier plan 272, award 219, none 225.
+- Component: matched by name 4,564, plan number only 174, none 1,405.
+- Amount: from the newest plan 4,692, carried from an earlier plan 266, none 1,185. Actual amounts recorded on 5,582 packages.
+- Notices: 5,909, of which 5,871 carry a borrower reference and 3,893 match a plan package. Awards: 3,485.
 
-**Some Spanish fragments survive.** The word-repair rules lean on the appraisal prose to judge English; French, Portuguese and Spanish are judged from the descriptions alone, which is weaker. The Honduras and Peru plans keep a handful of broken words ("present ación"), counted by the audit.
+### 3.3 Word repair (`src/glue.py`)
 
-**Clipped words stay clipped.** Where the plan rendition cut a cell and the rest of the word is gone ("Project Management Suppor"), there is nothing to restore it from.
+Plan cells are clipped at the column edge, so words come apart ("S upply", "Commissi on") or run together ("ofDigital", "DataCenter"). No dictionary file is used. Every decision is made from counts in this corpus:
 
-**Parse quality on converted documents.** Sentence segmentation is imperfect on clean text and worse on documents converted from PDF.
+- **The vocabulary.** Every distinct description (each counted once, however many plan versions repeat it), plus the cleaned appraisal text. The appraisal text is English and free of these defects, so for English descriptions it decides whenever it has a view. French, Portuguese and Spanish descriptions are judged against the descriptions alone.
+- **Joining.** Two or three neighbouring fragments are joined when:
+  - the joined word occurs at least 3 times;
+  - the fragments are not all words in their own right ("in formation" stays);
+  - no later fragment opens with a capital;
+  - the fragments are not an acronym followed by a word ("I T equipment").
 
-**Some plan renditions contribute no figures.** Where the extractor scattered a
-table's columns across the page, the rendition's references and descriptions are
-kept and its amounts, status and dates are refused rather than guessed. Niger's
-newest rendition is one of these, so that project's current-state status reads
-zero while its earlier renditions parse at 84%. Whether to fall back to the
-newest *readable* rendition is an open decision, not a defect.
+  A function word at either end stays separate when the rest is already a word ("Pr ovision of" becomes "Provision of", but "Commissi on" becomes "Commission"). A three-letter join is allowed for a function word ("a nd") or for one- and two-letter shards ("E-G ov"). The first piece of a hyphenated word stays separate ("for e-commerce"), and so do letters that end a code ("ID4D P roject" becomes "ID4D Project").
+- **Moving a space.** "forth e" becomes "for the" when the second piece is not a word, and the first new word is a function word and the second a word the prose uses.
+- **Splitting.** A token is split when:
+  - it is not itself a word the corpus uses;
+  - both halves are, or the left half is a function word ("andPemba");
+  - the right half is not a common ending ("Auditeur" is not "Audit eur");
+  - it is not an acronym of six capitals or fewer;
+  - it is not a mixed-case name the appraisal prose uses whole ("GovNet").
 
-**Some plans carry no borrower reference at all.** One project's plan renditions
-print a component number where the reference belongs — spot-checked on three of
-its twenty renditions, none carries a reference-shaped token anywhere — so its
-134 rows have no legitimate key and are not emitted. Keying them would mean
-minting a synthetic identifier for packages the Bank never referenced, which is
-a data-model decision rather than a parser fix.
+  A token the descriptions repeat is split only when both halves are at least five times more common than it.
+- **Punctuation.** A bracket or comma run into the next word gets a space.
+- **Order.** Join, split, then join once more, since a split can leave a fragment that only then has a neighbour.
 
-**Nine projects parse to zero package rows.** P171099, P174620, P175218,
-P175987, P177158, P179204, P180693, P180807, P502532 — one of them because its
-single plan rendition returns a hard 404 from the documents interface. The rest
-are undiagnosed.
+The rules use four short hand-written lists, which block or permit a decision but never supply a word:
+- about 35 function words in English, French, Portuguese and Spanish;
+- about 30 two-letter words;
+- about 50 word endings;
+- Roman numerals.
 
-**Cleaning is the first place quality is lost and the hardest to notice.** A defect that survives cleaning is embedded, scored and joined without ever raising an error. The review step is the only check standing between the corpus and every number the pipeline produces.
+## 4. Checks and review
+
+**Automated checks** (`src/audit.py`, `src/audit_procurement.py`) count known defects:
+- *Appraisal prose* (narrative and annex): footnote markers glued to words, paragraphs opening as footnote bodies, inline page numbers, column gutters, tabular rows in prose, paragraphs starting mid-sentence or ending without punctuation, unfolded characters, private-use and control characters.
+- *Procurement*: private-use, replacement and control characters; glued and broken words; second references; mid-word endings; missing or unnormalised references; placeholders; unmapped category, method and status; markers left at the edges; other cells left in a description; component not found; date and amount inconsistencies in the source.
+
+Each check has a gate in the tests, set just above the measured rate, so a regression fails.
+
+**Reading by eye** (`src/review_sheets.py`): two spreadsheets in `data/review/` with empty `ok` and `note` columns.
+- *Paragraphs*: 100 paragraphs drawn from those given to the model. Each shows the cleaned text, its sentences, and the stretch of raw PDF text it was built from (including anything cleaning removed from between its lines).
+- *Packages*: 100 packages with the raw description beside every cleaned field.
+
+An existing sheet is never overwritten; a new draw takes a new `--seed`.
+
+**Postgres** (`src/load_pg.py`): every table above is loaded into schema `wbg` in database `work`, with paragraph and sentence text resolved from the offsets. A table whose file has not changed is not reloaded.
+
+**Reports** (`src/run_report.py`): drafts a run note in `data/reports/`, which is copied into the notes vault at `Projects/WBG Digital Resilience/Reports/`. Reports never go into the repository.
+
+## 5. Storage
+
+- **Files**: `data/` in the main checkout (`/ygg/projects/wbg-digital-resilience/data/` on the box). Gitignored, never deleted. Every file has one home, defined once in `src/paths.py`:
+  - `raw/`: what was fetched, as published (`pdf/`, `pdf_text/`, `plans/`, `notices/`, `awards/`, `documents.csv`, `fetch_log.csv`, and the old `text/` renditions);
+  - `appraisal/`: cleaned text (`text/`), per-document caches (`cache/`), `paragraphs.csv`, `sentences.csv`, `rejected.csv`, `components.csv`;
+  - `procurement/`: packages, notices and awards, raw and cleaned, and superseded package versions;
+  - `embeddings/`: vectors and their index, when they come;
+  - `reports/`: every stage's report and the run notes;
+  - `review/`: the review spreadsheets.
+
+  `python src/paths.py` moves an older layout into this one. It only moves files, never overwrites, and does nothing the second time; `run.sh` runs it first.
+- **Postgres**: schema `wbg` in database `work`, a queryable copy of the files.
+- **Embeddings, when they come**: `halfvec(3072)` with an HNSW index on cosine distance; plain `vector` cannot be indexed past 2,000 dimensions. Only paragraphs with `for_model` true are embedded. The full-precision vectors stay in the on-disk cache as the record.
+
+## 6. Known limits
+
+- **Results-framework indicators are tables**, so the model does not see them, though some state measured commitments (for example a share of infrastructure built to withstand climate shocks).
+- **Component tags inside annexes.** Annexes have no lettered sections, so a later heading in the same annex that is not a component does not close the last one.
+- **Tables without ruling lines read as text**: their cells are read in page order and the unit is usually labelled `table` by its figures.
+- **Clipped words stay clipped.** Where a plan cell was cut and the rest of the word is gone ("Project Management Suppor"), nothing can restore it.
+- **French, Portuguese and Spanish word repair is weaker** than English: it has only the descriptions to judge by. Some broken words remain ("con sultant").
+- **Some plans print no component column** (1,405 of 6,143 packages have none).
+- **Scattered renditions give up their figures.** Where the text extractor scattered a table's columns, the rendition's references and descriptions are kept and its amounts, status and dates are refused rather than guessed.
+- **Projects with no package rows**: 9 projects publish no procurement plan (P169945, P170910, P171791, P180987, P181416, P506791, P508317, P508363, P511767), and 9 more have plans that parse to no package (P171099, P174620, P175218, P175987, P177158, P179204, P180693, P180807, P502532).
+- **Award descriptions** occasionally carry "?" where the interface lost an accented letter; that is in the source.
+- **One plan's references are slash-coded** ("…/PHN-20/CQS-002"), so its packages can carry a second reference in the description (6 packages).
+- **Status is a fact at a date.** An `earlier_plan` status is the last thing an older plan said, labelled with its date; it is not a claim about today.
