@@ -64,6 +64,8 @@ MENTION = re.compile(
     r"\b(?:Sub-?components?|Components?|Composantes?|Sous-composantes?|Componentes?|"
     r"Subcomponentes?)\s+((?:\d{1,2}(?:\.\d{1,2})?)"
     r"(?:\s*(?:,|and|&|et|e|y|or|to|-|–)\s*\d{1,2}(?:\.\d{1,2})?)*)", re.I)
+RUN_IN_NUMBER = re.compile(r"^\s*\d{1,3}\.\s+")
+RUN_IN_COMP = re.compile(rf"^\s*{COMP_WORD}\s*(\d{{1,2}})\s*[:.\-\u2013)]\s*[A-Z]")
 TAGGED_BLOCKS = {"narrative", "annex", "table", "heading", "footnote"}
 
 
@@ -97,6 +99,21 @@ class Tagger:
         if block not in TAGGED_BLOCKS:
             return "", ""
         short = len(text.split()) <= 30
+        # A run-in title opening a long numbered paragraph: '31. Subcomponent
+        # 2.2: Data centre. This subcomponent will finance ...'. Only with the
+        # word itself, so an ordinary '1.2' numbered paragraph is not read as one.
+        if not short and block in ("narrative", "annex"):
+            head = RUN_IN_NUMBER.sub("", text, count=1)
+            m = SUB_WORD_HEAD.match(head[:200])
+            if m and (not self.comp or m.group(1) == self.comp):
+                if not self.comp:
+                    self.home = path
+                self.comp, self.sub = m.group(1), f"{m.group(1)}.{m.group(2)}"
+                return self.comp, self.sub
+            m = RUN_IN_COMP.match(head)
+            if m:
+                self.comp, self.sub, self.home = m.group(1), "", path
+                return self.comp, ""
         if block == "heading" or short:
             m = COMP_HEAD.match(text)
             if m:

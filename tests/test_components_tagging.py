@@ -32,3 +32,12 @@ def test_a_footnote_that_is_only_a_reference_and_a_link_is_left_out_of_the_model
     long = ("The towers will be raised above the recorded flood level and fitted "
             "with backup power for at least seventy two hours, see [link]")
     assert not C.citation_only(long, "footnote")
+
+
+def test_a_run_in_subcomponent_title_opens_it():
+    t = K.Tagger()
+    t.see("Component 2: Shared Masts", "heading", "II.B")
+    long = ("31. Subcomponent 2.2: Weather-proof cabinets. This subcomponent will finance "
+            "cabinets for the shared masts with backup power and cooling, sized for the "
+            "hottest month on record and raised above the recorded flood level at each site.")
+    assert t.see(long, "narrative", "II.B") == ("2", "2.2")

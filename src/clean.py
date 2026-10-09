@@ -616,7 +616,12 @@ SENTENCE_BLOCKS = {"narrative", "annex"}
 # What goes to embedding and to the model test. Front matter (cover, data
 # sheet, acronyms, contents) and headings are kept and cleaned, but are too
 # short and too repetitive to be worth scoring.
-MODEL_BLOCKS = {"narrative", "annex", "table", "footnote"}
+# What the embedding and the decision model are given: the body prose and
+# its footnotes. Front matter and tables stay in the tables for reading, but
+# are not cleaned to the standard prose is and add little the prose does not
+# say; component names and costs are read from the front matter separately
+# (src/components.py), straight from the PDF.
+MODEL_BLOCKS = {"narrative", "annex", "footnote"}
 
 
 def citation_only(text, block):
@@ -649,9 +654,19 @@ def parser_version():
     import pdfplumber
     here = os.path.dirname(os.path.abspath(__file__))
     h = hashlib.sha256()
-    for name in ("pdf_layout.py", "clean.py"):   # components.py tags at row time
-        with open(os.path.join(here, name), "rb") as fh:
-            h.update(fh.read())
+    # Only the reader: what is cached is pdf_layout.extract's output, and an
+    # edit elsewhere in clean.py must not cost an hour of re-reading.
+    with open(os.path.join(here, "pdf_layout.py"), "rb") as fh:
+        h.update(fh.read())
+    # ...plus the helpers from this module that the reader calls.
+    import inspect
+    import pdf_layout
+    names = sorted(set(re.findall(r"\bC\.([A-Za-z_]\w*)", inspect.getsource(pdf_layout)))
+                   | {"CHAR_MAP"})   # what fold_chars folds
+    for name in names:
+        obj = globals()[name]
+        h.update(obj.pattern.encode() if hasattr(obj, "pattern") else
+                 inspect.getsource(obj).encode() if callable(obj) else repr(obj).encode())
     return f"pdf-layout-{h.hexdigest()[:10]}/pdfplumber-{pdfplumber.__version__}"
 
 
