@@ -1,35 +1,33 @@
 #!/usr/bin/env python3
-"""Prepare procurement text: the ten steps in docs/cleaning.md, procurement.
+"""Clean the procurement tables: packages from the plans, notices and awards.
 
 Reads  data/procurement/{packages_raw,notices_raw,awards_raw}.csv
        data/appraisal/components.csv   to name each package's component
+       data/appraisal/text/            the appraisal prose, as a vocabulary for
+                                       word repair (src/glue.py)
 Writes data/procurement/{packages,notices,awards,superseded_packages}.csv
        data/reports/clean_procurement.txt
 
-The rules here are deliberately the opposite of src/clean.py section 5:
+The rules here are deliberately the opposite of the appraisal side:
 
-    |               | clean.py (appraisal prose)  | this (procurement metadata) |
-    | case          | preserved                   | folded in a matching copy   |
-    | short units   | dropped (10,307 of them)    | kept - the unit IS the row  |
-    | digits/codes  | stripped as footnote marks  | kept - lot 2 is not lot 1   |
-    | boilerplate   | dropped                     | flagged, never dropped      |
+    |               | appraisal prose            | procurement metadata        |
+    | case          | preserved                  | folded in a matching copy   |
+    | short units   | dropped                    | kept - the unit IS the row  |
+    | digits/codes  | stripped as footnote marks | kept - lot 2 is not lot 1   |
+    | boilerplate   | dropped                    | flagged, never dropped      |
 
 Appraisal text is long prose recovered from page layout; this is short metadata
 typed into a form by a person. The failure modes are opposite, so a rule that
 helps one damages the other. Nothing here is dropped for being short.
 
-Character normalisation is NOT reimplemented: CHAR_MAP and fold_chars come from
-clean.py, because the Bank's renderers put the same Symbol and Wingdings glyphs
-in both corpora and that fix cost two rounds on the appraisal side already.
+Characters are folded with the same rules as the appraisal side
+(text_rules.fold_chars): the Bank's renderers put the same Symbol and Wingdings
+glyphs in both corpora.
 
-The normalisers in this module are also imported by src/fetch_procurement.py, so
-the key the plan-to-plan diff uses and the key V6 will use are the same function
-rather than two that drift.
-
-The only file this stage ever writes that is not derived here is nothing - every
-output is rebuilt from the raw tables in one pass, so a re-run is byte-identical.
+Every output is rebuilt from the raw tables in one pass, so a re-run on
+unchanged input is byte-identical.
 """
-import argparse, csv, glob, hashlib, os, re, sys
+import argparse, csv, hashlib, os, re, sys
 import unicodedata
 from collections import Counter, defaultdict
 
@@ -37,7 +35,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 
-from clean import CHAR_MAP, fold_chars                  # noqa: E402  (step 1)
+from text_rules import fold_chars                        # noqa: E402
+import plan_table                                        # noqa: E402
 import glue                                              # noqa: E402
 
 CLEAN_VERSION = "proc-clean-3"
@@ -51,13 +50,12 @@ REF_INLINE = re.compile(r"[A-Z]{2,}-[A-Z0-9]{1,12}-[0-9]{2,10}-(?:CW|GD|GO|CS|NC
 
 PROC_DIR = "procurement"
 
-# ------------------------------------------------------------------ step 1, 2
 
 WS_RE = re.compile(r"\s+")
 
 
 def collapse(text):
-    """Step 2's display string: characters folded, whitespace collapsed.
+    """The display string: characters folded, whitespace collapsed.
 
     U+FFFD is removed. It is not a character the Bank typed: the notices and
     awards interfaces return it where their own encoder lost a byte, exactly as
@@ -72,15 +70,15 @@ def count_replacement_chars(text):
 
 
 def casefold_key(text):
-    """Step 2's matching copy. Case folding is for matching only; the published
+    """A matching copy. Case folding is for matching only; the published
     string is kept verbatim in `description` for display."""
     return collapse(text).casefold()
 
 
 def match_key(text):
-    """Step 2's matching copy with ALL whitespace removed as well as case.
+    """The matching copy with ALL whitespace removed as well as case.
 
-    This is what Stage 8 matches asset terms against, and it exists because of
+    This is what asset terms will be matched against, and it exists because of
     one specific defect. Procurement plans are published only as documents, and
     the text rendition clips each table cell at the column edge. Rejoining the
     fragments is unavoidable, and where the clip landed exactly on a space that
@@ -113,10 +111,9 @@ def match_key(text):
     return WS_RE.sub("", collapse(text).casefold())
 
 
-# ---------------------------------------------------------------- step 3 and 4
 
 # The published description sometimes carries the borrower reference in front of
-# the words ("TZ-MCIT-123-CS-CQS - Supply of ..."). It has its own column, so it
+# the words ("AA-AGENCY-123-CS-CQS - Supply of ..."). It has its own column, so it
 # is removed from the text - but only when it is followed by real words.
 REF_IN_TEXT = re.compile(
     r"^\s*([A-Z]{2}-[A-Z0-9]{1,12}-\d{2,10}-[A-Z]{2}-[A-Z0-9]{2,6})\s*[-:/\u2013]?\s*")
@@ -138,7 +135,8 @@ def split_markers(description):
     """Steps 3 and 4: reference out, lot / phase / rebid into their own columns.
 
     'FIBER OPTIC CABLE SUPPLY - LOT 2 (REBID)' must yield a description, a lot
-    and a rebid flag rather than one string - that is what V6 depends on, because
+    and a rebid flag rather than one string - linking a plan package to its award
+    depends on it, because
     lot 2 and lot 1 of the same package are not the same package.
 
     The markers are removed only from the matching copy; `description` keeps the
@@ -179,15 +177,14 @@ def split_markers(description):
 # Credit number between two wrapped lines ('Rur IDA / 12345 al radio'), and on
 # some layouts the component, review type, method and market approach after
 # it. They are cut out here and the component is kept, in its own column.
-LOAN_IN_TEXT = re.compile(r"\s*\b(?:IDA|IBRD|TF|GRANT|CREDIT|DON|PRET|COFN)\s*/\s*"
-                          r"[A-Z]?\s?\d[\dA-Z-]*\s*")
+LOAN_IN_TEXT = re.compile(r"\s*" + plan_table.LOAN_INLINE.pattern + r"\s*")
 _METHOD_WORDS = (r"(?:Request for (?:Bids|Quota|Propos)|Direct Selection|Quality And Cost|"
                  r"Quality Based Selection|Consultant Qualification|Least Cost Selection|"
                  r"Individual Consult|S[eé]lection fond|S[eé]lection au moindre|"
                  r"Demande de prix|Appel d'offres|Entente directe|Passation de march|"
                  r"Consultant individuel)")
 _APPROACH_WORDS = r"(?:(?:Open|Limited|Direct)\s*-\s*(?:National|Internationa)|Single Stage)"
-_REVIEW_WORDS = r"(?:Post|Prior|A posteriori|A priori)"
+_REVIEW_WORDS = r"(?:Post|Prior|A posteriori|A priori|Posterior|Previa|Pr[eé]via)"
 CELL_TAIL = re.compile(
     rf"\s(?:{_REVIEW_WORDS}\s+(?=.*?(?:{_METHOD_WORDS}|{_APPROACH_WORDS}))"
     rf"|{_METHOD_WORDS}(?=.*?{_APPROACH_WORDS})|{_APPROACH_WORDS}|{_REVIEW_WORDS}$"
@@ -310,13 +307,12 @@ def read_components(data):
         return Components(list(csv.DictReader(fh)))
 
 
-# ------------------------------------------------------------------ step 5
 
 SEPARATORS = re.compile(r"[^A-Z0-9]+")
 
 
 def norm_ref(ref):
-    """Step 5. Case, whitespace and separators, and nothing else.
+    """Case, whitespace and separators, and nothing else.
 
     Uppercase, every run of non-alphanumerics collapsed to a single hyphen, ends
     trimmed. That recovers 'tz mcit 254784 cw rfb' and 'TZ/MCIT/254784/CW/RFB'
@@ -328,7 +324,6 @@ def norm_ref(ref):
     return SEPARATORS.sub("-", collapse(ref).upper()).strip("-")
 
 
-# ------------------------------------------------------------------ step 6
 
 # Function words that separate the four languages this corpus actually carries.
 # A description is five to fifteen words, so a handful of markers is a strong
@@ -351,7 +346,7 @@ WORD_RE = re.compile(r"[a-záàâãéêíóôõúüçñ]+", re.I)
 
 
 def detect_lang(text, default="en"):
-    """Step 6. Record the language of the description; never translate it.
+    """Record the language of the description; never translate it.
 
     Scored, not guessed: the language with the most marker hits wins, and a tie
     or no hit at all falls back to the corpus default `en`. Only the four
@@ -373,7 +368,6 @@ def detect_lang(text, default="en"):
     return best[0][0]
 
 
-# ------------------------------------------------------------------ step 7
 
 PLACEHOLDER_EXACT = {"tbd", "tba", "n/a", "na", "none", "nil", "unknown", "-",
                      "not applicable", "to be determined", "to be defined",
@@ -391,7 +385,7 @@ CELL_WORDS_ONLY = re.compile(
 
 
 def is_placeholder(description):
-    """Step 7. Flag, never drop.
+    """Flag, never drop.
 
     A placeholder is worth flagging because a package whose description is 'TBD'
     cannot be matched to an asset by any method, and the count of those is a
@@ -414,7 +408,6 @@ def is_placeholder(description):
     return len(words) < 2
 
 
-# ------------------------------------------------------------------ step 9
 
 # The status as STEP prints it, in STEP's own English words. The plans are
 # published in four languages; each foreign word is mapped to the English label
@@ -507,6 +500,18 @@ METHOD_TEXT = {
     "individual consultant selection": "INDV", "consultant individuel": "INDV",
     "individuel": "INDV",
     "framework agreement": "FA",
+    # Portuguese
+    "selecao baseada na qualidade e custo": "QCBS",
+    "selecao baseada nas qualificacoes dos consultores": "CQS",
+    "solicitacao de cotacoes": "RFQ", "solicitacao de ofertas": "RFB",
+    "solicitacao de propostas": "RFP", "selecao direta": "DIR",
+    "consultor individual": "INDV", "consultoria individual": "INDV",
+    # Spanish
+    "seleccion basada en calidad y costo": "QCBS",
+    "seleccion basada en las calificaciones de los consultores": "CQS",
+    "seleccion basada en el menor costo": "LCS",
+    "solicitud de cotizaciones": "RFQ", "solicitud de ofertas": "RFB",
+    "solicitud de propuestas": "RFP", "seleccion directa": "DIR",
 }
 # The code at the end of a borrower reference, including the older and
 # French spellings the corpus carries. 'RF' is a clipped RFB, RFQ or RFP and
@@ -514,7 +519,22 @@ METHOD_TEXT = {
 REF_METHOD = {code: code for code in METHOD_NAMES}
 REF_METHOD.update({"CI": "INDV", "IC": "INDV", "IND": "INDV", "QCB": "QCBS",
                    "SFQC": "QCBS", "SQC": "CQS", "ED": "DIR"})
-REF_METHOD_RE = re.compile(r"(?:^|-)(?:CW|GO|CS|NC)-?([A-Z]{2,5})(?=\d|\b)")
+REF_METHOD_RE = re.compile(r"(?:^|-)(?:CW|GO|CS|NC)-?([A-Z]+)")
+
+
+def ref_method(ref):
+    """The method code in a borrower reference, or ''. The reference is
+    normalised first ('...- CS-CQS' reads as '...-CS-CQS'), and the code may
+    run on into a suffix ('-CW-RFBREBID', '-GO-RFQ2'): the longest known code
+    it opens with is taken. 'RF' alone is a clipped RFB, RFQ or RFP and stays
+    unread."""
+    m = REF_METHOD_RE.search(norm_ref(ref))
+    if not m:
+        return ""
+    token = m.group(1)
+    # A two-letter code must be the whole token: 'IC' is not the start of 'ICT'.
+    return next((REF_METHOD[k] for k in sorted(REF_METHOD, key=lambda c: (-len(c), c))
+                 if token == k or (len(k) > 2 and token.startswith(k))), "")
 
 CATEGORY_MAP = {
     "goods": "goods", "go": "goods", "g": "goods",
@@ -532,7 +552,8 @@ CATEGORY_MAP = {
 
 
 def norm_category(value):
-    """Step 9 for the four-value category set (business rules A1.23)."""
+    """The four procurement categories: goods, works, consultant services and
+    non-consulting services."""
     key = collapse(value).casefold().strip(" .:;")
     if key in CATEGORY_MAP:
         return CATEGORY_MAP[key]
@@ -549,7 +570,7 @@ def enum_key(value):
     Separate from `collapse` on purpose. `collapse` produces the string that is
     stored and read by a person, and stripping the accents off a French package
     description to store it would be vandalism. Here the string is never stored
-    - it exists only to find a row in STATUS_MAP or METHOD_MAP - so folding
+    - it exists only to find a row in STATUS_MAP or METHOD_TEXT - so folding
     'Achevé' to 'acheve' costs nothing and lets those maps stay ASCII.
     """
     stripped = unicodedata.normalize("NFKD", collapse(value))
@@ -558,7 +579,7 @@ def enum_key(value):
 
 
 def norm_status(value):
-    """Step 9 for packages.status: the STEP label, or `unknown`, counted.
+    """packages.status: the STEP label, or `unknown`, counted.
 
     `status_raw` keeps the borrower's own word either way."""
     key = enum_key(value)
@@ -582,13 +603,13 @@ def norm_status(value):
 
 
 def norm_method(method_raw, category=""):
-    """Step 9 for method: the Bank's code (RFB, RFQ, QCBS, INDV ...) or
+    """method: the Bank's code (RFB, RFQ, QCBS, INDV ...) or
     `unknown`. Reads the Method cell's words, or a borrower reference's code
     when given one. Never 'other': a method the map does not know is unknown,
     and counted, so the map can be extended from what was actually printed."""
-    m = REF_METHOD_RE.search(collapse(method_raw).upper())
-    if m:
-        return REF_METHOD.get(m.group(1), "unknown")
+    code = ref_method(method_raw)
+    if code:
+        return code
     key = enum_key(method_raw)
     flat = re.sub(r"[\s-]+", "", key)
     code = METHOD_TEXT.get(key) or next(
@@ -639,7 +660,15 @@ METHOD_PREFIX = (
     ("selectiondeconsultantsparententedirecte", "CDS"),
     ("demandedeprix", "RFQ"), ("appeldoffres", "RFB"), ("ententedirecte", "DIR"),
     ("passationdemarchedegreagre", "DIR"), ("consultantindividuel", "INDV"),
-    ("solicituddeoferta", "RFB"), ("seleccionbasadaencalidadycosto", "QCBS"),
+    ("solicituddeoferta", "RFB"), ("solicituddecotiza", "RFQ"),
+    ("solicituddepropuesta", "RFP"), ("selecciondirecta", "DIR"),
+    ("seleccionbasadaencalidadycosto", "QCBS"),
+    ("seleccionbasadaenlascalificaciones", "CQS"),
+    ("selecaobaseadanaqualidadeecusto", "QCBS"),
+    ("selecaobaseadanasqualificacoes", "CQS"),
+    ("solicitacaodecot", "RFQ"), ("solicitacaodeofe", "RFB"),
+    ("solicitacaodepro", "RFP"), ("selecaodireta", "DIR"),
+    ("consultorindividual", "INDV"), ("consultoriaindividual", "INDV"),
 )
 
 
@@ -656,7 +685,8 @@ def resolve_method(r):
     """(method code, where it came from).
 
     The plan's Method cell first, because it is what the plan says now; then
-    the code in the borrower reference, which STEP writes when the activity is
+    the same cell clipped at its column edge and found among the row's other
+    cells ('Request for Propo'); then the code in the borrower reference, which STEP writes when the activity is
     created and which is on almost every package. Both are the Bank's own
     vocabulary, so nothing is inferred from the market approach."""
     code = norm_method(r.get("method_raw") or "", r.get("category") or "")
@@ -664,7 +694,7 @@ def resolve_method(r):
         return code, "method_cell"
     code = method_in_cells(r.get("cells_raw") or "", r.get("category") or "")
     if code != "unknown":
-        return code, "method_cell"
+        return code, "clipped_method_cell"
     code = norm_method(r.get("borrower_ref") or "")
     if code != "unknown":
         return code, "reference"
@@ -679,7 +709,6 @@ def norm_approach(value):
     return re.sub(r"\s*[-/]\s*", " - ", v).strip()
 
 
-# ------------------------------------------------------------------ step 10
 
 DATELINE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|"
                          r"\d{1,2}[- ][A-Za-z]{3}[- ]\d{4})\b")
@@ -688,16 +717,14 @@ MONEY_RE = re.compile(r"(?:US\$|USD|\$|EUR|€|GBP|£)\s?([\d.,]+)"
 
 
 def desc_sha256(text):
-    """Step 10: hash the description. Raw and cleaned are hashed separately, so a
-    reclassification can be driven off `description` without recomputing the
-    clean version, and a change to the cleaning rules is visible as a mismatch
-    between the two rather than as a silent rewrite."""
+    """SHA-256 of the cleaned description: the key a label is stored under
+    (AGENTS.md rule 9), so a label follows the words, not the row."""
     return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
 
 
 def extract_amount_and_date(text):
     """Amounts and dates sometimes sit inside the description string. Pull them
-    out so they are not matched as text later (docs/cleaning.md)."""
+    out so they are not matched as text later."""
     amount = ""
     m = MONEY_RE.search(text or "")
     if m:
@@ -728,19 +755,19 @@ PACKAGE_COLS = [
     "plan_version", "plan_disclosure_date", "fetched_at",
 ]
 NOTICE_COLS = [
-    "notice_id", "project_id", "notice_type", "publication_date", "deadline_date",
-    "bid_description", "bid_description_clean", "bid_description_match",
-    "description_lang", "is_placeholder", "glue_repairs",
-    "clean_version", "procurement_category", "country_code", "sector", "url",
+    "notice_id", "project_id", "notice_type", "notice_status", "publication_date",
+    "deadline_date", "borrower_ref", "borrower_ref_norm", "description",
+    "description_clean", "description_match", "description_sha256", "description_lang",
+    "is_placeholder", "glue_repairs", "category", "method", "method_name",
+    "country_name", "clean_version",
 ]
 AWARD_COLS = [
     "contract_id", "project_id", "borrower_ref", "borrower_ref_norm", "description",
     "description_clean", "description_match", "description_sha256",
     "description_lang", "is_placeholder", "glue_repairs",
     "clean_version", "signed_date", "no_objection_date", "total_amount", "currency",
-    "procurement_group", "method", "method_name", "review_type", "supplier_name",
-    "supplier_country",
-    "supplier_amount", "region", "sector",
+    "category", "method", "method_name", "review_type", "supplier_name",
+    "supplier_country", "supplier_amount", "region", "sector",
 ]
 SUPERSEDED_COLS = ["package_id", "project_id", "plan_version", "borrower_ref",
                    "borrower_ref_norm", "description", "status", "estimated_amount",
@@ -804,7 +831,7 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
         number, comp_name, comp_source = comp or ("", "", "")
         counters[f"component_source_{comp_source or 'none'}"] += 1
         stored_amount = r.get("estimated_amount") or ""
-        amount_source = "plan" if not absent("estimated_amount", stored_amount) else ""
+        amount_source = "plan" if stored_amount else ""
         amount_in_text, date_in_text = extract_amount_and_date(raw_desc)
         if not stored_amount and amount_in_text:
             stored_amount = amount_in_text
@@ -814,9 +841,10 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
         if not r.get("planned_date") and date_in_text:
             counters["date_read_from_text"] += 1
         counters["packages_in"] += 1
-        method, method_source = resolve_method(r)
+        category = norm_category(r.get("category_raw") or "")
+        method, method_source = resolve_method(dict(r, category=category))
         out.append({
-            "package_id": r["borrower_ref"],
+            "package_version_id": r.get("package_version_id") or "",
             "project_id": pid,
             "borrower_ref": r["borrower_ref"],
             "borrower_ref_norm": norm_ref(r["borrower_ref"]),
@@ -834,7 +862,7 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "superseded_by": "",
             "clean_version": CLEAN_VERSION,
-            "category": r.get("category") or "unknown",
+            "category": category,
             "method": method,
             "method_name": METHOD_NAMES.get(method, ""),
             "method_source": method_source,
@@ -851,7 +879,7 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
             "amount_source": amount_source,
             "amount_as_of": (r.get("plan_disclosure_date") or "") if amount_source else "",
             "amount_plan_doc": (r.get("plan_doc_id") or r["plan_version"]) if amount_source else "",
-            "actual_amount": "",
+            "actual_amount": r.get("actual_amount") or "",
             "plan_version": r["plan_version"],
             "fetched_at": r["fetched_at"],
             "_plan_disclosure_date": r.get("plan_disclosure_date") or "",
@@ -918,7 +946,7 @@ def absent(field, value):
 
 
 def dedupe_packages(rows, counters):
-    """Step 8: one row per package, with each field taken from the most recent
+    """One row per package, with each field taken from the most recent
     plan version that stated it, and supersession recorded.
 
     NOT simply the newest version's row. The newest plan is not reliably the
@@ -942,7 +970,7 @@ def dedupe_packages(rows, counters):
     amount_source, amount_as_of and amount_plan_doc say which plan version a
     carried amount came from, so nothing is taken on trust.
 
-    Grouped on (project_id, package_id), not on package_id. The borrower
+    Grouped on (project_id, normalised reference), not on the reference alone. The borrower
     reference is only unique within a project, and generic ones recur across
     projects - 'CS-INDV', 'GO-RFB' and 'CS-QCBS' each appear under three of the
     70, and 8 references in total are shared by two or more projects. Keyed on
@@ -955,9 +983,21 @@ def dedupe_packages(rows, counters):
     pointing at the version that replaced it, and counted - a supersession that
     leaves no trace is how a revised amount becomes invisible.
     """
+    # The key is the normalised reference ('EDGE- G13' and 'EDGE-G13' are one
+    # package). A generic reference that one plan uses for several packages
+    # ('CS-INDV' for every individual consultant) also takes the description's
+    # matching copy, so those packages are not folded into one another.
+    per_version = Counter((r["project_id"], r["plan_version"], r["borrower_ref_norm"])
+                          for r in rows)
+    shared = {(p, ref) for (p, _v, ref), n in per_version.items() if n > 1}
     groups = defaultdict(list)
     for r in rows:
-        groups[(r["project_id"], r["package_id"])].append(r)
+        key = (r["project_id"], r["borrower_ref_norm"])
+        if key in shared:
+            key += (r["description_match"],)
+        r["package_id"] = ":".join(key[:2]) + (
+            ":" + hashlib.sha256(key[2].encode()).hexdigest()[:8] if len(key) > 2 else "")
+        groups[key].append(r)
     kept, superseded = [], []
     for key, versions in groups.items():
         versions.sort(key=lambda x: (x["_plan_disclosure_date"], x["plan_version"]))
@@ -977,7 +1017,9 @@ def dedupe_packages(rows, counters):
                     for companion in CARRY_COMPANIONS.get(field, ()):
                         if companion in newest:
                             newest[companion] = older.get(companion, "")
-                    newest["amount_source"] = "earlier_plan"
+                    newest["amount_source"] = (
+                        "earlier_plan_description"
+                        if older.get("amount_source") == "description" else "earlier_plan")
                     counters[f"carried_{field}"] += 1
                     carried = True
                     break
@@ -1061,28 +1103,34 @@ def clean_notices(rows, counters, vocab=None, names=None):
     vocab = vocab or {}
     out = []
     for r in rows:
-        raw = collapse(r["bid_description"])
+        raw = collapse(r["description"])
+        lang = detect_lang(raw)
         clean, repairs, _, _, _ = clean_description(
-            r["bid_description"], vocab, names,
-            r.get("description_lang") or detect_lang(raw), "", counters)
+            r["description"], vocab, names, lang, r.get("borrower_ref") or "", counters)
         counters["glue_repairs_notices"] += repairs
         counters["notices_in"] += 1
-        counters["replacement_chars_removed"] += count_replacement_chars(
-            r.get("bid_description"))
+        counters["replacement_chars_removed"] += count_replacement_chars(r["description"])
+        category = norm_category(r.get("category_raw") or "")
+        # The notice interface gives the Bank's method code directly.
+        method = r.get("method_code") or norm_method(r.get("method_raw") or "", category)
         out.append({
             "notice_id": r["notice_id"], "project_id": r["project_id"],
-            "notice_type": r["notice_type"],
+            "notice_type": r["notice_type"], "notice_status": r.get("notice_status") or "",
             "publication_date": r["publication_date"],
             "deadline_date": r["deadline_date"],
-            "bid_description": raw, "bid_description_clean": clean,
-            "bid_description_match": match_key(clean),
-            "description_lang": r.get("description_lang") or detect_lang(clean),
+            "borrower_ref": r.get("borrower_ref") or "",
+            "borrower_ref_norm": norm_ref(r.get("borrower_ref") or ""),
+            "description": raw, "description_clean": clean,
+            "description_match": match_key(clean),
+            "description_sha256": desc_sha256(clean),
+            "description_lang": lang,
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "glue_repairs": repairs,
+            "category": category,
+            "method": method or "unknown",
+            "method_name": METHOD_NAMES.get(method, ""),
+            "country_name": r.get("country_name") or "",
             "clean_version": CLEAN_VERSION,
-            "procurement_category": r.get("procurement_category") or "unknown",
-            "country_code": r.get("country_code") or "",
-            "sector": r.get("sector") or "", "url": r.get("url") or "",
         })
     return out
 
@@ -1092,15 +1140,14 @@ def clean_awards(rows, counters, vocab=None, names=None):
     out = []
     for r in rows:
         raw = collapse(r["description"])
+        lang = detect_lang(raw)
         clean, repairs, _, _, _ = clean_description(
-            r["description"], vocab, names,
-            r.get("description_lang") or detect_lang(raw), r.get("borrower_ref") or "",
-            counters)
+            r["description"], vocab, names, lang, r.get("borrower_ref") or "", counters)
         counters["glue_repairs_awards"] += repairs
-        method = norm_method(r.get("method_raw") or "", r.get("procurement_group") or "")
         counters["awards_in"] += 1
-        counters["replacement_chars_removed"] += count_replacement_chars(
-            r.get("description"))
+        counters["replacement_chars_removed"] += count_replacement_chars(r["description"])
+        category = norm_category(r.get("category_raw") or "")
+        method = norm_method(r.get("method_raw") or "", category)
         out.append({
             "contract_id": r["contract_id"], "project_id": r["project_id"],
             "borrower_ref": r["borrower_ref"],
@@ -1108,7 +1155,7 @@ def clean_awards(rows, counters, vocab=None, names=None):
             "description": raw, "description_clean": clean,
             "description_match": match_key(clean),
             "description_sha256": desc_sha256(clean),
-            "description_lang": r.get("description_lang") or detect_lang(clean),
+            "description_lang": lang,
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "glue_repairs": repairs,
             "clean_version": CLEAN_VERSION,
@@ -1116,7 +1163,7 @@ def clean_awards(rows, counters, vocab=None, names=None):
             "no_objection_date": r.get("no_objection_date") or "",
             "total_amount": r.get("total_amount") or "",
             "currency": r.get("currency") or "USD",
-            "procurement_group": r.get("procurement_group") or "unknown",
+            "category": category,
             "method": method,
             "method_name": METHOD_NAMES.get(method, ""),
             "review_type": r.get("review_type") or "",
@@ -1141,21 +1188,19 @@ def main():
     counters = Counter()
     vocab, names = glue.corpus_vocab(
         [r["description"] for r in pkg_raw]
-        + [r["bid_description"] for r in notices_raw]
+        + [r["description"] for r in notices_raw]
         + [r["description"] for r in awards_raw], args.data)
     comps = read_components(args.data)
     packages = clean_packages(pkg_raw, counters, vocab, names, comps)
-    # step 9's unmapped counts, before dedup so the whole raw corpus is measured
-    for field in ("status", "method", "category"):
-        c = Counter(r[field] for r in packages)
-        counters[f"{field}_values"] = len(c)
-        counters[f"{field}_values"] = len(c)
-        counters[f"{field}_unknown"] = c.get("unknown", 0)
-
     kept, superseded = dedupe_packages(packages, counters)
     notices = clean_notices(notices_raw, counters, vocab, names)
     awards = clean_awards(awards_raw, counters, vocab, names)
     resolve_status(kept, awards, counters)
+    # Coverage of the closed value sets, on the packages as written.
+    for field in ("status", "method", "category"):
+        c = Counter(r[field] for r in kept)
+        counters[f"{field}_values"] = len(c)
+        counters[f"{field}_unknown"] = c.get("unknown", 0)
 
     write_csv(os.path.join(proc, "packages.csv"), PACKAGE_COLS, kept)
     write_csv(os.path.join(proc, "notices.csv"), NOTICE_COLS, notices)
@@ -1167,7 +1212,7 @@ def main():
     with open(report, "w", encoding="utf-8") as fh:
         fh.write(f"clean_version {CLEAN_VERSION}\n\n")
         fh.write(f"packages raw rows            {counters['packages_in']:,}\n")
-        fh.write(f"packages kept (latest only)  {counters['packages_out']:,}\n")
+        fh.write(f"packages (one row each)      {counters['packages_out']:,}\n")
         fh.write(f"package versions superseded  {counters['package_versions_superseded']:,}\n")
         fh.write(f"packages in >1 plan version  "
                  f"{counters['packages_seen_in_more_than_one_version']:,}\n")
@@ -1177,7 +1222,7 @@ def main():
                  f"{counters['amount_read_from_text']:,}\n")
         fh.write(f"dates read out of the description text:   "
                  f"{counters['date_read_from_text']:,}\n")
-        fh.write("\nnormalised value coverage (business rules A1.23-A1.25):\n")
+        fh.write("\nvalue coverage on the packages written:\n")
         for field in ("category", "method", "status"):
             fh.write(f"  {field:<10} distinct={counters[f'{field}_values']:<5}"
                      f" unmapped={counters[f'{field}_unknown']:,}\n")

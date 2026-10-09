@@ -22,8 +22,8 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 
-# Blocks that are meant to read as prose. Table and template blocks are
-# deliberately not prose, so prose checks would only produce noise there.
+# Blocks that are meant to read as prose; the defect checks run on these. Tables
+# and front matter are not prose, so prose checks would only produce noise.
 PROSE_BLOCKS = ("narrative", "annex")
 
 # Model tokens per word, MEASURED rather than assumed.
@@ -38,7 +38,7 @@ PROSE_BLOCKS = ("narrative", "annex")
 #
 # This holds for THIS tokeniser on THIS kind of text. A different model, or a
 # corpus in another language, needs its own number - take it from the
-# tokens_reported field of data/embedding_manifest.json, which records what the
+# tokens_reported field of data/embeddings/embedding_manifest.json, which records what the
 # API actually billed rather than what anyone predicted.
 TOKENS_PER_WORD = 3_027_632 / 2_287_945
 
@@ -131,7 +131,7 @@ def _control(t):
 
 @check("smart quote, ligature or hyphen left unfolded", blocks=None, severity="defect")
 def _unfolded(t):
-    """Characters clean.py is supposed to have folded to their ASCII form. The
+    """Characters text_rules.fold_chars is supposed to have folded to their ASCII form. The
     hyphens matter as much as the quotes: U+2010 in "Sub-component" renders
     identically to a plain hyphen and tokenises as something else."""
     return re.findall("[\u2018\u2019\u201c\u201d\u2013\u2010\u2011"
@@ -141,9 +141,9 @@ def _unfolded(t):
 @check("private use area character", blocks=None, severity="defect")
 def _private_use(t):
     """A code point in a Private Use Area means whatever the font that emitted
-    it decided, and nothing at all once the font is gone. clean.py maps the two
-    that appear in this corpus; this is what makes a third one a number rather
-    than a surprise in an embedding months later."""
+    it decided, and nothing at all once the font is gone. text_rules.CHAR_MAP
+    maps the ones found in this corpus; this is what makes a new one a number
+    rather than a surprise in an embedding months later."""
     return [c for c in t if 0xE000 <= ord(c) <= 0xF8FF
             or 0xF0000 <= ord(c) <= 0x10FFFD]
 
@@ -217,16 +217,17 @@ def main():
     for blk in sorted(blocks, key=lambda b: -words[b]):
         out.append(f"{blk:<34}{blocks[blk]:>8}{words[blk]:>12,}{chars[blk]:>12,}"
                    f"{tok_est(words[blk]):>26}")
-    pw = sum(words[b] for b in PROSE_BLOCKS)
-    pc = sum(chars[b] for b in PROSE_BLOCKS)
+    model = [r for r in rows if r.get("for_model") == "true"]
+    pw = sum(int(r["n_tokens"]) for r in model)
+    pc = sum(int(r["char_end"]) - int(r["char_start"]) for r in model)
     out.append("-" * 92)
-    out.append(f"{'EMBEDDABLE (narrative+annex)':<34}{prose:>8}{pw:>12,}{pc:>12,}"
+    out.append(f"{'GIVEN TO THE MODEL (for_model)':<34}{len(model):>8}{pw:>12,}{pc:>12,}"
                f"{tok_est(pw):>26}")
     tw, tc = sum(words.values()), sum(chars.values())
     out.append(f"{'ALL BLOCKS':<34}{len(rows):>8}{tw:>12,}{tc:>12,}"
                f"{tok_est(tw):>26}")
     out.append("")
-    out.append(f"chars per word: {pc / max(pw, 1):.2f} over the embeddable prose "
+    out.append(f"chars per word: {pc / max(pw, 1):.2f} over what the model is given "
                f"(ordinary English is nearer 5.3; the token column is measured, "
                f"not derived from this)")
     out.append("")

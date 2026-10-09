@@ -30,7 +30,6 @@ DATA = data_root()
 import clean_procurement as P  # noqa: E402
 import audit_procurement as AP  # noqa: E402
 import fetch_procurement as FP  # noqa: E402
-import v6_link_test as V6  # noqa: E402
 
 
 # ------------------------------------------------------- step 1: characters
@@ -63,7 +62,7 @@ def test_step2_folds_a_matching_copy_and_keeps_the_original():
 
 def test_step4_splits_lot_phase_and_rebid_into_columns():
     """The card's worked example. One string in, a description, a lot and a
-    rebid flag out - which is what V6 depends on."""
+    rebid flag out - which linking a plan package to its award depends on."""
     marks = P.split_markers("FIBER OPTIC CABLE SUPPLY - LOT 2 (REBID)")
     assert marks["lot_or_phase"] == "Lot 2"
     assert marks["is_rebid"] is True
@@ -101,8 +100,8 @@ def test_step4_does_not_read_a_broken_word_as_a_phase():
 
 
 def test_step3_removes_the_reference_that_is_embedded_in_the_description():
-    marks = P.split_markers("TZ-MCIT-123456-CS-QCBS - Provision of consulting services")
-    assert marks["ref_in_text"] == "TZ-MCIT-123456-CS-QCBS"
+    marks = P.split_markers("AA-AGENCY-123456-CS-QCBS - Provision of consulting services")
+    assert marks["ref_in_text"] == "AA-AGENCY-123456-CS-QCBS"
     assert marks["description"] == "Provision of consulting services"
 
 
@@ -114,10 +113,10 @@ def test_step3_leaves_a_leading_code_that_is_not_a_reference():
 # ------------------------------------------------ step 5: borrower reference
 
 @pytest.mark.parametrize("raw,want", [
-    ("tz mcit 254784 cw rfb", "TZ-MCIT-254784-CW-RFB"),
-    ("TZ/MCIT/254784/CW/RFB", "TZ-MCIT-254784-CW-RFB"),
-    ("TZ_MCIT_254784_CW_RFB", "TZ-MCIT-254784-CW-RFB"),
-    ("TZ-MCIT-254784-CW-RFB", "TZ-MCIT-254784-CW-RFB"),
+    ("aa agency 555555 cw rfb", "AA-AGENCY-555555-CW-RFB"),
+    ("AA/AGENCY/555555/CW/RFB", "AA-AGENCY-555555-CW-RFB"),
+    ("AA_AGENCY_555555_CW_RFB", "AA-AGENCY-555555-CW-RFB"),
+    ("AA-AGENCY-555555-CW-RFB", "AA-AGENCY-555555-CW-RFB"),
     ("EDGE- G1A", "EDGE-G1A"),
     ("EDGE \u2013IC6", "EDGE-IC6"),
     ("", ""),
@@ -155,7 +154,7 @@ def test_step6_falls_back_rather_than_guessing_on_a_tie():
 
 # ------------------------------------------------------------ step 7: placeholder
 
-@pytest.mark.parametrize("text", ["TBD", "Goods", "N/A", "", "TZ-MCIT-123456-CS-QCBS",
+@pytest.mark.parametrize("text", ["TBD", "Goods", "N/A", "", "AA-AGENCY-123456-CS-QCBS",
                                   "To be determined", "Services"])
 def test_step7_flags_a_placeholder(text):
     assert P.is_placeholder(text) is True
@@ -221,8 +220,8 @@ def test_step9_maps_the_method_to_the_bank_code(method, category, want):
 def test_step9_reads_the_method_out_of_a_step_reference_code():
     """STEP writes the method code into the reference, which covers rows whose
     method cell was not read."""
-    assert P.norm_method("TZ-MCIT-254784-CW-RFB") == "RFB"
-    assert P.norm_method("TZ-MCIT-461806-CS-INDV") == "INDV"
+    assert P.norm_method("AA-AGENCY-555555-CW-RFB") == "RFB"
+    assert P.norm_method("AA-AGENCY-555556-CS-INDV") == "INDV"
     assert P.norm_method("AA-AGENCY-123456-GO-RFQ2") == "RFQ"
     assert P.norm_method("AA-AGENCY-12345-CS-SFQC") == "QCBS"
     assert P.norm_method("XX-ABC-123-GO-RF") == "unknown"
@@ -393,9 +392,9 @@ class TestMatchKey:
     package drops out of the asset class, and nothing anywhere reports an
     error. These are the tests that make that failure loud."""
 
-    GLUED = ("Supply, Installation and commission of Storage Equipment,Servers "
-             "and Network equipment for enhancement of DataCenter Infrastructure "
-             "(Mainland and Zanzibar) - Phase 2")
+    GLUED = ("Delivery and set-up of Storage Equipment,Servers and Network "
+             "equipment for the DataCenter Infrastructure of the river districts "
+             "- Phase 3")
 
     def test_glued_term_is_found_after_despacing(self):
         """'Data Center' lost its space when the cell was clipped at the column
@@ -466,17 +465,6 @@ def test_step8_still_folds_two_versions_of_one_project_package():
     assert counters["package_versions_superseded"] == 1
 
 
-def test_the_plan_diff_does_not_compare_one_project_against_another():
-    """package_changes keeps a running 'seen' dict. Keyed on the reference alone
-    it would find P2's CS-INDV in P1's row and report a change that never
-    happened."""
-    rows = [_pkg_row("P1", "CS-INDV", "d1", "2024-01-01", "Supply of cable"),
-            _pkg_row("P2", "CS-INDV", "d2", "2024-01-01", "Fourniture de cable")]
-    changes, _unkeyable = FP.package_changes(rows)
-    assert [c["change"] for c in changes] == ["appeared", "appeared"]
-    assert {c["project_id"] for c in changes} == {"P1", "P2"}
-
-
 # ------------------------------------------- the reference that wrapped in two
 
 # A minimal but complete STEP table: the section heading, the column heading
@@ -527,24 +515,6 @@ def test_parse_plan_text_recovers_a_wrapped_reference_end_to_end():
     assert len(rows) == 1
     assert rows[0]["borrower_ref"] == "AA-AGENCY-123456-CW-RFB"
     assert rows[0]["description"] == "Construction of the fibre duct"
-
-
-# --------------------------------------------- the climate probe's term list
-
-def test_the_climate_probe_carries_the_eight_terms_the_card_names():
-    """The earlier list had 'earthquake' where the card says 'seismic'. They are
-    different words and only one of them is in the instruction."""
-    for term in ("flood", "cyclone", "typhoon", "storm", "seismic", "climate",
-                 "resilien", "adaptation"):
-        assert term in V6.CLIMATE_TERMS, term
-
-
-def test_the_climate_probe_counts_notices_as_well_as_packages_and_awards():
-    """The card asks for all three tables. The probe counted packages and awards
-    and left notices out."""
-    import inspect
-    src = inspect.getsource(V6.main)
-    assert "notices" in src and "bid_description_clean" in src
 
 
 # ------------------------------------------------- carrying values forward

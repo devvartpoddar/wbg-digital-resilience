@@ -66,6 +66,16 @@ MENTION = re.compile(
     r"(?:\s*(?:,|and|&|et|e|y|or|to|-|–)\s*\d{1,2}(?:\.\d{1,2})?)*)", re.I)
 RUN_IN_NUMBER = re.compile(r"^\s*\d{1,3}\.\s+")
 RUN_IN_COMP = re.compile(rf"^\s*{COMP_WORD}\s*(\d{{1,2}})\s*[:.\-\u2013)]\s*[A-Z]")
+def _reader_version():
+    here = os.path.dirname(os.path.abspath(__file__))
+    h = hashlib.sha256()
+    for name in ("components.py", "text_rules.py"):
+        with open(os.path.join(here, name), "rb") as fh:
+            h.update(fh.read())
+    return h.hexdigest()[:10]
+
+
+READER_VERSION = _reader_version()
 TAGGED_BLOCKS = {"narrative", "annex", "table", "heading", "footnote"}
 
 
@@ -158,7 +168,7 @@ def _to_millions(value, header_text):
 
 
 def _cell(c):
-    import clean as C
+    import text_rules as C
     parts = [p for p in (c or "").split("\n") if "@#&OPS" not in p]
     return re.sub(r"\s+", " ", C.fold_chars(" ".join(parts))).strip()
 
@@ -442,7 +452,7 @@ def main():
     except (OSError, ValueError):
         cache = {}
 
-    out, stats = [], Counter()
+    out, stats, used = [], Counter(), {}
     for did in sorted(docs):
         doc = docs[did]
         rows = paras.get(did, [])
@@ -461,9 +471,12 @@ def main():
             re.I)})
         found = []
         pdf_path = where(args.data, "pdf", f"{did}.pdf")
-        key = doc.get("pdf_sha256") or ""
+        # Keyed on the PDF, the pages searched and this module's code, so a
+        # change to any of them reads the tables again.
+        key = ":".join([doc.get("pdf_sha256") or "", ",".join(map(str, sorted(pages))),
+                        READER_VERSION])
         if pages and os.path.exists(pdf_path):
-            if key and key in cache:
+            if key in cache:
                 found = cache[key]
             else:
                 with pdfplumber.open(pdf_path) as pdf:
@@ -486,8 +499,8 @@ def main():
                         if rs:
                             found = [dict(c, source=src, page=pno) for c in _tidy(rs)]
                             break
-                if key:
-                    cache[key] = found
+                cache[key] = found
+            used[key] = found
         for c in found:
             c = dict(c, name=clean_name(c["name"]) or c["name"])
             out.append(dict(base, level="component", **c))
@@ -503,7 +516,7 @@ def main():
             stats["docs_heading"] += 1
 
     with open(cache_path + ".part", "w", encoding="utf-8") as fh:
-        json.dump(cache, fh)
+        json.dump(used, fh, sort_keys=True)
     os.replace(cache_path + ".part", cache_path)
 
     out.sort(key=lambda r: (r["doc_id"], r["source"], r["level"],

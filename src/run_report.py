@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Draft the run report as a note for the project folder in Dev's notes vault.
+"""Draft the run report as a note for the project folder in the notes vault.
 
 Reads  data/reports/{fetch,clean,audit,fetch_procurement,clean_procurement,
        audit_procurement}.txt
@@ -69,12 +69,13 @@ def build(data, topic, today):
 
     rows = [
         ("Appraisal documents", grab(fetch, "documents written")),
-        ("  read from PDF", grab(clean, "read from PDF")),
-        ("  read from text rendition", grab(clean, "read from text")),
+        ("  cleaned (read from the PDF)", grab(clean, "documents cleaned")),
+        ("  not cleaned", grab(clean, "documents not cleaned")),
         ("Paragraphs kept", grab(clean, "paragraphs kept")),
+        ("  given to the model", grab(clean, "given to the model (for_model)")),
         ("Paragraphs dropped", grab(clean, "paragraphs dropped")),
         ("Sentences", grab(clean, "sentences")),
-        ("Procurement packages", grab(pclean, "packages kept (latest only)")),
+        ("Procurement packages", grab(pclean, "packages (one row each)")),
         ("Notices", grab(pfetch, "notices rows")),
         ("Awards", grab(pfetch, "awards rows")),
     ]

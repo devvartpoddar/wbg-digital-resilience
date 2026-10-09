@@ -2,7 +2,7 @@
 """Write two plain spreadsheets for reading the cleaning by eye.
 
 Reads  data/appraisal/paragraphs.csv, data/appraisal/text/{doc_id}.txt,
-       data/raw/text/{doc_id}.txt, data/procurement/packages.csv
+       data/raw/pdf_text/{doc_id}.txt, data/procurement/packages.csv
 Writes data/review/paragraphs_s{seed}.xlsx    100 paragraphs: cleaned, split into
                                               sentences, and the raw text beside them
        data/review/packages_s{seed}.xlsx      100 packages, raw next to cleaned
@@ -10,33 +10,29 @@ Writes data/review/paragraphs_s{seed}.xlsx    100 paragraphs: cleaned, split int
 One sheet each, one row per unit, and two empty columns - ok, note - for the
 person reading. The files live in data/, so they are never committed.
 
+Paragraphs are drawn only from those given to the model (for_model): front
+matter and tables are kept for reading but are not reviewed.
+
 A file that already exists is left alone: it may hold someone's notes. Pass a
 new --seed for a fresh draw, or --force to overwrite.
 
   python3 src/review_sheets.py
   python3 src/review_sheets.py --n 200 --seed 2
 
-The raw column for a paragraph is found, not stored. The cleaner keeps no map
-from cleaned offsets back to the raw file, so this matches the paragraph's
-first and last letters against the raw text with everything but letters thrown
-away - which survives rejoined hyphens, collapsed whitespace and stripped
-footnote numbers. What lies between those two points in the raw file is shown
-as it is, including any running header the cleaner removed from the middle.
-That is the point: the reader sees what was taken out. A paragraph that cannot
-be matched says so, and that is itself worth a look.
+The raw column is the stretch of the PDF's own text the paragraph was built
+from (raw_start:raw_end in data/raw/pdf_text/), shown exactly as read: the
+lines, any running header or footnote number the cleaner removed from between
+them, and the page break if the paragraph crossed one.
 """
 import argparse, csv, os, sys
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where                    # noqa: E402
-from clean import CHAR_MAP, decode_raw         # noqa: E402
 from review import draw                        # noqa: E402
 import sentences                               # noqa: E402
 
 CELL_MAX = 32_000          # Excel refuses a cell over 32,767 characters
-ANCHOR = 20                # letters matched at each end of a paragraph; short,
-                           # so a header cut into the paragraph rarely splits one
 
 PARA_COLS = [("paragraph_id", 18), ("project_ids", 12), ("page_from", 6),
              ("section_path", 12), ("block", 12), ("n_tokens", 8),
@@ -50,67 +46,6 @@ PKG_COLS = [("package_id", 18), ("project_id", 10), ("plan_version", 10),
             ("status", 14), ("status_source", 10), ("status_as_of", 11),
             ("estimated_amount", 12), ("currency", 7), ("amount_source", 10),
             ("amount_as_of", 11), ("planned_date", 11), ("ok", 6), ("note", 30)]
-
-
-def letters(text):
-    """Lowercased letters only, with each one's offset in the original text."""
-    out, idx = [], []
-    for i, ch in enumerate(text):
-        for c in CHAR_MAP.get(ch, ch):
-            if c.isalpha():
-                out.append(c.lower())
-                idx.append(i)
-    return "".join(out), idx
-
-
-def page_window(raw, page_from, page_to, margin=1):
-    """(start, end) of the raw text from page_from-margin to page_to+margin.
-    The rendition marks each page end with a form feed, one per PDF page."""
-    if not page_from:
-        return 0, len(raw)
-    breaks = [i for i, ch in enumerate(raw) if ch == "\f"]
-    first = max(1, page_from - margin)
-    last = (page_to or page_from) + margin
-    start = breaks[first - 2] + 1 if first >= 2 and first - 2 < len(breaks) else 0
-    end = breaks[last - 1] if last - 1 < len(breaks) else len(raw)
-    return start, end
-
-
-def locate_raw(clean_para, raw, raw_letters, page_from=0, page_to=0):
-    """The stretch of the raw text this cleaned paragraph came from, or None.
-
-    Searched only on the paragraph's own pages (one either side), so a
-    sentence the document repeats elsewhere is not picked up; and the match
-    must span about as many letters as the paragraph has, so a head and a tail
-    found far apart are not taken for one paragraph."""
-    norm, idx = raw_letters
-    para, _ = letters(clean_para)
-    if not para:
-        return None
-    w0, w1 = page_window(raw, page_from, page_to)
-    lo = next((i for i, at in enumerate(idx) if at >= w0), len(idx))
-    hi = next((i for i, at in enumerate(idx) if at >= w1), len(idx))
-    n = len(para)
-    for skip in (0, 2, 4, 8):             # the head may open on a figure or a
-        head = para[skip:skip + ANCHOR]    # marker the raw prints differently
-        if len(head) < min(ANCHOR, n):
-            break
-        start = norm.find(head, lo, hi)
-        while start >= 0:
-            for k in (ANCHOR, 12):
-                tail = para[-k:] if n > k else para
-                end = norm.find(tail, start + max(0, int(0.6 * n) - k - skip), hi)
-                span = end + len(tail) - start
-                if end >= 0 and 0.6 * n <= span + skip <= 2.5 * n + min(300, 2 * n):
-                    a, b = idx[start], idx[end + len(tail) - 1] + 1
-                    # Widen to whole lines: the match is on letters, so a
-                    # leading number or a trailing figure would otherwise be
-                    # cut off - and those are what go wrong.
-                    a = raw.rfind("\n", 0, a) + 1
-                    b = raw.find("\n", b)
-                    return raw[a:b if b >= 0 else len(raw)]
-            start = norm.find(head, start + 1, hi)
-    return None
 
 
 def cell_text(value):
@@ -148,24 +83,9 @@ def read_csv(path):
         return list(csv.DictReader(fh))
 
 
-def read_raw(data, did):
-    """(raw text, its letters, from_pdf): the PDF's own text as read when the
-    paragraph came from the PDF, else a text rendition left from an earlier
-    run, searched for the paragraph."""
-    path = where(data, "pdf_text", f"{did}.txt")
-    if os.path.exists(path):
-        with open(path, encoding="utf-8") as fh:
-            return fh.read(), None, True
-    path = where(data, "rendition", f"{did}.txt")
-    if os.path.exists(path):
-        with open(path, "rb") as fh:
-            raw, _ = decode_raw(fh.read())
-        return raw, letters(raw), False
-    return "", ("", []), False
-
-
 def paragraph_rows(data, n, seed):
-    paras = read_csv(where(data, "appraisal", "paragraphs.csv"))
+    paras = [r for r in read_csv(where(data, "appraisal", "paragraphs.csv"))
+             if r.get("for_model") == "true"]
     picked = draw(paras, n, seed)
     clean_cache, raw_cache = {}, {}
     out, missed = [], 0
@@ -174,22 +94,20 @@ def paragraph_rows(data, n, seed):
         if did not in clean_cache:
             with open(where(data, "text", f"{did}.txt"), encoding="utf-8") as fh:
                 clean_cache[did] = fh.read()
-            raw_cache[did] = read_raw(data, did)
+            path = where(data, "pdf_text", f"{did}.txt")
+            raw_cache[did] = open(path, encoding="utf-8").read() \
+                if os.path.exists(path) else None
         body = clean_cache[did][int(r["char_start"]):int(r["char_end"])]
-        raw, raw_letters, from_pdf = raw_cache[did]
-        if from_pdf and r.get("raw_start", "") != "":
-            # Exact: the lines of the PDF this paragraph was built from.
-            found = raw[int(r["raw_start"]):int(r["raw_end"])]
+        raw = raw_cache[did]
+        if raw is None or r.get("raw_start", "") == "":
+            found, missed = "(no PDF text for this paragraph)", missed + 1
         else:
-            found = locate_raw(body, raw, raw_letters, int(r.get("page_from") or 0),
-                               int(r.get("page_to") or 0))
-        if found is None:
-            missed += 1
+            found = raw[int(r["raw_start"]):int(r["raw_end"])]
         cuts = sentences.split(body)
         out.append(dict(r, cleaned=body,
                         sentences="\n".join(f"[{k}] {body[a:b]}" for k, (a, b)
                                              in enumerate(cuts, 1)),
-                        raw=found if found is not None else "(not located in the raw file)"))
+                        raw=found))
     return out, missed
 
 
@@ -219,7 +137,7 @@ def main():
             continue
         if name == "paragraphs":
             rows, missed = paragraph_rows(args.data, args.n, args.seed)
-            extra = f", {missed} not located in raw"
+            extra = f", {missed} with no PDF text"
         else:
             rows, extra = package_rows(args.data, args.n, args.seed), ""
             if rows is None:

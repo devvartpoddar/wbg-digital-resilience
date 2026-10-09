@@ -43,29 +43,42 @@ def test_not_a_repo_falls_back_to_itself(tmp_path):
     assert paths.main_checkout(str(tmp_path)) == str(tmp_path)
 
 
-# --- finding a paragraph in the raw file --------------------------------------
+# --- the raw column ------------------------------------------------------------
 
-RAW = ("Some heading\n\n"
-       "  12. The ministry will build shel-\n"
-       "  ters on raised plinths above the flood line.\n"
-       "\fPage 4 of 9\n"
-       "  The works cost 3.2 million.\n"
-       "Next paragraph here.\n")
-
-
-def test_locates_across_hyphen_and_page_header():
+def _corpus(tmp_path, for_model="true"):
+    data = tmp_path
+    raw = ("Some heading\n  12. The ministry will build shel-\n"
+           "\fPage 4 of 9\n  ters on raised plinths above the flood line.\n")
     clean = ("12. The ministry will build shelters on raised plinths above the "
-             "flood line. The works cost 3.2 million.")
-    got = RS.locate_raw(clean, RAW, RS.letters(RAW))
-    assert got.startswith("  12. The ministry")        # whole first line
-    assert "Page 4 of 9" in got                        # what cleaning removed is shown
-    assert got.endswith("3.2 million.")                # trailing figure kept
-    assert "Next paragraph" not in got
+             "flood line.")
+    (data / "appraisal" / "text").mkdir(parents=True)
+    (data / "raw" / "pdf_text").mkdir(parents=True)
+    (data / "appraisal" / "text" / "D1.txt").write_text(clean, encoding="utf-8")
+    (data / "raw" / "pdf_text" / "D1.txt").write_text(raw, encoding="utf-8")
+    start = raw.index("  12.")
+    with open(data / "appraisal" / "paragraphs.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=["paragraph_id", "doc_id", "project_ids",
+                                           "char_start", "char_end", "raw_start",
+                                           "raw_end", "for_model", "block"])
+        w.writeheader()
+        w.writerow({"paragraph_id": "D1:p00001", "doc_id": "D1", "project_ids": "P1",
+                    "char_start": 0, "char_end": len(clean), "raw_start": start,
+                    "raw_end": len(raw) - 1, "for_model": for_model,
+                    "block": "narrative"})
+    return data, raw[start:len(raw) - 1]
 
 
-def test_unlocatable_paragraph_is_none():
-    assert RS.locate_raw("Nothing like this appears anywhere in it at all, honestly.",
-                         RAW, RS.letters(RAW)) is None
+def test_the_raw_column_is_the_pdf_text_the_paragraph_came_from(tmp_path):
+    data, expected = _corpus(tmp_path)
+    rows, missed = RS.paragraph_rows(str(data), 5, 1)
+    assert missed == 0 and rows[0]["raw"] == expected
+    assert "Page 4 of 9" in rows[0]["raw"]          # what cleaning removed is shown
+
+
+def test_paragraphs_not_given_to_the_model_are_not_sampled(tmp_path):
+    data, _ = _corpus(tmp_path, for_model="false")
+    rows, _ = RS.paragraph_rows(str(data), 5, 1)
+    assert rows == []
 
 
 def test_cell_text_marks_page_breaks_and_drops_control_chars():

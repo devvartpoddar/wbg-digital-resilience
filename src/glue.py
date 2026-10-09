@@ -96,6 +96,10 @@ def corpus_vocab(descriptions, data=None):
     # plan version, up to dozens of times, and counting every copy lets one
     # repeated glue ('consultantindividuel', 1,035 copies) outvote real words.
     vocab = Vocab(build_vocab(sorted(set(descriptions))))
+    # French, Portuguese and Spanish are judged against the descriptions alone:
+    # the appraisal prose is English and its counts would vouch for English
+    # fragments inside a foreign description.
+    vocab.foreign = Vocab(vocab)
     names = None
     if data:
         paths = sorted(glob.glob(where(data, "text", "*.txt")))
@@ -109,7 +113,6 @@ def corpus_vocab(descriptions, data=None):
                 vocab.prose[w.lower()] += 1
                 if re.search(r"[a-z][A-Z]", w):
                     names[w.lower()] += 1
-    vocab.foreign = Vocab(vocab)        # same counts, no prose: for non-English
     return vocab, names
 
 

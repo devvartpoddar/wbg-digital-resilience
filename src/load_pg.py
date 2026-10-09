@@ -44,7 +44,7 @@ TABLES = [
     ("awards", "procurement/awards.csv"),
 ]
 INTEGER = {"ordinal", "char_start", "char_end", "n_tokens", "n_chars",
-           "page_from", "page_to"}
+           "page_from", "page_to", "raw_start", "raw_end"}
 NUMERIC = {"estimated_amount", "actual_amount", "total_amount", "supplier_amount"}
 INDEXED = {"doc_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
            "contract_id", "unit_id", "borrower_ref_norm"}

@@ -1,37 +1,37 @@
 """Read an appraisal document from its PDF, using layout rather than guesswork.
 
-The World Bank's own text rendition of a PDF throws away everything that says
-what a line IS: its font size, its position on the page, whether it is bold,
-whether a character is raised. src/clean.py has to infer all of that back from
-line patterns, and its residual defects are exactly the places where the
-inference fails - a footnote number fused to the word it annotated
-("202024"), a running header inside a paragraph, a footnote body read as prose.
+A text rendition of a PDF throws away everything that says what a line IS: its
+font size, its position on the page, whether it is bold, whether a character
+is raised. The PDF still has that information, so this reads it directly:
 
-The PDF still has that information, so this reads it directly:
-
+  rotated text              the "Public Disclosure Authorized" stamp down the
+                            margin, dropped by its angle (the text matrix)
   running header / footer   lines repeating at the same height on many pages,
-                            plus page-number lines and the rotated
-                            "Public Disclosure Authorized" watermark
-  footnote marker           a raised digit set smaller than the line it sits on
+                            page-number lines, classification banners, dated
+                            footers and hidden template codes
+  footnote marker           a raised digit set smaller than the line it sits on,
+                            or a number run onto a word that the page's own
+                            footnotes define
   footnote body             the run of small-type lines at the foot of a page
-  heading                   a short line set in bold, or larger than body text
-  table                     a region pdfplumber finds ruled as a table; each
-                            row becomes one unit, its cells joined by " | "
+  heading                   a short line set in bold, italic or larger type
+  table                     a region pdfplumber finds ruled as a table; each row
+                            becomes one unit, "Caption - Header: value · ...",
+                            or cells joined by " | " when no header is found
   paragraph                 a vertical gap larger than the line pitch, or a
                             numbered paragraph or bullet opening a new line
 
 Everything is decided from measurements the document gives, relative to its
 own body font size and line pitch, so no threshold depends on one template.
 
-Output matches clean.clean_document: the cleaned text, and one span per unit,
-so every stage downstream is unchanged. Spans also carry the pages they came
-from, so a reader can open the PDF at the right place.
+Output: the cleaned text, one span per unit (start, end, section path, section
+title, block, first page, last page, meta), and - when asked - the PDF's text
+exactly as read, which every span points into through meta["src"].
 """
 import re
 import statistics
 from collections import Counter
 
-import clean as C
+import text_rules as C
 
 WATERMARK_MAX_SIZE = 6.0      # the rotated disclosure stamp is set at ~4.7pt
 SUPERSCRIPT_RATIO = 0.80      # a footnote marker is set at most this size of its line
@@ -490,8 +490,7 @@ def extract(pdf, raw_out=None):
                     stats["inline_marks_removed"] += 1
                     return ""
                 return m.group(0)
-            return re.sub(r" (?=[,.;:])", "", INLINE_MARK.sub(repl, text)) \
-                if defined else text
+            return INLINE_MARK.sub(repl, text) if defined else text
 
         emitted_tables = set()
         for i, l in enumerate(keep):
@@ -546,7 +545,7 @@ def extract(pdf, raw_out=None):
                 last_caption[0], last_caption[1] = text, pno
                 last_header[0] = None   # a new title ends the previous table
             items.append(("heading" if heading else "body", pno, text, l))
-            if i and keep[i - 1] is not None:
+            if i:
                 gap = l["top"] - keep[i - 1]["top"]
                 if 0 < gap < 3 * body:
                     pitches.append(round(gap, 1))
@@ -590,7 +589,8 @@ def extract(pdf, raw_out=None):
                 u[3] = pno
                 extend(u, l)
             else:
-                start("footnote", re.sub(r"^\d{1,3}\s*", "", text), pno, line=l)
+                # The footnote's own number goes; a year opening the text stays.
+                start("footnote", re.sub(r"^\d{1,3}(?!\d)\s*", "", text), pno, line=l)
             prev = "footnote"
             continue
         # Body. A paragraph continues when the next line follows at the normal

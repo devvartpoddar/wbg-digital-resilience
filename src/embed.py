@@ -14,7 +14,7 @@ an interrupted run resumes, and a later cohort pays only for the paragraphs it
 adds. Nothing here is ever re-embedded because a downstream script wanted it.
 
   python3 src/embed.py --dry-run          # counts and spend, no network call
-  python3 src/embed.py --limit 5          # smoke test, artifacts under data/smoke_*
+  python3 src/embed.py --limit 5          # smoke test, artifacts under data/embeddings/smoke_*
   python3 src/embed.py                    # the corpus
 """
 import argparse, csv, hashlib, json, os, socket, stat, sys, time
@@ -407,7 +407,7 @@ def main():
                     help="read the credential from this file (mode 0600) rather "
                          "than from $" + KEY_VAR)
     ap.add_argument("--limit", type=int, default=0,
-                    help="first N paragraphs; artifacts go to data/smoke_*")
+                    help="first N paragraphs; artifacts go to data/embeddings/smoke_*")
     args = ap.parse_args()
 
     def log(msg):
@@ -415,7 +415,10 @@ def main():
 
     with open(where(args.data, "appraisal", "paragraphs.csv"), newline="",
               encoding="utf-8") as fh:
-        rows = list(csv.DictReader(fh))
+        # Only what clean.py marks for the model: body prose and footnotes, not
+        # front matter, tables or headings. A table written before for_model
+        # existed has no such column and is taken whole.
+        rows = [r for r in csv.DictReader(fh) if r.get("for_model", "true") == "true"]
     words_by_sha = {}
     if args.limit:
         rows = rows[:args.limit]

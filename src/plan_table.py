@@ -9,8 +9,8 @@ sections in the same order - WORKS, GOODS, NON CONSULTING SERVICES, CONSULTING
 FIRMS, INDIVIDUAL CONSULTANTS - each with the same columns under the same
 English headings, whatever language the rest of the document is in.
 
-That invariant is the whole design. Every one of the 496 renditions in the
-eight-country corpus carries all five section headings and the "Activity
+That invariant is the whole design. Every rendition in the first sample (496
+renditions, eight countries) carries all five section headings and the "Activity
 Reference No." column heading, with no exceptions, so the table can be located
 exactly rather than inferred, and everything outside it can be ignored rather
 than defended against. The parser this replaces read the whole document with
@@ -22,15 +22,14 @@ the layout is the text extractor's, not the borrower's:
 
   gutters    The table prints at fixed character positions, columns separated
              by runs of spaces, each cell wrapped over as many physical lines
-             as it needs. 474 of 496 renditions. This module bounds those
+             as it needs. 474 of the first sample's 496 renditions. This module bounds those
              tables and reads their heading bands; fetch_procurement reads the
              rows within the bounds.
 
   collapsed  Whitespace is gone. Each cell is on its own line, or a few narrow
-             cells share one. 22 of 496 renditions - but they are the NEWEST
-             rendition for six of the eight projects, so they decide what the
-             current-state table says, and being 4% of documents does not make
-             them a tail case.
+             cells share one. 22 of the first sample's 496 renditions - but they
+             were the NEWEST rendition for six of its eight projects, so they
+             decide what the current-state table says and are not a tail case.
 
 Slicing a gutter table into its columns by character position was tried and is
 not here. The heading labels are centred over their columns and butt against
@@ -105,7 +104,7 @@ def catalogue(section):
 
     A superset because the same section is printed with different columns in
     different plans - a third of NON CONSULTING SERVICES tables carry the
-    consulting columns - and because 19% of renditions have no Estimated Amount
+    consulting columns - and because about a fifth of renditions have no Estimated Amount
     column at all, those being old enough that STEP printed only the actual. A
     reader that demanded a fixed column list would reject them; one that takes
     what it finds, in order, reads them.
@@ -195,8 +194,6 @@ def _label_positions(header, label, min_prefix=5):
     """
     for n in range(len(label), min_prefix - 1, -1):
         frag = label[:n]
-        hits = [(l.find(frag, k), n) for l in header
-                for k in [0] if frag in l]
         hits = []
         for line in header:
             k = line.find(frag)
@@ -247,10 +244,10 @@ def has_column(table, label):
     INDIVIDUAL CONSULTANTS have a Contract Type where GOODS has a
     Prequalification - and the same section is printed with different columns in
     different plans. One of those differences changes a value rather than just
-    the layout: 19% of renditions are old enough that STEP printed only an
+    the layout: about a fifth of renditions are old enough that STEP printed only an
     Actual Amount, and on those the single figure on a row is the actual. A
     reader that takes the first figure it finds as the estimate files an actual
-    of 0.00 as an estimate of zero on 25,793 of the corpus's records, which is
+    of 0.00 as an estimate of zero on 25,793 records of the first sample, which is
     worse than reading nothing because nothing about the result looks wrong.
 
     So the question is asked of each table's own heading band, per rendition,
@@ -295,9 +292,12 @@ def table_span(table):
 
 # A collapsed rendition has no column positions, so the cells have to be told
 # apart by what they contain. These are the shapes that are unambiguous.
-LOAN_RE = re.compile(r"^\s*(IDA|IBRD|TF|GRANT|CREDIT|DON|PRET)\s*/\s*\S", re.I)
+# The Loan / Credit cell: 'IDA / 66850', 'IBRD / 9455', 'TF / B1234'. One pattern,
+# used wherever a loan number has to be found or cut out.
+LOAN_WORDS = r"(?:IDA|IBRD|TF|GRANT|CREDIT|DON|PRET|COFN)"
+LOAN_RE = re.compile(rf"^\s*{LOAN_WORDS}\s*/\s*\S", re.I)
 AMOUNT_TOKEN_RE = re.compile(r"[\d,]+\.\d{2}")
-LOAN_INLINE = re.compile(r"\b(?:IDA|IBRD|TF|GRANT|CREDIT|DON|PRET)\s*/\s*[A-Z]?\s?\d[\dA-Z-]*")
+LOAN_INLINE = re.compile(rf"\b{LOAN_WORDS}\s*/\s*[A-Z]?\s?\d[\dA-Z-]*")
 # The first cell after the description in a collapsed row: the review type,
 # the method or the market approach, in the languages the plans use.
 CELL_OPEN = re.compile(
@@ -375,7 +375,7 @@ def read_collapsed_table(table, has_estimated=None):
     text sits between the last of them and the first milestone date.
 
     `has_estimated` says whether this table prints an Estimated Amount column.
-    It matters and it cannot be guessed from the row: 19% of renditions are old
+    It matters and it cannot be guessed from the row: about a fifth of renditions are old
     enough that STEP printed only the actual amount, and on those the single
     figure is the actual. Read positionally without knowing that, an actual of
     0.00 is filed as an estimate of zero, which is worse than reading nothing.

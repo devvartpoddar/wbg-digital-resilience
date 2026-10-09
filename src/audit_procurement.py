@@ -22,7 +22,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 
-from clean import CHAR_MAP                                # noqa: E402
 from clean_procurement import norm_ref, is_placeholder, REF_INLINE  # noqa: E402
 import glue                                                # noqa: E402
 
@@ -51,7 +50,7 @@ def _private_use(row):
     anything else in a Private Use Area is a code point whose only meaning lived
     in a font that is now gone."""
     out = []
-    for field in ("description", "bid_description", "supplier_name", "sector"):
+    for field in ("description", "supplier_name", "sector"):
         for c in row.get(field) or "":
             if 0xE000 <= ord(c) <= 0xF8FF or 0xF0000 <= ord(c) <= 0x10FFFD:
                 out.append(f"{field}:U+{ord(c):04X}")
@@ -60,14 +59,14 @@ def _private_use(row):
 
 @check("unicode replacement character", tables=("packages", "notices", "awards"))
 def _replacement(row):
-    return [f for f in ("description", "bid_description")
+    return [f for f in ("description",)
             if "\ufffd" in (row.get(f) or "")]
 
 
 @check("control or format character", tables=("packages", "notices", "awards"))
 def _control(row):
     out = []
-    for field in ("description", "bid_description"):
+    for field in ("description",):
         for c in row.get(field) or "":
             if unicodedata.category(c) in ("Cc", "Cf") and c not in "\n\t":
                 out.append(f"{field}:U+{ord(c):04X}")
@@ -79,7 +78,7 @@ def _spacing(row):
     """Descriptions only. Supplier names are interface metadata this stage does
     not rewrite, so a double space in one is not a cleaning defect."""
     out = []
-    for field in ("description", "bid_description"):
+    for field in ("description",):
         v = row.get(field) or ""
         if v != " ".join(v.split()):
             out.append(field)
@@ -91,7 +90,6 @@ def _spacing(row):
 # A second borrower reference inside a description means the record boundary was
 # missed and two packages were stitched into one. It is the only check that can
 # see the plan parser's worst failure, and it is exact rather than heuristic.
-REF_SHAPE = re.compile(r"^[A-Z0-9][A-Z0-9\u2013-]*$")
 
 
 @check("word glued to the next inside the description",
@@ -107,11 +105,11 @@ def _glued_inside(row):
     too and carry no case boundary to find them by - so read it as "at least
     this many", and read it alongside the seam count in the fetch report.
 
-    Nothing repairs these. They are made harmless in the matching copy instead;
-    see match_key in clean_procurement.py. The check exists so the size of the
-    loss stays visible rather than becoming invisible once it stops hurting.
+    glue.repair splits these at clean time; a hit here is one it declined,
+    usually a name the appraisal prose uses whole ('NetSec'). The matching copy
+    (match_key) ignores spaces altogether, so a leftover does not stop a match.
     """
-    field = "bid_description_clean" if "bid_description_clean" in row else "description_clean"
+    field = "description_clean"
     d = row.get(field) or ""
     v = VOCAB if (row.get("description_lang") or "en") == "en" else \
         getattr(VOCAB, "foreign", VOCAB)
@@ -124,7 +122,7 @@ def _glued_inside(row):
 def _broken_word(row):
     """'S upply', 'Ca pacity': two fragments that are one word the corpus uses.
     The same test glue.rejoin repairs by, so a hit is one it declined."""
-    field = "bid_description_clean" if "bid_description_clean" in row else "description_clean"
+    field = "description_clean"
     d = row.get(field) or ""
     v = VOCAB if (row.get("description_lang") or "en") == "en" else \
         getattr(VOCAB, "foreign", VOCAB)
@@ -135,9 +133,8 @@ def _broken_word(row):
 @check("description carries a second borrower reference")
 def _double_ref(row):
     """Two packages stitched into one: the next record's reference survived
-    inside this description. Checked on the MATCHING copy, which is the string
-    the parser produced and the one a later stage will match on - the published
-    string is display only and is allowed to be messy."""
+    inside this description. Checked on the cleaned description, which is the
+    one a later stage reads; the published string is kept as printed."""
     return REF_INLINE.findall(row.get("description_clean") or "")
 
 
@@ -210,11 +207,6 @@ def _short(row):
     return ["short"] if len(words) < 3 else []
 
 
-@check("language not determined")
-def _lang(row):
-    return [] if (row.get("description_lang") or "") in ("en", "fr", "es", "pt") else ["?"]
-
-
 # ----------------------------------------------------------- cross-field
 
 @check("planned date after revised date", severity="source")
@@ -249,7 +241,7 @@ def _marker_left(row):
 def _cells_left(row):
     """The Loan / Credit number, or the review type, method and market
     approach, read into the description from a neighbouring column."""
-    d = row.get("description_clean") or row.get("bid_description_clean") or ""
+    d = row.get("description_clean") or ""
     found = re.findall(r"\b(?:IDA|IBRD|TF|COFN)\s*/\s*[A-Z]?\d{3,}", d)
     found += re.findall(r"(?:Open|Limited|Direct)\s*-\s*(?:National|Internationa)"
                         r"|Single Stage\s*-\s*(?:One|Two)", d)
@@ -286,19 +278,19 @@ def _header_leak(row):
 
 @check("notice with no description", tables=("notices",), severity="source")
 def _notice_desc(row):
-    return [] if (row.get("bid_description") or "").strip() else ["empty"]
+    return [] if (row.get("description") or "").strip() else ["empty"]
 
 
 # ---------------------------------------------------------------- the profile
 
 ENUM_FIELDS = {
-    "packages": ["category", "category_raw", "method", "method_raw", "market_approach",
+    "packages": ["category", "method", "method_source", "method_raw", "market_approach",
                  "status", "status_raw", "description_lang", "is_placeholder",
-                 "is_rebid", "lot_or_phase", "component_source", "method_source",
-                 "amount_source", "status_source", "currency"],
-    "notices": ["notice_type", "procurement_category", "description_lang",
-                "is_placeholder", "country_code"],
-    "awards": ["procurement_group", "method", "review_type", "description_lang",
+                 "is_rebid", "lot_or_phase", "component_source", "amount_source",
+                 "status_source", "currency"],
+    "notices": ["notice_type", "notice_status", "category", "method", "description_lang",
+                "is_placeholder", "country_name"],
+    "awards": ["category", "method", "review_type", "description_lang",
                "is_placeholder", "currency"],
 }
 
@@ -316,7 +308,7 @@ def load_vocab(data):
     global VOCAB, NAMES
     proc = where(data, "procurement")
     raw = []
-    for name, field in (("packages_raw", "description"), ("notices_raw", "bid_description"),
+    for name, field in (("packages_raw", "description"), ("notices_raw", "description"),
                         ("awards_raw", "description")):
         path = os.path.join(proc, f"{name}.csv")
         if os.path.exists(path):
@@ -349,7 +341,7 @@ def main():
                         row.get("contract_id") or "?"
                     hits[name].append((t, key, str(found[:3]),
                                        (row.get("description_clean")
-                                        or row.get("bid_description_clean") or "")[:160]))
+                                        or "")[:160]))
     out = []
     out.append("procurement audit - prepared tables")
     out.append("")
@@ -380,7 +372,7 @@ def main():
     # buying recall at a price worth knowing about.
     out.append("despacing collisions - descriptions that differ but despace alike")
     out.append("=" * 86)
-    for t, field in (("packages", "description"), ("notices", "bid_description"),
+    for t, field in (("packages", "description"), ("notices", "description"),
                      ("awards", "description")):
         rows = tables.get(t) or []
         mkey = f"{field}_match"

@@ -169,8 +169,8 @@ def test_every_block_value_is_known(scanned):
 # reader of the file should copy.
 
 def _embeddings():
-    idx = os.path.join(DATA, "emb_index.csv")
-    npy = os.path.join(DATA, "paragraph_emb.npy")
+    idx = os.path.join(DATA, "embeddings", "emb_index.csv")
+    npy = os.path.join(DATA, "embeddings", "paragraph_emb.npy")
     if not (os.path.exists(idx) and os.path.exists(npy)):
         pytest.skip("no embeddings on disk; run src/embed.py first")
     numpy = pytest.importorskip("numpy")

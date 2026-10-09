@@ -525,3 +525,22 @@ def test_the_credential_never_reaches_disk(corpus, monkeypatch):
                 body = open(os.path.join(dirpath, name), encoding="utf-8",
                             errors="ignore").read()
                 assert FAKE_KEY not in body, f"credential written into {name}"
+
+
+def test_only_paragraphs_marked_for_the_model_are_embedded(tmp_path, monkeypatch):
+    """Front matter, tables and headings are kept in paragraphs.csv but marked
+    for_model=false; the embedding must leave them out."""
+    data = build_corpus(str(tmp_path))
+    path = os.path.join(data, "appraisal", "paragraphs.csv")
+    with open(path, newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    for i, r in enumerate(rows):
+        r["for_model"] = "false" if i == 0 else "true"
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
+    run(tmp_path, Stub(), monkeypatch)
+    ids = {r["paragraph_id"] for r in read_index(data)}
+    assert rows[0]["paragraph_id"] not in ids
+    assert {r["paragraph_id"] for r in rows[1:]} <= ids

@@ -87,13 +87,28 @@ class TestClosedValueSets:
         """The cell is wider than its column, so it prints as two pieces with
         the rest of the row's gap between them. 9,036 rows of the corpus."""
         assert F._first_token("0.00   Under Implementati      on   2021-05-05",
-                              F.STATUS_TOKENS) == "Under Implementation"
+                              F.STATUS_TOKENS) == "Under implementation"
 
-    def test_the_longer_exact_match_wins_over_a_shorter_despaced_one(self):
-        """Both passes run over the whole token list before the next begins. Per
-        token instead, a despaced hit on 'Signed' would beat an exact hit on
-        'Contract Signed' further down."""
-        assert F._first_token("   Contract Signed   ", F.STATUS_TOKENS) == "Contract Signed"
+    def test_a_wrapped_pending_implementation_is_not_read_as_pending(self):
+        """'Pending' is its own STEP value; when 'Implementation' wraps onto
+        later lines between other cells, the cell is still Pending
+        Implementation."""
+        assert F._status_token("0.00   Pending Impl   Open   ementat   ion") == \
+            "Pending Implementation"
+        assert F._status_token("0.00   Pending   2021-05-05") == "Pending"
+
+    def test_an_interleaved_status_is_read_from_its_head(self):
+        assert F._status_token("Under Imple   Open - National   mentation") == \
+            "Under implementation"
+
+    def test_the_longer_exact_match_wins_over_a_shorter_one(self):
+        """Tokens are tried longest first, so 'Pending Implementation' is not
+        read as 'Pending'."""
+        assert F._first_token("   Pending Implementation   ", F.STATUS_TOKENS) == \
+            "Pending Implementation"
+
+    def test_the_printed_words_are_kept(self):
+        assert F._first_token("  50,000.00  Achevé  2019-11-20", F.STATUS_TOKENS) == "Achevé"
 
     def test_a_french_method_is_recognised(self):
         assert F._first_token("  Demande de prix   Limited  ", F.METHOD_TOKENS) \
@@ -382,15 +397,15 @@ class TestTheWrapJoinAndTheLoanCell:
     matches, and the row is gone."""
 
     def test_a_loan_cell_is_never_glued_onto_a_reference(self):
-        out = F._join_wrapped_refs(["MZ-AAA-111-GO-RFQ", "IDA / D9060",
+        out = F._join_wrapped_refs(["MZ-AAA-111-GO-RFQ", "IDA / X1111",
                                     "/ Acquisition of furniture"])
-        assert "MZ-AAA-111-GO-RFQIDA / D9060" not in out
+        assert "MZ-AAA-111-GO-RFQIDA / X1111" not in out
         assert "MZ-AAA-111-GO-RFQ" in " ".join(out)
 
     def test_a_genuine_wrapped_reference_still_joins(self):
-        out = F._join_wrapped_refs(["PE-PRONATEL-196394-CW-",
-                                    "RFB / Elaboracion del estudio"])
-        assert out == ["PE-PRONATEL-196394-CW-RFB / Elaboracion del estudio"]
+        out = F._join_wrapped_refs(["BB-RADIO-222222-CW-",
+                                    "RFB / Estudio de las torres"])
+        assert out == ["BB-RADIO-222222-CW-RFB / Estudio de las torres"]
 
     def test_a_tail_that_lands_after_the_loan_line_still_joins(self):
         """The shape that cost 218 rows of the 70-project corpus.
@@ -399,11 +414,11 @@ class TestTheWrapJoinAndTheLoanCell:
         clipped reference, so the tail is not on the adjacent line. Looking only
         at the next line never joins it, and once the loan guard stopped the
         parser fabricating an identity out of the loan number, the record
-        vanished instead of being mis-keyed. Reproduced from
-        data/raw/plans/40013368.txt:1126-1128 - shape only, no borrower text."""
+        vanished instead of being mis-keyed. The layout reproduced, the text
+        invented."""
         out = F._join_wrapped_refs([
             " ZZ-AAAAA-111111-CS-IND      Component 4. Project Manag   Individual Consult",
-            "                             IDA / 70960   Prior   Open - National   48,000.00",
+            "                             IDA / 11111   Prior   Open - National   48,000.00",
             " V / A consultant role       ement and Implementation    ant Selection",
         ])
         assert any(l.lstrip().startswith("ZZ-AAAAA-111111-CS-INDV / A consultant role")
@@ -413,10 +428,10 @@ class TestTheWrapJoinAndTheLoanCell:
         """The loan and the amounts sit in that gap and belong to this record."""
         out = F._join_wrapped_refs([
             " ZZ-AAAAA-111111-CS-IND",
-            "   IDA / 70960   Prior   48,000.00",
+            "   IDA / 11111   Prior   48,000.00",
             " V / A consultant role",
         ])
-        assert any("IDA / 70960" in l and "48,000.00" in l for l in out)
+        assert any("IDA / 11111" in l and "48,000.00" in l for l in out)
 
     def test_a_long_token_is_not_glued_on_across_a_gap(self):
         """A clipped fragment is a character or three. Allowing any length at a

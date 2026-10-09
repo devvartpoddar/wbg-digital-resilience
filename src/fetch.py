@@ -86,7 +86,7 @@ def list_docs(project_id, doc_type):
     capping this silently truncates busy projects and hides their PAD."""
     q = urllib.parse.urlencode({
         "format": "json", "rows": "50", "projectid": project_id, "docty": doc_type,
-        "fl": "id,docty,display_title,disclosure_date,txturl,pdfurl,lang"})
+        "fl": "id,docty,display_title,disclosure_date,pdfurl,lang"})
     data = get(f"{WDS}?{q}", timeout=45).json()
     out = []
     for key, val in data.get("documents", {}).items():
@@ -98,7 +98,6 @@ def list_docs(project_id, doc_type):
             "title": (val.get("display_title") or "").replace("\xa0", " ").strip(),
             "disclosure_date": (val.get("disclosure_date") or "")[:10],
             "lang": val.get("lang") or "",
-            "txturl": val.get("txturl") or "",
             "pdfurl": val.get("pdfurl") or "",
         })
     return [d for d in out if d["doc_id"]]
@@ -107,8 +106,8 @@ def list_docs(project_id, doc_type):
 def fetch_pdf(doc, pdf_dir, counts, notes, pid, delay):
     """The PDF behind a document, cached on disk. Returns its bytes, or None.
 
-    The Bank's text rendition is no longer fetched. One already on disk from
-    an earlier run is still the fallback for a document whose PDF is missing."""
+    A document whose PDF cannot be had is noted and left out: clean.py reads
+    the PDF only."""
     dest = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
     if os.path.exists(dest):
         counts["pdf_cached"] += 1
@@ -150,14 +149,12 @@ def main():
     ap.add_argument("--delay", type=float, default=0.5, help="seconds between requests")
     args = ap.parse_args()
 
-    raw_dir = where(args.out, "rendition")
-
     projects = read_cohort(args.cohort)
     if args.limit:
         projects = projects[:args.limit]
     print(f"cohort: {len(projects)} projects included", flush=True)
 
-    by_doc, notes = {}, []
+    by_doc, notes, listed = {}, [], set()
     counts = {"no_docs": 0, "error": 0, "pdf_fetched": 0, "pdf_cached": 0,
               "pdf_missing": 0}
     pdf_dir = where(args.out, "pdf")
@@ -176,6 +173,7 @@ def main():
             print(f"[{n}/{len(projects)}] {pid} listing failed: {exc}", flush=True)
             continue
 
+        listed.add(pid)
         if not docs:
             counts["no_docs"] += 1
             notes.append(f"{pid}\tno appraisal documents returned")
@@ -188,10 +186,7 @@ def main():
             pdf_path = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
             cached = os.path.exists(pdf_path)
             pdf_blob = fetch_pdf(doc, pdf_dir, counts, notes, pid, args.delay)
-            # A document with no PDF is kept only when a text rendition from
-            # an earlier run is already on disk for clean.py to fall back on.
-            rendition = os.path.join(raw_dir, f"{doc['doc_id']}.txt")
-            if not pdf_blob and not os.path.exists(rendition):
+            if not pdf_blob:
                 continue
             when = os.path.getmtime(pdf_path) if cached else time.time()
             by_doc[doc["doc_id"]] = {
@@ -201,14 +196,30 @@ def main():
                 "title": doc["title"], "disclosure_date": doc["disclosure_date"],
                 "lang": doc["lang"],
                 "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when)),
-                "pdf_url": doc["pdfurl"] if pdf_blob else "",
-                "pdf_bytes": len(pdf_blob) if pdf_blob else "",
-                "pdf_sha256": hashlib.sha256(pdf_blob).hexdigest() if pdf_blob else "",
+                "pdf_url": doc["pdfurl"],
+                "pdf_bytes": len(pdf_blob),
+                "pdf_sha256": hashlib.sha256(pdf_blob).hexdigest(),
             }
 
         if n % 10 == 0:
             print(f"  ...{n}/{len(projects)} projects, {len(by_doc)} documents", flush=True)
 
+    docs_csv = where(args.out, "documents")
+    # A project this run did not list - outside a --limit smoke run, or its
+    # listing failed - keeps the documents an earlier run recorded for it, so a
+    # partial run never shrinks the corpus.
+    if os.path.exists(docs_csv):
+        with open(docs_csv, newline="", encoding="utf-8") as fh:
+            for old in csv.DictReader(fh):
+                kept = {p for p in old["project_ids"].split("|") if p and p not in listed}
+                if not kept:
+                    continue
+                if old["doc_id"] in by_doc:
+                    by_doc[old["doc_id"]]["_projects"] |= kept
+                else:
+                    row = {c: old.get(c, "") for c in DOC_COLS if c != "project_ids"}
+                    by_doc[old["doc_id"]] = dict(row, _projects=kept)
+                    counts["kept_from_earlier_run"] = counts.get("kept_from_earlier_run", 0) + 1
     rows = []
     for did in sorted(by_doc):
         row = dict(by_doc[did])
@@ -216,7 +227,6 @@ def main():
         rows.append(row)
     # Deterministic order so a re-run produces the same file.
     rows.sort(key=lambda r: r["doc_id"])
-    docs_csv = where(args.out, "documents")
     with open(docs_csv, "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=DOC_COLS, lineterminator="\n")
         w.writeheader()

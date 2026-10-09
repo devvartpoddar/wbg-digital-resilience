@@ -10,24 +10,21 @@ Writes data/raw/...                              (gitignored raw artefacts)
        data/procurement/packages_raw.csv
        data/procurement/notices_raw.csv
        data/procurement/awards_raw.csv
-       data/procurement/package_changes.csv
        data/reports/fetch_procurement.txt
 
-Built for re-running, because the procurement plan is the document that recurs.
-Three disciplines, all from the card and all load-bearing:
+Built for re-running, because the procurement plan is the document that recurs:
 
-  * Content-hash every artefact. A re-fetch that returns identical bytes is not a
-    new version and writes no new row. The hash is the identity of a plan
-    rendition, the same way the SHA-256 of a text is the identity of an embedding
-    cache entry - which is why re-running the embedder is free.
-  * Never overwrite a plan version. Every distinct (doc_id, content_sha256) is a
-    row in packages_raw with its own fetched_at. History is the product.
-  * Write the diff. package_changes.csv says, per package, what moved between
-    consecutive plan versions: appeared, status, amount, disappeared.
+  * Every artefact is content-hashed: the hash is the identity of a plan
+    rendition, recorded on each of its rows.
+  * Every plan version is kept. Each plan document is its own set of rows in
+    packages_raw; clean_procurement assembles one row per package from them.
+  * Nothing fetched is overwritten. A plan, notice or award file already on disk
+    is not downloaded again; --refresh downloads again and, when the bytes
+    differ, keeps the earlier file beside the new one rather than replacing it.
 
-Re-run cost: a plan whose raw file is already on disk is not re-downloaded, which
-mirrors src/fetch.py. --refresh forces the download and re-hash, which is how a
-re-published rendition under the same doc_id is noticed.
+This stage records what was published. Everything derived from it - the method
+code, the status label, the language, the placeholder flag, hashes of the
+cleaned text - is computed in clean_procurement.
 
 Two of the three sources are structured JSON. The third is not: procurement plans
 are published only as a PDF and its text rendition, and the text rendition is a
@@ -44,10 +41,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 
 import plan_table                                     # noqa: E402
-from fetch import get, HEADERS, read_cohort            # noqa: E402
+from fetch import get, read_cohort            # noqa: E402
 from clean_procurement import (                        # noqa: E402
-    CLEAN_VERSION, norm_ref, split_markers, is_placeholder, detect_lang,
-    norm_status, norm_method, norm_category, desc_sha256, fold_chars,
+    STATUS_MAP, METHOD_TEXT, fold_chars,
 )
 
 WDS = "https://search.worldbank.org/api/v3/wds"
@@ -66,7 +62,7 @@ REF_RE = re.compile(r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){1,5}
 # Does a rendition's text look like it carries borrower references at all? Used
 # only to tell an empty package table apart from a parse failure.
 PLAN_REF_SHAPE = re.compile(r"\b[A-Z]{2,}[-\u2013][A-Z0-9]{1,12}[-\u2013][0-9]{3,}")
-LENDER_RE = re.compile(r"\s*IDA\s*/\s*[\dA-Za-z]+\s*$")
+LENDER_RE = re.compile(r"\s*" + plan_table.LOAN_INLINE.pattern + r"\s*$")
 # Column headings the rendition repeats down every page. A heading taken as a
 # continuation line is how "Activity Reference No." ends up inside a package
 # description - found by reading the first full run, where 213 of 4,077 rows
@@ -77,81 +73,43 @@ HEADER_LINE_RE = re.compile(
     r"General Information|Country:|Project ID|Project Name|Executing Agency|"
     r"Date of the Procurement Plan|Period covered|Revised Plan Date|"
     r"PROCUREMENT|PLAN\s*$)")
-SECTION_RE = re.compile(r"^\s*(WORKS|GOODS|CONSULTING SERVICES|CONSULTING FIRMS|"
-                        r"INDIVIDUAL CONSULTANTS|NON[ -]CONSULTING SERVICES|"
-                        r"NON CONSULTING SERVICES)\s*$")
 # The closed value sets STEP prints in the Method, Market Approach and Process
-# Status cells. Longest first, because _first_token returns the first that
-# matches and 'Signed' is a prefix of nothing but 'Under' is a prefix of three.
+# Status cells. The method and status words are the keys of the maps that
+# clean_procurement turns into the Bank's codes and STEP's labels, so the word
+# the parser can find and the word the cleaner can map are one list, in four
+# languages. Longest first, because _first_token returns the first that
+# matches: 'Pending Implementation' must be tried before 'Pending'.
 #
-# These lists were English-only until they were checked against the corpus, and
-# that was a silent, large defect: a francophone borrower prints 'Achevé', not
-# 'Completed', so every one of its packages came back with no status and no
-# method. Niger read 5% populated and Mozambique 3%, and both were read as
-# layout failures when the layout was fine and the vocabulary was not.
-#
-# The values below are not translations guessed at a desk. They were mined from
-# the 496 renditions without assuming any vocabulary at all - the Process Status
-# cell is whatever sits between the Actual Amount and the first milestone date,
-# so a regex over that gap enumerates the set - and the whole corpus yields 13
-# distinct status strings. Adding a borrower in a new language means re-running
-# that mining step, not inventing words.
-METHOD_TOKENS = ("Request for Bids", "Request for Quotations", "Direct Selection",
-                 "Direct Contracting", "Consultant Qualification Selection",
-                 "Consultant Qualification  Selection", "Quality And Cost Based Selection",
-                 "Quality and Cost Based Selection", "Quality And Cost-Based Selection",
-                 "Least Cost Selection", "Individual Consultant Selection",
-                 "Single Source Selection", "Framework Agreement", "Competitive Dialogue",
-                 # French
-                 "Selection fondee sur les qualifications des consultants",
-                 "Selection fondee sur la qualite et le cout",
-                 "Selection au moindre cout", "Passation de marche de gre a gre",
-                 "Entente directe", "Demande de prix", "Appel d'offres",
-                 "Consultant individuel", "Individuel")
+# The vocabularies were mined from the plans themselves, not translated at a
+# desk: the Process Status cell is whatever sits between the Actual Amount and
+# the first milestone date, so a regex over that gap enumerates the set. Adding
+# a borrower in a new language means re-running that mining step.
+METHOD_TOKENS = tuple(sorted(METHOD_TEXT, key=lambda k: (-len(k), k)))
+STATUS_TOKENS = tuple(sorted(STATUS_MAP, key=lambda k: (-len(k), k)))
 APPROACH_TOKENS = ("Open - International", "Open - National", "Limited - International",
                    "Limited - National", "Direct - International", "Direct - National",
                    "Open - international", "Open - national", "Open / National",
                    "Limited", "Direct", "Open")
-STATUS_TOKENS = ("Pending Implementation", "Under Implementation", "Under Preparation",
-                 "Under Evaluation", "Under Review", "Not Started", "In Progress",
-                 "Contract Completed", "Contract Signed", "Terminated", "Completed",
-                 "Cancelled", "Canceled", "Advertised", "Signed", "Planned", "Pending",
-                 # French
-                 "En attente d'execution", "En cours d'execution", "En cours d'examen",
-                 "En cours de preparation", "En cours d'evaluation",
-                 "Acheve", "Annule", "Resilie", "Signe", "Planifie",
-                 # Portuguese
-                 "Em execucao", "Em preparacao", "Concluido", "Cancelado", "Assinado",
-                 "Rescindido",
-                 # Spanish
-                 "En ejecucion", "En preparacion", "En evaluacion", "Firmado",
-                 "Pendiente", "Planificado", "Rescindido", "Anulado")
-
 PACKAGE_COLS = [
-    "package_version_id", "package_id", "project_id", "plan_version", "plan_doc_id",
-    "plan_disclosure_date", "borrower_ref", "description", "description_sha256",
-    "description_lang", "is_placeholder", "category", "category_raw", "method",
-    "method_raw", "market_approach", "status", "status_raw", "planned_date",
-    "revised_date", "estimated_amount", "currency", "content_sha256", "fetched_at",
+    "package_version_id", "project_id", "plan_version", "plan_doc_id",
+    "plan_disclosure_date", "borrower_ref", "description", "category_raw",
+    "method_raw", "market_approach", "status_raw", "planned_date", "revised_date",
+    "estimated_amount", "actual_amount", "currency", "content_sha256", "fetched_at",
     "section", "record_index", "cells_raw",
 ]
 NOTICE_COLS = [
-    "notice_id", "project_id", "notice_type", "publication_date", "deadline_date",
-    "bid_description", "bid_description_sha256", "description_lang", "is_placeholder",
-    "procurement_category", "country_code", "country_name", "sector", "url",
+    "notice_id", "project_id", "notice_type", "notice_status", "publication_date",
+    "deadline_date", "borrower_ref", "description", "category_raw", "method_code",
+    "method_raw", "country_name", "notice_lang",
 ]
 AWARD_COLS = [
-    "contract_id", "project_id", "borrower_ref", "description", "description_sha256",
-    "description_lang", "is_placeholder", "signed_date", "no_objection_date",
-    "total_amount", "currency", "procurement_group", "method", "method_raw", "review_type",
-    "supplier_name", "supplier_country", "supplier_amount", "region", "sector",
+    "contract_id", "project_id", "borrower_ref", "description", "signed_date",
+    "no_objection_date", "total_amount", "currency", "category_raw", "method_raw",
+    "review_type", "supplier_name", "supplier_country", "supplier_amount", "region",
+    "sector",
 ]
 FETCH_LOG_COLS = ["fetch_id", "source", "endpoint", "query_params", "fetched_at",
                   "record_count", "response_sha256"]
-CHANGE_COLS = ["project_id", "key", "key_basis", "borrower_ref", "change", "field",
-               "from_value", "to_value", "from_plan_version", "to_plan_version",
-               "detected_at"]
-
 
 # ------------------------------------------------------------------ utilities
 
@@ -279,14 +237,14 @@ def _join_wrapped(parts):
 # Both halves are reference-shaped, so this is a shape test, not a guess at
 # wording. Three shapes are in the corpus:
 #
-#   ' PE-PRONATEL-196394-CW-'          the reference alone on its line
+#   ' BB-RADIO-222222-CW-'          the reference alone on its line
 #   'RFB / Elaboración del'
 #
-#   'SO-MOCT-FGS-358521-CS-IN       Component 4. Project Manag  ...'
+#   'SO-AAA-BBB-358521-CS-IN       Component 4. Project Manag  ...'
 #   'DV / PIU Project Coordinator    Component 4. Project Manag  ...'
 #   the reference line also carries that row's other columns
 #
-#   'DM-MPWDE-220449-CS-QCB'           the clip fell inside the token, so the
+#   'XX-AGENCY-220449-CS-QCB'           the clip fell inside the token, so the
 #   'S / Upgrades to the establish'    join needs no separator at all
 #
 # The digit requirement keeps this from firing on a heading: an all-caps section
@@ -312,14 +270,14 @@ REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9][A-Z0-9\u2013\u2014-]{0,20})\s*/\s*(.*
 # before the slash is reached. REF_RE wants both on one line and matches
 # neither, and the record is lost.
 #
-# Measured on the biggest plan of each of eight countries: Mozambique parses 3
+# Measured on the biggest plan of each country in the first, eight-country sample: Mozambique parses 3
 # references normally against 47 orphaned this way, Niger 128 against 61,
 # Uganda 153 against 21. Tanzania, Nigeria and Kenya have none - their
 # renditions keep the slash on the reference's line.
 # Alone in its COLUMN, not necessarily alone on its line: a fixed-width
 # rendition prints the row's other columns beside it, and requiring the whole
 # line to hold nothing else misses the shape wherever the layout kept its
-# columns. Those renditions are 474 of 496.
+# columns: 474 of the first sample's 496 renditions.
 REF_ALONE = re.compile(
     r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){2,5})(\s{2,}\S.*)?\s*$")
 SLASH_TAIL = re.compile(r"^\s*(/\s*\S.*)$")
@@ -339,21 +297,21 @@ def _join_wrapped_refs(lines):
     followed it stays where it was, and the rest of the line - the row's other
     columns, which carry the method, the status and the dates - is kept.
 
-        [' PE-PRONATEL-196394-CW-',      ->  ['PE-PRONATEL-196394-CW-RFB / Elaboración del']
+        [' BB-RADIO-222222-CW-',      ->  ['BB-RADIO-222222-CW-RFB / Estudio de las']
          'RFB / Elaboración del']
 
-        ['SO-MOCT-FGS-358521-CS-IN   Component 4. ...',  ->  ['...CS-INDV / PIU Project
+        ['SO-AAA-BBB-358521-CS-IN   Component 4. ...',  ->  ['...CS-INDV / PIU Project
          'DV / PIU Project Coordinator   Component 4. ...']       Coordinator   Component 4. ...']
 
     The tail is not always on the next line. In a wide layout the row's other
     cells print between the two halves, and the Loan/Amount line lands in the
     gap:
 
-        ' GH-MOCDTI-481188-CS-IND     Component 4. Project Manag   Individual Consult'
-        '                             IDA / 70960   Prior   Open - National   48,000.00'
-        ' V / Innovation Specialist   ement and Implementation    ant Selection'
+        ' GH-AAAAA-481188-CS-IND     Component 4. Project Manag   Individual Consult'
+        '                             IDA / 11111   Prior   Open - National   48,000.00'
+        ' V / A consultant role   ement and Implementation    ant Selection'
 
-    That is one record - 'GH-MOCDTI-481188-CS-INDV / Innovation Specialist' -
+    That is one record - 'GH-AAAAA-481188-CS-INDV / A consultant role' -
     and looking only at the adjacent line never joins it. 218 rows of the
     70-project corpus were lost that way, in Ghana's P176126 and Burundi's
     P176396, once the loan guard stopped the parser fabricating an identity out
@@ -376,18 +334,18 @@ def _join_wrapped_refs(lines):
                     # below - and it means the reference on the head line was
                     # complete, not clipped. Stopping here is what keeps the
                     # scan from reaching past it and gluing a later fragment on:
-                    # 'MZ-MJACER-423912-GO-RFQ' whose description reads
+                    # 'MZ-AAA-423912-GO-RFQ' whose description reads
                     # '/ o Urgent consumables for' then 'DNRN / DNIC / PIU' two
-                    # lines on became 'MZ-MJACER-423912-GO-RFQDNRN', a
+                    # lines on became 'MZ-AAA-423912-GO-RFQDNRN', a
                     # legitimate package turned into a fabricated one. The
                     # orphan branch handles this record correctly; the wrap
                     # branch only has to get out of its way.
                     break
                 # A Loan / Credit cell has the same shape as the tail of a
-                # wrapped reference - 'IDA / D9060' reads as the token 'IDA'
+                # wrapped reference - 'IDA / X1111' reads as the token 'IDA'
                 # followed by a slash and a description - and gluing one on
-                # destroys the package: 'MZ-MJACER-423921-GO-RFQ' plus
-                # 'IDA / D9060' becomes 'MZ-MJACER-423921-GO-RFQIDA / D9060',
+                # destroys the package: 'MZ-AAA-423921-GO-RFQ' plus
+                # 'IDA / X1111' becomes 'MZ-AAA-111-GO-RFQIDA / X1111',
                 # which REF_RE happily accepts and which matches no package that
                 # exists. Skipped rather than stopped at, because in the wide
                 # layouts the loan cell is exactly what sits BETWEEN a clipped
@@ -463,31 +421,32 @@ def segment_for_project(text, project_id):
     """Cut a bundled rendition down to this project's own plan.
 
     Some plan documents are published with a text rendition that concatenates
-    the plans of many operations - one 8.9 MB rendition returned for Tanzania's
-    P160766 carries preambles for 59 projects. Parsing it whole would attribute
-    other countries' packages to this project, which is worse than not parsing
-    it, because the row looks valid. A rendition with more than one preamble is
-    therefore split at the preambles and only the segment naming this project is
-    used; a rendition with one preamble is returned untouched.
+    the plans of many operations - one rendition returned for a single project
+    carries preambles for 59. Parsing it whole would attribute other projects'
+    packages to this one, which is worse than not parsing it, because the rows
+    look valid. A rendition with more than one preamble is therefore split at
+    the preambles and only the segment naming this project is used.
+
+    Returns (text, kind): kind is "single" for an ordinary rendition, "cut" when
+    this project's segment was found in a bundle, "not_found" when it was not.
     """
-    preambles = [i for i, ln in enumerate(text.split("\n"))
-                 if ln.startswith("Project information")]
-    if len(preambles) < 2:
-        return text, False
     lines = text.split("\n")
+    preambles = [i for i, ln in enumerate(lines) if ln.startswith("Project information")]
+    if len(preambles) < 2:
+        return text, "single"
     bounds = preambles + [len(lines)]
     for a, b in zip(bounds, bounds[1:]):
         head = "\n".join(lines[a:min(a + 6, b)])
         if project_id in head:
-            return "\n".join(lines[a:b]), True
-    return text, True
+            return "\n".join(lines[a:b]), "cut"
+    return text, "not_found"
 
 
 def split_ref_chain(desc, fallback):
     """Recover the package reference from the joined first column.
 
     The reference cell is a chain of one or two references followed by the
-    description: 'TZ-MCIT-254784-CW-RFB / Rehabilitation of ...', or
+    description: 'AA-AGENCY-555555-CW-RFB / Rehabilitation of ...', or
     'BJ-UCP / PADA-43641-GO-RFQ / Fourniture de ...' where the PIU prints its own
     name first. Either can be clipped mid-token by the column edge - 'PADA-43641-
     GO-' plus 'RFQ' on the next line - so this reads the JOINED string rather
@@ -512,7 +471,7 @@ def split_ref_chain(desc, fallback):
 def _parse_collapsed(tables, doc_meta):
     """Rows out of a rendition that prints the table with no column positions.
 
-    These are 22 of the corpus's 496 renditions and they used to yield nothing
+    These were 22 of the first sample's 496 renditions and they used to yield nothing
     at all - the parser for the fixed-width layout splits a line at the first
     run of two spaces, and in a collapsed rendition there are none, so every
     line became the description and no metadata column was ever found. They
@@ -559,6 +518,8 @@ def _parse_collapsed(tables, doc_meta):
                 "revised_date": dates[-1] if len(dates) > 1 else "",
                 "estimated_amount": ""
                     if refused else _as_amount(rec["estimated_amount"]),
+                "actual_amount": ""
+                    if refused else _as_amount(rec["actual_amount"]),
                 "currency": "USD",
                 "content_sha256": doc_meta["content_sha256"],
                 "fetched_at": doc_meta["fetched_at"],
@@ -591,8 +552,8 @@ def parse_plan_text(text, doc_meta):
     Only the tables. A plan document is two things bolted together and one of
     them is not data: the front is narrative the borrower writes, sometimes with
     annex tables of its own, and the back is generated by STEP. plan_table finds
-    the five STEP sections exactly - all 496 renditions of the eight-country
-    corpus carry all five, with the "Activity Reference No." heading as the test
+    the five STEP sections exactly - every rendition of the first, eight-country
+    sample carries all five, with the "Activity Reference No." heading as the test
     that tells a heading from the same word in a sentence - and records are
     built from inside those bounds and nowhere else.
 
@@ -625,7 +586,7 @@ def parse_plan_text(text, doc_meta):
     for table in tables:
         start, end = plan_table.table_span(table)
         covered.update(range(start, end))
-        # Asked of THIS table's heading band. 19% of renditions print no
+        # Asked of THIS table's heading band. About a fifth of renditions print no
         # Estimated Amount column at all, and on those the figure on the row is
         # the actual - filing it as an estimate would invent a number the plan
         # never stated, on the one field that is carried forward.
@@ -682,15 +643,18 @@ def _plan_row(rec, section, has_estimated, doc_meta, index):
     ref, desc = split_ref_chain(desc, rec["ref"])
     body = " ".join(rec["body"])
     numbers = DATE_RE.findall(body)
-    amount = None
-    if has_estimated:
-        for tok in re.split(r" {2,}|\s{3,}", body):
-            if AMOUNT_RE.match(tok.strip()):
-                try:
-                    amount = float(tok.replace(",", ""))
-                except ValueError:
-                    continue
-                break
+    # The figures in print order: Estimated then Actual where the table has an
+    # Estimated column; only the Actual where it does not (older plans).
+    figures = []
+    for tok in re.split(r" {2,}|\s{3,}", body):
+        if AMOUNT_RE.match(tok.strip()):
+            try:
+                figures.append(float(tok.replace(",", "")))
+            except ValueError:
+                continue
+    estimated = figures[0] if has_estimated and figures else None
+    actual = (figures[1] if len(figures) > 1 else None) if has_estimated else \
+        (figures[0] if figures else None)
     return {
         "project_id": doc_meta["project_id"],
         "plan_version": doc_meta["doc_id"],
@@ -701,11 +665,12 @@ def _plan_row(rec, section, has_estimated, doc_meta, index):
         "category_raw": section,
         "method_raw": _first_token(body, METHOD_TOKENS),
         "market_approach": _first_token(body, APPROACH_TOKENS),
-        "status_raw": _first_token(body, STATUS_TOKENS),
+        "status_raw": _status_token(body),
         "cells_raw": _cells_text(body),
         "planned_date": numbers[0] if numbers else "",
         "revised_date": numbers[-1] if len(numbers) > 1 else "",
-        "estimated_amount": "" if amount is None else f"{amount:.2f}",
+        "estimated_amount": "" if estimated is None else f"{estimated:.2f}",
+        "actual_amount": "" if actual is None else f"{actual:.2f}",
         "currency": "USD",
         "content_sha256": doc_meta["content_sha256"],
         "fetched_at": doc_meta["fetched_at"],
@@ -752,24 +717,63 @@ def _match_form(value):
     return folded, re.sub(r"\s+", "", folded)
 
 
+def _status_token(body):
+    """The Process Status cell's word. A status too wide for its column wraps
+    and is interleaved with the next columns' text: 'Pending Impl' ... 'ementat'
+    ... 'ion', or 'Under Imple' ... 'mentation'. An exact match would take the
+    first piece for 'Pending' (a different STEP value) or find nothing, so a
+    clipped head is matched too - only when it opens exactly one status."""
+    found = _first_token(body, STATUS_TOKENS)
+    folded, flat = _match_form(body)
+    if found.lower() == "pending" and re.search(r"pending\b.{0,80}?\bimpl", folded):
+        return "Pending Implementation"
+    if found:
+        return found
+    heads = {}
+    for tok in STATUS_TOKENS:
+        _, dt = _match_form(tok)
+        if len(dt) >= 10 and dt[:10] in flat:
+            heads.setdefault(dt[:10], set()).add(tok)
+    hits = {t for ts in heads.values() for t in ts}
+    if len(hits) != 1:
+        return ""
+    t = hits.pop()
+    return t[:1].upper() + t[1:]
+
+
+def _fold_same_length(text):
+    """_match_form's folding, one character for one, so a match position in the
+    folded text is the same position in the printed text."""
+    out = []
+    for ch in text or "":
+        base = unicodedata.normalize("NFKD", ch)[:1] or ch
+        base = "'" if base in "\u2019\u02bc" else base
+        low = base.lower()
+        out.append(low if len(low) == 1 else base)
+    return "".join(out)
+
+
 def _first_token(text, tokens):
-    """The first of `tokens` that appears in `text`, or ''.
+    """The words of the first of `tokens` found in `text`, as printed, or ''.
 
     Two passes, and never one: an exact match on the folded text is tried for
     every token before any despaced match is considered. Doing it token by token
     instead would let a despaced match on a short token beat an exact match on a
-    longer one further down the list, which is how 'Signed' wins over 'Contract
-    Signed'.
+    longer one further down the list. An exact match returns the cell's own
+    words ('Achevé'); a despaced one, where the cell is broken up, returns the
+    vocabulary word it matched.
     """
-    ftext, dtext = _match_form(text)
+    ftext = _fold_same_length(text)
+    _, dtext = _match_form(text)
     for t in tokens:
         ft, _ = _match_form(t)
-        if re.search(r"(?<!\w)" + re.escape(ft) + r"(?!\w)", ftext):
-            return t
+        m = re.search(r"(?<!\w)" + re.escape(ft) + r"(?!\w)", ftext)
+        if m:
+            return re.sub(r"\s+", " ", text[m.start():m.end()])
     for t in tokens:
         _, dt = _match_form(t)
         if len(dt) >= 6 and dt in dtext:
-            return t
+            return t[:1].upper() + t[1:]
     return ""
 
 
@@ -836,12 +840,12 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
             continue
         path = os.path.join(raw_dir, f"{d['doc_id']}.txt")
         text = blob.decode("utf-8", errors="replace")
-        text, bundled = segment_for_project(text, pid)
-        if bundled:
-            # A multi-operation bundle. Kept on disk, counted, and NOT parsed:
-            # attributing another operation's packages to this project would put
-            # rows in the table that look exactly like real ones.
-            bundle_docs.append(d["doc_id"])
+        text, kind = segment_for_project(text, pid)
+        if kind != "single":
+            bundle_docs.append((d["doc_id"], kind))
+        if kind == "not_found":
+            # A bundle that does not name this project: kept on disk, counted,
+            # and not parsed, so no other operation's packages land here.
             continue
         meta = {
             "project_id": pid, "doc_id": d["doc_id"],
@@ -861,8 +865,9 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
             empty_docs.append((d["doc_id"], pid,
                                bool(PLAN_REF_SHAPE.search(text))))
         for r in parsed:
-            r["package_id"] = r["borrower_ref"]
-            r["package_version_id"] = f"{d['doc_id']}:{r['borrower_ref']}"
+            # Position in the plan, not the reference: a plan can list two
+            # packages under one generic reference ('CS-INDV').
+            r["package_version_id"] = f"{d['doc_id']}:{r['record_index']:05d}"
             rows.append(r)
 
     print(f"  parsed {len(rows):,} package rows from {len(blobs):,} renditions",
@@ -871,16 +876,31 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
             bundle_docs, empty_docs)
 
 
+def store_keeping_old(path, blob):
+    """Write a fetched file. When one is already there with different bytes -
+    a re-published plan, a changed interface response - the old one is kept
+    beside it, named by its own checksum, never overwritten."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    if os.path.exists(path):
+        old = open(path, "rb").read()
+        if old == blob:
+            return
+        stem, ext = os.path.splitext(path)
+        keep = f"{stem}.{sha256_bytes(old)[:12]}{ext}.old"
+        if not os.path.exists(keep):
+            os.replace(path, keep)
+    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.part"
+    with open(tmp, "wb") as fh:
+        fh.write(blob)
+    os.replace(tmp, path)
+
+
 def _fetch_plan_file(path, url, refresh, delay):
     if os.path.exists(path) and not refresh:
         return open(path, "rb").read(), False
     r = get(url, timeout=120)
     blob = r.content
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.part"
-    with open(tmp, "wb") as fh:
-        fh.write(blob)
-    os.replace(tmp, path)
+    store_keeping_old(path, blob)
     time.sleep(delay)
     return blob, True
 
@@ -914,30 +934,28 @@ def collect_notices(projects, data, log, refresh, delay):
                     time.sleep(delay)
                 blob = json.dumps(records, ensure_ascii=False, sort_keys=True,
                                   indent=0).encode()
-                tmp = path + ".part"
-                open(tmp, "wb").write(blob)
-                os.replace(tmp, path)
+                store_keeping_old(path, blob)
                 time.sleep(delay)
         except Exception as exc:                       # noqa: BLE001
             failures.append((pid, str(exc)))
             continue
         for rec in records:
-            desc = _clean_space(rec.get("bid_description") or "")
             rows.append({
                 "notice_id": str(rec.get("id") or ""),
                 "project_id": rec.get("project_id") or pid,
                 "notice_type": rec.get("notice_type") or "",
+                "notice_status": rec.get("notice_status") or "",
                 "publication_date": _iso_date(rec.get("noticedate")),
                 "deadline_date": _iso_date(rec.get("submission_deadline_date")),
-                "bid_description": desc,
-                "bid_description_sha256": desc_sha256(desc),
-                "description_lang": detect_lang(desc),
-                "is_placeholder": str(is_placeholder(desc)).lower(),
-                "procurement_category": norm_category(rec.get("procurement_group")),
-                "country_code": rec.get("country_code") or rec.get("contact_ctry_code") or "",
+                # The borrower reference the notice was issued under: the key
+                # that ties a notice to its plan package and its award.
+                "borrower_ref": (rec.get("bid_reference_no") or "").strip(),
+                "description": _clean_space(rec.get("bid_description") or ""),
+                "category_raw": rec.get("procurement_group") or "",
+                "method_code": rec.get("procurement_method_code") or "",
+                "method_raw": rec.get("procurement_method_name") or "",
                 "country_name": rec.get("project_ctry_name") or "",
-                "sector": _join_sector(rec.get("sector")),
-                "url": rec.get("url") or "",
+                "notice_lang": rec.get("notice_lang_name") or "",
             })
     return rows, failures
 
@@ -970,9 +988,7 @@ def collect_awards(projects, data, log, refresh, delay):
                     time.sleep(delay)
                 blob = json.dumps(records, ensure_ascii=False, sort_keys=True,
                                   indent=0).encode()
-                tmp = path + ".part"
-                open(tmp, "wb").write(blob)
-                os.replace(tmp, path)
+                store_keeping_old(path, blob)
                 time.sleep(delay)
         except Exception as exc:                       # noqa: BLE001
             failures.append((pid, str(exc)))
@@ -999,16 +1015,11 @@ def collect_awards(projects, data, log, refresh, delay):
                 "project_id": rec.get("projectid") or pid,
                 "borrower_ref": (rec.get("contr_refnum") or "").strip(),
                 "description": desc,
-                "description_sha256": desc_sha256(desc),
-                "description_lang": detect_lang(desc),
-                "is_placeholder": str(is_placeholder(desc)).lower(),
                 "signed_date": _iso_date(rec.get("contr_sgn_date")),
                 "no_objection_date": _iso_date(rec.get("contr_no_obj_dat")),
                 "total_amount": _num(rec.get("total_contr_amnt")),
                 "currency": "USD",
-                "procurement_group": norm_category(rec.get("procurement_group")),
-                "method": norm_method(rec.get("procu_meth_text") or "",
-                                      norm_category(rec.get("procurement_group"))),
+                "category_raw": rec.get("procurement_group") or "",
                 "method_raw": (rec.get("procu_meth_text") or "").strip(),
                 "review_type": (rec.get("rvw_type") or "").strip().lower(),
                 "supplier_name": "|".join(dict.fromkeys(n for n in names if n)),
@@ -1056,69 +1067,6 @@ def _iso_date(v):
 
 # -------------------------------------------------------------------- the diff
 
-def package_changes(rows):
-    """What moved between consecutive plan versions, per package.
-
-    Keyed on the normalised borrower reference where the reference is present,
-    and on a hash of the normalised description where it is not. A package with
-    neither cannot be followed across versions; those are counted in the report
-    rather than guessed at, because a wrong key silently invents a change.
-    """
-    by_plan = {}
-    for r in rows:
-        by_plan.setdefault((r["project_id"], r["plan_version"]), []).append(r)
-    # plan order: oldest disclosure date first, tie-broken by doc id
-    order = sorted(by_plan, key=lambda k: (by_plan[k][0]["plan_disclosure_date"], k[1]))
-    changes, unkeyable = [], 0
-    # Keyed by (project, key), not by key alone. Generic references recur across
-    # projects - 'CS-INDV', 'GO-RFB', 'CS-QCBS' each appear under three - so a
-    # key-only dict compares one project's package against another's and reports
-    # changes that never happened.
-    seen = {}
-    for project, version in order:
-        packages = by_plan[(project, version)]
-        stamp = packages[0]["fetched_at"]
-        current = {}
-        for r in packages:
-            ref_norm = norm_ref(r["borrower_ref"])
-            if ref_norm:
-                key, basis = ref_norm, "borrower_ref_norm"
-            else:
-                key, basis = "d:" + desc_sha256(split_markers(r["description"])["description"]), \
-                    "description_sha256"
-                unkeyable += 1
-            current[key] = (r, basis)
-        for key, (r, basis) in current.items():
-            prev = seen.get((project, key))
-            if prev is None:
-                changes.append(_change(project, key, basis, r["borrower_ref"], "appeared",
-                                       "", "", "", "", version, stamp))
-            else:
-                pr, pv = prev
-                for field in ("status", "estimated_amount", "description", "planned_date",
-                              "revised_date", "method", "category"):
-                    if str(pr.get(field, "")) != str(r.get(field, "")):
-                        changes.append(_change(project, key, basis, r["borrower_ref"],
-                                               "changed", field, pr.get(field, ""),
-                                               r.get(field, ""), pv, version, stamp))
-        for (sp, key), (pr, basis) in list(seen.items()):
-            if sp == project and key not in current:
-                changes.append(_change(project, key, basis, pr["borrower_ref"],
-                                       "disappeared", "", "", "", pr["plan_version"],
-                                       version, stamp))
-        seen.update({(project, k): v for k, v in current.items()})
-    # packages never seen twice contribute no change rows
-    return changes, unkeyable
-
-
-def _change(project, key, basis, ref, change, field, frm, to, from_v, to_v, stamp):
-    return {"project_id": project, "key": key, "key_basis": basis, "borrower_ref": ref,
-            "change": change, "field": field, "from_value": frm, "to_value": to,
-            "from_plan_version": from_v, "to_plan_version": to_v, "detected_at": stamp}
-
-
-# ------------------------------------------------------------------------ main
-
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cohort", default=os.path.join(ROOT, "inputs/config/cohort.csv"))
@@ -1155,17 +1103,7 @@ def main():
     section_columns = Counter()
     no_estimated_column = 0
     for r in plan_rows:
-        desc = r["description"]
-        lang = detect_lang(desc)
         row = dict(r)
-        row["description_sha256"] = desc_sha256(desc)
-        row["description_lang"] = lang
-        row["is_placeholder"] = str(is_placeholder(desc)).lower()
-        row["category"] = norm_category(r["category_raw"])
-        row["method"] = norm_method(r["method_raw"], row["category"])
-        row["status"] = norm_status(r["status_raw"])
-        row["planned_date"] = r["planned_date"]
-        row["revised_date"] = r["revised_date"]
         row.pop("_wrap_seams", None)
         row.pop("_dates", None)
         row.pop("_layout", None)
@@ -1179,12 +1117,9 @@ def main():
     notices, notice_fail = collect_notices(projects, args.data, log, args.refresh, args.delay)
     awards, award_fail = collect_awards(projects, args.data, log, args.refresh, args.delay)
 
-    changes, unkeyable = package_changes(prep)
-
     write_csv(os.path.join(proc_dir, "packages_raw.csv"), PACKAGE_COLS, prep)
     write_csv(os.path.join(proc_dir, "notices_raw.csv"), NOTICE_COLS, notices)
     write_csv(os.path.join(proc_dir, "awards_raw.csv"), AWARD_COLS, awards)
-    write_csv(os.path.join(proc_dir, "package_changes.csv"), CHANGE_COLS, changes)
     log.write()
 
     distinct_versions = len({(r["project_id"], r["plan_version"]) for r in prep})
@@ -1233,13 +1168,15 @@ def main():
                  f"({100 * no_estimated_column / max(1, len(prep)):.1f}%) - "
                  f"their estimated_amount is left blank, never filled from the "
                  f"actual\n")
-        fh.write(f"package_changes rows: {len(changes):,}\n")
-        fh.write(f"packages with no usable key: {unkeyable:,}\n")
         fh.write(f"cell fragments glued (no space inserted, never guessed): "
          f"{wrap_seams_total:,}\n")
         fh.write(f"preamble characters outside the plan tables: {sum(free_chars):,}\n")
-        fh.write(f"bundled renditions cut to this project ({len(bundle_docs)}): "
-                 f"{', '.join(bundle_docs)}\n")
+        cut = [d for d, k in bundle_docs if k == "cut"]
+        lost = [d for d, k in bundle_docs if k == "not_found"]
+        fh.write(f"bundled renditions cut to this project's plan ({len(cut)}): "
+                 f"{', '.join(cut)}\n")
+        fh.write(f"bundled renditions not naming this project, not parsed "
+                 f"({len(lost)}): {', '.join(lost)}\n")
         fh.write(f"projects returning no procurement plan ({len(no_plan)}): "
                  f"{', '.join(no_plan)}\n")
         parsed_pids = {r["project_id"] for r in plan_rows}
@@ -1270,18 +1207,10 @@ def main():
         fh.write(f"award failures ({len(award_fail)}):\n")
         for pid, exc in award_fail:
             fh.write(f"  {pid}\t{exc}\n")
-        ch = {}
-        for c in changes:
-            ch[c["change"] + "/" + (c["field"] or "-")] = \
-                ch.get(c["change"] + "/" + (c["field"] or "-"), 0) + 1
-        fh.write("\nchanges by kind:\n")
-        for k in sorted(ch, key=lambda x: -ch[x]):
-            fh.write(f"  {k:<28}{ch[k]:>8}\n")
 
     print(f"\nplan documents: {len(seen_hash)}  packages: {len(prep):,}  "
-          f"notices: {len(notices):,}  awards: {len(awards):,}  "
-          f"changes: {len(changes):,}")
-    print(f"wrote {proc_dir}/{{packages_raw,notices_raw,awards_raw,package_changes}}.csv")
+          f"notices: {len(notices):,}  awards: {len(awards):,}")
+    print(f"wrote {proc_dir}/{{packages_raw,notices_raw,awards_raw}}.csv")
     print(f"wrote {report}")
     return 0
 
