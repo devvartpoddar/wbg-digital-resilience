@@ -232,16 +232,12 @@ def main():
         fh.write(f"documents written:             {len(rows)}\n")
         for k, v in counts.items():
             fh.write(f"  {k}: {v}\n")
-        no_markers = [r['doc_id'] for r in rows if r['has_markers'] == 'false']
         kinds = {}
         for r in rows:
             kinds[r["doc_kind"]] = kinds.get(r["doc_kind"], 0) + 1
         fh.write("by kind:\n")
         for k in sorted(kinds):
             fh.write(f"  {k}: {kinds[k]}\n")
-        fh.write(f"documents without @#&OPS markers: {len(no_markers)}\n")
-        if no_markers:
-            fh.write("  " + ", ".join(no_markers[:40]) + "\n")
         fh.write(f"\nprojects yielding nothing ({len(missing)}):\n")
         for p in missing:
             fh.write(f"  {p}\n")
