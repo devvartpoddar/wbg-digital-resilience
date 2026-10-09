@@ -1,12 +1,13 @@
 #!/usr/bin/env python3
-"""Fetch World Bank appraisal documents (PDFs) for the cohort.
+"""Fetch World Bank appraisal documents for the cohort.
 
 Reads  inputs/config/cohort.csv  (hand-maintained; included=true rows only)
-Writes data/raw/pdf/{doc_id}.pdf   the PDF, which src/pdf_layout.py reads
+Writes data/raw/text/{doc_id}.txt  the Bank's text rendition (gitignored)
+       data/raw/pdf/{doc_id}.pdf   the PDF, which src/pdf_layout.py reads
        data/raw/documents.csv      (one row per fetched document)
        data/reports/fetch.txt      (what was skipped and why)
 
-Resumable: a document whose PDF already exists is not re-fetched.
+Resumable: a document whose raw file already exists is not re-fetched.
 Run again after an interruption and it picks up where it stopped.
 """
 import argparse, csv, hashlib, json, os, sys, time
@@ -26,12 +27,22 @@ HEADERS = {"User-Agent": "wbg-digital-resilience/0.1 (research; "
 # financings. A project routinely has one PAD and several Project Papers.
 DOC_TYPES = ("Project Appraisal Document", "Project Paper")
 
+# A genuine restructuring paper can be 15 KB, so the floor is low and the real
+# guard is the HTML check below: the Bank's silent-403 body is a 118-byte page.
+MIN_BYTES = 3_000
+
 # One row per document, not per project-document pair. A regional programme
 # discloses one appraisal document that serves several projects, so project_ids
 # is pipe-delimited: keying on project_id instead would repeat the document and
 # emit duplicate paragraph identifiers downstream.
 DOC_COLS = ["doc_id", "project_ids", "doc_type", "doc_kind", "title",
-            "disclosure_date", "lang", "fetched_at", "pdf_url", "pdf_bytes", "pdf_sha256"]
+            "disclosure_date", "lang", "has_markers", "fetched_at",
+            "pdf_url", "pdf_bytes", "pdf_sha256"]
+
+
+def looks_like_error_page(blob):
+    head = blob[:600].lstrip().lower()
+    return head.startswith(b"<html") or b"<title>403" in head or b"404 not found" in head
 
 
 def classify(doc_type, title):
@@ -107,8 +118,8 @@ def list_docs(project_id, doc_type):
 def fetch_pdf(doc, pdf_dir, counts, notes, pid, delay):
     """The PDF behind a document, cached on disk. Returns its bytes, or None.
 
-    The Bank's text rendition is no longer fetched. One already on disk from
-    an earlier run is still the fallback for a document whose PDF is missing."""
+    The text rendition stays the fallback: a PDF that is missing, refused, or
+    not a PDF leaves the document readable, just by the older cleaner."""
     dest = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
     if os.path.exists(dest):
         counts["pdf_cached"] += 1
@@ -137,6 +148,44 @@ def fetch_pdf(doc, pdf_dir, counts, notes, pid, delay):
     return blob
 
 
+def fetch_text(doc, raw_dir, counts, notes, pid, delay):
+    """The Bank's text rendition behind a document, cached on disk. Returns its
+    decoded text, or None when it is missing, refused, or not a rendition.
+
+    The rendition carries the '@#&OPS...#doctemplate' markers that name each
+    structured block in documents disclosed from about 2022 on, and it is what
+    clean.py reads as the fallback when a PDF is missing or image-only, so it is
+    fetched alongside the PDF."""
+    dest = os.path.join(raw_dir, f"{doc['doc_id']}.txt")
+    if os.path.exists(dest) and os.path.getsize(dest) >= MIN_BYTES:
+        blob = open(dest, "rb").read()
+        counts["cached"] += 1
+        return blob.decode("utf-8", errors="replace")
+    if not doc.get("txturl"):
+        counts["no_txturl"] += 1
+        notes.append(f"{pid}\t{doc['doc_id']}\tno txturl published")
+        return None
+    try:
+        blob = get(doc["txturl"]).content
+    except Exception as exc:
+        counts["error"] += 1
+        notes.append(f"{pid}\t{doc['doc_id']}\tTEXT FETCH FAILED\t{exc}")
+        return None
+    # Guard against the silent-403 case before anything is stored.
+    if looks_like_error_page(blob) or len(blob) < MIN_BYTES:
+        counts["too_small"] += 1
+        why = "HTML error page" if looks_like_error_page(blob) else f"only {len(blob)} bytes"
+        notes.append(f"{pid}\t{doc['doc_id']}\t{why}, not stored")
+        return None
+    tmp = dest + ".part"
+    with open(tmp, "wb") as fh:
+        fh.write(blob)
+    os.replace(tmp, dest)
+    counts["fetched"] += 1
+    time.sleep(delay)
+    return blob.decode("utf-8", errors="replace")
+
+
 def read_cohort(path):
     with open(path, newline="", encoding="utf-8") as fh:
         return [r for r in csv.DictReader(fh) if r["included"].strip().lower() == "true"]
@@ -151,6 +200,7 @@ def main():
     args = ap.parse_args()
 
     raw_dir = where(args.out, "rendition")
+    os.makedirs(raw_dir, exist_ok=True)
 
     projects = read_cohort(args.cohort)
     if args.limit:
@@ -158,7 +208,8 @@ def main():
     print(f"cohort: {len(projects)} projects included", flush=True)
 
     by_doc, notes = {}, []
-    counts = {"no_docs": 0, "error": 0, "pdf_fetched": 0, "pdf_cached": 0,
+    counts = {"fetched": 0, "cached": 0, "too_small": 0, "no_txturl": 0,
+              "no_docs": 0, "error": 0, "pdf_fetched": 0, "pdf_cached": 0,
               "pdf_missing": 0}
     pdf_dir = where(args.out, "pdf")
     os.makedirs(pdf_dir, exist_ok=True)
@@ -185,13 +236,13 @@ def main():
             if doc["doc_id"] in by_doc:
                 by_doc[doc["doc_id"]]["_projects"].add(pid)
                 continue
+            text = fetch_text(doc, raw_dir, counts, notes, pid, args.delay)
             pdf_path = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
             cached = os.path.exists(pdf_path)
             pdf_blob = fetch_pdf(doc, pdf_dir, counts, notes, pid, args.delay)
-            # A document with no PDF is kept only when a text rendition from
-            # an earlier run is already on disk for clean.py to fall back on.
-            rendition = os.path.join(raw_dir, f"{doc['doc_id']}.txt")
-            if not pdf_blob and not os.path.exists(rendition):
+            # A document with no PDF is kept only when its text rendition is
+            # on disk for clean.py to fall back on.
+            if not pdf_blob and text is None:
                 continue
             when = os.path.getmtime(pdf_path) if cached else time.time()
             by_doc[doc["doc_id"]] = {
@@ -200,6 +251,7 @@ def main():
                 "doc_kind": classify(doc["doc_type"], doc["title"]),
                 "title": doc["title"], "disclosure_date": doc["disclosure_date"],
                 "lang": doc["lang"],
+                "has_markers": "true" if (text is not None and "@#&OPS" in text) else "false",
                 "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when)),
                 "pdf_url": doc["pdfurl"] if pdf_blob else "",
                 "pdf_bytes": len(pdf_blob) if pdf_blob else "",

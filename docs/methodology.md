@@ -68,7 +68,7 @@ Two corpora, cleaned separately. Appraisal documents are long prose recovered fr
 
 Every threshold is relative to the document's own body type size and line pitch. Each document's result is cached against the PDF's checksum and a checksum of the reader's code, so a re-run costs nothing and any change to the rules re-reads everything it affects.
 
-**The PDF's own text is kept, and every paragraph points into it.** The reader writes each document's text exactly as the PDF gives it, every line of every page before anything is removed, to `data/raw/pdf_text/`. Each paragraph records the stretch of that file it was built from (`raw_start`, `raw_end`), so the review sheet shows a paragraph's source by slicing, not by searching. The Bank's separate text rendition is no longer fetched; one already on disk is used only for a document whose PDF is missing or is a scan, and every row's `source` says which was used.
+**The PDF's own text is kept, and every paragraph points into it.** The reader writes each document's text exactly as the PDF gives it, every line of every page before anything is removed, to `data/raw/pdf_text/`. Each paragraph records the stretch of that file it was built from (`raw_start`, `raw_end`), so the review sheet shows a paragraph's source by slicing, not by searching. The Bank's separate text rendition is fetched alongside the PDF and kept as the fallback for a document whose PDF is missing, unreadable or image-only, and every row's `source` says which was used.
 
 **Web addresses become "[link]".** They cost the model many tokens and say nothing about assets or measures. A footnote that is only a reference and a link ("World Bank. 2021. … [link]") is kept for reading and left out of what the model is given.
 

@@ -761,9 +761,8 @@ def main():
         elif lay and lay[3]:
             stats["pdf_unreadable"] += 1
         if source == "txt":
-            # The Bank's text rendition is no longer fetched; one already on
-            # disk is used only for a document whose PDF is missing or holds no
-            # text (a scan).
+            # The Bank's text rendition is the fallback: used only for a
+            # document whose PDF is missing or holds no text (a scan).
             src = os.path.join(raw_dir, f"{doc['doc_id']}.txt")
             if os.path.exists(src):
                 with open(src, "rb") as fh:

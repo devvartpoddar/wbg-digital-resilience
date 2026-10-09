@@ -16,7 +16,7 @@ written down once:
   data/raw/          what was fetched, exactly as published
        pdf/            appraisal documents (PDF)
        pdf_text/       each PDF's text exactly as read, before cleaning
-       text/           the Bank's text renditions (no longer fetched; kept)
+       text/           the Bank's text renditions of the same documents
        plans/ notices/ awards/   procurement plans and interface responses
        documents.csv   the document list; fetch_log.csv every request made
   data/appraisal/    what the appraisal stages make
