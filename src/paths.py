@@ -15,7 +15,8 @@ written down once:
 
   data/raw/          what was fetched, exactly as published
        pdf/            appraisal documents (PDF)
-       text/           the Bank's text renditions of the same documents
+       pdf_text/       each PDF's text exactly as read, before cleaning
+       text/           the Bank's text renditions (no longer fetched; kept)
        plans/ notices/ awards/   procurement plans and interface responses
        documents.csv   the document list; fetch_log.csv every request made
   data/appraisal/    what the appraisal stages make
@@ -59,6 +60,7 @@ def data_root():
 LAYOUT = {
     "pdf": "raw/pdf",
     "rendition": "raw/text",
+    "pdf_text": "raw/pdf_text",
     "plans": "raw/plans",
     "notices_json": "raw/notices",
     "awards_json": "raw/awards",

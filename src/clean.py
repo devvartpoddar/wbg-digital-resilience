@@ -150,7 +150,7 @@ def looks_tabular(body):
 PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
              "section_title", "block", "char_start", "char_end", "n_tokens",
              "text_sha256", "page_from", "page_to", "source", "parser",
-             "for_model", "list_item", "lead_in_id", "table_id",
+             "for_model", "list_item", "lead_in_id", "table_id", "raw_start", "raw_end",
              "component", "subcomponent", "component_mentions"]
 REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
 
@@ -607,9 +607,9 @@ def clean_document(raw):
 
 
 PARSER_TXT = "clean-txt-1"
-# Below this share of the text rendition's characters, a PDF read is treated as
-# failed (a scanned or image-only PDF) and the text rendition is used instead.
-PDF_MIN_SHARE = 0.5
+# A PDF whose text layer holds fewer characters than this is a scan, not a
+# document that can be read by layout.
+PDF_MIN_CHARS = 2000
 # Footnotes are mostly references ('ITU. 2021. Global Cybersecurity Index
 # 2020.'), which a sentence splitter can only cut into nonsense.
 SENTENCE_BLOCKS = {"narrative", "annex"}
@@ -617,6 +617,27 @@ SENTENCE_BLOCKS = {"narrative", "annex"}
 # sheet, acronyms, contents) and headings are kept and cleaned, but are too
 # short and too repetitive to be worth scoring.
 MODEL_BLOCKS = {"narrative", "annex", "table", "footnote"}
+
+
+def citation_only(text, block):
+    """A footnote that is a reference and a link, and nothing else: 'World
+    Bank. 2021. Climate Risk Profile. [link]'. It is a bibliography entry, so it
+    is kept for reading and left out of what the model is given."""
+    if block != "footnote" or "[link]" not in text:
+        return False
+    return len(re.findall(r"[^\W\d_]{2,}", text.replace("[link]", ""))) < 15
+
+
+def write_if_changed(path, text):
+    """Write a file only when its content differs, so a re-run touches nothing."""
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            if fh.read() == text:
+                return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".part", "w", encoding="utf-8") as fh:
+        fh.write(text)
+    os.replace(path + ".part", path)
 SENT_COLS = ["sentence_id", "paragraph_id", "doc_id", "ordinal", "char_start",
              "char_end", "n_tokens", "text_sha256"]
 
@@ -640,15 +661,17 @@ def _layout_job(args):
     import pdfplumber
     import pdf_layout
     try:
+        raw = []
         with pdfplumber.open(path) as pdf:
-            text, spans, stats = pdf_layout.extract(pdf)
-        return doc_id, text, [list(s) for s in spans], dict(stats), ""
+            text, spans, stats = pdf_layout.extract(pdf, raw)
+        return doc_id, text, [list(s) for s in spans], dict(stats), raw[0], ""
     except Exception as exc:                       # a broken PDF is a fallback, not a crash
-        return doc_id, "", [], {}, f"{type(exc).__name__}: {exc}"
+        return doc_id, "", [], {}, "", f"{type(exc).__name__}: {exc}"
 
 
 def layout_cached(data, docs, workers):
-    """{doc_id: (text, spans, stats, error)} for every document with a PDF.
+    """{doc_id: (text, spans, stats, error, raw)} for every document with a PDF;
+    raw is the PDF's text as read, before cleaning.
 
     Each result is cached in data/appraisal/cache/{doc_id}.layout.json, keyed on the PDF's
     SHA-256 and the parser version, so a re-run reads the cache and only a
@@ -667,7 +690,8 @@ def layout_cached(data, docs, workers):
             with open(cache, encoding="utf-8") as fh:
                 c = json.load(fh)
             if c.get("pdf_sha256") == sha and c.get("parser") == version:
-                out[doc["doc_id"]] = (c["text"], c["spans"], c["stats"], c.get("error", ""))
+                out[doc["doc_id"]] = (c["text"], c["spans"], c["stats"], c.get("error", ""),
+                                      c.get("raw", ""))
                 continue
         todo.append((doc["doc_id"], pdf, sha, cache))
     if todo:
@@ -675,15 +699,16 @@ def layout_cached(data, docs, workers):
               f"({len(out)} cached)", flush=True)
         meta = {d: (sha, cache) for d, _, sha, cache in todo}
         with ProcessPoolExecutor(max_workers=workers) as ex:
-            for n, (did, text, spans, stats, err) in enumerate(
+            for n, (did, text, spans, stats, raw, err) in enumerate(
                     ex.map(_layout_job, [(d, p) for d, p, _, _ in todo]), 1):
                 sha, cache = meta[did]
                 tmp = cache + ".part"
                 with open(tmp, "w", encoding="utf-8") as fh:
                     json.dump({"pdf_sha256": sha, "parser": version, "text": text,
-                               "spans": spans, "stats": stats, "error": err}, fh)
+                               "spans": spans, "stats": stats, "error": err,
+                               "raw": raw}, fh)
                 os.replace(tmp, cache)
-                out[did] = (text, spans, stats, err)
+                out[did] = (text, spans, stats, err, raw)
                 if n % 10 == 0:
                     print(f"    ...{n}/{len(todo)} PDFs read", flush=True)
     return out
@@ -719,28 +744,31 @@ def main():
     per_doc = []
 
     for n, doc in enumerate(docs, 1):
-        src = os.path.join(raw_dir, f"{doc['doc_id']}.txt")
         raw = ""
-        if os.path.exists(src):
-            with open(src, "rb") as fh:
-                raw, undecodable = decode_raw(fh.read())
-            stats["undecodable_bytes_dropped"] += undecodable
-
         source, parser = "txt", PARSER_TXT
         lay = layouts.get(doc["doc_id"])
         if lay and not lay[3]:
-            text, spans, lstats, _ = lay
-            rn = len(re.sub(r"\s", "", raw))
-            if not rn or len(re.sub(r"\s", "", text)) >= PDF_MIN_SHARE * rn:
+            text, spans, lstats, _, raw = lay
+            if len(re.sub(r"\s", "", raw)) >= PDF_MIN_CHARS:
                 clean, source, parser = text, "pdf", version
                 spans = [tuple(s) + (({},) if len(s) == 7 else ()) for s in spans]
                 for k, v in lstats.items():
                     stats["pdf_" + k] += v
+                write_if_changed(where(args.data, "pdf_text", f"{doc['doc_id']}.txt"), raw)
             else:
                 stats["pdf_too_little_text"] += 1
+                raw = ""
         elif lay and lay[3]:
             stats["pdf_unreadable"] += 1
         if source == "txt":
+            # The Bank's text rendition is no longer fetched; one already on
+            # disk is used only for a document whose PDF is missing or holds no
+            # text (a scan).
+            src = os.path.join(raw_dir, f"{doc['doc_id']}.txt")
+            if os.path.exists(src):
+                with open(src, "rb") as fh:
+                    raw, undecodable = decode_raw(fh.read())
+                stats["undecodable_bytes_dropped"] += undecodable
             if not raw:
                 stats["missing_raw"] += 1
                 continue
@@ -774,12 +802,15 @@ def main():
                 "char_start": a, "char_end": b, "n_tokens": ntok,
                 "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
                 "page_from": p0, "page_to": p1, "source": source, "parser": parser,
-                "for_model": str(block in MODEL_BLOCKS).lower(),
+                "for_model": str(block in MODEL_BLOCKS
+                                 and not citation_only(body, block)).lower(),
                 "list_item": str(bool(meta.get("list_item"))).lower(),
                 "lead_in_id": (f"{doc['doc_id']}:p{meta['lead_in'] + 1:05d}"
                                if "lead_in" in meta else ""),
                 "table_id": (f"{doc['doc_id']}:t{meta['table']:03d}"
                              if "table" in meta else ""),
+                "raw_start": (meta.get("src") or ["", ""])[0],
+                "raw_end": (meta.get("src") or ["", ""])[1],
                 "component": comp, "subcomponent": sub,
                 "component_mentions": "|".join(components.mentions(body)),
             })

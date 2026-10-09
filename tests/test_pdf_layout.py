@@ -104,3 +104,18 @@ def test_sentence_offsets_index_the_paragraph():
 def test_a_sentence_of_fewer_than_three_words_is_not_cut_off():
     text = "See above. The project will finance towers."
     assert [text[a:b] for a, b in S.split(text)] == [text]
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("See https://www.example.org/report.pdf for details.", "See [link] for details."),
+    ("Source: www.example.org/en/ country/overview. More.", "Source: [link] More."),
+    ("Data from the agency (2021).", "Data from the agency (2021)."),
+])
+def test_a_web_address_becomes_a_link_marker(text, expected):
+    assert PL.URL.sub("[link]", text) == expected
+
+
+def test_a_rotated_character_is_dropped_and_a_level_one_kept():
+    assert PL._not_rotated({"object_type": "char", "matrix": (1, 0, 0, 1, 5, 5)})
+    assert not PL._not_rotated({"object_type": "char", "matrix": (0, 1, -1, 0, 5, 5)})
+    assert PL._not_rotated({"object_type": "rect"})

@@ -43,7 +43,7 @@ PAGE_NUM = re.compile(r"^\s*(?:Page\s+)?\d{1,4}(?:\s+of\s+\d{1,4})?\s*$", re.I)
 # the classification banner some restructuring papers repeat, and the hidden
 # template markers the Bank's authoring system leaves in the PDF text layer.
 FURNITURE_TEXT = re.compile(
-    r"^(?:for\s+)?official\s+use\s+only(?:\s+page\s+\d+(?:\s+of\s+\d+)?)?$"
+    r"^(?:for\s+)?official\s+use\s+only(?:\s+page\s+\d+(?:\s+of\s+\d+)?|\s+[ivxlc]{1,6})?$"
     r"|@#&OPS"
     # Hidden template codes left in the text layer: RESULT_FRAME_TBL_PDO.
     r"|^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}$"
@@ -53,6 +53,10 @@ FURNITURE_TEXT = re.compile(
 # word or a closing bracket, 'hoped44', 'process104.'. Only removed when the
 # page's own footnotes define that number.
 INLINE_MARK = re.compile(r"(?<=[a-z\)\]\"'])(\d{1,3})(?=[\s,.;:)]|$)")
+# A web address, including the pieces a line break left after a space
+# ('https://www.example.org/en/ country/report.pdf'). Replaced by "[link]": it
+# costs the model many tokens and says nothing about assets or measures.
+URL = re.compile(r"(?:https?://|www\.)\S+(?:\s(?=[\w.\-]*[/=])[\w./?=&%#~:+\-]+)*", re.I)
 TITLE_LINE = re.compile(r"^(?:Sub-?component|Component|Figure|Table|Box|Map|Chart)\s*[\dA-Z]")
 BULLET_OPEN = re.compile(r"^\s*(?:[•●▪■◦\-–]|\(?[ivxlc]{1,5}[\).]|\(?[a-z][\).]|\d{1,2}\))\s+\S")
 
@@ -131,9 +135,12 @@ def _not_rotated(obj):
 
 
 def _page_lines(page):
-    """(top, bottom, x0, x1, size, bold, text) for every upright line on a page."""
-    lines = []
+    """(lines, raw): the level lines on a page as dicts (top, bottom, x0, x1,
+    size, bold, italic, text, raw_i), and every line exactly as the PDF gives
+    it, before anything is removed; raw_i points a line at its raw line."""
+    lines, raw = [], []
     for ln in page.extract_text_lines(return_chars=True, strip=True):
+        raw.append(ln["text"])
         if not any(c.get("upright", True) and c["size"] >= WATERMARK_MAX_SIZE
                    for c in ln["chars"]):
             continue                        # the rotated disclosure stamp
@@ -149,8 +156,8 @@ def _page_lines(page):
         if text:
             lines.append({"top": ln["top"], "bottom": ln["bottom"], "x0": ln["x0"],
                           "x1": ln["x1"], "size": size, "bold": bold, "italic": italic,
-                          "text": text})
-    return lines
+                          "text": text, "raw_i": len(raw) - 1})
+    return lines, raw
 
 
 def _tables(page):
@@ -381,8 +388,13 @@ def _opens_block(line, before):
     return bool(re.search(r"[.:;!?)\"]$", tail) or re.search(r"\b(?:and|or)$", tail))
 
 
-def extract(pdf):
+def extract(pdf, raw_out=None):
     """An open pdfplumber PDF -> (clean_text, spans, stats).
+
+    raw_out, a list, receives the PDF's text exactly as read - every line of
+    every page, a form feed between pages - and each span's meta carries `src`,
+    the (start, end) of the lines it was built from in that text. So the review
+    sheet shows a paragraph's source without searching for it.
 
     spans: (start, end, section_path, section_title, block, page_from, page_to,
             meta) - meta holds, where they apply: list_item, lead_in (index of
@@ -391,12 +403,24 @@ def extract(pdf):
     """
     stats = Counter()
     pages, tables = [], []
+    raw_parts, cursor = [], 0
     for page in pdf.pages:
         page = page.filter(_not_rotated)
-        lines = _page_lines(page)
+        lines, raw = _page_lines(page)
+        offs = []
+        for r in raw:
+            offs.append((cursor, cursor + len(r)))
+            raw_parts.append(r + "\n")
+            cursor += len(r) + 1
+        raw_parts.append("\f")
+        cursor += 1
+        for l in lines:
+            l["src"] = offs[l.pop("raw_i")]
         tabs = _tables(page)
         pages.append(lines)
         tables.append(tabs)
+    if raw_out is not None:
+        raw_out.append("".join(raw_parts))
     body_sizes = Counter(l["size"] for lines in pages for l in lines for _ in range(len(l["text"])))
     if not body_sizes:
         return "", [], stats
@@ -495,13 +519,17 @@ def extract(pdf):
                         last_header[0], last_header[1] = header, caption
                         stats["tables_with_header"] += 1
                     stats["tables"] += 1
+                    inside = [x["src"] for x in keep if _in_box(x, box[0])]
+                    tsrc = [min(a for a, _ in inside), max(b for _, b in inside)] \
+                        if inside else None
                     for r_i, (row, row_cap) in enumerate(data):
                         row_caption = row_cap or caption
                         text = _row_text(row, header, row_caption)
                         if text:
                             items.append(("table", pno, text, {
                                 "table": table_no[0], "row": r_i, "cells": row,
-                                "header": header, "caption": row_caption}))
+                                "header": header, "caption": row_caption,
+                                "src": tsrc}))
                 stats["table_lines"] += 1
                 continue
             if i >= fn_from:
@@ -530,8 +558,16 @@ def extract(pdf):
     last_body = None    # index in units of the last body unit
     last_body_line = None
 
-    def start(kind, text, pno, meta=None):
-        units.append([kind, text, pno, pno, meta or {}])
+    def start(kind, text, pno, meta=None, line=None):
+        meta = dict(meta or {})
+        if line is not None:
+            meta["src"] = list(line["src"])
+        units.append([kind, text, pno, pno, meta])
+
+    def extend(u, line):
+        if "src" in u[4]:
+            u[4]["src"][0] = min(u[4]["src"][0], line["src"][0])
+            u[4]["src"][1] = max(u[4]["src"][1], line["src"][1])
 
     for kind, pno, text, l in items:
         if kind == "table":
@@ -543,7 +579,7 @@ def extract(pdf):
             # paragraph that carries on below it. last_body is kept so that a
             # lowercase continuation can still find its paragraph; prev is
             # cleared so an ordinary next line does not join across it.
-            start(kind, text, pno)
+            start(kind, text, pno, line=l)
             prev = kind
             continue
         if kind == "footnote":
@@ -552,8 +588,9 @@ def extract(pdf):
                 u = units[-1]
                 u[1] = _dehyphenate(u[1], text, vocab)
                 u[3] = pno
+                extend(u, l)
             else:
-                start("footnote", re.sub(r"^\d{1,3}\s*", "", text), pno)
+                start("footnote", re.sub(r"^\d{1,3}\s*", "", text), pno, line=l)
             prev = "footnote"
             continue
         # Body. A paragraph continues when the next line follows at the normal
@@ -582,9 +619,10 @@ def extract(pdf):
                 u = units[last_body]
                 u[1] = _dehyphenate(u[1], text, vocab)
                 u[3] = pno
+                extend(u, l)
                 joined = True
         if not joined:
-            start("body", text, pno)
+            start("body", text, pno, line=l)
             last_body = len(units) - 1
         last_body_line = (pno, l)
         prev = "body"
@@ -604,7 +642,13 @@ def extract(pdf):
             meta["list_item"] = True
         elif kind == "body" and BULLET_OPEN.match(text):
             meta["list_item"] = True
-        if not text:
+        text, n_links = URL.subn("[link]", text)
+        stats["links_replaced"] += n_links
+        if n_links:
+            meta["links"] = n_links
+        # A lone symbol is a logo or an ornament, not text: '$'.
+        if not re.search(r"[^\W_]", text):
+            stats["symbol_only_units"] += 1
             continue
         block = kind
         if kind == "heading" or kind == "body":

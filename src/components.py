@@ -78,23 +78,29 @@ def mentions(text):
 
 class Tagger:
     """Walk a document's units in order and say which component each sits
-    under. A component heading opens a component; a sub-component heading opens
-    a sub-component inside it; a new top-level section closes both."""
+    under. A component heading opens a component, and a sub-component heading
+    a sub-component inside it. Both close at the first section that is not the
+    one the component opened in, or inside it: after the last component of
+    'II.B Project Components', 'II.C Project Beneficiaries' belongs to none."""
 
     def __init__(self):
-        self.comp, self.sub, self.top = "", "", None
+        self.comp, self.sub, self.home = "", "", None
+
+    def _close(self):
+        self.comp, self.sub, self.home = "", "", None
 
     def see(self, text, block, section_path):
-        top = (section_path or "").split(".")[0]
-        if top != self.top:
-            self.comp, self.sub, self.top = "", "", top
+        path = section_path or ""
+        if self.home is not None and path != self.home \
+                and not path.startswith(self.home + "."):
+            self._close()
         if block not in TAGGED_BLOCKS:
             return "", ""
         short = len(text.split()) <= 30
         if block == "heading" or short:
             m = COMP_HEAD.match(text)
             if m:
-                self.comp, self.sub = m.group(1), ""
+                self.comp, self.sub, self.home = m.group(1), "", path
                 return self.comp, ""
             # A numbered sub-component title is a heading even when set in
             # plain type, if it carries a cost: '1.2. Infrastructure ... (US$15.3
@@ -102,6 +108,8 @@ class Tagger:
             titled = block == "heading" or bool(COST_IN_TEXT.search(text))
             m = SUB_WORD_HEAD.match(text) or (SUB_HEAD.match(text) if titled else None)
             if m and (not self.comp or m.group(1) == self.comp):
+                if not self.comp:
+                    self.home = path
                 self.comp, self.sub = m.group(1), f"{m.group(1)}.{m.group(2)}"
                 return self.comp, self.sub
         return self.comp, self.sub

@@ -148,6 +148,22 @@ def read_csv(path):
         return list(csv.DictReader(fh))
 
 
+def read_raw(data, did):
+    """(raw text, its letters, from_pdf): the PDF's own text as read when the
+    paragraph came from the PDF, else a text rendition left from an earlier
+    run, searched for the paragraph."""
+    path = where(data, "pdf_text", f"{did}.txt")
+    if os.path.exists(path):
+        with open(path, encoding="utf-8") as fh:
+            return fh.read(), None, True
+    path = where(data, "rendition", f"{did}.txt")
+    if os.path.exists(path):
+        with open(path, "rb") as fh:
+            raw, _ = decode_raw(fh.read())
+        return raw, letters(raw), False
+    return "", ("", []), False
+
+
 def paragraph_rows(data, n, seed):
     paras = read_csv(where(data, "appraisal", "paragraphs.csv"))
     picked = draw(paras, n, seed)
@@ -158,23 +174,16 @@ def paragraph_rows(data, n, seed):
         if did not in clean_cache:
             with open(where(data, "text", f"{did}.txt"), encoding="utf-8") as fh:
                 clean_cache[did] = fh.read()
-            raw_path = where(data, "rendition", f"{did}.txt")
-            raw = ""
-            if os.path.exists(raw_path):
-                with open(raw_path, "rb") as fh:
-                    raw, _ = decode_raw(fh.read())
-            raw_cache[did] = (raw, letters(raw))
+            raw_cache[did] = read_raw(data, did)
         body = clean_cache[did][int(r["char_start"]):int(r["char_end"])]
-        raw, raw_letters = raw_cache[did]
-        found = locate_raw(body.split(" \u2014 ", 1)[-1] if r.get("table_id") else body,
-                           raw, raw_letters, int(r.get("page_from") or 0),
-                           int(r.get("page_to") or 0))
-        if found is None and r["block"] == "table":
-            # A table row read from the PDF joins its cells with " | "; the text
-            # rendition flattens the same table its own way, so the two rarely
-            # line up. Not a miss - the page number says where to look.
-            found = "(table row: compare with the PDF page)"
-        elif found is None:
+        raw, raw_letters, from_pdf = raw_cache[did]
+        if from_pdf and r.get("raw_start", "") != "":
+            # Exact: the lines of the PDF this paragraph was built from.
+            found = raw[int(r["raw_start"]):int(r["raw_end"])]
+        else:
+            found = locate_raw(body, raw, raw_letters, int(r.get("page_from") or 0),
+                               int(r.get("page_to") or 0))
+        if found is None:
             missed += 1
         cuts = sentences.split(body)
         out.append(dict(r, cleaned=body,
