@@ -356,6 +356,13 @@ def clean_name(name):
     n = re.split(r"\.\s+(?=(?:This|The|It|These|Under)\b)", n)[0]
     n = re.sub(r"(?:\s+(?:[\d.,]+|N/A))+$", "", n)
     n = n.strip(" :-\u2013(.;,")
+    # A cell read twice over: 'National Digital Connectivity Infrastructure
+    # Digital Connectivity Infrastructure' is the name and the tail of it again.
+    words = n.split()
+    for k in range(len(words) // 2, 1, -1):
+        if k >= 2 and words[-k:] == words[:-k][-k:]:
+            n = " ".join(words[:-k])
+            break
     return "" if not n or n[:1].islower() else n
 
 

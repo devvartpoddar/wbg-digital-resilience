@@ -277,9 +277,9 @@ class Components:
                 continue
             hit = self._by_name(pid, flat, partial_ok=False)
             if hit:
-                return desc[:p].rstrip(" -\u2013,;:/("), (hit[0], hit[1], "appraisal")
+                return desc[:p].rstrip(" -\u2013,;:/("), (hit[0], hit[1], "name_match")
             if m and re.match(r"(?:Component|Composante|Componente|Comp\.)", seg, re.I):
-                return desc[:p].rstrip(" -\u2013,;:/("), (m.group(1), "", "plan")
+                return desc[:p].rstrip(" -\u2013,;:/("), (m.group(1), "", "number_only")
         return desc, None
 
     def in_cells(self, pid, cells):
@@ -287,7 +287,7 @@ class Components:
         component's name they carry, else by the number the plan prints."""
         hit = self._by_name(pid, _flat(cells), partial_ok=True)
         if hit:
-            return hit[0], hit[1], "appraisal"
+            return hit[0], hit[1], "name_match"
         m = COMP_NAMED.search(cells) or COMP_NUMBER.match(cells)
         if not m:
             return None
@@ -298,8 +298,8 @@ class Components:
         head = _flat(cells[m.end():])[:12]
         for num, name, f in self.by_project.get(pid, ()):
             if num == m.group(1) and len(head) >= 8 and f.startswith(head[:min(len(head), len(f))]):
-                return num, name, "appraisal"
-        return m.group(1), "", "plan"
+                return num, name, "name_match"
+        return m.group(1), "", "number_only"
 
 
 def read_components(data):

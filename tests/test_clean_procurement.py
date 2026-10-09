@@ -800,12 +800,12 @@ def test_a_component_is_found_by_the_stretch_of_its_name_the_cells_carry():
     c = P.Components(COMPONENT_ROWS)
     got = c.in_cells("P1", "Shared Weather Stati Quality And Cost- Open - "
                            "Internationa IDA / 12345 ons, Masts and Rela Post")
-    assert got == ("3", "Shared Weather Stations, Masts and Relays", "appraisal")
+    assert got == ("3", "Shared Weather Stations, Masts and Relays", "name_match")
 
 
 def test_a_numbered_cell_with_no_name_match_keeps_only_the_plans_number():
     c = P.Components(COMPONENT_ROWS)
-    assert c.in_cells("P1", "Component 4: Something Else Entirely Post") == ("4", "", "plan")
+    assert c.in_cells("P1", "Component 4: Something Else Entirely Post") == ("4", "", "number_only")
     assert c.in_cells("P1", "Post Request for Bids Open - National") is None
 
 
@@ -813,4 +813,4 @@ def test_a_component_name_at_the_end_of_a_description_is_cut_off():
     c = P.Components(COMPONENT_ROWS)
     desc, comp = c.strip_tail("P1", "Repair of rooftop gauges Shared Weather Stati")
     assert desc == "Repair of rooftop gauges"
-    assert comp[0] == "3" and comp[2] == "appraisal"
+    assert comp[0] == "3" and comp[2] == "name_match"
