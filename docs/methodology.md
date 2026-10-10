@@ -264,7 +264,7 @@ On the current run:
 - 1,930 plan documents from 52 projects (9 projects published no plan); 116,919 package rows, one per plan version per package. 582 renditions parse to no package: 566 carry no reference anywhere (an empty table), 16 are parse failures.
 - 6,143 packages after grouping (110,776 older versions in `superseded_packages.csv`).
 - Method: INDV 1,853, RFQ 1,124, RFB 887, CQS 840, QCBS 685, CDS 269, DIR 219, RFP 136, LCS 47, QBS 27, UN 3, FBS 2, FA 1, unknown 50. Read from the Method cell 4,664, the clipped cell 697, the reference 732.
-- Status: Canceled 1,774, Signed 1,580, Pending Implementation 893, Under Implementation 885, Completed 615, Pending 74, Terminated 50, Under Review 45, Planned 2, unknown 225. Source: plan 5,427, earlier plan 272, award 219, none 225.
+- Status: Canceled 1,659, Signed 1,574, Under Implementation 839, Pending Implementation 794, Completed 613, Pending 74, Terminated 49, Under Review 42, Planned 2, unknown 497. Source: plan 5,427, award 219, none 497.
 - Component: matched by name 4,564, plan number only 174, none 1,405.
 - Amount: from the newest plan 4,692, carried from an earlier plan 266, none 1,185. Actual amounts recorded on 5,582 packages.
 - Notices: 5,909, of which 5,871 carry a borrower reference and 3,893 match a plan package. Awards: 3,485.

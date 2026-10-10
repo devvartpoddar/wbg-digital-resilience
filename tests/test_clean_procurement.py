@@ -345,7 +345,7 @@ MAX_RATE = {
     "borrower reference not normalised": 0.0,    # 0.00%
     "category unmapped": 0.0,                    # 0.00%
     "method unmapped": 1.2,                      # 0.81% (soft) - Bank codes, no 'other'
-    "status unmapped": 4.5,                      # 3.66% (soft) - no evidence anywhere
+    "status unmapped": 9.0,                      # 8.09% (soft) - newest plan prints none, no contract; older plans' status not carried
     "status raw present but unmapped": 0.1,      # 0.02% (soft)
     "planned date after revised date": 0.5,      # 0.31% - source
     "lot or phase marker left at the edge of the description": 0.05,  # 0.02%
