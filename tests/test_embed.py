@@ -544,3 +544,17 @@ def test_only_paragraphs_marked_for_the_model_are_embedded(tmp_path, monkeypatch
     ids = {r["paragraph_id"] for r in read_index(data)}
     assert rows[0]["paragraph_id"] not in ids
     assert {r["paragraph_id"] for r in rows[1:]} <= ids
+
+
+def test_the_key_is_read_from_the_project_key_file_when_the_variable_is_unset(
+        tmp_path, monkeypatch):
+    monkeypatch.delenv(E.KEY_VAR, raising=False)
+    monkeypatch.setattr(E, "main_checkout", lambda: str(tmp_path))
+    path = tmp_path / E.KEY_FILE
+    path.parent.mkdir()
+    path.write_text("sk-test\n")
+    os.chmod(path, 0o600)
+    assert E.read_key("") == "sk-test"
+    os.chmod(path, 0o644)
+    with pytest.raises(SystemExit):
+        E.read_key("")          # readable beyond its owner: refused

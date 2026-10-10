@@ -6,3 +6,5 @@ data/
 __pycache__/
 .venv/
 .worktrees/
+# The project's own API key, mode 0600 (src/embed.py). Never committed.
+.secrets/

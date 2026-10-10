@@ -12,9 +12,8 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
 ./wbg list    --practice digital      # by Global Practice; --unit IDD04 by managing unit
 ./wbg export  --fy 2024 --tables      # write the selection's results to data/runs/<name>-<date>/
 ./wbg sensitivity                     # how much the cleaned text depends on its paragraph, tag and sentence settings
-./wbg embed --dry-run                 # what embedding the sentences would cost; without --dry-run it embeds (needs WBG_OPENROUTER_KEY)
-./wbg search assets                   # score every sentence against every asset definition and phrase (inputs/taxonomy/)
-./wbg hits assets --min-percentile 99.5 --top 100 --country KE   # filter the scores; writes hits and paragraphs CSVs
+./wbg search assets                   # embed the sentences (only what is not cached) and score them against
+                                      # every asset definition and phrase in inputs/taxonomy/; --dry-run shows the cost
 python -m pytest                      # tests (locally)
 ```
 
@@ -32,6 +31,13 @@ git pull                      # main
                               # write review sheets and the run note (re-reads every PDF when the
                               # parser changed: hours)
 ./wbg sensitivity             # data/reports/sensitivity.md (re-reads 10 PDFs at 5 settings: slow)
+```
+
+The embedding key lives in `.secrets/wbg-openrouter-key` in this folder, readable only by the account that runs the pipeline:
+
+```
+sudo mkdir -p .secrets && sudo chown svc-hermes .secrets && sudo chmod 700 .secrets
+sudo install -m 600 -o svc-hermes /dev/stdin .secrets/wbg-openrouter-key    # paste the key, then Ctrl-D
 ```
 
 Then copy the run note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` in the notes vault and add a line to that folder's `README.md`. An interrupted run restarts where it stopped: run the same command again.

@@ -30,24 +30,24 @@ without embedding or scoring anything again.
             is a new version, which embeds only what changed; an unchanged
             set is not scored again.
 
-  hits      for each unit and label: the best score over the label's queries,
-            the query that gave it, that score's percentile among all units
-            for the same query, and how many of the label's queries rank the
-            unit at or above --min-percentile. Kept when it passes every filter
-            given:
-              --min-score       cosine similarity
-              --min-percentile  within its query: raw cosine is not comparable
-                                between a short phrase and a long definition,
-                                a percentile is
-              --top             best N units per label
-              --label, --project, --kind (sentence | footnote)
-            Writes hits.csv and its paragraph roll-up paragraph_hits.csv.
+  hits()    a function, for analysis: for each unit and label, the best
+            score over the label's queries, the query that gave it, that
+            score's percentile among all units for the same query, and how
+            many of the label's queries rank the unit at or above
+            min_percentile. Keeps what passes every filter given: min_score,
+            min_percentile (within its query: raw cosine is not comparable
+            between a short phrase and a long definition, a percentile is),
+            top (best N per label), labels, projects, kinds.
+            paragraph_rollup() turns hits into one row per label and paragraph.
 
 No filter is the right one by default: which works is decided against
 examples a person checked (AGENTS.md).
 
-  python src/search.py assets                       # score
-  python src/search.py assets --hits --min-percentile 99.5 --top 100
+  python src/search.py assets           # or ./wbg search assets
+
+  import search
+  folder, _ = search.run_folder("assets", data)
+  rows = search.hits(folder, data, min_percentile=99.5, top=100)
 """
 import argparse, csv, hashlib, json, os, sys, time
 from collections import defaultdict
@@ -299,28 +299,6 @@ def paragraph_rollup(rows):
     return out
 
 
-def filter_name(min_score=None, min_percentile=None, top=None, labels=None, projects=None,
-                kinds=None):
-    """A file-name tag for a filter, so different filters sit side by side."""
-    parts = [f"score{min_score}" if min_score is not None else "",
-             f"pct{min_percentile}" if min_percentile is not None else "",
-             f"top{top}" if top else "", "-".join(sorted(labels or [])),
-             "-".join(sorted(projects or [])), "-".join(sorted(kinds or []))]
-    return "_".join(p for p in parts if p) or "all"
-
-
-def write_hits(folder, data, **filters):
-    """Run a filter and write hits-<filter>.csv and paragraphs-<filter>.csv
-    into the run folder; returns their paths."""
-    rows = hits(folder, data, **filters)
-    tag = filter_name(**filters)
-    a = os.path.join(folder, f"hits-{tag}.csv")
-    b = os.path.join(folder, f"paragraphs-{tag}.csv")
-    _write(a, HIT_COLS, rows)
-    _write(b, PARA_COLS, paragraph_rollup(rows))
-    return a, b
-
-
 def _write(path, cols, rows):
     with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n", extrasaction="ignore")
@@ -333,30 +311,10 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("label_set", help="a file in inputs/taxonomy/ without .csv: assets, measures")
     ap.add_argument("--data", default=data_root())
-    ap.add_argument("--model", default=embed.DEFAULT_MODEL)
-    ap.add_argument("--dim", type=int, default=embed.DEFAULT_DIM)
-    ap.add_argument("--base-url", default=embed.DEFAULT_BASE)
-    ap.add_argument("--key-file", default="", help="as for src/embed.py")
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--hits", action="store_true",
-                    help="filter the scores of the current version (scoring it first)")
-    ap.add_argument("--min-score", type=float)
-    ap.add_argument("--min-percentile", type=float)
-    ap.add_argument("--top", type=int)
-    ap.add_argument("--label", action="append")
-    ap.add_argument("--project", action="append")
-    ap.add_argument("--kind", action="append", choices=["sentence", "footnote"])
     args = ap.parse_args()
-    folder, _ = run_folder(args.label_set, args.data, args.model, args.dim)
-    if not os.path.exists(os.path.join(folder, "manifest.json")) or args.dry_run:
-        key = "" if args.dry_run else embed.read_key(args.key_file)
-        folder = search(args.label_set, args.data, args.model, args.dim, args.base_url,
-                        key, dry_run=args.dry_run)
-    if args.hits and folder:
-        for path in write_hits(folder, args.data, min_score=args.min_score,
-                               min_percentile=args.min_percentile, top=args.top,
-                               labels=args.label, projects=args.project, kinds=args.kind):
-            print(f"wrote {path}")
+    key = "" if args.dry_run else embed.read_key("")
+    search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
     return 0
 
 

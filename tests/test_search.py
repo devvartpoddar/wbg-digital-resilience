@@ -149,10 +149,7 @@ def test_a_new_phrase_is_a_new_version_embedding_only_that_phrase(store):
     assert calls[-1] == ["mast"]
 
 
-def test_filters_are_written_side_by_side(store):
-    data, _, _ = store
+def test_the_manifest_says_what_was_run(store):
     out = _score(store)
-    a, b = search.write_hits(out, data, min_percentile=50.0, top=10)
-    assert os.path.basename(a) == "hits-pct50.0_top10.csv" and os.path.exists(b)
     m = json.load(open(os.path.join(out, "manifest.json")))
     assert (m["labels"], m["queries"], m["units"]) == (2, 4, len(UNITS))

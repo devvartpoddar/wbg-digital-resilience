@@ -34,15 +34,18 @@ import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root, where  # noqa: E402
+from paths import data_root, main_checkout, where  # noqa: E402
 import units  # noqa: E402
 
 DEFAULT_MODEL = "openai/text-embedding-3-large"
 DEFAULT_DIM = 3072
 DEFAULT_BASE = "https://openrouter.ai/api/v1"
-# Named for this project, so the credential is not mistaken for, or reused as,
-# a general OpenRouter key. On the box: sudo ygg creds set wbg-openrouter-key.
+# The project's own key, so it is not mistaken for, or reused as, a general
+# OpenRouter key. Read from $WBG_OPENROUTER_KEY, else from KEY_FILE in the main
+# checkout: a 0600 file owned by the account that runs the pipeline (on the box
+# svc-hermes, so Hephaestus can run it and nothing else can read it).
 KEY_VAR = "WBG_OPENROUTER_KEY"
+KEY_FILE = os.path.join(".secrets", "wbg-openrouter-key")
 
 # For the report only. The provider's invoice is the real number; this exists so
 # a dry run can say roughly what a full run will cost before it costs it.
@@ -206,7 +209,11 @@ def read_key(key_file):
     afterwards.
     """
     if not key_file:
-        return os.environ.get(KEY_VAR, "").strip()
+        key = os.environ.get(KEY_VAR, "").strip()
+        default = os.path.join(main_checkout(), KEY_FILE)
+        if key or not os.path.exists(default):
+            return key
+        key_file = default
     try:
         mode = stat.S_IMODE(os.stat(key_file).st_mode)
     except OSError as exc:
@@ -480,9 +487,9 @@ def main():
     api_key = read_key(args.key_file)
     if not api_key and todo:
         raise SystemExit(
-            f"embed: no credential. ${KEY_VAR} is not set in this environment "
-            f"and no --key-file was given. Set one; never pass a key as an "
-            f"argument.")
+            f"embed: no credential. ${KEY_VAR} is not set, there is no "
+            f"{KEY_FILE} in the main checkout and no --key-file was given. Never "
+            f"pass a key as an argument.")
 
     stats, failures = ({"requests": 0, "tokens": 0, "stored": 0,
                         "retried_singly": 0, "rate_limit": {}, "served_model": ""}, [])

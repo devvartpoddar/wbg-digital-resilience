@@ -617,24 +617,10 @@ def main(argv=None):
     _filters(p)
     p.add_argument("--name", help="folder name (default: from the filters)")
     p.add_argument("--tables", action="store_true", help="also write every table as CSV")
-    p = sub.add_parser("embed", help="embed the search units (sentences) - costs money "
-                                     "for anything not yet cached")
-    p.add_argument("--dry-run", action="store_true", help="counts and cost only")
-    p.add_argument("--unit", default="sentences", choices=["sentences", "paragraphs"])
-    p = sub.add_parser("search", help="score every sentence against every query of a "
-                                      "label set in inputs/taxonomy/ (assets, measures)")
-    p.add_argument("label_set")
-    p.add_argument("--dry-run", action="store_true")
-    p = sub.add_parser("hits", help="filter a label set's scores: by score, percentile "
-                                    "within its query, top N, label, project, kind")
-    p.add_argument("label_set")
-    p.add_argument("--min-score", type=float, help="cosine similarity")
-    p.add_argument("--min-percentile", type=float,
-                   help="percentile within the matching query (e.g. 99.5)")
-    p.add_argument("--top", type=int, help="best N units per label")
-    p.add_argument("--label", action="append")
-    p.add_argument("--kind", action="append", choices=["sentence", "footnote"])
-    _filters(p)
+    p = sub.add_parser("search", help="embed the sentences (only what is not cached) and "
+                                      "score them against a label set in inputs/taxonomy/")
+    p.add_argument("label_set", help="assets, measures")
+    p.add_argument("--dry-run", action="store_true", help="what it would embed, and cost")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
                                            "paragraph, component-tag and sentence settings")
     p.add_argument("--docs", type=int, default=10,
@@ -653,32 +639,10 @@ def main(argv=None):
         _run("review_sheets.py", data=data)
         _run("run_report.py", "--topic", "Pipeline run", data=data)
         return 0
-    if args.cmd == "embed":
-        _run("embed.py", "--unit", args.unit, *(["--dry-run"] if args.dry_run else []),
-             data=data)
-        return 0
     if args.cmd == "search":
-        _run("search.py", args.label_set, *(["--dry-run"] if args.dry_run else []),
-             data=data)
-        return 0
-    if args.cmd == "hits":
-        # A selection (--project, --country, --region, --fy, --practice,
-        # --unit) narrows the hits to its projects.
-        sel = _sel(args)
-        extra = ["--hits"]
-        for flag, value in (("--min-score", args.min_score),
-                            ("--min-percentile", args.min_percentile), ("--top", args.top)):
-            if value is not None:
-                extra += [flag, str(value)]
-        for label in args.label or []:
-            extra += ["--label", label]
-        for kind in args.kind or []:
-            extra += ["--kind", kind]
-        if any(getattr(args, f) for f in ("project", "country", "region", "fy",
-                                          "practice", "unit")):
-            for p in sel.ids:
-                extra += ["--project", p]
-        _run("search.py", args.label_set, *extra, data=data)
+        dry = ["--dry-run"] if args.dry_run else []
+        _run("embed.py", *dry, data=data)
+        _run("search.py", args.label_set, *dry, data=data)
         return 0
     if args.cmd == "sensitivity":
         _run("sensitivity.py", "--docs", str(args.docs),

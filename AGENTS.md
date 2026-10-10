@@ -29,7 +29,7 @@ Every decision the pipeline makes must be **repeatable** (same text, same answer
 1. **Never delete data to save space, and never treat a stage's input as disposable.** If disk is a problem, say so.
 2. **No document text in git.** Tables carry identifiers, offsets and checksums. Text lives in `data/` and in Postgres, on the box. Test fixtures are invented.
 3. **Hand-maintained inputs are read, never written.** `inputs/config/` and `inputs/taxonomy/` are kept by people. Changing an asset or measure definition invalidates every label collected under it, so if a task seems to need it, stop and ask.
-4. **Secrets come from the environment.** Never in a file, a command line or a log. If you see one, stop, say so and recommend rotation.
+4. **Secrets come from the environment or the project key file.** The embedding key is `$WBG_OPENROUTER_KEY` or `.secrets/wbg-openrouter-key` in the main checkout (gitignored, mode 0600, owned by the account that runs the pipeline). Never in a committed file, a command line or a log. If you see one anywhere else, stop, say so and recommend rotation.
 5. **Identifiers are deterministic.** A re-run on unchanged input produces byte-identical identifiers and outputs.
 6. **Stages are resumable and skip unchanged work**, keyed on content checksums. On this hardware, reprocessing everything is expensive in hours, not just in principle.
 7. **The parse must be reproducible.** Identifiers are positional, so pin tool versions and check `text_sha256` on re-parse. A silent boundary shift repoints every label.
