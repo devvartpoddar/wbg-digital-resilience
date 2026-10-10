@@ -32,6 +32,9 @@ ABBREV = {
     "nov", "dec", "u.s", "u.k", "u.n", "rs", "est", "min", "max", "incl",
     "govt", "intl", "natl", "ref", "resp", "viz", "ca",
 }
+# A stretch with fewer words than this does not stand alone as a sentence.
+# src/sensitivity.py varies it, and the abbreviation list.
+MIN_WORDS = 3
 BOUNDARY = re.compile(r"[.!?][\"')\]]*\s+(?=[\"'(\[]?[A-Z0-9])")
 WORD_BEFORE = re.compile(r"([A-Za-z][A-Za-z.]*)$")
 PARA_NUMBER = re.compile(r"^\s*\(?\d{1,3}(?:\.\d{1,2})*[.)]\s+")
@@ -50,7 +53,7 @@ def split(text):
         before = text[start:b.start()]
         # Too short to be a sentence: 'ITU.', '2021.' in a reference, 'Annex
         # 2.' as a label. Fewer than three words do not stand alone.
-        if len(re.findall(r"\w+", text[max(start, floor):b.start()])) < 3:
+        if len(re.findall(r"\w+", text[max(start, floor):b.start()])) < MIN_WORDS:
             continue
         w = WORD_BEFORE.search(before)
         if w:

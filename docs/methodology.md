@@ -128,7 +128,7 @@ Each PDF is read by layout with pdfplumber 0.11.10 (the version is pinned in req
 
 **Lines are grouped into units (paragraphs):**
 
-15. A body line continues the paragraph above when it follows at the normal line spacing on the same page (up to 1.45 times the median spacing); or the paragraph had not finished its sentence and the page turned; or the paragraph had not finished its sentence, the line opens in lower case, and a table, heading or footnote came in between; or the paragraph had not finished its sentence, the line opens in lower case, and it sits within three line-spacings (a paragraph set with looser spacing).
+15. A body line continues the paragraph above when it follows at the normal line spacing on the same page (up to 1.45 times the median spacing, `pdf_layout.LINE_GAP`); or the paragraph had not finished its sentence and the page turned; or the paragraph had not finished its sentence, the line opens in lower case, and a table, heading or footnote came in between; or the paragraph had not finished its sentence, the line opens in lower case, and it sits within three line-spacings (`pdf_layout.LOOSE_GAP`; a paragraph set with looser spacing).
 16. A line does not continue the paragraph when it opens a new block: a bullet glyph always does; a paragraph number ("23.") or an enumerator ("(ii)", "a)", "3)") does only when the text before it ended at a stopping point (. : ; ! ? or a closing bracket or quote, or "and"/"or"). A wrapped cross-reference such as "as described in sub-part (ii) above" therefore stays one paragraph.
 17. A word broken by a hyphen at a line end is joined without the hyphen when the document uses the whole word unbroken elsewhere; otherwise the hyphen is real and kept ("climate-resilient").
 18. A footnote line that does not open with a number continues the footnote above; the number a footnote opens with is removed from its text (a year such as 2016 at the start is not mistaken for one).
@@ -152,7 +152,7 @@ Each PDF is read by layout with pdfplumber 0.11.10 (the version is pinned in req
 
 1. Cells that wrap keep pdfplumber's line breaks; the pieces are joined, with a word broken at a hyphen mended as in prose.
 2. Hidden template text in a cell is removed. Columns empty in every row are removed.
-3. The header row is the first row of two or more labels that a later row answers with a figure. Single-cell rows above it are titles; the last title is the table's caption.
+3. The header row is the first row of two or more labels that a later row answers with a figure. Single-cell rows above it are titles; the last title is the table's caption. A table with no title of its own takes the last heading or title line on its page or the one before, unless a line of body prose (more than six words) came after that heading: then the heading opened a section, not the table, and the table has no caption (a data sheet that follows "G. Key Risks" and its text is not captioned "G. Key Risks").
 4. A row of small numbers under the header is a sub-header: "Intermediate Targets" over "1 2" becomes "Intermediate Targets 1", "Intermediate Targets 2".
 5. A header repeated mid-table starts a new segment, with the title before it as the new caption.
 6. A table ruled only around its edge gives one row per printed line; label fragments and their figures are regrouped into one row.
@@ -356,6 +356,11 @@ Each check has a gate in the tests, set just above the measured rate, so a regre
 - *Packages*: 100 packages with the raw description beside every cleaned field.
 
 An existing sheet is never overwritten; a new draw takes a new `--seed`.
+
+**Sensitivity** (`src/sensitivity.py`, `./wbg sensitivity`): how much the cleaned text depends on three settings, written to `data/reports/sensitivity.md`. Nothing the pipeline writes is changed.
+- *Paragraph joining*: a sample of 10 documents (PADs and additional financings first, chosen by a hash of their id) is read again from the PDF with the line gap at 1.30 and 1.60 and the loose gap at 2 and 4; the report gives the number of model paragraphs and the share of the default's model text in paragraphs that no longer exist word for word. This re-reads PDFs and is slow on the box.
+- *Component tags*: every document is tagged with a tag closing at the section change (the default) and with it running on to the next component heading; the report gives how many model paragraphs are tagged each way and how many differ.
+- *Sentences*: every narrative and annex model paragraph is split with the word minimum at 3 (default), 2 and 4, and without the abbreviation list; the report gives the sentence count and how many paragraphs split differently.
 
 **Postgres** (`src/load_pg.py`): every table above is loaded into schema `wbg` in database `work`, with paragraph and sentence text resolved from the offsets. A table whose file has not changed is not reloaded.
 

@@ -617,6 +617,12 @@ def main(argv=None):
     _filters(p)
     p.add_argument("--name", help="folder name (default: from the filters)")
     p.add_argument("--tables", action="store_true", help="also write every table as CSV")
+    p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
+                                           "paragraph, component-tag and sentence settings")
+    p.add_argument("--docs", type=int, default=10,
+                   help="documents to re-read from the PDF for the paragraph test")
+    p.add_argument("--skip-paragraphs", action="store_true",
+                   help="skip the slow paragraph test")
     p = sub.add_parser("pipeline", help="everything run.sh does: prepare all, load, "
                                         "review sheets, run report")
     p.add_argument("--update", action="store_true", help="fetch every project again")
@@ -628,6 +634,10 @@ def main(argv=None):
         _run("load_pg.py", data=data)
         _run("review_sheets.py", data=data)
         _run("run_report.py", "--topic", "Pipeline run", data=data)
+        return 0
+    if args.cmd == "sensitivity":
+        _run("sensitivity.py", "--docs", str(args.docs),
+             *(["--skip-paragraphs"] if args.skip_paragraphs else []), data=data)
         return 0
     sel = _sel(args)
     if args.cmd == "list":

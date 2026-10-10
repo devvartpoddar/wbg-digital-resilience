@@ -96,7 +96,10 @@ class Tagger:
     one the component opened in, or inside it: after the last component of
     'II.B Project Components', 'II.C Project Beneficiaries' belongs to none."""
 
-    def __init__(self):
+    def __init__(self, close_at_section=True):
+        # close_at_section=False keeps a component open until the next
+        # component heading; src/sensitivity.py compares the two.
+        self.close_at_section = close_at_section
         self.comp, self.sub, self.home = "", "", None
 
     def _close(self):
@@ -104,7 +107,7 @@ class Tagger:
 
     def see(self, text, block, section_path):
         path = section_path or ""
-        if self.home is not None and path != self.home \
+        if self.close_at_section and self.home is not None and path != self.home \
                 and not path.startswith(self.home + "."):
             self._close()
         if block not in TAGGED_BLOCKS:
@@ -165,6 +168,9 @@ def _has_name(name):
 
 
 def _num(v):
+    # A figure wrapped inside its cell ('125,000,000.0' over '0') comes back
+    # with a space in it; digits on both sides of a space are one figure.
+    v = re.sub(r"(?<=[\d,.])\s+(?=\d)", "", v or "") if re.fullmatch(r"[\d,.\s$]+", v or "") else v
     m = NUM.match(v or "")
     return float(m.group(1).replace(",", "")) if m else None
 

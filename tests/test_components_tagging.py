@@ -94,3 +94,11 @@ def test_a_restructuring_keeps_the_cost_before_and_after():
     got = K.read_restructuring(grid)
     assert [(c["cost_usd_m"], c["cost_before_usd_m"], c["action"]) for c in got] == \
         [("2.00", "40.00", "Revised"), ("4.00", "4.00", "No Change")]
+
+
+def test_a_cost_wrapped_inside_its_cell_is_still_a_cost():
+    grid = [["Component Name", "Cost (USD)"],
+            ["Digital access", "53,400,000.00"],
+            ["Digital public services", "125,000,000.0\n0"]]
+    assert [(c["name"], c["cost_usd_m"]) for c in K.read_datasheet(grid)] == \
+        [("Digital access", "53.40"), ("Digital public services", "125.00")]

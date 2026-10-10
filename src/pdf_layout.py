@@ -64,6 +64,15 @@ BULLET_OPEN = re.compile(r"^\s*(?:[•●▪■◦\-–]|\(?[ivxlc]{1,5}[\).]|\(
 TEMPLATE_CODE = re.compile(r"\s*\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}\b|\s*\b[A-Z]{2,} Table SPACE\b")
 
 
+
+# How far below the last body line the next one may sit and still continue
+# its paragraph, in multiples of the document's median line pitch: at the
+# normal pitch (LINE_GAP), or further for a paragraph set with looser spacing
+# that had not finished its sentence (LOOSE_GAP). src/sensitivity.py varies
+# them to measure how much the paragraph boundaries depend on them.
+LINE_GAP = 1.45
+LOOSE_GAP = 3
+
 def _norm(text):
     return re.sub(r"\s+", " ", TEMPLATE_CODE.sub("", C.fold_chars(text))).strip()
 
@@ -544,6 +553,11 @@ def extract(pdf, raw_out=None):
             if heading or TITLE_LINE.match(text):
                 last_caption[0], last_caption[1] = text, pno
                 last_header[0] = None   # a new title ends the previous table
+            elif len(text.split()) > 6:
+                # Body prose after a title makes it a section heading, not a
+                # caption: the data sheet after "G. Key Risks" and its text is
+                # not a key-risks table. A short note ("(US$ million)") keeps it.
+                last_caption[0] = ""
             items.append(("heading" if heading else "body", pno, text, l))
             if i:
                 gap = l["top"] - keep[i - 1]["top"]
@@ -603,7 +617,7 @@ def extract(pdf, raw_out=None):
             ppno, pl = last_body_line
             opens_block = _opens_block(text, units[last_body][1])
             same_page = pno == ppno and prev == "body" and \
-                l["top"] - pl["top"] <= 1.45 * pitch
+                l["top"] - pl["top"] <= LINE_GAP * pitch
             unfinished = not re.search(r"[.!?:]\"?$", units[last_body][1])
             page_turn = pno == ppno + 1 and unfinished and prev != "heading"
             # Past an interruption (figure, table, caption) only a line that
@@ -614,7 +628,7 @@ def extract(pdf, raw_out=None):
             # document set this paragraph at looser spacing. The sentence was
             # not finished and the line opens in lower case, so it continues.
             loose = pno == ppno and prev == "body" and unfinished \
-                and re.match(r"[a-z]", text) and l["top"] - pl["top"] <= 3 * pitch
+                and re.match(r"[a-z]", text) and l["top"] - pl["top"] <= LOOSE_GAP * pitch
             if (same_page or page_turn or resumed or loose) and not opens_block:
                 u = units[last_body]
                 u[1] = _dehyphenate(u[1], text, vocab)
