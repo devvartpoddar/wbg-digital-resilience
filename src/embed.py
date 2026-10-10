@@ -1,12 +1,21 @@
 #!/usr/bin/env python3
-"""Embed every cleaned paragraph once, and cache the vectors so it stays once.
+"""Embed every search unit once, and cache the vectors so it stays once.
 
-Reads  data/appraisal/paragraphs.csv, data/appraisal/text/{doc_id}.txt
+Sentences are where we search, paragraphs where we work (src/units.py), so
+the default unit is the sentence: every sentence of the narrative and annex
+paragraphs given to the model, and each such footnote whole. --unit paragraphs
+embeds the paragraphs instead.
+
+Reads  data/appraisal/{sentences,paragraphs,components}.csv,
+       data/appraisal/text/{doc_id}.txt
 Writes data/embeddings/cache/{model}.{dim}/{aa}/{sha256}.f32  one vector per text
-       data/embeddings/paragraph_emb.npy                 (rows, dim) float32
-       data/embeddings/emb_index.csv                     row -> paragraph_id
-       data/reports/embed.txt
-       data/embeddings/embedding_manifest.json           the provenance record
+       data/embeddings/sentence_emb.npy        (rows, dim) float32
+       data/embeddings/sentence_index.csv      row -> unit, with its paragraph,
+                                               document, projects and component
+       data/embeddings/sentence_embedding_manifest.json   the provenance record
+       data/reports/embed_sentences.txt
+       (--unit paragraphs: paragraph_emb.npy, emb_index.csv,
+        embedding_manifest.json, reports/embed.txt)
 
 The cache is content-addressed on the SHA-256 of the exact text embedded, under
 a directory named for the model and dimension count. So a re-run costs nothing,
@@ -15,7 +24,8 @@ adds. Nothing here is ever re-embedded because a downstream script wanted it.
 
   python3 src/embed.py --dry-run          # counts and spend, no network call
   python3 src/embed.py --limit 5          # smoke test, artifacts under data/embeddings/smoke_*
-  python3 src/embed.py                    # the corpus
+  python3 src/embed.py                    # the corpus, by sentence
+  python3 src/embed.py --unit paragraphs  # the corpus, by paragraph
 """
 import argparse, csv, hashlib, json, os, socket, stat, sys, time
 
@@ -25,6 +35,7 @@ import requests
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
+import units  # noqa: E402
 
 DEFAULT_MODEL = "openai/text-embedding-3-large"
 DEFAULT_DIM = 3072
@@ -50,6 +61,16 @@ CHUNK_CHARS = 200_000
 MAX_TEXT_CHARS = 28_000
 
 INDEX_COLS = ["row", "paragraph_id", "text_sha256"]
+SENTENCE_INDEX_COLS = ["row"] + [c for c in units.UNIT_COLS
+                                 if c not in ("char_start", "char_end", "n_tokens")]
+
+# What each unit writes: (matrix, index, manifest, report).
+OUTPUTS = {
+    "sentences": ("sentence_emb.npy", "sentence_index.csv",
+                  "sentence_embedding_manifest.json", "embed_sentences.txt"),
+    "paragraphs": ("paragraph_emb.npy", "emb_index.csv",
+                   "embedding_manifest.json", "embed.txt"),
+}
 
 
 class TransportError(RuntimeError):
@@ -263,7 +284,7 @@ def pack(vec, dim):
 
 # ------------------------------------------------------------------ the corpus
 
-def resolve(data_dir, rows):
+def resolve(data_dir, rows, id_field="paragraph_id"):
     """Paragraph text pulled back out of the clean files by offset, with the
     hash recorded at cleaning time re-checked against it.
 
@@ -288,18 +309,18 @@ def resolve(data_dir, rows):
         sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
         if sha != row["text_sha256"]:
             raise SystemExit(
-                f"embed: {row['paragraph_id']} does not match its recorded hash.\n"
+                f"embed: {row[id_field]} does not match its recorded hash.\n"
                 f"  paragraphs.csv and data/appraisal/text/ have diverged - re-run "
                 f"src/clean.py before embedding.")
         if not body.strip():
-            empty.append(row["paragraph_id"])
+            empty.append(row[id_field])
             continue
         if len(body) > MAX_TEXT_CHARS:
             raise SystemExit(
-                f"embed: {row['paragraph_id']} is {len(body):,} characters, over "
+                f"embed: {row[id_field]} is {len(body):,} characters, over "
                 f"the {MAX_TEXT_CHARS:,} ceiling. Truncating would cache a vector "
                 f"under the hash of text it does not describe; fix the cleaner.")
-        order.append((row["paragraph_id"], sha))
+        order.append((row[id_field], sha))
         unique.setdefault(sha, body)
     return order, unique, empty
 
@@ -407,25 +428,31 @@ def main():
                     help="read the credential from this file (mode 0600) rather "
                          "than from $" + KEY_VAR)
     ap.add_argument("--limit", type=int, default=0,
-                    help="first N paragraphs; artifacts go to data/embeddings/smoke_*")
+                    help="first N units; artifacts go to data/embeddings/smoke_*")
+    ap.add_argument("--unit", choices=sorted(OUTPUTS), default="sentences",
+                    help="what one vector stands for (default: sentences)")
     args = ap.parse_args()
 
     def log(msg):
         print(msg, flush=True)
 
-    with open(where(args.data, "appraisal", "paragraphs.csv"), newline="",
-              encoding="utf-8") as fh:
-        # Only what clean.py marks for the model: body prose and footnotes, not
-        # front matter, tables or headings. A table written before for_model
-        # existed has no such column and is taken whole.
-        rows = [r for r in csv.DictReader(fh) if r.get("for_model", "true") == "true"]
+    if args.unit == "sentences":
+        rows, id_field = units.search_units(args.data), "unit_id"
+    else:
+        with open(where(args.data, "appraisal", "paragraphs.csv"), newline="",
+                  encoding="utf-8") as fh:
+            # Only what clean.py marks for the model: body prose and footnotes,
+            # not front matter, tables or headings. A table written before
+            # for_model existed has no such column and is taken whole.
+            rows = [r for r in csv.DictReader(fh) if r.get("for_model", "true") == "true"]
+        id_field = "paragraph_id"
     words_by_sha = {}
     if args.limit:
         rows = rows[:args.limit]
     for row in rows:
         words_by_sha[row["text_sha256"]] = int(row["n_tokens"])
 
-    order, unique, empty = resolve(args.data, rows)
+    order, unique, empty = resolve(args.data, rows, id_field)
     root = cache_root(args.data, args.model, args.dim)
 
     have = {sha for sha in unique if read_cached(root, sha, args.dim) is not None}
@@ -434,7 +461,7 @@ def main():
     words = sum(words_by_sha.get(s, 0) for s in todo)
     lo, hi = token_range(words, chars)
 
-    log(f"paragraphs:      {len(rows):,}" + (f"  (--limit {args.limit})" if args.limit else ""))
+    log(f"{args.unit + ':':<17}{len(rows):,}" + (f"  (--limit {args.limit})" if args.limit else ""))
     log(f"unique texts:    {len(unique):,}  "
         f"(deduplication removes {len(order) - len(unique):,})")
     log(f"already cached:  {len(have):,}")
@@ -472,19 +499,30 @@ def main():
     dropped = [pid for pid, sha in order if sha not in have]
 
     prefix = "smoke_" if args.limit else ""
-    npy_path = where(args.data, "embeddings", f"{prefix}paragraph_emb.npy")
-    idx_path = where(args.data, "embeddings", f"{prefix}emb_index.csv")
-    rep_path = where(args.data, "reports", f"{prefix}embed.txt")
+    npy_name, idx_name, man_name, rep_name = OUTPUTS[args.unit]
+    npy_path = where(args.data, "embeddings", f"{prefix}{npy_name}")
+    idx_path = where(args.data, "embeddings", f"{prefix}{idx_name}")
+    rep_path = where(args.data, "reports", f"{prefix}{rep_name}")
     for d in (os.path.dirname(npy_path), os.path.dirname(rep_path)):
         os.makedirs(d, exist_ok=True)
 
     log("")
     assemble(npy_path, index, root, args.dim, log)
-    with open(idx_path, "w", newline="", encoding="utf-8") as fh:
+    with open(idx_path + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh, lineterminator="\n")
-        w.writerow(INDEX_COLS)
-        for i, (pid, sha) in enumerate(index):
-            w.writerow([i, pid, sha])
+        if args.unit == "sentences":
+            # Every unit's context rides with its row, so a search result names
+            # its paragraph, document, projects and component directly.
+            by_id = {r["unit_id"]: r for r in rows}
+            w.writerow(SENTENCE_INDEX_COLS)
+            for i, (uid, sha) in enumerate(index):
+                r = by_id[uid]
+                w.writerow([i] + [r[c] for c in SENTENCE_INDEX_COLS[1:]])
+        else:
+            w.writerow(INDEX_COLS)
+            for i, (pid, sha) in enumerate(index):
+                w.writerow([i, pid, sha])
+    os.replace(idx_path + ".part", idx_path)
 
     spend = stats["tokens"] / 1e6 * PRICE_PER_MTOK
     manifest = {
@@ -495,10 +533,11 @@ def main():
         "base_url": args.base_url,
         "provider_pin": {"order": ["openai"], "allow_fallbacks": False},
         "cache_dir": os.path.relpath(root, ROOT),
-        "paragraphs": len(rows),
+        "unit": args.unit,
+        args.unit: len(rows),
         "unique_texts": len(unique),
         "rows_embedded": len(index),
-        "paragraphs_without_a_vector": len(dropped),
+        f"{args.unit}_without_a_vector": len(dropped),
         "tokens_reported": stats["tokens"],
         "usd_per_mtok": PRICE_PER_MTOK,
         "usd_spent": round(spend, 4),
@@ -508,16 +547,16 @@ def main():
         "host": socket.gethostname(),
     }
     if args.limit:
-        man_path = where(args.data, "embeddings", "smoke_embedding_manifest.json")
+        man_path = where(args.data, "embeddings", f"smoke_{man_name}")
     else:
-        man_path = where(args.meta, "embeddings", "embedding_manifest.json")
+        man_path = where(args.meta, "embeddings", man_name)
         os.makedirs(os.path.dirname(man_path), exist_ok=True)
     with open(man_path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
         fh.write("\n")
 
     out = [
-        f"paragraphs read:            {len(rows):,}",
+        f"{args.unit + ' read:':<28}{len(rows):,}",
         f"unique texts:               {len(unique):,}",
         f"cache hits before this run: {len(have) - stats['stored']:,}",
         f"requests made:              {stats['requests']:,}"
@@ -529,12 +568,12 @@ def main():
         "",
         f"rows in {os.path.basename(npy_path)}: {len(index):,} x {args.dim}"
         f"  ({len(index) * args.dim * 4 / 1e9:.2f} GB)",
-        f"paragraphs with no vector:  {len(dropped)}",
+        f"{args.unit + ' with no vector:':<28}{len(dropped)}",
     ]
     if dropped:
         out.append("  " + ", ".join(dropped[:20]))
     if empty:
-        out.append(f"paragraphs resolving empty: {len(empty)}")
+        out.append(f"{args.unit} resolving empty: {len(empty)}")
     if failures:
         out.append("")
         out.append(f"texts that failed after retries ({len(failures)}):")

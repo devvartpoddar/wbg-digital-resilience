@@ -34,8 +34,10 @@ Any model that meets all three may be used, including an external one. For an ex
 | Clean procurement packages, notices and awards | Built; under review |
 | Link notices and awards to their plan package | Built |
 | Load into Postgres, write review sheets and the run report | Built |
-| Embed paragraphs into pgvector | Next, once cleaning is accepted |
-| Judge paragraphs for assets and measures | Next: a test of a pinned external decision model (referred to as Jev) that returns a yes probability |
+| Embed the search units (sentences, and whole footnotes) | Built; runs once the box's data is current (`./wbg embed`) |
+| Search sentences for each asset and measure; roll up to paragraphs | Built for any label set in `inputs/taxonomy/` (`./wbg search assets`); the measures list is still to be written |
+| Link a measure to an asset (same paragraph, same asset, same component) | Next, once the measures list exists |
+| Judge the paragraphs the search finds | Next: a test of a pinned external decision model (referred to as Jev) that returns a yes probability |
 | Labels for measuring it | To be drawn fresh. Keyed by the SHA-256 of the unit's text plus the name and date of the label set; nothing but evaluation reads them |
 
 ## 0. Running it
@@ -368,14 +370,27 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
 
 **Reports** (`src/run_report.py`): drafts a run note in `data/reports/`, which is copied into the notes vault at `Projects/WBG Digital Resilience/Reports/`. Reports never go into the repository.
 
-## 5. Storage
+## 5. Search
+
+Sentences are where we search, paragraphs where we work: a sentence states one thing, so an asset or a measure is found in a sentence, and the paragraph around it is what a model or a person reads to decide.
+
+**Search units (`src/units.py`).** Every sentence of the narrative and annex paragraphs given to the model, and each footnote given to the model, whole (footnotes are mostly references, which a sentence splitter would cut into nonsense). Each unit carries its paragraph, document, the project of the document part it sits in, block, section, component number and sub-component number in its own document's numbering, and `component_key`, that component's `name_key`, which finds the same component in another document even when a restructuring renumbered it. A paragraph under no component heading has no key. On the current run: 58,715 units (54,827 sentences and 3,888 footnotes), 55,222 distinct texts.
+
+**Embedding (`src/embed.py`, `./wbg embed`).** Each distinct unit text is embedded once by a pinned model (`openai/text-embedding-3-large`, 3,072 dimensions, through OpenRouter with the provider pinned and fallbacks refused) and cached under the SHA-256 of the text, so a re-run, an interrupted run or a larger cohort pays only for text not seen before. A vector is stored only if it has the right length and a norm near 1; nothing is truncated or zeroed. Before embedding, each unit's text is cut from the cleaned file by its offsets and checked against the checksum recorded at cleaning. Output: `data/embeddings/sentence_emb.npy` (one row per unit) and `sentence_index.csv` (the row's unit and its context), with a manifest of the model actually served, tokens and spend. `--unit paragraphs` embeds paragraphs instead. The key comes from the environment (`OPENROUTER_API_KEY`), never an argument. Estimated cost for the whole corpus: about US$0.30.
+
+**Searching a label set (`src/search.py`, `./wbg search <set>`).** A label set is a file in `inputs/taxonomy/` kept by people (`assets.csv`; `measures.csv` to come), one row per label with an id, a name, a definition and whether it is active. Each active label is searched with "name: definition", embedded and cached like any text; every unit is scored by cosine similarity, and each label keeps its top units (200 by default) with their scores, ranks and context in `sentence_hits.csv`. `paragraph_hits.csv` rolls these up per label and paragraph: the best score, the unit that gave it and how many of the paragraph's units are in the label's top list. A run is written to `data/search/<set>-<version>/`, where the version is a SHA-256 over the query texts, the model and the sentence index: revising one definition gives a new run that embeds only that definition, and an unchanged run is skipped. No cut-off is applied; where a match ends is a judgement to be made against examples a person checked.
+
+**Linking a measure to an asset (next).** Three layers, strongest first: the measure and the asset in the same paragraph; the same asset; the same component (by `component_key` across documents). What "the same asset" means is still to be defined.
+
+## 6. Storage
 
 - **Files**: `data/` in the main checkout (`/ygg/projects/wbg-digital-resilience/data/` on the box). Gitignored, never deleted. Every file has one home, defined once in `src/paths.py`:
   - `raw/`: what was fetched, as published (`pdf/`, `pdf_text/`, `plans/`, `notices/`, `awards/`, `projects/`, `documents.csv`, `fetch_log.csv`, and the old `text/` renditions);
   - `appraisal/`: cleaned text (`text/`), per-document caches (`cache/`), `paragraphs.csv`, `sentences.csv`, `rejected.csv`, `components.csv`, `document_parts.csv`;
   - `procurement/`: packages, notices and awards, raw and cleaned, and superseded package versions;
   - `projects/`: `projects.csv`;
-  - `embeddings/`: vectors and their index, when they come;
+  - `embeddings/`: the vector cache, `sentence_emb.npy` and `sentence_index.csv`;
+  - `search/`: one folder per label set and version (section 5);
   - `reports/`: every stage's report and the run notes;
   - `review/`: the review spreadsheets;
   - `runs/`: exports for a selection, one folder per selection and date (`./wbg export`).
@@ -397,12 +412,13 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
   | notices, awards | packages | `package_id`, with `package_link` saying how (step 19) |
   | awards | notices | `notice_ids`: the notices issued under the same reference (and, where both are linked, the same package) |
   | notices, awards | projects | `project_id` |
+  | search units, search hits | paragraphs, documents, components | `paragraph_id`, `doc_id`, `project_ids`, `component_key` (section 5) |
 
   So a paragraph about a component, the packages that buy it, the notices that tendered them and the contracts that were signed can be read together.
 - **Postgres**: schema `wbg` in database `work`, a queryable copy of the files.
-- **Embeddings, when they come**: `halfvec(3072)` with an HNSW index on cosine distance; plain `vector` cannot be indexed past 2,000 dimensions. Only paragraphs with `for_model` true are embedded. The full-precision vectors stay in the on-disk cache as the record.
+- **Embeddings**: the vectors live in the content-addressed cache and `sentence_emb.npy`; search reads them from there (section 5). Loading them into Postgres as `halfvec(3072)` with an HNSW index on cosine distance (plain `vector` cannot be indexed past 2,000 dimensions) is left until a query needs the database; the cache stays the record.
 
-## 6. Known limits
+## 7. Known limits
 
 - **Results-framework indicators are tables**, so the model does not see them, though some state measured commitments (for example a share of infrastructure built to withstand climate shocks).
 - **Component tags inside annexes.** Annexes have no lettered sections, so a later heading in the same annex that is not a component does not close the last one.

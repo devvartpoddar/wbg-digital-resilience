@@ -29,6 +29,8 @@ written down once:
   data/reports/      every stage's report, and the run notes for the vault
   data/review/       spreadsheets for reading the output by eye
   data/runs/         a selection's exported results, when asked for (src/wbg.py)
+  data/search/       a label set's scores over the sentences, one folder per
+                     label set and version (src/search.py)
 
 Order of precedence for the data root:
   1. $WBG_DATA, if set
@@ -79,6 +81,7 @@ LAYOUT = {
     "reports": "reports",
     "review": "review",
     "runs": "runs",
+    "search": "search",
     "fetch_status": "reports/fetch_status",
 }
 

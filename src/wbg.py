@@ -617,6 +617,15 @@ def main(argv=None):
     _filters(p)
     p.add_argument("--name", help="folder name (default: from the filters)")
     p.add_argument("--tables", action="store_true", help="also write every table as CSV")
+    p = sub.add_parser("embed", help="embed the search units (sentences) - costs money "
+                                     "for anything not yet cached")
+    p.add_argument("--dry-run", action="store_true", help="counts and cost only")
+    p.add_argument("--unit", default="sentences", choices=["sentences", "paragraphs"])
+    p = sub.add_parser("search", help="score the sentences against a label set in "
+                                      "inputs/taxonomy/ (assets, measures)")
+    p.add_argument("label_set")
+    p.add_argument("--top", type=int, default=200, help="units kept per label")
+    p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
                                            "paragraph, component-tag and sentence settings")
     p.add_argument("--docs", type=int, default=10,
@@ -634,6 +643,14 @@ def main(argv=None):
         _run("load_pg.py", data=data)
         _run("review_sheets.py", data=data)
         _run("run_report.py", "--topic", "Pipeline run", data=data)
+        return 0
+    if args.cmd == "embed":
+        _run("embed.py", "--unit", args.unit, *(["--dry-run"] if args.dry_run else []),
+             data=data)
+        return 0
+    if args.cmd == "search":
+        _run("search.py", args.label_set, "--top", str(args.top),
+             *(["--dry-run"] if args.dry_run else []), data=data)
         return 0
     if args.cmd == "sensitivity":
         _run("sensitivity.py", "--docs", str(args.docs),

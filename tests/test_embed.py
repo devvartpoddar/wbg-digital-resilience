@@ -139,7 +139,7 @@ def run(tmp_path, stub, monkeypatch, *extra):
     monkeypatch.setattr(E, "embed_texts", stub)
     monkeypatch.setattr(sys, "argv", [
         "embed.py", "--data", data, "--meta", meta, "--dim", str(DIM),
-        "--model", MODEL, *extra])
+        "--model", MODEL, "--unit", "paragraphs", *extra])
     return E.main()
 
 
