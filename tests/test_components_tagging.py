@@ -62,3 +62,11 @@ def test_a_cell_of_figures_is_not_a_name(cell, ok):
 @pytest.mark.parametrize("cell", ["IDA", "Front-end Fee", "Total"])
 def test_financing_lines_end_the_component_list(cell):
     assert K.STOP_ROW.match(cell)
+
+
+def test_an_exchange_rate_line_is_not_a_subcomponent():
+    text = "5.72 BRL = US$1\nComponent 2: Rural Radio Masts"
+    rows = [{"block": "heading", "char_start": "0", "char_end": "15", "page_from": "2"},
+            {"block": "heading", "char_start": "16", "char_end": str(len(text)), "page_from": "9"}]
+    got = K.read_headings(rows, text)
+    assert [(c["level"], c["number"]) for c in got] == [("component", "2")]

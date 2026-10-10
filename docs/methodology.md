@@ -193,7 +193,7 @@ Tables are kept in the tables for reading. They are not given to the model and a
 2. All tables on that page and the next are read from the PDF, top to bottom, as one grid. A restructuring paper's table of changes is read first (current and proposed names, cost, action); otherwise the data sheet's component table (name and cost). Costs are in millions of US dollars; a figure over 10,000 is read as dollars and converted.
 3. Body headings "Component N: ..." and "Sub-component N.M: ..." add components and sub-components, with any cost printed in the heading.
 4. Each name is cleaned: its number and printed cost removed, a following sentence cut off ("... This component will ..."), figures from neighbouring columns removed, a name read twice collapsed, and a heading that opens in lower case discarded. "Unallocated" and contingency budget lines are kept but not numbered; the Contingent Emergency Response Component (CERC) keeps its number.
-5. One row per component or sub-component per document that states it: projects, document, kind, disclosure date, where it was read (`datasheet`, `restructuring`, `heading`), level, number, name, cost, action, page. The reads are cached against the PDF, the pages searched and the module's code. (942 rows covering all 70 projects: 297 from data sheets, 126 from restructuring tables and 519 from headings on the current run.)
+5. One row per component or sub-component per document that states it: projects, document, kind, disclosure date, where it was read (`datasheet`, `restructuring`, `heading`), level, number, name, cost, action, page. The reads are cached against the PDF, the pages searched and the module's code. (950 rows covering all 70 projects on the current run.)
 
 **Paragraphs are tagged by position:**
 

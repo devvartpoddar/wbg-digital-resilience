@@ -434,8 +434,10 @@ def read_headings(rows, text):
         if not level or (level, number) in seen:
             continue
         # A results indicator numbered like a component ("2. Number of
-        # servers planned ...") is not one.
-        if re.match(r"(?:Number|Percentage|Share|Proportion)\s+of\b", name, re.I):
+        # servers planned ...") is not one, nor an exchange rate read as a
+        # sub-component number ("5.72 BRL = US$1").
+        if re.match(r"(?:Number|Percentage|Share|Proportion)\s+of\b", name, re.I) \
+                or "=" in name:
             continue
         seen.add((level, number))
         cost = COST_IN_TEXT.search(name)
@@ -483,10 +485,16 @@ def main():
                 "disclosure_date": doc["disclosure_date"]}
 
         # Pages holding a component table, found in the cleaned text so the
-        # PDF is opened only at those pages.
-        pages = sorted({int(r["page_from"]) for r in rows if r["page_from"] and re.search(
-            r"component\s*name|current component", text[int(r["char_start"]):int(r["char_end"])],
-            re.I)})
+        # PDF is opened only at those pages. Searched over the whole text, not
+        # paragraph by paragraph: a table's heading line can fall between two
+        # kept paragraphs, and then belongs to the page of the one before it.
+        starts = sorted((int(r["char_start"]), int(r["page_from"] or 0)) for r in rows)
+        pages = set()
+        for m in re.finditer(r"component\s*name|current component", text, re.I):
+            before = [pg for s, pg in starts if s <= m.start()]
+            if before and before[-1]:
+                pages.add(before[-1])
+        pages = sorted(pages)
         found = []
         pdf_path = where(args.data, "pdf", f"{did}.pdf")
         # Keyed on the PDF, the pages searched and this module's code, so a
