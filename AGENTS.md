@@ -18,7 +18,7 @@ The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement
 - **Postgres**: schema `wbg` in database `work` (`postgresql:///work`, no password). `WBG_PG` overrides it.
 - **Hardware**: an Intel N150, four efficiency cores, about 15 GB of memory, no graphics card. Stream large files rather than loading them whole. Anything that needs a graphics card is the wrong design here.
 
-Run everything with `./run.sh`; a smoke run is `./run.sh --limit 3`.
+Run everything with `./run.sh`. For one project, country, region or approval year use `./wbg` (`./wbg --help`); a smoke run is `./wbg prepare --project <id>` followed by `./wbg summary --project <id>`. Both skip work whose code and inputs have not changed.
 
 ## The principle
 
@@ -43,7 +43,7 @@ Plain language; expand every abbreviation on first use. No claim beyond what the
 ## Done means
 
 - `python -m pytest` passes (run it locally; the box's worker venv has no pytest).
-- The change was run on real data, at least `./run.sh --limit 3`, and the output was looked at.
+- The change was run on real data, at least `./wbg prepare --project <id>` on one real project, and the output was looked at.
 - Re-running on unchanged input produces identical output; an interrupted run restarts without redoing finished work.
 - Nothing under `data/` is staged, and no new table carries document text into git.
 - `docs/methodology.md` says what the code now does.

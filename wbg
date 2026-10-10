@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# The pipeline's command line: ./wbg --help, or see src/wbg.py.
+set -euo pipefail
+cd "$(dirname "$0")"
+PY="${WBG_PY:-/opt/yggdrasil/venvs/work/bin/python}"
+[ -x "$PY" ] || PY=python3
+exec "$PY" src/wbg.py "$@"

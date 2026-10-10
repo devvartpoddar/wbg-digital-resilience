@@ -36,7 +36,16 @@ Any model that meets all three may be used, including an external one. For an ex
 | Judge paragraphs for assets and measures | Next: a test of a pinned external decision model (referred to as Jev) that returns a yes probability |
 | Labels for measuring it | To be drawn fresh. Keyed by the SHA-256 of the unit's text plus the name and date of the label set; nothing but evaluation reads them |
 
-`./run.sh` runs every stage below in this order. Each stage reads only the files the earlier stages wrote, skips work whose inputs have not changed, and writes its own report to `data/reports/`. Every number marked "on the current run" comes from those reports and will move when the documents do.
+## 0. Running it
+
+`./run.sh` (the same as `./wbg pipeline`) runs every stage below in this order, then loads Postgres, writes the review sheets and drafts the run note. `./wbg` does the same for a selection of the cohort:
+
+1. **Select.** `--project`, `--country` (country code), `--region` (case-insensitive, part of the name is enough) and `--fy` (approval fiscal year) filter the included rows of `inputs/config/cohort.csv`. Each takes several values; different filters combine with "and". A project outside the cohort is refused. On the current cohort, 5 included projects have no region or country recorded and 12 no approval year, so a region, country or year filter cannot select them; `--project` can.
+2. **Fetch only what is new.** `data/reports/stages.json` records which projects have been fetched, for appraisal documents and for procurement separately. `./wbg prepare` fetches only selected projects not recorded there; `--update` fetches the selected projects again. Fetching one project keeps every other project's rows (sections 2.1 and 3.1). A store made before this file existed counts every project it already holds as fetched.
+3. **Rebuild only what changed.** Every later stage runs over the whole store, never one project alone, so the shared tables stay whole. `stages.json` keeps a SHA-256 of each stage's code and input files; a stage runs only when that changes. Within a stage, the per-document caches (keyed on the PDF's checksum and the reading code's version) skip unchanged documents. A second `prepare` with nothing new does nothing.
+4. **Read and export.** `./wbg summary` prints, for each selected project, the latest procurement plan's date, its packages by status, the packages still to come (status Pending, Pending Implementation, Under Review or Planned) with their estimated value, how many of those have a planned date already past, the next planned date, open notices (deadline not yet passed) and signed contracts. `./wbg export` writes the same to `data/runs/<selection>-<date>/summary.xlsx` (sheets: projects, upcoming packages, open notices, components, the components and costs taken from each project's latest appraisal document), and with `--tables` every filtered table as CSV. A planned date already past is what the plan records, not evidence of delay: the plan may simply not have been updated.
+
+Each stage reads only the files the earlier stages wrote, skips work whose inputs have not changed, and writes its own report to `data/reports/`. Every number marked "on the current run" comes from those reports and will move when the documents do.
 
 ## 1. What is pulled
 
@@ -60,7 +69,7 @@ Personal contact details in notices (names, e-mail addresses, telephone numbers)
 2. Label each document's kind from its type and title: `pad`; `additional_financing` (a Project Paper whose title says additional financing); `restructuring` (title says restructuring); otherwise `project_paper_other`.
 3. Download the PDF. A document with no PDF, or whose address returns something that is not a PDF, is noted in the report and left out.
 4. Write one row per document to `data/raw/documents.csv`: document id, all the projects it serves (a regional document serves several, joined with "|"), type, kind, title, disclosure date, language, when it was fetched, the PDF's address, size and SHA-256.
-5. A project not listed on this run (outside a `--limit` smoke run, or because its listing failed) keeps the rows an earlier run recorded for it, so a partial run never shrinks the corpus.
+5. A project not listed on this run (outside the selection being fetched, or because its listing failed) keeps the rows an earlier run recorded for it, so a partial run never shrinks the corpus.
 
 On the current run: 147 documents for the 70 projects: 65 PADs, 13 additional financings and 69 restructuring papers.
 
@@ -204,7 +213,7 @@ Tables are kept in the tables for reading. They are not given to the model and a
 10. **Figures.** Where the table has an Estimated Amount column, the first figure is the estimate and the second the actual. Where it has none (older plans), the only figure is the actual, and the estimate is left blank.
 11. **Notices.** Notice id, project, notice type and status, publication and deadline dates, the borrower reference the notice was issued under, description, procurement group, the Bank's method code and name, country, notice language.
 12. **Awards.** Contract id, project, borrower reference, description, signing and no-objection dates, contract amount, procurement group, method name, review type, supplier name, country and amount, region and sector.
-13. **Output.** Written to `data/procurement/{packages_raw,notices_raw,awards_raw}.csv`: one package row per plan version per package, as printed. Nothing is derived at this stage.
+13. **Output.** Written to `data/procurement/{packages_raw,notices_raw,awards_raw}.csv`: one package row per plan version per package, as printed. Nothing is derived at this stage. Fetching a selection of projects (`--projects`) rewrites only those projects' rows; every other project keeps the rows an earlier run recorded, and a project whose listing fails keeps its earlier rows too.
 
 ### 3.2 Clean (`src/clean_procurement.py`)
 
@@ -317,9 +326,10 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
   - `procurement/`: packages, notices and awards, raw and cleaned, and superseded package versions;
   - `embeddings/`: vectors and their index, when they come;
   - `reports/`: every stage's report and the run notes;
-  - `review/`: the review spreadsheets.
+  - `review/`: the review spreadsheets;
+  - `runs/`: exports for a selection, one folder per selection and date (`./wbg export`).
 
-  `python src/paths.py` moves an older layout into this one. It only moves files, never overwrites, and does nothing the second time; `run.sh` runs it first.
+  `python src/paths.py` moves an older layout into this one. It only moves files, never overwrites, and does nothing the second time; `./wbg prepare` and `run.sh` run it first.
 - **Postgres**: schema `wbg` in database `work`, a queryable copy of the files.
 - **Embeddings, when they come**: `halfvec(3072)` with an HNSW index on cosine distance; plain `vector` cannot be indexed past 2,000 dimensions. Only paragraphs with `for_model` true are embedded. The full-precision vectors stay in the on-disk cache as the record.
 

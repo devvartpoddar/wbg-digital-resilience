@@ -26,6 +26,7 @@ written down once:
   data/procurement/  packages, notices, awards: raw and cleaned tables
   data/reports/      every stage's report, and the run notes for the vault
   data/review/       spreadsheets for reading the output by eye
+  data/runs/         a selection's exported results, when asked for (src/wbg.py)
 
 Order of precedence for the data root:
   1. $WBG_DATA, if set
@@ -73,6 +74,7 @@ LAYOUT = {
     "embeddings": "embeddings",
     "reports": "reports",
     "review": "review",
+    "runs": "runs",
 }
 
 

@@ -146,10 +146,16 @@ def main():
     ap.add_argument("--cohort", default=os.path.join(ROOT, "inputs/config/cohort.csv"))
     ap.add_argument("--out", default=data_root())
     ap.add_argument("--limit", type=int, default=0, help="first N projects only (for a smoke run)")
+    ap.add_argument("--projects", default="",
+                    help="comma-separated project ids: fetch only these; the rest keep "
+                         "what earlier runs recorded")
     ap.add_argument("--delay", type=float, default=0.5, help="seconds between requests")
     args = ap.parse_args()
 
     projects = read_cohort(args.cohort)
+    if args.projects:
+        wanted = {p.strip() for p in args.projects.split(",") if p.strip()}
+        projects = [p for p in projects if p["project_id"] in wanted]
     if args.limit:
         projects = projects[:args.limit]
     print(f"cohort: {len(projects)} projects included", flush=True)

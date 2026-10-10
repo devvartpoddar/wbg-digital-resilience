@@ -1073,6 +1073,9 @@ def main():
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--meta", default=data_root())
     ap.add_argument("--limit", type=int, default=0, help="first N projects (smoke run)")
+    ap.add_argument("--projects", default="",
+                    help="comma-separated project ids: fetch only these; the other "
+                         "projects' rows are kept from the earlier run")
     ap.add_argument("--delay", type=float, default=0.3)
     ap.add_argument("--workers", type=int, default=6,
                     help="concurrent plan rendition downloads")
@@ -1082,6 +1085,9 @@ def main():
     args = ap.parse_args()
 
     projects = read_cohort(args.cohort)
+    if args.projects:
+        wanted = {p.strip() for p in args.projects.split(",") if p.strip()}
+        projects = [p for p in projects if p["project_id"] in wanted]
     if args.limit:
         projects = projects[:args.limit]
     proc_dir = where(args.data, "procurement")
@@ -1117,9 +1123,20 @@ def main():
     notices, notice_fail = collect_notices(projects, args.data, log, args.refresh, args.delay)
     awards, award_fail = collect_awards(projects, args.data, log, args.refresh, args.delay)
 
-    write_csv(os.path.join(proc_dir, "packages_raw.csv"), PACKAGE_COLS, prep)
-    write_csv(os.path.join(proc_dir, "notices_raw.csv"), NOTICE_COLS, notices)
-    write_csv(os.path.join(proc_dir, "awards_raw.csv"), AWARD_COLS, awards)
+    # A run over some projects replaces only their rows: every other project
+    # keeps what an earlier run wrote, so a partial run never shrinks a table.
+    done = {p["project_id"] for p in projects}
+    for name, cols, rows, order in (
+            ("packages_raw.csv", PACKAGE_COLS, prep, ("project_id", "plan_version", "record_index")),
+            ("notices_raw.csv", NOTICE_COLS, notices, ("project_id", "notice_id")),
+            ("awards_raw.csv", AWARD_COLS, awards, ("project_id", "contract_id"))):
+        path = os.path.join(proc_dir, name)
+        if os.path.exists(path):
+            with open(path, newline="", encoding="utf-8") as fh:
+                rows = rows + [r for r in csv.DictReader(fh) if r["project_id"] not in done]
+        rows.sort(key=lambda r: tuple(str(r.get(k, "")).zfill(8) if k == "record_index"
+                                      else str(r.get(k, "")) for k in order))
+        write_csv(path, cols, rows)
     log.write()
 
     distinct_versions = len({(r["project_id"], r["plan_version"]) for r in prep})

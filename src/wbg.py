@@ -1,0 +1,523 @@
+#!/usr/bin/env python3
+"""The pipeline as one module: choose projects, prepare them, read the results.
+
+    import wbg
+    sel = wbg.select(country="KE")               # or region=, fy=, project=, all
+    wbg.prepare(sel)                             # fetch what is missing, rebuild what changed
+    t = wbg.tables(sel)                          # the cleaned tables, cut to the selection
+    wbg.summary(sel)                             # one row per project: where it stands
+    wbg.upcoming(sel), wbg.open_notices(sel)     # package and notice detail
+    wbg.export(sel)                              # optional: data/runs/<name>/
+
+The same from the command line (./wbg, see `./wbg --help`):
+
+    ./wbg list    --region "Western and Central Africa"
+    ./wbg prepare --project P171528 --project P176932
+    ./wbg summary --country KE
+    ./wbg export  --fy 2024 --tables
+    ./wbg pipeline                               # everything, as run.sh does
+
+Projects are selected from the cohort (inputs/config/cohort.csv, included rows
+only); that file is kept by people and only read here.
+
+Nothing is redone that has not changed. Fetching is per project: a project is
+fetched once, and again only with update=True. Every later stage runs over the
+whole store from its caches, and only when its code or its inputs changed since
+it last ran: data/reports/stages.json records what each stage last ran on. The
+store is shared, so a selection prepared once is there for every later
+selection that includes it.
+"""
+import argparse, csv, datetime, glob, hashlib, json, os, re, subprocess, sys
+from collections import Counter, defaultdict
+
+SRC = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(SRC)
+sys.path.insert(0, SRC)
+from paths import data_root, where  # noqa: E402
+
+COHORT = os.path.join(ROOT, "inputs", "config", "cohort.csv")
+# Statuses that mean the package is still to come.
+UPCOMING = ("Pending", "Pending Implementation", "Under Review", "Planned")
+
+
+# ------------------------------------------------------------------ selection
+
+class Selection:
+    """A set of cohort projects, with a name for its outputs."""
+
+    def __init__(self, rows, name):
+        self.rows = rows
+        self.name = name
+        self.ids = [r["project_id"] for r in rows]
+
+    def __len__(self):
+        return len(self.ids)
+
+    def __contains__(self, pid):
+        return pid in set(self.ids)
+
+    def __repr__(self):
+        return f"Selection({self.name!r}, {len(self)} projects)"
+
+
+def cohort(path=COHORT):
+    with open(path, newline="", encoding="utf-8") as fh:
+        return [r for r in csv.DictReader(fh) if r["included"].strip().lower() == "true"]
+
+
+def _as_list(v):
+    if v is None:
+        return []
+    if isinstance(v, str):
+        return [x.strip() for x in v.split(",") if x.strip()]
+    return [str(x).strip() for x in v if str(x).strip()]
+
+
+def select(project=None, country=None, region=None, fy=None, path=COHORT):
+    """Cohort projects matching every filter given; all of them when none is.
+
+    project  project ids, a list or comma-separated ('P171528,P176932')
+    country  country codes as the cohort records them ('KE', '3W')
+    region   region names, matched without regard to case ('western and central')
+    fy       approval fiscal years ('2024')
+
+    A project the cohort records no value for is not matched by that filter:
+    5 included projects have no region or country, 12 no approval year."""
+    rows = cohort(path)
+    projects, countries = _as_list(project), [c.upper() for c in _as_list(country)]
+    regions, years = [r.lower() for r in _as_list(region)], _as_list(fy)
+    unknown = sorted(set(projects) - {r["project_id"] for r in rows})
+    if unknown:
+        raise SystemExit(f"not in the cohort (or not included): {', '.join(unknown)}")
+    out = [r for r in rows
+           if (not projects or r["project_id"] in projects)
+           and (not countries or r["country_code"].upper() in countries)
+           and (not regions or any(g in r["region"].lower() for g in regions))
+           and (not years or r["approval_fy"] in years)]
+    parts = [*projects, *countries, *[g.replace(" ", "-") for g in regions],
+             *[f"fy{y}" for y in years]]
+    name = "-".join(parts)[:80] if parts else "all"
+    return Selection(out, re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-").lower())
+
+
+# ------------------------------------------------------------------ preparing
+
+# Each stage after fetching: the script, the code it depends on, and the files
+# it reads. It runs when any of those changed since it last ran.
+STAGES = [
+    ("clean", "clean.py",
+     ["clean.py", "pdf_layout.py", "text_rules.py", "components.py", "sentences.py"],
+     [("documents",), ("pdf", "*.pdf")]),
+    ("components", "components.py", ["components.py", "text_rules.py"],
+     [("documents",), ("appraisal", "paragraphs.csv")]),
+    ("audit", "audit.py", ["audit.py"], [("appraisal", "paragraphs.csv")]),
+    ("clean_procurement", "clean_procurement.py",
+     ["clean_procurement.py", "glue.py", "text_rules.py", "plan_table.py"],
+     [("procurement", "packages_raw.csv"), ("procurement", "notices_raw.csv"),
+      ("procurement", "awards_raw.csv"), ("appraisal", "components.csv"),
+      ("appraisal", "paragraphs.csv")]),
+    ("audit_procurement", "audit_procurement.py", ["audit_procurement.py", "glue.py"],
+     [("procurement", "packages.csv"), ("procurement", "notices.csv"),
+      ("procurement", "awards.csv")]),
+]
+
+
+def _python():
+    box = "/opt/yggdrasil/venvs/work/bin/python"
+    return os.environ.get("WBG_PY") or (box if os.path.exists(box) else sys.executable)
+
+
+def _run(script, *args, data, tail=0):
+    """Run one stage. tail=N shows only the last N lines of its output (the
+    audits print their whole report; it is in data/reports/ anyway)."""
+    env = dict(os.environ, WBG_DATA=data)
+    cmd = [_python(), os.path.join(SRC, script), *args]
+    print(f"== {script} {' '.join(args)}".rstrip(), flush=True)
+    if not tail:
+        subprocess.run(cmd, check=True, env=env, cwd=ROOT)
+        return
+    done = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
+    print("\n".join(done.stdout.rstrip().splitlines()[-tail:]), flush=True)
+    if done.returncode:
+        sys.stderr.write(done.stderr)
+        raise subprocess.CalledProcessError(done.returncode, cmd)
+
+
+def _fingerprint(data, code, inputs):
+    """SHA-256 over the stage's code and the bytes of its input files. A file
+    matched by a pattern is fingerprinted by name and size, which is enough
+    for PDFs: their content checksums are in documents.csv, also an input."""
+    h = hashlib.sha256()
+    for name in code:
+        with open(os.path.join(SRC, name), "rb") as fh:
+            h.update(name.encode() + fh.read())
+    for spec in inputs:
+        path = where(data, *spec)
+        if "*" in path:
+            for p in sorted(glob.glob(path)):
+                h.update(f"{os.path.basename(p)}:{os.path.getsize(p)}".encode())
+        elif os.path.exists(path):
+            h.update(path.encode())
+            with open(path, "rb") as fh:
+                for block in iter(lambda: fh.read(1 << 20), b""):
+                    h.update(block)
+        else:
+            h.update(f"{path}:missing".encode())
+    return h.hexdigest()
+
+
+def _state_path(data):
+    return where(data, "reports", "stages.json")
+
+
+def _load_state(data):
+    """What each stage last ran on. A store that predates this file starts from
+    what it already holds: a project with documents is counted as fetched, so
+    the first prepare does not fetch the whole cohort again."""
+    try:
+        with open(_state_path(data), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        pass
+    seen = {"appraisal": set(), "procurement": set()}
+    for r in _read(where(data, "documents")):
+        seen["appraisal"].update(p for p in r["project_ids"].split("|") if p)
+    for name in ("packages_raw.csv", "notices_raw.csv", "awards_raw.csv"):
+        seen["procurement"].update(r["project_id"] for r in
+                                   _read(where(data, "procurement", name)))
+    stamp = "before stages.json"
+    return {"fetched": {k: {p: stamp for p in sorted(v)} for k, v in seen.items()}}
+
+
+def _save_state(data, state):
+    path = _state_path(data)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".part", "w", encoding="utf-8") as fh:
+        json.dump(state, fh, indent=1, sort_keys=True)
+    os.replace(path + ".part", path)
+
+
+def prepare(sel=None, update=False, data=None, fetch=True):
+    """Bring the store up to date for a selection.
+
+    1. The data folder is put in its layout (src/paths.py).
+    2. Fetching: each selected project not fetched before - or every selected
+       project with update=True - is fetched (appraisal documents, then
+       procurement plans, notices and awards).
+    3. Every later stage runs over the whole store, from its caches, only if
+       its code or inputs changed since it last ran.
+
+    Returns the names of the stages that ran."""
+    data = data or data_root()
+    sel = sel if sel is not None else select()
+    _run("paths.py", data=data)
+    state = _load_state(data)
+    ran = []
+    if fetch:
+        today = datetime.date.today().isoformat()
+        for kind, script in (("appraisal", "fetch.py"), ("procurement", "fetch_procurement.py")):
+            done = state.setdefault("fetched", {}).setdefault(kind, {})
+            todo = [p for p in sel.ids if update or p not in done]
+            if not todo:
+                continue
+            _run(script, "--projects", ",".join(todo), data=data)
+            for p in todo:
+                done[p] = today
+            _save_state(data, state)
+            ran.append(script)
+    for name, script, code, inputs in STAGES:
+        fp = _fingerprint(data, code, inputs)
+        if state.get("stages", {}).get(name) == fp:
+            continue
+        _run(script, data=data, tail=2 if name.startswith("audit") else 0)
+        state.setdefault("stages", {})[name] = _fingerprint(data, code, inputs)
+        _save_state(data, state)
+        ran.append(name)
+    if not ran:
+        print("nothing to do: every stage is up to date", flush=True)
+    return ran
+
+
+# ------------------------------------------------------------------ reading
+
+def _read(path):
+    if not os.path.exists(path):
+        return []
+    with open(path, newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
+
+
+def _in(sel, ids):
+    want = set(sel.ids)
+    return any(p in want for p in (ids or "").split("|"))
+
+
+def tables(sel=None, data=None, text=False):
+    """The cleaned tables, cut to the selection, as lists of rows (dicts).
+
+    documents, paragraphs, sentences, components, packages, superseded_packages,
+    notices, awards. With text=True each paragraph also carries its text (the
+    tables themselves store offsets, not text)."""
+    data = data or data_root()
+    sel = sel if sel is not None else select()
+    out = {
+        "documents": [r for r in _read(where(data, "documents")) if _in(sel, r["project_ids"])],
+        "paragraphs": [r for r in _read(where(data, "appraisal", "paragraphs.csv"))
+                       if _in(sel, r["project_ids"])],
+        "components": [r for r in _read(where(data, "appraisal", "components.csv"))
+                       if _in(sel, r["project_ids"])],
+    }
+    docs = {r["doc_id"] for r in out["documents"]}
+    out["sentences"] = [r for r in _read(where(data, "appraisal", "sentences.csv"))
+                        if r["doc_id"] in docs]
+    for name in ("packages", "superseded_packages", "notices", "awards"):
+        out[name] = [r for r in _read(where(data, "procurement", f"{name}.csv"))
+                     if r["project_id"] in sel]
+    if text:
+        cache = {}
+        for r in out["paragraphs"]:
+            d = r["doc_id"]
+            if d not in cache:
+                with open(where(data, "text", f"{d}.txt"), encoding="utf-8") as fh:
+                    cache[d] = fh.read()
+            r["text"] = cache[d][int(r["char_start"]):int(r["char_end"])]
+    return out
+
+
+def _amount(v):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def summary(sel=None, data=None, today=None, t=None):
+    """One row per selected project: what the store holds and where it stands.
+
+    Documents and the latest appraisal-side disclosure; components and their
+    cost; the latest procurement plan; packages by STEP status; what is still
+    to come (Pending, Pending Implementation, Under Review, Planned) with its
+    estimated value, how many are planned for a date already past, and the
+    next planned date; notices, and those still open
+    (deadline today or later); signed contracts and their value. Dates are
+    ISO; amounts are US dollars as the plans and the awards interface give
+    them. A project with no procurement plan has blank plan columns."""
+    data = data or data_root()
+    sel = sel if sel is not None else select()
+    today = today or datetime.date.today().isoformat()
+    t = t or tables(sel, data)
+    by = defaultdict(lambda: defaultdict(list))
+    for name in ("documents", "components"):
+        for r in t[name]:
+            for p in r["project_ids"].split("|"):
+                by[p][name].append(r)
+    for name in ("packages", "notices", "awards"):
+        for r in t[name]:
+            by[r["project_id"]][name].append(r)
+    rows = []
+    for c in sel.rows:
+        p = c["project_id"]
+        g = by[p]
+        docs = g["documents"]
+        kinds = Counter(d["doc_kind"] for d in docs)
+        comps = _latest_components(g["components"])
+        pk = g["packages"]
+        statuses = Counter(r["status"] for r in pk)
+        up = [r for r in pk if r["status"] in UPCOMING]
+        next_dates = sorted(r["planned_date"] for r in up if r["planned_date"] >= today)
+        open_n = [n for n in g["notices"] if n["deadline_date"] and n["deadline_date"] >= today]
+        rows.append({
+            "project_id": p, "country_code": c["country_code"], "region": c["region"],
+            "approval_fy": c["approval_fy"],
+            "documents": len(docs),
+            "documents_by_kind": "; ".join(f"{k} {v}" for k, v in sorted(kinds.items())),
+            "latest_document_date": max((d["disclosure_date"] for d in docs), default=""),
+            "components": "; ".join(f"{n}. {name}" + (f" (US${cost}m)" if cost else "")
+                                    for n, name, cost in comps),
+            "components_cost_usd_m": f"{sum(_amount(x[2]) for x in comps):.2f}" if comps else "",
+            "latest_plan_date": max((r["plan_disclosure_date"] for r in pk), default=""),
+            "packages": len(pk),
+            "packages_by_status": "; ".join(f"{k} {v}" for k, v in statuses.most_common()),
+            "upcoming_packages": len(up),
+            "upcoming_estimated_usd": f"{sum(_amount(r['estimated_amount']) for r in up):.2f}",
+            # Still to come, but planned for a date already past: the plan has
+            # not been updated, or the package is late. Either is worth a question.
+            "upcoming_planned_date_passed": sum(1 for r in up if r["planned_date"]
+                                                and r["planned_date"] < today),
+            "next_planned_date": next_dates[0] if next_dates else "",
+            "notices": len(g["notices"]),
+            "open_notices": len(open_n),
+            "latest_notice_date": max((n["publication_date"] for n in g["notices"]), default=""),
+            "contracts_signed": len(g["awards"]),
+            "contracts_value_usd": f"{sum(_amount(a['total_amount']) for a in g['awards']):.2f}",
+            "latest_contract_date": max((a["signed_date"] for a in g["awards"]), default=""),
+        })
+    return rows
+
+
+def _latest_components(rows):
+    """(number, name, cost) of top-level components, from the most recent
+    document that lists them; the data sheet's list where it has one."""
+    tops = [r for r in rows if r["level"] == "component" and r["number"]]
+    if not tops:
+        return []
+    latest = max(r["disclosure_date"] for r in tops)
+    pick = [r for r in tops if r["disclosure_date"] == latest]
+    pref = [r for r in pick if r["source"] in ("datasheet", "restructuring")] or pick
+    seen, out = set(), []
+    for r in sorted(pref, key=lambda r: [int(x) for x in r["number"].split(".") if x.isdigit()]):
+        if r["number"] not in seen:
+            seen.add(r["number"])
+            out.append((r["number"], r["name"], r["cost_usd_m"]))
+    return out
+
+
+def upcoming(sel=None, data=None, t=None):
+    """Packages still to come, one row each, soonest planned date first."""
+    t = t or tables(sel, data)
+    cols = ("project_id", "package_id", "borrower_ref", "description_clean", "category",
+            "method", "method_name", "market_approach", "component_number", "component",
+            "status", "status_source", "status_as_of", "planned_date", "revised_date",
+            "estimated_amount", "currency", "amount_source", "plan_disclosure_date")
+    rows = [{k: r.get(k, "") for k in cols} for r in t["packages"] if r["status"] in UPCOMING]
+    return sorted(rows, key=lambda r: (r["planned_date"] or "9999", r["project_id"],
+                                       r["package_id"]))
+
+
+def open_notices(sel=None, data=None, today=None, t=None):
+    """Notices whose deadline is today or later, soonest deadline first."""
+    today = today or datetime.date.today().isoformat()
+    t = t or tables(sel, data)
+    cols = ("project_id", "notice_id", "notice_type", "publication_date", "deadline_date",
+            "borrower_ref", "description_clean", "category", "method", "method_name")
+    rows = [{k: n.get(k, "") for k in cols} for n in t["notices"]
+            if n["deadline_date"] and n["deadline_date"] >= today]
+    return sorted(rows, key=lambda r: (r["deadline_date"], r["project_id"], r["notice_id"]))
+
+
+# ------------------------------------------------------------------ writing
+
+def _write_csv(path, rows):
+    if not rows:
+        return
+    with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
+        w.writeheader()
+        w.writerows(rows)
+    os.replace(path + ".part", path)
+
+
+def export(sel=None, name=None, data=None, include_tables=False, today=None):
+    """Write a selection's results to data/runs/<name>/ and return the folder.
+
+    summary.xlsx  sheets: projects (summary), upcoming packages, open notices,
+                  components
+    *.csv         with include_tables=True, every table cut to the selection
+
+    Only what is asked for is written; nothing else reads these folders."""
+    from openpyxl import Workbook
+    from openpyxl.styles import Font
+    data = data or data_root()
+    sel = sel if sel is not None else select()
+    today = today or datetime.date.today().isoformat()
+    out = where(data, "runs", f"{name or sel.name}-{today}")
+    os.makedirs(out, exist_ok=True)
+    t = tables(sel, data)
+    sheets = [("projects", summary(sel, data, today, t)),
+              ("upcoming packages", upcoming(sel, data, t)),
+              ("open notices", open_notices(sel, data, today, t)),
+              ("components", t["components"])]
+    wb = Workbook()
+    wb.remove(wb.active)
+    for title, rows in sheets:
+        ws = wb.create_sheet(title)
+        if not rows:
+            ws.append(["(none)"])
+            continue
+        ws.append(list(rows[0]))
+        for cell in ws[1]:
+            cell.font = Font(bold=True)
+        for r in rows:
+            ws.append([r.get(k, "") for k in rows[0]])
+        ws.freeze_panes = "A2"
+    path = os.path.join(out, "summary.xlsx")
+    wb.save(path + ".part")
+    os.replace(path + ".part", path)
+    if include_tables:
+        for tname, rows in t.items():
+            _write_csv(os.path.join(out, f"{tname}.csv"), rows)
+    return out
+
+
+# ------------------------------------------------------------------ command line
+
+def _filters(ap):
+    ap.add_argument("--project", action="append", help="project id (repeat or comma-separate)")
+    ap.add_argument("--country", action="append", help="country code as in the cohort")
+    ap.add_argument("--region", action="append", help="region name, or part of one")
+    ap.add_argument("--fy", action="append", help="approval fiscal year")
+
+
+def _sel(args):
+    return select(project=args.project and ",".join(args.project),
+                  country=args.country and ",".join(args.country),
+                  region=args.region and ",".join(args.region),
+                  fy=args.fy and ",".join(args.fy))
+
+
+def _print_rows(rows, cols):
+    if not rows:
+        print("(none)")
+        return
+    width = {c: min(40, max(len(c), *(len(str(r.get(c, ""))) for r in rows))) for c in cols}
+    print("  ".join(c.ljust(width[c]) for c in cols))
+    for r in rows:
+        print("  ".join(str(r.get(c, ""))[:40].ljust(width[c]) for c in cols))
+
+
+def main(argv=None):
+    ap = argparse.ArgumentParser(prog="wbg", description=__doc__.split("\n\n")[0])
+    sub = ap.add_subparsers(dest="cmd", required=True)
+    p = sub.add_parser("list", help="show the projects a selection covers")
+    _filters(p)
+    p = sub.add_parser("prepare", help="fetch what is missing and rebuild what changed")
+    _filters(p)
+    p.add_argument("--update", action="store_true",
+                   help="fetch the selected projects again, even if fetched before")
+    p = sub.add_parser("summary", help="where each selected project stands")
+    _filters(p)
+    p = sub.add_parser("export", help="write a selection's results to data/runs/")
+    _filters(p)
+    p.add_argument("--name", help="folder name (default: from the filters)")
+    p.add_argument("--tables", action="store_true", help="also write every table as CSV")
+    p = sub.add_parser("pipeline", help="everything run.sh does: prepare all, load, "
+                                        "review sheets, run report")
+    p.add_argument("--update", action="store_true", help="fetch every project again")
+    args = ap.parse_args(argv)
+
+    data = data_root()
+    if args.cmd == "pipeline":
+        prepare(select(), update=args.update, data=data)
+        _run("load_pg.py", data=data)
+        _run("review_sheets.py", data=data)
+        _run("run_report.py", "--topic", "Pipeline run", data=data)
+        return 0
+    sel = _sel(args)
+    if args.cmd == "list":
+        _print_rows(sel.rows, ["project_id", "country_code", "region", "approval_fy"])
+        print(f"\n{len(sel)} projects")
+    elif args.cmd == "prepare":
+        prepare(sel, update=args.update, data=data)
+    elif args.cmd == "summary":
+        _print_rows(summary(sel, data), ["project_id", "country_code", "latest_plan_date",
+                                         "packages", "upcoming_packages",
+                                         "upcoming_estimated_usd",
+                                         "upcoming_planned_date_passed", "next_planned_date",
+                                         "open_notices", "contracts_signed"])
+    elif args.cmd == "export":
+        print(f"wrote {export(sel, args.name, data, include_tables=args.tables)}")
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
