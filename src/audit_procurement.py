@@ -121,13 +121,16 @@ def _glued_inside(row):
        tables=("packages", "notices", "awards"))
 def _broken_word(row):
     """'S upply', 'Ca pacity': two fragments that are one word the corpus uses.
-    The same test glue.rejoin repairs by, so a hit is one it declined."""
+    The same tests glue.repair ends with - join, then split fused pairs - so a
+    hit is one it declined. A pair the fused-pair rule separates ('de
+    protocolos', though 'deprotocolos' recurs) is two words, not a hit."""
     field = "description_clean"
     d = row.get(field) or ""
     v = VOCAB if (row.get("description_lang") or "en") == "en" else \
         getattr(VOCAB, "foreign", VOCAB)
-    fixed, n = glue.rejoin(d, v)
-    return [f"{n} fragment pair(s)"] if n else []
+    joined, n = glue.rejoin(d, v)
+    fixed, _ = glue.unfuse(joined, v, VOCAB)
+    return [f"{n} fragment pair(s)"] if n and fixed != d else []
 
 
 @check("description carries a second borrower reference")
