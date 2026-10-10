@@ -4,6 +4,7 @@
 Reads  inputs/config/cohort.csv  (hand-maintained; included=true rows only)
 Writes data/raw/projects/{project_id}.json   the record, the fields in FIELDS
        data/reports/fetch_projects.txt       what was found and what was not
+       data/reports/fetch_status/projects.json  which requests succeeded
 
 Only the fields in FIELDS are requested. The interface also publishes the
 team's names and e-mail addresses; they are not requested and never stored.
@@ -14,7 +15,7 @@ import argparse, json, os, sys, time
 import urllib.parse
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root, where  # noqa: E402
+from paths import data_root, where, write_fetch_status  # noqa: E402
 from fetch import ROOT, get, read_cohort  # noqa: E402
 from fetch_procurement import store_keeping_old  # noqa: E402
 
@@ -69,6 +70,7 @@ def main():
         wanted = {p.strip() for p in args.projects.split(",") if p.strip()}
         ids = [p for p in ids if p in wanted]
     found, missing, failed = fetch(ids, args.out, args.delay)
+    write_fetch_status(args.out, "projects", found + missing, [p for p, _ in failed])
 
     report = where(args.out, "reports", "fetch_projects.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)
@@ -83,7 +85,9 @@ def main():
             fh.write(f"  {p}\t{err}\n")
     print(f"projects: {len(found)} found, {len(missing)} with no record, "
           f"{len(failed)} failed", flush=True)
-    return 1 if failed and not found else 0
+    # Failures are reported and retried on the next run, never fatal: one
+    # project's failed request must not stop the others' stages.
+    return 0
 
 
 if __name__ == "__main__":

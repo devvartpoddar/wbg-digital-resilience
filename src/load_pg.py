@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """Load the cleaned tables into Postgres, schema wbg, so they can be queried.
 
-Reads  data/raw/documents.csv, data/appraisal/{paragraphs,sentences,rejected,
+Reads  data/projects/projects.csv, data/raw/documents.csv,
+       data/appraisal/{paragraphs,sentences,rejected,
        components}.csv (+ data/appraisal/text/ for their text),
        data/procurement/*.csv
 Writes Postgres: wbg.<table> for each, and wbg.loads (one row per load)

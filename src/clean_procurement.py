@@ -41,7 +41,7 @@ import plan_table                                        # noqa: E402
 import glue                                              # noqa: E402
 import links                                             # noqa: E402
 
-CLEAN_VERSION = "proc-clean-8"
+CLEAN_VERSION = "proc-clean-9"
 
 # Another package's borrower reference inside a description: the parser missed
 # a record boundary and stitched the next record on. Used to cut it off here and
@@ -767,7 +767,7 @@ PACKAGE_COLS = [
     "market_approach", "status", "status_raw", "status_source", "status_as_of",
     "planned_date", "revised_date", "estimated_amount", "currency",
     "amount_source", "actual_amount",
-    "plan_version", "plan_disclosure_date", "fetched_at",
+    "plan_version", "plan_disclosure_date", "in_latest_plan", "fetched_at",
 ]
 NOTICE_COLS = [
     "notice_id", "project_id", "notice_type", "notice_status", "publication_date",
@@ -931,19 +931,43 @@ def dedupe_packages(rows, counters):
     per_version = Counter((r["project_id"], r["plan_version"], r["borrower_ref_norm"])
                           for r in rows)
     shared = {(p, ref) for (p, _v, ref), n in per_version.items() if n > 1}
+    # A plan that prints the same reference AND description twice lists two
+    # packages (EDGE-G1A at 13.0m and at 13.06m): the second and later
+    # printings in a version are told apart by their order in it, so neither
+    # is lost behind the other.
+    occurrence = Counter()
     groups = defaultdict(list)
-    for r in rows:
+    for r in sorted(rows, key=lambda r: (r["project_id"], r["plan_version"],
+                                         r.get("package_version_id") or "")):
         key = (r["project_id"], r["borrower_ref_norm"])
+        suffix = ""
         if key in shared:
             key += (r["description_match"],)
-        r["package_id"] = ":".join(key[:2]) + (
-            ":" + hashlib.sha256(key[2].encode()).hexdigest()[:8] if len(key) > 2 else "")
+            suffix = ":" + hashlib.sha256(key[2].encode()).hexdigest()[:8]
+        occurrence[(r["plan_version"],) + key] += 1
+        n = occurrence[(r["plan_version"],) + key]
+        if n > 1:
+            key += (f"#{n}",)
+            suffix += f":{n}"
+            counters["packages_repeated_within_a_version"] += 1
+        r["package_id"] = ":".join(key[:2]) + suffix
         groups[key].append(r)
+    # The project's latest plan: every plan version disclosed on its most
+    # recent disclosure date. A package not in it was dropped from the plan,
+    # or the latest plan was published in parts; in_latest_plan says which
+    # packages the latest plan still lists, and nothing is decided on it here.
+    latest_date = {}
+    for r in rows:
+        d = r["_plan_disclosure_date"]
+        if d > latest_date.get(r["project_id"], ""):
+            latest_date[r["project_id"]] = d
     kept, superseded = [], []
     for key, versions in groups.items():
         versions.sort(key=lambda x: (x["_plan_disclosure_date"], x["plan_version"]))
         newest = dict(versions[-1])
         newest_version = newest.get("plan_version", "")
+        newest["in_latest_plan"] = str(
+            newest["_plan_disclosure_date"] == latest_date[newest["project_id"]]).lower()
         kept.append(newest)
 
         for old in versions[:-1]:

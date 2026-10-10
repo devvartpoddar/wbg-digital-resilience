@@ -63,7 +63,6 @@ def build(data, topic, today):
     fetch = read(where(data, "reports", "fetch.txt"))
     clean = read(where(data, "reports", "clean.txt"))
     audit = read(where(data, "reports", "audit.txt"))
-    pfetch = read(where(data, "reports", "fetch_procurement.txt"))
     pclean = read(where(data, "reports", "clean_procurement.txt"))
     paudit = read(where(data, "reports", "audit_procurement.txt"))
 
@@ -76,8 +75,8 @@ def build(data, topic, today):
         ("Paragraphs dropped", grab(clean, "paragraphs dropped")),
         ("Sentences", grab(clean, "sentences")),
         ("Procurement packages", grab(pclean, "packages (one row each)")),
-        ("Notices", grab(pfetch, "notices rows")),
-        ("Awards", grab(pfetch, "awards rows")),
+        ("Notices", grab(pclean, "notices rows")),
+        ("Awards", grab(pclean, "awards rows")),
     ]
     # Looked up by label, so adding a row cannot shift what the summary says.
     got = dict(rows)

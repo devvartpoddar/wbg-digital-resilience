@@ -198,3 +198,23 @@ def test_upcoming_carries_the_notices_linked_to_each_package(store, cohort):
     rows = {r["package_id"]: r for r in wbg.upcoming(sel, data=store)}
     assert (rows["a"]["notices"], rows["a"]["latest_notice_deadline"]) == (1, "2030-02-01")
     assert rows["b"]["notices"] == 0
+
+
+def test_a_project_whose_fetch_failed_is_tried_again(store, cohort, monkeypatch):
+    import json
+    calls = []
+
+    def fake_run(script, *a, data, tail=0):
+        calls.append(script)
+        if script == "fetch_procurement.py":
+            path = os.path.join(data, "reports", "fetch_status", "procurement.json")
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as fh:
+                json.dump({"ok": [], "failed": ["P000002"]}, fh)
+    monkeypatch.setattr(wbg, "_run", fake_run)
+    sel = wbg.select(project="P000002", path=cohort)
+    wbg.prepare(sel, data=store)
+    calls.clear()
+    wbg.prepare(sel, data=store)
+    assert "fetch_procurement.py" in calls
+    assert "fetch.py" not in calls, "the appraisal fetch succeeded and is not repeated"

@@ -145,7 +145,7 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
 # it reads. It runs when any of those changed since it last ran.
 STAGES = [
     ("projects", "projects.py", ["projects.py"],
-     [("projects_json", "*.json"), ("documents",)]),
+     [("projects_json", "*.json"), ("documents",), ("cohort",)]),
     ("clean", "clean.py",
      ["clean.py", "pdf_layout.py", "text_rules.py", "components.py", "sentences.py"],
      [("documents",), ("pdf", "*.pdf")]),
@@ -158,7 +158,8 @@ STAGES = [
      [("procurement", "packages_raw.csv"), ("procurement", "notices_raw.csv"),
       ("procurement", "awards_raw.csv"), ("appraisal", "components.csv"),
       ("appraisal", "paragraphs.csv")]),
-    ("audit_procurement", "audit_procurement.py", ["audit_procurement.py", "glue.py"],
+    ("audit_procurement", "audit_procurement.py",
+     ["audit_procurement.py", "glue.py", "clean_procurement.py"],
      [("procurement", "packages.csv"), ("procurement", "notices.csv"),
       ("procurement", "awards.csv")]),
 ]
@@ -195,7 +196,9 @@ def _fingerprint(data, code, inputs):
         with open(os.path.join(SRC, name), "rb") as fh:
             h.update(name.encode() + fh.read())
     for spec in inputs:
-        path = where(data, *spec)
+        # ("cohort",) is the hand-kept cohort file, outside the data folder.
+        path = COHORT if spec == ("cohort",) else where(data, *spec)
+        label = "cohort" if spec == ("cohort",) else os.path.relpath(path, data)
         if "*" in path:
             for p in sorted(glob.glob(path)):
                 h.update(f"{os.path.basename(p)}:{os.path.getsize(p)}".encode())
@@ -203,12 +206,14 @@ def _fingerprint(data, code, inputs):
                     with open(p, "rb") as fh:
                         h.update(fh.read())
         elif os.path.exists(path):
-            h.update(path.encode())
+            # The path relative to the data folder: moving the folder is not
+            # a change to any stage's input.
+            h.update(label.encode())
             with open(path, "rb") as fh:
                 for block in iter(lambda: fh.read(1 << 20), b""):
                     h.update(block)
         else:
-            h.update(f"{path}:missing".encode())
+            h.update(f"{label}:missing".encode())
     return h.hexdigest()
 
 
@@ -235,6 +240,18 @@ def _load_state(data):
                             glob.glob(where(data, "projects_json", "P*.json")))
     stamp = "before stages.json"
     return {"fetched": {k: {p: stamp for p in sorted(v)} for k, v in seen.items()}}
+
+
+def _fetch_status(data, kind, asked):
+    """(ok, failed) from the fetch's status file; everything asked counts as
+    ok when the fetcher wrote none."""
+    try:
+        with open(where(data, "fetch_status", f"{kind}.json"), encoding="utf-8") as fh:
+            s = json.load(fh)
+    except (OSError, ValueError):
+        return list(asked), []
+    ok = set(s.get("ok", []))
+    return [p for p in asked if p in ok], [p for p in asked if p not in ok]
 
 
 def _save_state(data, state):
@@ -269,8 +286,14 @@ def prepare(sel=None, update=False, data=None, fetch=True):
             todo = [p for p in sel.ids if update or p not in done]
             if not todo:
                 continue
-            _run(script, "--projects", ",".join(todo), data=data)
-            for p in todo:
+            args = ["--projects", ",".join(todo)]
+            if update and kind == "procurement":
+                args.append("--refresh-records")      # notices and awards change
+            _run(script, *args, data=data)
+            # Only what the fetch says it fully read counts as fetched; a
+            # project whose request failed is tried again next time.
+            ok, _failed = _fetch_status(data, kind, todo)
+            for p in ok:
                 done[p] = today
             _save_state(data, state)
             ran.append(script)
@@ -392,6 +415,10 @@ def summary(sel=None, data=None, today=None, t=None):
             "packages": len(pk),
             "packages_by_status": "; ".join(f"{k} {v}" for k, v in statuses.most_common()),
             "upcoming_packages": len(up),
+            # Of those, how many the project's latest plan no longer lists:
+            # their status is from an older plan (packages.in_latest_plan).
+            "upcoming_not_in_latest_plan": sum(1 for r in up
+                                               if r.get("in_latest_plan") == "false"),
             "upcoming_estimated_usd": f"{sum(_amount(r['estimated_amount']) for r in up):.2f}",
             # Still to come, but planned for a date already past: the plan has
             # not been updated, or the package is late. Either is worth a question.
@@ -433,7 +460,8 @@ def upcoming(sel=None, data=None, t=None):
     cols = ("project_id", "package_id", "borrower_ref", "description_clean", "category",
             "method", "method_name", "market_approach", "component_number", "component",
             "status", "status_source", "status_as_of", "planned_date", "revised_date",
-            "estimated_amount", "currency", "amount_source", "plan_disclosure_date")
+            "estimated_amount", "currency", "amount_source", "plan_disclosure_date",
+            "in_latest_plan")
     notices = defaultdict(list)
     for n in t["notices"]:
         if n.get("package_id"):
@@ -476,6 +504,9 @@ def open_notices(sel=None, data=None, today=None, t=None):
 
 def _write_csv(path, rows):
     if not rows:
+        # An empty file rather than none, so a CSV from an earlier export into
+        # the same folder is not left behind looking current.
+        open(path, "w").close()
         return
     with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
@@ -596,7 +627,7 @@ def main(argv=None):
         _print_rows(summary(sel, data), ["project_id", "country_code", "status",
                                          "closing_date", "latest_plan_date",
                                          "packages", "upcoming_packages",
-                                         "upcoming_estimated_usd",
+                                         "upcoming_not_in_latest_plan", "upcoming_estimated_usd",
                                          "upcoming_planned_date_passed", "next_planned_date",
                                          "open_notices", "contracts_signed"])
     elif args.cmd == "export":

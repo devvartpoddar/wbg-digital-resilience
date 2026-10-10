@@ -96,12 +96,14 @@ def managing_unit(docs):
 
 def project_row(pid, rec, docs):
     """One projects.csv row from the interface record and the project's documents."""
+    fetched, rec = rec is not None, rec or {}
     names, codes = practices(rec.get("project_gp_info"))
     owner, doc_id, as_of = managing_unit(docs)
     country = rec.get("countrycode") or []
     return {
         "project_id": pid,
-        "in_projects_interface": str(bool(rec)).lower(),
+        # true, false (the interface has no record), or blank (not fetched)
+        "in_projects_interface": str(bool(rec)).lower() if fetched else "",
         "project_name": " ".join((rec.get("project_name") or "").split()),
         "status": rec.get("status") or "",
         "approval_date": _iso(rec.get("boardapprovaldate")),
@@ -136,7 +138,7 @@ def build(project_ids, data):
             with open(where(data, "projects_json", f"{pid}.json"), encoding="utf-8") as fh:
                 rec = json.load(fh)
         except FileNotFoundError:
-            rec = {}
+            rec = None
         rows.append(project_row(pid, rec, docs.get(pid, [])))
     return rows
 
@@ -166,6 +168,8 @@ def main():
              f"  with a closing date:       {count('closing_date')}",
              "", "not in the projects interface:"]
     lines += [f"  {r['project_id']}" for r in rows if r["in_projects_interface"] == "false"]
+    lines += ["", "not fetched yet (or the request failed):"]
+    lines += [f"  {r['project_id']}" for r in rows if not r["in_projects_interface"]]
     report = where(args.data, "reports", "projects.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:

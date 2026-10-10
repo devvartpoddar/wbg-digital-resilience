@@ -38,7 +38,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root, where  # noqa: E402
+from paths import data_root, where, write_fetch_status  # noqa: E402
 
 import plan_table                                     # noqa: E402
 from fetch import get, read_cohort            # noqa: E402
@@ -1055,6 +1055,9 @@ def main():
                     help="concurrent plan rendition downloads")
     ap.add_argument("--refresh", action="store_true",
                     help="re-download even where a raw file exists")
+    ap.add_argument("--refresh-records", action="store_true",
+                    help="request notices and awards again (they change); plan "
+                         "renditions already on disk are kept")
     ap.add_argument("--skip-plans", action="store_true")
     args = ap.parse_args()
 
@@ -1094,24 +1097,37 @@ def main():
             seen_hash[r["plan_doc_id"]] = r["content_sha256"]
         prep.append(row)
 
-    notices, notice_fail = collect_notices(projects, args.data, log, args.refresh, args.delay)
-    awards, award_fail = collect_awards(projects, args.data, log, args.refresh, args.delay)
+    refresh_records = args.refresh or args.refresh_records
+    notices, notice_fail = collect_notices(projects, args.data, log, refresh_records,
+                                           args.delay)
+    awards, award_fail = collect_awards(projects, args.data, log, refresh_records,
+                                        args.delay)
 
-    # A run over some projects replaces only their rows: every other project
-    # keeps what an earlier run wrote, so a partial run never shrinks a table.
-    done = {p["project_id"] for p in projects}
-    for name, cols, rows, order in (
-            ("packages_raw.csv", PACKAGE_COLS, prep, ("project_id", "plan_version", "record_index")),
-            ("notices_raw.csv", NOTICE_COLS, notices, ("project_id", "notice_id")),
-            ("awards_raw.csv", AWARD_COLS, awards, ("project_id", "contract_id"))):
+    # A run over some projects replaces only the rows it fully re-read: a
+    # project outside the run, or one whose listing or any download failed,
+    # keeps what an earlier run wrote, so a partial or failed run never
+    # shrinks a table.
+    asked = {p["project_id"] for p in projects}
+    plans_ok = set() if args.skip_plans else asked - (
+        {p for p, _ in listing_fail} | {f[0] for f in plan_fail})
+    notices_ok = asked - {p for p, _ in notice_fail}
+    awards_ok = asked - {p for p, _ in award_fail}
+    for name, cols, rows, order, ok in (
+            ("packages_raw.csv", PACKAGE_COLS, prep,
+             ("project_id", "plan_version", "record_index"), plans_ok),
+            ("notices_raw.csv", NOTICE_COLS, notices, ("project_id", "notice_id"), notices_ok),
+            ("awards_raw.csv", AWARD_COLS, awards, ("project_id", "contract_id"), awards_ok)):
         path = os.path.join(proc_dir, name)
+        rows = [r for r in rows if r["project_id"] in ok]
         if os.path.exists(path):
             with open(path, newline="", encoding="utf-8") as fh:
-                rows = rows + [r for r in csv.DictReader(fh) if r["project_id"] not in done]
+                rows = rows + [r for r in csv.DictReader(fh) if r["project_id"] not in ok]
         rows.sort(key=lambda r: tuple(str(r.get(k, "")).zfill(8) if k == "record_index"
                                       else str(r.get(k, "")) for k in order))
         write_csv(path, cols, rows)
     log.write()
+    write_fetch_status(args.data, "procurement", sorted(plans_ok & notices_ok & awards_ok),
+                       sorted(asked - (plans_ok & notices_ok & awards_ok)))
 
     distinct_versions = len({(r["project_id"], r["plan_version"]) for r in prep})
     distinct_hashes = len({r["content_sha256"] for r in prep})

@@ -15,7 +15,7 @@ import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root, where  # noqa: E402
+from paths import data_root, where, write_fetch_status  # noqa: E402
 WDS = "https://search.worldbank.org/api/v3/wds"
 
 # Identify the caller rather than arriving as an anonymous script.
@@ -238,10 +238,19 @@ def main():
         rows.append(row)
     # Deterministic order so a re-run produces the same file.
     rows.sort(key=lambda r: r["doc_id"])
-    with open(docs_csv, "w", newline="", encoding="utf-8") as fh:
+    # Written aside and renamed, so an interrupted write never leaves a
+    # truncated document list for the next partial run to merge from.
+    with open(docs_csv + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=DOC_COLS, lineterminator="\n")
         w.writeheader()
         w.writerows(rows)
+    os.replace(docs_csv + ".part", docs_csv)
+    # A project whose listing or a PDF download failed is not counted as
+    # fetched: the next run tries it again. (A document that publishes no PDF
+    # is a fact about the document, not a failure, and is not retried.)
+    asked = {p["project_id"] for p in projects}
+    failed = {n.split("\t")[0] for n in notes if "FAILED" in n} & asked
+    write_fetch_status(args.out, "appraisal", sorted(asked - failed), sorted(failed))
 
     seen = {p for r in rows for p in r["project_ids"].split("|")}
     missing = [p["project_id"] for p in projects if p["project_id"] not in seen]

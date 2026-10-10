@@ -702,3 +702,23 @@ def test_a_component_name_at_the_end_of_a_description_is_cut_off():
     desc, comp = c.strip_tail("P1", "Repair of rooftop gauges Shared Weather Stati")
     assert desc == "Repair of rooftop gauges"
     assert comp[0] == "3" and comp[2] == "name_match"
+
+
+def test_a_package_printed_twice_in_one_plan_is_two_packages():
+    rows = [_version("v1", "2020-01-01", estimated_amount="13.00", package_version_id="d:00001"),
+            _version("v1", "2020-01-01", estimated_amount="13.06", package_version_id="d:00002"),
+            _version("v2", "2021-01-01", estimated_amount="13.00", package_version_id="e:00001"),
+            _version("v2", "2021-01-01", estimated_amount="13.06", package_version_id="e:00002")]
+    kept, sup = P.dedupe_packages(rows, Counter())
+    assert sorted(r["estimated_amount"] for r in kept) == ["13.00", "13.06"]
+    first, second = sorted(r["package_id"] for r in kept)
+    assert second == first + ":2"
+    assert all(s["superseded_by"] == "v2" for s in sup)
+
+
+def test_a_package_the_latest_plan_no_longer_lists_is_flagged():
+    rows = [_version("v1", "2020-01-01", borrower_ref_norm="old"),
+            _version("v2", "2021-01-01", borrower_ref_norm="kept")]
+    kept, _ = P.dedupe_packages(rows, Counter())
+    assert {r["borrower_ref_norm"]: r["in_latest_plan"] for r in kept} == \
+        {"old": "false", "kept": "true"}

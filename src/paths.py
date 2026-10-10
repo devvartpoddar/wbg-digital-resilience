@@ -79,12 +79,25 @@ LAYOUT = {
     "reports": "reports",
     "review": "review",
     "runs": "runs",
+    "fetch_status": "reports/fetch_status",
 }
 
 
 def where(data, name, *parts):
     """The path of a named place in the data folder (see LAYOUT)."""
     return os.path.join(data, LAYOUT[name], *parts)
+
+
+def write_fetch_status(data, kind, ok, failed):
+    """Record which projects a fetch fully read (ok) and which it did not, in
+    reports/fetch_status/<kind>.json. src/wbg.py counts a project as fetched
+    only when it is in ok, so a failed one is tried again on the next run."""
+    import json
+    path = where(data, "fetch_status", f"{kind}.json")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".part", "w", encoding="utf-8") as fh:
+        json.dump({"ok": sorted(ok), "failed": sorted(failed)}, fh, indent=1)
+    os.replace(path + ".part", path)
 
 
 # The layout before everything had a home: (old, new), relative to data/. A
