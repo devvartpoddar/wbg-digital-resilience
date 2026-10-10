@@ -193,7 +193,7 @@ Tables are kept in the tables for reading. They are not given to the model and a
 2. All tables on that page and the next are read from the PDF, top to bottom, as one grid. A restructuring paper's table of changes is read first (current and proposed names, cost, action); otherwise the data sheet's component table (name and cost). Costs are in millions of US dollars; a figure over 10,000 is read as dollars and converted.
 3. Body headings "Component N: ..." and "Sub-component N.M: ..." add components and sub-components, with any cost printed in the heading.
 4. Each name is cleaned: its number and printed cost removed, a following sentence cut off ("... This component will ..."), figures from neighbouring columns removed, a name read twice collapsed, and a heading that opens in lower case discarded. "Unallocated" and contingency budget lines are kept but not numbered; the Contingent Emergency Response Component (CERC) keeps its number.
-5. One row per component or sub-component per document that states it: projects, document, kind, disclosure date, where it was read (`datasheet`, `restructuring`, `heading`), level, number, name, cost, action, page. The reads are cached against the PDF, the pages searched and the module's code. (946 rows covering all 70 projects: 294 from data sheets, 132 from restructuring tables and 520 from headings on the current run.)
+5. One row per component or sub-component per document that states it: projects, document, kind, disclosure date, where it was read (`datasheet`, `restructuring`, `heading`), level, number, name, cost, action, page. The reads are cached against the PDF, the pages searched and the module's code. (942 rows covering all 70 projects: 297 from data sheets, 126 from restructuring tables and 519 from headings on the current run.)
 
 **Paragraphs are tagged by position:**
 
@@ -295,13 +295,13 @@ Tables are kept in the tables for reading. They are not given to the model and a
 
 On the current run:
 - 1,930 plan documents from 52 projects (9 projects published no plan); 116,919 package rows, one per plan version per package. 582 renditions parse to no package: 566 carry no reference anywhere (an empty table), 16 are parse failures.
-- 6,143 packages after grouping (110,776 older versions in `superseded_packages.csv`).
-- Method: INDV 1,853, RFQ 1,124, RFB 887, CQS 840, QCBS 685, CDS 269, DIR 219, RFP 136, LCS 47, QBS 27, UN 3, FBS 2, FA 1, unknown 50. Read from the Method cell 4,664, the clipped cell 697, the reference 732.
-- Status: Canceled 1,659, Signed 1,580, Under Implementation 839, Pending Implementation 794, Completed 613, Pending 74, Terminated 49, Under Review 42, Planned 1, unknown 492. Source: plan 5,426, award 225, none 492.
-- Component: matched by name 4,564, plan number only 174, none 1,405.
-- Amount: from the newest plan 4,694, none 1,449. Actual amounts recorded on 5,582 packages.
-- Notices: 5,909. Linked to a package 4,011 (by reference 3,996, by reference and description 15); not linked: no package with that reference 1,859 (536 in projects with no disclosed plan), no reference 38, ambiguous 1.
-- Awards: 3,485. Linked 2,245; not linked: no package with that reference 1,234 (423 in projects with no disclosed plan), ambiguous 6. Most unlinked references either carry no STEP activity number ("110/NCS/INAGE-MDAP/24") or carry one that no disclosed plan holds; a few are lots or re-bids of a plan package ("-A", "-2"), which are not linked to it.
+- 6,180 packages after grouping (110,739 older versions in `superseded_packages.csv`).
+- Method: INDV 1,857, RFQ 1,128, RFB 894, CQS 857, QCBS 685, CDS 269, DIR 221, RFP 139, LCS 47, QBS 27, UN 3, FBS 2, FA 1, unknown 50. Read from the Method cell 4,684, the clipped cell 702, the reference 744.
+- Status: Canceled 1,683, Signed 1,579, Under Implementation 840, Pending Implementation 794, Completed 614, Pending 74, Terminated 49, Under Review 42, Planned 1, unknown 504. Source: plan 5,452, award 224, none 504.
+- Component: matched by name 4,591, plan number only 174, none 1,415.
+- Amount: from the newest plan 4,719, none 1,461. Actual amounts recorded on 5,607 packages. 37 packages exist because a plan printed the same reference and description twice (597 such rows across versions).
+- Notices: 5,909. Linked to a package 3,966 (by reference 3,954, by reference and description 12); not linked: no package with that reference 1,859 (536 in projects with no disclosed plan), ambiguous 46, no reference 38.
+- Awards: 3,485. Linked 2,227; not linked: no package with that reference 1,234 (423 in projects with no disclosed plan), ambiguous 24. 3,005 awards name a notice of the same reference. Most unlinked references either carry no STEP activity number ("110/NCS/INAGE-MDAP/24") or carry one that no disclosed plan holds; a few are lots or re-bids of a plan package ("-A", "-2"), which are not linked to it.
 
 ### 3.3 Word repair (`src/glue.py`)
 
@@ -392,7 +392,7 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
 - **Tables without ruling lines read as text**: their cells are read in page order and the unit is usually labelled `table` by its figures.
 - **Clipped words stay clipped.** Where a plan cell was cut and the rest of the word is gone ("Project Management Suppor"), nothing can restore it.
 - **French, Portuguese and Spanish word repair is weaker** than English: it has only the descriptions to judge by. Some broken words remain ("con sultant").
-- **Some plans print no component column** (1,405 of 6,143 packages have none).
+- **Some plans print no component column** (1,415 of 6,180 packages have none).
 - **Scattered renditions give up their figures.** Where the text extractor scattered a table's columns, the rendition's references and descriptions are kept and its amounts, status and dates are refused rather than guessed.
 - **Projects with no package rows**: 9 projects publish no procurement plan (P169945, P170910, P171791, P180987, P181416, P506791, P508317, P508363, P511767), and 9 more have plans that parse to no package (P171099, P174620, P175218, P175987, P177158, P179204, P180693, P180807, P502532).
 - **Award descriptions** occasionally carry "?" where the interface lost an accented letter; that is in the source.
