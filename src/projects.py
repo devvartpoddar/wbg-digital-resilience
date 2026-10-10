@@ -156,10 +156,10 @@ def main():
         w.writerows(rows)
     os.replace(out + ".part", out)
 
-    def count(col):
-        return sum(1 for r in rows if r[col])
+    def count(col, value=None):
+        return sum(1 for r in rows if (r[col] == value if value else r[col]))
     lines = [f"projects: {len(rows)}",
-             f"  in the projects interface: {count('project_name')}",
+             f"  in the projects interface: {count('in_projects_interface', 'true')}",
              f"  with a practice:           {count('practice')}",
              f"  with a managing unit:      {count('managing_unit')}",
              f"  with a unit code:          {count('unit_code')}",

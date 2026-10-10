@@ -442,32 +442,6 @@ def segment_for_project(text, project_id):
     return text, "not_found"
 
 
-def split_ref_chain(desc, fallback):
-    """Recover the package reference from the joined first column.
-
-    The reference cell is a chain of one or two references followed by the
-    description: 'AA-AGENCY-555555-CW-RFB / Rehabilitation of ...', or
-    'BJ-UCP / PADA-43641-GO-RFQ / Fourniture de ...' where the PIU prints its own
-    name first. Either can be clipped mid-token by the column edge - 'PADA-43641-
-    GO-' plus 'RFQ' on the next line - so this reads the JOINED string rather
-    than the first line, takes the last reference-shaped segment that carries a
-    number, and returns what is left as the description.
-    """
-    parts = desc.split(" / ")
-    ref, i = fallback, 0
-    while i < len(parts) and i < 3:
-        tok = parts[i].strip()
-        if not re.fullmatch(r"[A-Z0-9][A-Z0-9\u2013\u2014-]{1,40}", tok):
-            break
-        if re.search(r"\d", tok):
-            ref = tok
-        elif i > 0:
-            break
-        i += 1
-    rest = " / ".join(parts[i:]).strip()
-    return ref, (rest or desc)
-
-
 def _parse_collapsed(tables, doc_meta):
     """Rows out of a rendition that prints the table with no column positions.
 
@@ -497,7 +471,7 @@ def _parse_collapsed(tables, doc_meta):
     for table, read in per_table:
         columns = "|".join(plan_table.present_columns(table))
         for rec in read:
-            ref, desc = split_ref_chain(collapse_ws(rec["description"]), "")
+            ref, desc = plan_table.split_ref_chain(collapse_ws(rec["description"]), "")
             if not ref:
                 continue
             block = rec["block"]
@@ -640,7 +614,7 @@ def _records_in_table(table):
 def _plan_row(rec, section, has_estimated, doc_meta, index):
     """One package row from one record of a fixed-width table."""
     desc, seams = _join_wrapped(rec["col0"])
-    ref, desc = split_ref_chain(desc, rec["ref"])
+    ref, desc = plan_table.split_ref_chain(desc, rec["ref"])
     body = " ".join(rec["body"])
     numbers = DATE_RE.findall(body)
     # The figures in print order: Estimated then Actual where the table has an

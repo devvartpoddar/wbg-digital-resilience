@@ -79,7 +79,8 @@ Personal contact details in notices (names, e-mail addresses, telephone numbers)
    - from the projects interface: `project_name`, `status` (Active, Closed, Pipeline), `approval_date`, `approval_fy`, `closing_date`, `region`, `country_code`, `country_name`, `lending_instrument`, `commitment_usd_m` (current total commitment, US$ millions), `practice` and `practice_code` (the Global Practice(s) leading the project), `sectors` (the top three, with their shares);
    - from the appraisal documents: `managing_unit`, the owner recorded on the project's most recent appraisal document that records one, printed as recorded, with `unit_doc_id` and `unit_as_of` naming that document and its date; `unit_code` is the code inside it ("Digital Dev - AFR EAST/SOUTH (IDD04)" gives IDD04).
    - `in_projects_interface` says whether the interface had a record.
-3. **What is not there.** Neither interface publishes the vice presidency as a field, so there is no such column. The document owner is uneven: usually a practice unit, sometimes a country office or a regional vice presidency's office, and blank on most recent papers, which is why the most recent document that records one is used.
+3. **On the current run:** 67 of 70 projects are in the projects interface (P508317, P508948 and P511767 are not); 62 have a practice (Digital Development 46, Governance 6, Education 6, Finance, Competitiveness and Innovation 3, Social Protection and Jobs 1); 66 have a managing unit, 65 with a code (IDD04 14, IDD02 13, IDD01 9, others 29); 55 have a closing date. Status: Active 56, Pipeline 7, Closed 2, none 5.
+4. **What is not there.** Neither interface publishes the vice presidency as a field, so there is no such column. The document owner is uneven: usually a practice unit, sometimes a country office or a regional vice presidency's office, and blank on most recent papers, which is why the most recent document that records one is used.
 
 ## 2. Appraisal documents
 
@@ -282,7 +283,7 @@ Tables are kept in the tables for reading. They are not given to the model and a
 
 **Links (`src/links.py`):**
 
-19. Every notice and every award is linked to the plan package it was procured under, by project and normalised borrower reference. `package_id` names the package; `package_link` says how:
+19. Every notice and every award is linked to the plan package it was procured under, by project and normalised borrower reference. A notice or award that prints a reference chain ("BJ-UCP / PADA-43641-GO-RFQ") is reduced to its package reference by the same rule as the plans (step 7) before normalising. `package_id` names the package; `package_link` says how:
     - `reference`: one package in the project has this reference;
     - `reference_and_description`: several packages share the reference (a generic "CS-INDV"), and the description's match key picks one;
     - `ambiguous`: several share it and the description does not pick one; left unlinked;
@@ -295,10 +296,11 @@ On the current run:
 - 1,930 plan documents from 52 projects (9 projects published no plan); 116,919 package rows, one per plan version per package. 582 renditions parse to no package: 566 carry no reference anywhere (an empty table), 16 are parse failures.
 - 6,143 packages after grouping (110,776 older versions in `superseded_packages.csv`).
 - Method: INDV 1,853, RFQ 1,124, RFB 887, CQS 840, QCBS 685, CDS 269, DIR 219, RFP 136, LCS 47, QBS 27, UN 3, FBS 2, FA 1, unknown 50. Read from the Method cell 4,664, the clipped cell 697, the reference 732.
-- Status: Canceled 1,659, Signed 1,574, Under Implementation 839, Pending Implementation 794, Completed 613, Pending 74, Terminated 49, Under Review 42, Planned 2, unknown 497. Source: plan 5,427, award 219, none 497.
+- Status: Canceled 1,659, Signed 1,580, Under Implementation 839, Pending Implementation 794, Completed 613, Pending 74, Terminated 49, Under Review 42, Planned 1, unknown 492. Source: plan 5,426, award 225, none 492.
 - Component: matched by name 4,564, plan number only 174, none 1,405.
-- Amount: from the newest plan 4,692, carried from an earlier plan 266, none 1,185. Actual amounts recorded on 5,582 packages.
-- Notices: 5,909, of which 5,871 carry a borrower reference and 3,893 match a plan package. Awards: 3,485.
+- Amount: from the newest plan 4,694, none 1,449. Actual amounts recorded on 5,582 packages.
+- Notices: 5,909. Linked to a package 4,011 (by reference 3,996, by reference and description 15); not linked: no package with that reference 1,859 (536 in projects with no disclosed plan), no reference 38, ambiguous 1.
+- Awards: 3,485. Linked 2,245; not linked: no package with that reference 1,234 (423 in projects with no disclosed plan), ambiguous 6. Most unlinked references either carry no STEP activity number ("110/NCS/INAGE-MDAP/24") or carry one that no disclosed plan holds; a few are lots or re-bids of a plan package ("-A", "-2"), which are not linked to it.
 
 ### 3.3 Word repair (`src/glue.py`)
 

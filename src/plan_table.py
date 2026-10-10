@@ -494,3 +494,37 @@ def collapsed_is_aligned(rows, floor=0.8):
         return True
     with_money = sum(1 for r in rows if r["estimated_amount"] or r["actual_amount"])
     return with_money / len(rows) >= floor
+
+
+def split_ref_chain(desc, fallback):
+    """Recover the package reference from the joined first column.
+
+    The reference cell is a chain of one or two references followed by the
+    description: 'AA-AGENCY-555555-CW-RFB / Rehabilitation of ...', or
+    'BJ-UCP / PADA-43641-GO-RFQ / Fourniture de ...' where the PIU prints its own
+    name first. Either can be clipped mid-token by the column edge - 'PADA-43641-
+    GO-' plus 'RFQ' on the next line - so this reads the JOINED string rather
+    than the first line, takes the last reference-shaped segment that carries a
+    number, and returns what is left as the description.
+    """
+    parts = desc.split(" / ")
+    ref, i = fallback, 0
+    while i < len(parts) and i < 3:
+        tok = parts[i].strip()
+        if not re.fullmatch(r"[A-Z0-9][A-Z0-9\u2013\u2014-]{1,40}", tok):
+            break
+        if re.search(r"\d", tok):
+            ref = tok
+        elif i > 0:
+            break
+        i += 1
+    rest = " / ".join(parts[i:]).strip()
+    return ref, (rest or desc)
+
+
+def chain_ref(ref):
+    """The package reference inside a printed reference chain, by the same rule
+    as split_ref_chain: 'BJ-UCP / PADA-43641-GO-RFQ' gives 'PADA-43641-GO-RFQ'.
+    Notices and awards print the chain the plan's reference was cut from."""
+    return split_ref_chain(ref or "", ref or "")[0]
+

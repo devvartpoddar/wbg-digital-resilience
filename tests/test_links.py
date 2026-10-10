@@ -45,3 +45,14 @@ def test_link_all_writes_the_columns_and_counts_them():
     links.link_all(rows, PACKAGES, counters, "notices")
     assert [r["package_link"] for r in rows] == ["reference", "no_reference"]
     assert counters["notices_link_reference"] == 1
+
+
+@pytest.mark.parametrize("printed,ref", [
+    ("BJ-UCP / PADA-111854-CS-INDV", "PADA-111854-CS-INDV"),
+    ("AA-AGENCY-555555-CW-RFB", "AA-AGENCY-555555-CW-RFB"),
+    ("EDGE –IC26", "EDGE –IC26"),
+    ("", ""),
+])
+def test_a_notice_reference_chain_gives_the_plan_reference(printed, ref):
+    import plan_table
+    assert plan_table.chain_ref(printed) == ref

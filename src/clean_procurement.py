@@ -40,7 +40,7 @@ import plan_table                                        # noqa: E402
 import glue                                              # noqa: E402
 import links                                             # noqa: E402
 
-CLEAN_VERSION = "proc-clean-6"
+CLEAN_VERSION = "proc-clean-7"
 
 # Another package's borrower reference inside a description: the parser missed
 # a record boundary and stitched the next record on. Used to cut it off here and
@@ -1013,7 +1013,7 @@ def clean_notices(rows, counters, vocab=None, names=None):
             "publication_date": r["publication_date"],
             "deadline_date": r["deadline_date"],
             "borrower_ref": r.get("borrower_ref") or "",
-            "borrower_ref_norm": norm_ref(r.get("borrower_ref") or ""),
+            "borrower_ref_norm": norm_ref(plan_table.chain_ref(r.get("borrower_ref"))),
             "description": raw, "description_clean": clean,
             "description_match": match_key(clean),
             "description_sha256": desc_sha256(clean),
@@ -1045,7 +1045,7 @@ def clean_awards(rows, counters, vocab=None, names=None):
         out.append({
             "contract_id": r["contract_id"], "project_id": r["project_id"],
             "borrower_ref": r["borrower_ref"],
-            "borrower_ref_norm": norm_ref(r["borrower_ref"]),
+            "borrower_ref_norm": norm_ref(plan_table.chain_ref(r["borrower_ref"])),
             "description": raw, "description_clean": clean,
             "description_match": match_key(clean),
             "description_sha256": desc_sha256(clean),
