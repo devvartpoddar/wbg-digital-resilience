@@ -272,7 +272,7 @@ Tables are kept in the tables for reading. They are not given to the model and a
 
 **Across plan versions (one row per package):**
 
-14. Package versions are grouped by project and normalised reference. A generic reference that one plan uses for several packages ("CS-INDV") is also grouped by description. `package_id` is "project:reference" (plus a short hash of the description for those). A plan that prints the same reference and description twice lists two packages: the second printing in a version is told apart by its order (`package_id` ending ":2"), so neither is lost behind the other.
+14. Package versions are grouped by project and normalised reference. A generic reference that one plan uses for several packages ("CS-INDV") is also grouped by description. `package_id` is "project:reference" (plus a short hash of the description for those). A plan that prints the same reference and description twice with different figures, status or dates lists two packages: the second in a version is told apart by its order (`package_id` ending ":2"), so neither is lost behind the other. A row repeated identically in one version is one package printed twice and is kept once.
 15. The newest version (by disclosure date) gives the row. `in_latest_plan` says whether the package is in the project's most recently disclosed plan (every plan version on the latest disclosure date). A package that is not was dropped from the plan, or the latest plan was published in parts; its status is the one the older plan gave. The summary counts such packages separately (`upcoming_not_in_latest_plan`) and does not exclude them; whether they should count as upcoming is a judgement left to a person.
 16. **Nothing is carried from an older version.** The newest version's row is kept whole: a status, amount or date it leaves blank stays blank, and a zero stays zero. `amount_source` says where the estimated amount came from: `plan` (the newest version's Estimated Amount cell) or `description` (a figure printed inside the description, when the cell was empty). The actual amount is also the newest version's.
 17. Older versions are written whole to `superseded_packages.csv`, each pointing at the version that replaced it.
@@ -295,11 +295,11 @@ Tables are kept in the tables for reading. They are not given to the model and a
 
 On the current run:
 - 1,930 plan documents from 52 projects (9 projects published no plan); 116,919 package rows, one per plan version per package. 582 renditions parse to no package: 566 carry no reference anywhere (an empty table), 16 are parse failures.
-- 6,180 packages after grouping (110,739 older versions in `superseded_packages.csv`).
+- 6,171 packages after grouping (110,690 older versions in `superseded_packages.csv`).
 - Method: INDV 1,857, RFQ 1,128, RFB 894, CQS 857, QCBS 685, CDS 269, DIR 221, RFP 139, LCS 47, QBS 27, UN 3, FBS 2, FA 1, unknown 50. Read from the Method cell 4,684, the clipped cell 702, the reference 744.
 - Status: Canceled 1,683, Signed 1,579, Under Implementation 840, Pending Implementation 794, Completed 614, Pending 74, Terminated 49, Under Review 42, Planned 1, unknown 504. Source: plan 5,452, award 224, none 504.
 - Component: matched by name 4,591, plan number only 174, none 1,415.
-- Amount: from the newest plan 4,719, none 1,461. Actual amounts recorded on 5,607 packages. 37 packages exist because a plan printed the same reference and description twice (597 such rows across versions).
+- Amount: from the newest plan 4,719, none 1,461. Actual amounts recorded on 5,607 packages. 28 packages exist because a plan printed the same reference and description twice with different figures; 58 rows printed twice identically were kept once.
 - Notices: 5,909. Linked to a package 3,966 (by reference 3,954, by reference and description 12); not linked: no package with that reference 1,859 (536 in projects with no disclosed plan), ambiguous 46, no reference 38.
 - Awards: 3,485. Linked 2,227; not linked: no package with that reference 1,234 (423 in projects with no disclosed plan), ambiguous 24. 3,005 awards name a notice of the same reference. Most unlinked references either carry no STEP activity number ("110/NCS/INAGE-MDAP/24") or carry one that no disclosed plan holds; a few are lots or re-bids of a plan package ("-A", "-2"), which are not linked to it.
 

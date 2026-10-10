@@ -722,3 +722,10 @@ def test_a_package_the_latest_plan_no_longer_lists_is_flagged():
     kept, _ = P.dedupe_packages(rows, Counter())
     assert {r["borrower_ref_norm"]: r["in_latest_plan"] for r in kept} == \
         {"old": "false", "kept": "true"}
+
+
+def test_a_row_printed_twice_identically_is_one_package():
+    rows = [_version("v1", "2020-01-01", estimated_amount="25.80", package_version_id="d:00001"),
+            _version("v1", "2020-01-01", estimated_amount="25.80", package_version_id="d:00002")]
+    kept, sup = P.dedupe_packages(rows, Counter())
+    assert len(kept) == 1 and not sup

@@ -931,14 +931,24 @@ def dedupe_packages(rows, counters):
     per_version = Counter((r["project_id"], r["plan_version"], r["borrower_ref_norm"])
                           for r in rows)
     shared = {(p, ref) for (p, _v, ref), n in per_version.items() if n > 1}
-    # A plan that prints the same reference AND description twice lists two
-    # packages (EDGE-G1A at 13.0m and at 13.06m): the second and later
-    # printings in a version are told apart by their order in it, so neither
-    # is lost behind the other.
+    # A plan that prints the same reference AND description twice with
+    # different figures, status or dates lists two packages (EDGE-G1A at 13.0m
+    # and at 13.06m): the second and later in a version are told apart by
+    # their order in it, so neither is lost behind the other. A row repeated
+    # identically in the same version is one package printed twice and is
+    # dropped, so its value is not counted twice.
     occurrence = Counter()
+    printed = set()
     groups = defaultdict(list)
     for r in sorted(rows, key=lambda r: (r["project_id"], r["plan_version"],
                                          r.get("package_version_id") or "")):
+        same = (r["project_id"], r["plan_version"], r["borrower_ref_norm"],
+                r.get("description_match"), r.get("estimated_amount"), r.get("actual_amount"),
+                r.get("status"), r.get("planned_date"), r.get("method"), r.get("category"))
+        if same in printed:
+            counters["package_rows_printed_twice_in_a_version"] += 1
+            continue
+        printed.add(same)
         key = (r["project_id"], r["borrower_ref_norm"])
         suffix = ""
         if key in shared:
