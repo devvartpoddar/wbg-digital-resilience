@@ -48,6 +48,7 @@ from collections import Counter, defaultdict
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
+from keys import name_key  # noqa: E402
 
 COMP_WORD = r"(?:Component|Composante|Componente|Komponen)"
 COMP_HEAD = re.compile(
@@ -144,11 +145,22 @@ class Tagger:
 
 # ------------------------------------------------------------- extraction
 
+# name_key (keys.name_key) is what the same component shares across
+# documents and with procurement: a paragraph and a package under one
+# component meet on it even when a restructuring renumbered it.
 COMP_COLS = ["project_ids", "doc_id", "doc_kind", "disclosure_date", "source", "level",
-             "number", "name", "cost_usd_m", "action", "page"]
+             "number", "name", "name_key", "cost_usd_m", "action", "page"]
 NUM = re.compile(r"^\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$")
+# A row that ends the component list: what the data sheet prints after it.
+# The lender's name ("IDA") and the front-end fee are financing lines.
 STOP_ROW = re.compile(r"^(?:implementing agency|organizations|project financing|total"
-                      r"|borrower|financing|summary)", re.I)
+                      r"|borrower|financing|summary|front.end fee|(?:ida|ibrd)\s*$)", re.I)
+
+
+def _has_name(name):
+    """Does a cell hold a name at all? '+2.5 +3.3' read from the wrong column
+    does not: a name has a word of three letters or more."""
+    return bool(re.search(r"[A-Za-z\u00C0-\u024F]{3}", name or ""))
 
 
 def _num(v):
@@ -365,12 +377,14 @@ def clean_name(name):
     n = n.split("**")[0]
     n = re.split(r"\.\s+(?=(?:This|The|It|These|Under)\b)", n)[0]
     n = re.sub(r"(?:\s+(?:[\d.,]+|N/A))+$", "", n)
+    n = re.sub(r"\s+The World Bank$", "", n)     # the page footer, read into the cell
     n = n.strip(" :-\u2013(.;,")
     # A cell read twice over: 'National Digital Connectivity Infrastructure
     # Digital Connectivity Infrastructure' is the name and the tail of it again.
     words = n.split()
-    for k in range(len(words) // 2, 1, -1):
-        if k >= 2 and words[-k:] == words[:-k][-k:]:
+    # 'Project Management Management' is the same with one word.
+    for k in range(len(words) // 2, 0, -1):
+        if words[-k:] == words[:-k][-k:]:
             n = " ".join(words[:-k])
             break
     return "" if not n or n[:1].islower() else n
@@ -418,6 +432,10 @@ def read_headings(rows, text):
             if m:
                 level, number, name = "subcomponent", f"{m.group(1)}.{m.group(2)}", m.group(3)
         if not level or (level, number) in seen:
+            continue
+        # A results indicator numbered like a component ("2. Number of
+        # servers planned ...") is not one.
+        if re.match(r"(?:Number|Percentage|Share|Proportion)\s+of\b", name, re.I):
             continue
         seen.add((level, number))
         cost = COST_IN_TEXT.search(name)
@@ -493,9 +511,13 @@ def main():
                                     grid += t.extract()
                         width = max((len(r) for r in grid), default=0)
                         grid = [list(r) + [None] * (width - len(r)) for r in grid]
-                        rs, src = read_restructuring(grid), "restructuring"
+                        # Rows with no name are a misread grid: drop them, so
+                        # a table that yields only those is passed over.
+                        rs = [c for c in read_restructuring(grid) if _has_name(c["name"])]
+                        src = "restructuring"
                         if not rs:
-                            rs, src = read_datasheet(grid), "datasheet"
+                            rs = [c for c in read_datasheet(grid) if _has_name(c["name"])]
+                            src = "datasheet"
                         if rs:
                             found = [dict(c, source=src, page=pno) for c in _tidy(rs)]
                             break
@@ -519,6 +541,8 @@ def main():
         json.dump(used, fh, sort_keys=True)
     os.replace(cache_path + ".part", cache_path)
 
+    for r in out:
+        r["name_key"] = name_key(r["name"])
     out.sort(key=lambda r: (r["doc_id"], r["source"], r["level"],
                             [int(x) for x in r["number"].split(".") if x.isdigit()]))
     with open(where(args.data, "appraisal", "components.csv"), "w", newline="",

@@ -9,7 +9,11 @@ several packages ('CS-INDV' for every individual consultant) points at more
 than one package; the description's match key then decides, and when it cannot
 the record is left unlinked and says so. Nothing is linked on a guess.
 
-Every linked record gets two columns:
+Every award also names the notices issued under the same reference
+(notice_ids), so a tender and its contract meet even when no disclosed plan
+holds the package.
+
+Every notice and award gets two columns:
 
   package_id    the package it belongs to, or blank
   package_link  how: reference, reference_and_description, ambiguous (the
@@ -58,3 +62,30 @@ def link_all(records, packages, counters=None, name="records"):
         if counters is not None:
             counters[f"{name}_link_{r['package_link']}"] += 1
     return records
+
+
+def link_awards_to_notices(awards, notices, counters=None):
+    """Write notice_ids onto every award, in place: the notices of the same
+    project and normalised reference, joined with '|'. Where both the award and
+    a notice are linked to a package, they must be linked to the same one, so a
+    generic reference shared by several packages does not join a contract to
+    another package's tender."""
+    by_ref = defaultdict(list)
+    for n in notices:
+        if n.get("borrower_ref_norm"):
+            by_ref[(n["project_id"], n["borrower_ref_norm"])].append(n)
+    for a in awards:
+        found = []
+        if a.get("borrower_ref_norm"):
+            for n in by_ref.get((a["project_id"], a["borrower_ref_norm"]), []):
+                if a.get("package_id") and n.get("package_id") and \
+                        n["package_id"] != a["package_id"]:
+                    continue
+                if not a.get("package_id") and n.get("package_link") == "ambiguous":
+                    continue
+                found.append(n["notice_id"])
+        a["notice_ids"] = "|".join(sorted(set(found)))
+        if counters is not None:
+            counters["awards_with_a_notice" if found else "awards_with_no_notice"] += 1
+    return awards
+

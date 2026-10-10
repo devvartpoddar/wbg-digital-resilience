@@ -291,6 +291,7 @@ Tables are kept in the tables for reading. They are not given to the model and a
     - `no_reference`: the record carries none.
 
     Nothing is linked on a guess. The award status in step 18 uses this link.
+20. Every award also lists in `notice_ids` the notices of the same project and normalised reference, so a contract meets its tender even when no disclosed plan holds the package. Where both are linked to a package it must be the same one; an unlinked award does not take a notice whose reference was ambiguous.
 
 On the current run:
 - 1,930 plan documents from 52 projects (9 projects published no plan); 116,919 package rows, one per plan version per package. 582 renditions parse to no package: 566 carry no reference anywhere (an empty table), 16 are parse failures.
@@ -372,10 +373,12 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
   | paragraphs, sentences | documents | `doc_id`; sentences also `paragraph_id` |
   | paragraphs | components | `doc_id` and `component_number` / `subcomponent_number` (the component the paragraph sits under) |
   | components | documents | `doc_id`; the latest document's list is the project's current one |
+  | components | components | `name_key`: the same component in another document, even when a restructuring renumbered it |
   | packages | projects | `project_id` |
-  | packages | components | `component_number` and `component` (matched by name or plan number, section 3.2) |
+  | packages | components | `component_doc_id` and `component_number` when matched by name (the document whose list gave the number); `component_number` alone when the plan printed only a number |
   | superseded package versions | packages | `package_id` |
   | notices, awards | packages | `package_id`, with `package_link` saying how (step 19) |
+  | awards | notices | `notice_ids`: the notices issued under the same reference (and, where both are linked, the same package) |
   | notices, awards | projects | `project_id` |
 
   So a paragraph about a component, the packages that buy it, the notices that tendered them and the contracts that were signed can be read together.

@@ -1,6 +1,7 @@
 """Which component a paragraph sits under, from its place in the document."""
 import os
 import sys
+import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
@@ -41,3 +42,23 @@ def test_a_run_in_subcomponent_title_opens_it():
             "cabinets for the shared masts with backup power and cooling, sized for the "
             "hottest month on record and raised above the recorded flood level at each site.")
     assert t.see(long, "narrative", "II.B") == ("2", "2.2")
+
+
+@pytest.mark.parametrize("raw,clean", [
+    ("Project Management Management", "Project Management"),
+    ("Rural Radio and Masts The World Bank", "Rural Radio and Masts"),
+    ("Shared Weather Stations Weather Stations", "Shared Weather Stations"),
+])
+def test_names_lose_a_doubled_tail_and_the_page_footer(raw, clean):
+    assert K.clean_name(raw) == clean
+
+
+@pytest.mark.parametrize("cell,ok", [("+2.5 +3.3", False), ("0.1", False),
+                                     ("Rural radio", True), ("Données", True)])
+def test_a_cell_of_figures_is_not_a_name(cell, ok):
+    assert K._has_name(cell) is ok
+
+
+@pytest.mark.parametrize("cell", ["IDA", "Front-end Fee", "Total"])
+def test_financing_lines_end_the_component_list(cell):
+    assert K.STOP_ROW.match(cell)

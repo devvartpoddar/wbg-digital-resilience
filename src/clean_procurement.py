@@ -35,12 +35,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 
-from text_rules import fold_chars                        # noqa: E402
+from text_rules import fold_chars                       # noqa: E402
+from keys import name_key                                 # noqa: E402
 import plan_table                                        # noqa: E402
 import glue                                              # noqa: E402
 import links                                             # noqa: E402
 
-CLEAN_VERSION = "proc-clean-7"
+CLEAN_VERSION = "proc-clean-8"
 
 # Another package's borrower reference inside a description: the parser missed
 # a record boundary and stitched the next record on. Used to cut it off here and
@@ -233,7 +234,9 @@ class Components:
     (components.csv), to name the component a procurement package belongs to.
 
     A restructuring can renumber components, so each name takes its number
-    from the most recent document that lists it."""
+    from the most recent document that lists it, and a match says which
+    document that was: (number, name, source, doc_id), so a package joins
+    components.csv on (doc_id, number). A number-only match has no document."""
 
     def __init__(self, rows=()):
         self.by_project = defaultdict(list)
@@ -242,16 +245,17 @@ class Components:
             name = re.sub(r"^(?:Component|Sub-?component)\s*\d+(?:\.\d+)?\s*[.:\-\u2013]?\s*",
                           "", r.get("name") or "", flags=re.I).strip()
             for pid in (r.get("project_ids") or "").split("|"):
-                key = (pid, _flat(name))
+                key = (pid, name_key(name))
                 if not pid or len(key[1]) < 4 or key in seen:
                     continue
                 seen.add(key)
-                self.by_project[pid].append((r.get("number") or "", name, _flat(name)))
+                self.by_project[pid].append((r.get("number") or "", name, key[1],
+                                             r.get("doc_id") or ""))
 
     def _by_name(self, pid, flat, partial_ok):
-        """The one component whose name the text carries, as (number, name)."""
+        """The one component whose name the text carries, as (number, name, doc_id)."""
         best, found = 0, {}
-        for num, name, f in self.by_project.get(pid, ()):
+        for num, name, f, doc in self.by_project.get(pid, ()):
             if partial_ok:
                 n = len(f)
                 while n >= 12 and f[:n] not in flat:
@@ -263,15 +267,18 @@ class Components:
                 if not n:
                     continue
             if n > best:
-                best, found = n, {num: name}
+                best, found = n, {num: (name, doc)}
             elif n == best:
-                found.setdefault(num, name)
-        return next(iter(found.items())) if len(found) == 1 else None
+                found.setdefault(num, (name, doc))
+        if len(found) != 1:
+            return None
+        num, (name, doc) = next(iter(found.items()))
+        return num, name, doc
 
     def strip_tail(self, pid, desc):
         """A component at the end of a description: (description, component).
 
-        The component is (number, name, source) or None."""
+        The component is (number, name, source, doc_id) or None."""
         starts = [m.start() for m in re.finditer(r"(?:(?<=\s)|^)\S", desc)]
         for p in starts[2:]:
             seg = desc[p:]
@@ -282,9 +289,9 @@ class Components:
                 continue
             hit = self._by_name(pid, flat, partial_ok=False)
             if hit:
-                return desc[:p].rstrip(" -\u2013,;:/("), (hit[0], hit[1], "name_match")
+                return desc[:p].rstrip(" -\u2013,;:/("), (hit[0], hit[1], "name_match", hit[2])
             if m and re.match(r"(?:Component|Composante|Componente|Comp\.)", seg, re.I):
-                return desc[:p].rstrip(" -\u2013,;:/("), (m.group(1), "", "number_only")
+                return desc[:p].rstrip(" -\u2013,;:/("), (m.group(1), "", "number_only", "")
         return desc, None
 
     def in_cells(self, pid, cells):
@@ -292,7 +299,7 @@ class Components:
         component's name they carry, else by the number the plan prints."""
         hit = self._by_name(pid, _flat(cells), partial_ok=True)
         if hit:
-            return hit[0], hit[1], "name_match"
+            return hit[0], hit[1], "name_match", hit[2]
         m = COMP_NAMED.search(cells) or COMP_NUMBER.match(cells)
         if not m:
             return None
@@ -301,10 +308,10 @@ class Components:
         # name itself is usually clipped and interleaved with other cells,
         # so it is not repeated from the plan.
         head = _flat(cells[m.end():])[:12]
-        for num, name, f in self.by_project.get(pid, ()):
+        for num, name, f, doc in self.by_project.get(pid, ()):
             if num == m.group(1) and len(head) >= 8 and f.startswith(head[:min(len(head), len(f))]):
-                return num, name, "name_match"
-        return m.group(1), "", "number_only"
+                return num, name, "name_match", doc
+        return m.group(1), "", "number_only", ""
 
 
 def read_components(data):
@@ -754,7 +761,7 @@ PACKAGE_COLS = [
     "package_id", "project_id", "borrower_ref", "borrower_ref_norm", "description",
     "description_clean", "description_match", "description_sha256",
     "description_lang", "lot_or_phase", "component_number", "component",
-    "component_source",
+    "component_source", "component_doc_id",
     "glue_repairs", "is_rebid", "is_placeholder", "superseded_by", "clean_version",
     "category", "method", "method_name", "method_source", "method_raw",
     "market_approach", "status", "status_raw", "status_source", "status_as_of",
@@ -776,7 +783,7 @@ AWARD_COLS = [
     "clean_version", "signed_date", "no_objection_date", "total_amount", "currency",
     "category", "method", "method_name", "review_type", "supplier_name",
     "supplier_country", "supplier_amount", "region", "sector",
-    "package_id", "package_link",
+    "package_id", "package_link", "notice_ids",
 ]
 SUPERSEDED_COLS = ["package_id", "project_id", "plan_version", "borrower_ref",
                    "borrower_ref_norm", "description", "status", "estimated_amount",
@@ -837,7 +844,7 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
         if not comp:
             comp = comps.in_cells(pid, " ".join(
                 x for x in (cells, r.get("cells_raw") or "") if x))
-        number, comp_name, comp_source = comp or ("", "", "")
+        number, comp_name, comp_source, comp_doc = comp or ("", "", "", "")
         counters[f"component_source_{comp_source or 'none'}"] += 1
         stored_amount = r.get("estimated_amount") or ""
         amount_source = "plan" if stored_amount else ""
@@ -865,7 +872,7 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
             "lot_or_phase": marks["lot_or_phase"],
             "component_number": number,
             "component": comp_name,
-            "component_source": comp_source,
+            "component_source": comp_source, "component_doc_id": comp_doc,
             "glue_repairs": repairs,
             "is_rebid": str(marks["is_rebid"]).lower(),
             "is_placeholder": str(is_placeholder(clean)).lower(),
@@ -1091,6 +1098,7 @@ def main():
     awards = clean_awards(awards_raw, counters, vocab, names)
     links.link_all(notices, kept, counters, "notices")
     links.link_all(awards, kept, counters, "awards")
+    links.link_awards_to_notices(awards, notices, counters)
     resolve_status(kept, awards, counters)
     # Coverage of the closed value sets, on the packages as written.
     for field in ("status", "method", "category"):

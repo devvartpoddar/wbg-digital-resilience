@@ -56,3 +56,22 @@ def test_link_all_writes_the_columns_and_counts_them():
 def test_a_notice_reference_chain_gives_the_plan_reference(printed, ref):
     import plan_table
     assert plan_table.chain_ref(printed) == ref
+
+
+def test_an_award_names_the_notices_of_its_reference_and_package():
+    notices = [{"notice_id": "N1", "project_id": "P1", "borrower_ref_norm": "ab-g-1",
+                "package_id": "P1:ab-g-1"},
+               {"notice_id": "N2", "project_id": "P1", "borrower_ref_norm": "zz-9",
+                "package_id": ""},
+               {"notice_id": "N3", "project_id": "P1", "borrower_ref_norm": "cs-indv",
+                "package_id": "P1:cs-indv:aaaa"},
+               {"notice_id": "N4", "project_id": "P2", "borrower_ref_norm": "zz-9",
+                "package_id": ""}]
+    awards = [{"project_id": "P1", "borrower_ref_norm": "ab-g-1", "package_id": "P1:ab-g-1"},
+              # Not in any plan, still meets its tender.
+              {"project_id": "P1", "borrower_ref_norm": "zz-9", "package_id": ""},
+              # Another package under the same generic reference: not N3.
+              {"project_id": "P1", "borrower_ref_norm": "cs-indv",
+               "package_id": "P1:cs-indv:bbbb"}]
+    links.link_awards_to_notices(awards, notices)
+    assert [a["notice_ids"] for a in awards] == ["N1", "N2", ""]

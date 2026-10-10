@@ -677,7 +677,7 @@ COMPONENT_ROWS = [
     {"project_ids": "P1", "disclosure_date": "2020-01-01", "number": "2",
      "name": "Shared Weather Stations, Masts and Relays"},
     # A restructuring renumbered the second component: the latest number wins.
-    {"project_ids": "P1", "disclosure_date": "2023-01-01", "number": "3",
+    {"project_ids": "P1", "doc_id": "D9", "disclosure_date": "2023-01-01", "number": "3",
      "name": "Shared Weather Stations, Masts and Relays"},
 ]
 
@@ -686,12 +686,14 @@ def test_a_component_is_found_by_the_stretch_of_its_name_the_cells_carry():
     c = P.Components(COMPONENT_ROWS)
     got = c.in_cells("P1", "Shared Weather Stati Quality And Cost- Open - "
                            "Internationa IDA / 12345 ons, Masts and Rela Post")
-    assert got == ("3", "Shared Weather Stations, Masts and Relays", "name_match")
+    # The number and the document it comes from, so the package joins
+    # components.csv on (doc_id, number).
+    assert got == ("3", "Shared Weather Stations, Masts and Relays", "name_match", "D9")
 
 
 def test_a_numbered_cell_with_no_name_match_keeps_only_the_plans_number():
     c = P.Components(COMPONENT_ROWS)
-    assert c.in_cells("P1", "Component 4: Something Else Entirely Post") == ("4", "", "number_only")
+    assert c.in_cells("P1", "Component 4: Something Else Entirely Post") == ("4", "", "number_only", "")
     assert c.in_cells("P1", "Post Request for Bids Open - National") is None
 
 
