@@ -38,8 +38,9 @@ from paths import data_root, where  # noqa: E402
 from text_rules import fold_chars                        # noqa: E402
 import plan_table                                        # noqa: E402
 import glue                                              # noqa: E402
+import links                                             # noqa: E402
 
-CLEAN_VERSION = "proc-clean-4"
+CLEAN_VERSION = "proc-clean-6"
 
 # Another package's borrower reference inside a description: the parser missed
 # a record boundary and stitched the next record on. Used to cut it off here and
@@ -758,7 +759,7 @@ PACKAGE_COLS = [
     "category", "method", "method_name", "method_source", "method_raw",
     "market_approach", "status", "status_raw", "status_source", "status_as_of",
     "planned_date", "revised_date", "estimated_amount", "currency",
-    "amount_source", "amount_as_of", "amount_plan_doc", "actual_amount",
+    "amount_source", "actual_amount",
     "plan_version", "plan_disclosure_date", "fetched_at",
 ]
 NOTICE_COLS = [
@@ -766,7 +767,7 @@ NOTICE_COLS = [
     "deadline_date", "borrower_ref", "borrower_ref_norm", "description",
     "description_clean", "description_match", "description_sha256", "description_lang",
     "is_placeholder", "glue_repairs", "category", "method", "method_name",
-    "country_name", "clean_version",
+    "country_name", "package_id", "package_link", "clean_version",
 ]
 AWARD_COLS = [
     "contract_id", "project_id", "borrower_ref", "borrower_ref_norm", "description",
@@ -775,6 +776,7 @@ AWARD_COLS = [
     "clean_version", "signed_date", "no_objection_date", "total_amount", "currency",
     "category", "method", "method_name", "review_type", "supplier_name",
     "supplier_country", "supplier_amount", "region", "sector",
+    "package_id", "package_link",
 ]
 SUPERSEDED_COLS = ["package_id", "project_id", "plan_version", "borrower_ref",
                    "borrower_ref_norm", "description", "status", "estimated_amount",
@@ -884,8 +886,6 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
             "estimated_amount": stored_amount,
             "currency": r.get("currency") or "USD",
             "amount_source": amount_source,
-            "amount_as_of": (r.get("plan_disclosure_date") or "") if amount_source else "",
-            "amount_plan_doc": (r.get("plan_doc_id") or r["plan_version"]) if amount_source else "",
             "actual_amount": r.get("actual_amount") or "",
             "plan_version": r["plan_version"],
             "fetched_at": r["fetched_at"],
@@ -895,88 +895,14 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
     return out
 
 
-# The one field carried forward from the most recent plan version that
-# actually printed it. See dedupe_packages.
-#
-#   estimated_amount  A property of the package. Version 9 leaving the cost
-#                     column blank does not retract the 200,000 version 8
-#                     printed; nothing was said, so the last thing said stands.
-#
-# Everything else is deliberately NOT carried, status above all. A status is a
-# fact at a point in time, and 'Under Implementation' as of 2021 asserts
-# nothing about 2024; carrying it forward manufactures a present-tense claim
-# out of a stale one. A package whose newest plan prints no status is
-# 'unknown' unless a signed contract says otherwise (resolve_status). The
-# carried amount says where it came from in amount_source ('earlier_plan'),
-# amount_as_of (that plan's disclosure date) and amount_plan_doc (its
-# document), so nothing is taken on trust.
-CARRY_FORWARD = ("estimated_amount",)
-
-# Fields that travel with a carried field, from the SAME plan version, so the
-# set can never be assembled out of two different ones. An amount carried from
-# version 8 with a currency from version 3 would be a figure nobody published.
-CARRY_COMPANIONS = {"estimated_amount": ("currency", "amount_as_of", "amount_plan_doc")}
-
-# Normalised enum values that mean "this version did not tell us" rather than
-# being an answer in their own right.
-_NOT_AN_ANSWER = {"status": "unknown", "method": "unknown", "category": "unknown"}
-
-
-def absent(field, value):
-    """Did this plan version actually state a value for this field?
-
-    A blank is absent. So is a normalised enum that fell through to `unknown`,
-    because that is the parser saying it could not read the column rather than
-    the borrower saying the answer is unknown. `status_raw` is deliberately not
-    in that set: there it would be the borrower's own word.
-
-    A zero amount is absent too, and that one is a judgement rather than a fact.
-    In this corpus a package routinely sits at 0.00 for its first several plan
-    versions before a real figure appears - CS-FIRME-9 ran eight versions at
-    zero, then 200,000 - so zero reads as "not costed yet". The cost of the
-    judgement is real and worth stating: a package genuinely revised DOWN to
-    zero, defunded rather than un-costed, keeps its old figure. amount_source
-    and amount_plan_doc record which version each surviving value came from, so that case is
-    visible rather than silent, and packages_raw.csv still holds every version
-    verbatim.
-    """
-    v = (value or "").strip()
-    if not v:
-        return True
-    if _NOT_AN_ANSWER.get(field) == v:
-        return True
-    if field.endswith("_amount"):
-        try:
-            return float(v) == 0.0
-        except ValueError:
-            return True
-    return False
-
-
 def dedupe_packages(rows, counters):
-    """One row per package, with each field taken from the most recent
-    plan version that stated it, and supersession recorded.
+    """One row per package: the newest plan version's row, whole.
 
-    NOT simply the newest version's row. The newest plan is not reliably the
-    best-parsed one: a package can carry an amount for years and then appear
-    blank in the latest plan because that plan's table was laid out differently
-    and the cost column was lost. Keeping the newest row wholesale lets a parse
-    failure overwrite good data, which is how a known 200,000 becomes an empty
-    cell.
-
-    So the row is assembled field by field. The newest version supplies the
-    identity, the description, the plan_version and every field not in
-    CARRY_FORWARD; for the one that is, if the newest version did not state
-    the field, the most recent version that did is used instead. A later real
-    value always beats an earlier one - 2,000,000 then blank keeps 2,000,000,
-    but 2,000,000 then blank then 1,000,000 keeps 1,000,000.
-
-    Status is not among them and that is on purpose; see CARRY_FORWARD. A
-    package whose latest plan does not print a status has an unknown status
-    here, which is what is true.
-
-    amount_source, amount_as_of and amount_plan_doc say which plan version a
-    carried amount came from, so nothing is taken on trust.
+    Nothing is carried from an older version, neither status nor amount. A
+    value is a statement a plan made on its date; filling a field the newest
+    plan left blank with an older plan's figure would put a statement on today
+    that no current plan makes. Every version stays in packages_raw.csv and
+    the older ones in superseded_packages.csv, so the history is not lost.
 
     Grouped on (project_id, normalised reference), not on the reference alone. The borrower
     reference is only unique within a project, and generic ones recur across
@@ -1011,28 +937,6 @@ def dedupe_packages(rows, counters):
         versions.sort(key=lambda x: (x["_plan_disclosure_date"], x["plan_version"]))
         newest = dict(versions[-1])
         newest_version = newest.get("plan_version", "")
-
-        carried = False
-        for field in CARRY_FORWARD:
-            if field not in newest or not absent(field, newest.get(field)):
-                continue
-            for older in reversed(versions[:-1]):
-                if not absent(field, older.get(field)):
-                    newest[field] = older[field]
-                    # The companions come from this same version, blank or not,
-                    # so an amount and its currency are always the pair that was
-                    # actually published together.
-                    for companion in CARRY_COMPANIONS.get(field, ()):
-                        if companion in newest:
-                            newest[companion] = older.get(companion, "")
-                    newest["amount_source"] = (
-                        "earlier_plan_description"
-                        if older.get("amount_source") == "description" else "earlier_plan")
-                    counters[f"carried_{field}"] += 1
-                    carried = True
-                    break
-        if carried:
-            counters["packages_with_a_carried_field"] += 1
         kept.append(newest)
 
         for old in versions[:-1]:
@@ -1062,23 +966,22 @@ def resolve_status(kept, awards, counters):
     Two sources, the more recent dated evidence winning:
 
       plan   the newest plan version's own status, as of its disclosure
-      award  a signed contract in the awards data whose normalised borrower
-             reference matches the package's, as of signing
+      award  a signed contract in the awards data linked to the package
+             (links.py), as of signing
 
     An older plan version's status is never used: it is a fact about that
     plan's date, not about now. With neither source the status stays unknown.
     """
     signed = {}
     for a in awards:
-        key = (a["project_id"], a["borrower_ref_norm"])
         d = a.get("signed_date") or ""
-        if a["borrower_ref_norm"] and d and d > signed.get(key, ""):
-            signed[key] = d
+        if a.get("package_id") and d > signed.get(a["package_id"], ""):
+            signed[a["package_id"]] = d
     for r in kept:
         cands = []
         if r["status"] != "unknown":
             cands.append((r.get("_disclosed", ""), r["status"], "plan"))
-        d = signed.get((r["project_id"], r["borrower_ref_norm"]))
+        d = signed.get(r["package_id"])
         if d and r["status"] not in CONTRACT_EXISTS:
             cands.append((d, "Signed", "award"))
         if cands:
@@ -1186,6 +1089,8 @@ def main():
     kept, superseded = dedupe_packages(packages, counters)
     notices = clean_notices(notices_raw, counters, vocab, names)
     awards = clean_awards(awards_raw, counters, vocab, names)
+    links.link_all(notices, kept, counters, "notices")
+    links.link_all(awards, kept, counters, "awards")
     resolve_status(kept, awards, counters)
     # Coverage of the closed value sets, on the packages as written.
     for field in ("status", "method", "category"):

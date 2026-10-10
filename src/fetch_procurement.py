@@ -589,7 +589,7 @@ def parse_plan_text(text, doc_meta):
         # Asked of THIS table's heading band. About a fifth of renditions print no
         # Estimated Amount column at all, and on those the figure on the row is
         # the actual - filing it as an estimate would invent a number the plan
-        # never stated, on the one field that is carried forward.
+        # never stated.
         has_estimated = plan_table.has_column(table, plan_table.ESTIMATED_LABEL)
         columns = "|".join(plan_table.present_columns(table))
         for rec in _records_in_table(table):

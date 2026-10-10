@@ -94,12 +94,25 @@ def store(tmp_path, cohort):
         dict(pk, package_id="b", status="Pending", planned_date="2020-01-01",
              estimated_amount="50.00"),
         dict(pk, package_id="c", status="Signed", planned_date="2021-01-01")])
+    os.makedirs(os.path.join(data, "raw", "projects"))
+    with open(os.path.join(data, "raw", "projects", "P000001.json"), "w") as fh:
+        fh.write("{}\n")
+    _write(os.path.join(data, "projects", "projects.csv"), [
+        {"project_id": "P000001", "project_name": "Radio masts", "status": "Active",
+         "closing_date": "2028-06-30", "practice": "Digital Development",
+         "practice_code": "DDT", "managing_unit": "Digital Dev - West (IDD02)",
+         "unit_code": "IDD02", "region": "", "country_code": "", "approval_fy": ""},
+        {"project_id": "P000003", "project_name": "Roads", "status": "Active",
+         "closing_date": "", "practice": "Transport", "practice_code": "TRA",
+         "managing_unit": "", "unit_code": "", "region": "South Asia",
+         "country_code": "CC", "approval_fy": "2023"}])
     _write(os.path.join(data, "procurement", "packages_raw.csv"), [
         {"package_version_id": "R1:00000", "project_id": "P000001"}])
     _write(os.path.join(data, "procurement", "notices.csv"), [
         {"notice_id": "N1", "project_id": "P000001", "publication_date": "2026-01-01",
          "deadline_date": "2030-02-01", "notice_type": "x", "borrower_ref": "",
-         "description_clean": "x", "category": "goods", "method": "RFB"}])
+         "description_clean": "x", "category": "goods", "method": "RFB",
+         "package_id": "a", "package_link": "reference"}])
     _write(os.path.join(data, "procurement", "awards.csv"), [
         {"contract_id": "C1", "project_id": "P000001", "signed_date": "2025-06-01",
          "total_amount": "75.50"}])
@@ -155,3 +168,33 @@ def test_prepare_fetches_only_what_is_new_and_skips_what_did_not_change(
     calls.clear()
     wbg.prepare(wbg.select(project="P000002", path=cohort), data=store)
     assert ("fetch_procurement.py", ("--projects", "P000002")) in calls
+
+
+@pytest.mark.parametrize("kw,ids", [
+    ({"practice": "digital"}, ["P000001"]),
+    ({"practice": "TRA"}, ["P000003"]),
+    ({"unit": "idd02"}, ["P000001"]),
+    # The cohort records no region for P000003; the projects interface does.
+    ({"region": "south asia"}, ["P000002", "P000003"]),
+    ({"fy": "2023"}, ["P000003"]),
+])
+def test_practice_unit_and_blank_cohort_fields_come_from_the_projects_table(
+        store, cohort, kw, ids):
+    assert wbg.select(path=cohort, data=store, **kw).ids == ids
+
+
+def test_the_cohort_wins_where_it_records_a_value(store, cohort):
+    # P000001's cohort region is Western and Central Africa; projects.csv is blank.
+    assert wbg.select(path=cohort, data=store, region="western").ids == ["P000001"]
+
+
+def test_practice_filter_needs_the_projects_table(cohort, tmp_path):
+    with pytest.raises(SystemExit):
+        wbg.select(path=cohort, data=str(tmp_path / "empty"), practice="digital")
+
+
+def test_upcoming_carries_the_notices_linked_to_each_package(store, cohort):
+    sel = wbg.select(project="P000001", path=cohort, data=store)
+    rows = {r["package_id"]: r for r in wbg.upcoming(sel, data=store)}
+    assert (rows["a"]["notices"], rows["a"]["latest_notice_deadline"]) == (1, "2030-02-01")
+    assert rows["b"]["notices"] == 0

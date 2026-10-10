@@ -30,8 +30,11 @@ DOC_TYPES = ("Project Appraisal Document", "Project Paper")
 # discloses one appraisal document that serves several projects, so project_ids
 # is pipe-delimited: keying on project_id instead would repeat the document and
 # emit duplicate paragraph identifiers downstream.
+# owner_unit is the unit the documents interface records as the document's
+# owner, as printed ("Digital Dev - AFR EAST/SOUTH (IDD04)"); often blank.
 DOC_COLS = ["doc_id", "project_ids", "doc_type", "doc_kind", "title",
-            "disclosure_date", "lang", "fetched_at", "pdf_url", "pdf_bytes", "pdf_sha256"]
+            "disclosure_date", "lang", "fetched_at", "pdf_url", "pdf_bytes", "pdf_sha256",
+            "owner_unit"]
 
 
 def classify(doc_type, title):
@@ -86,7 +89,7 @@ def list_docs(project_id, doc_type):
     capping this silently truncates busy projects and hides their PAD."""
     q = urllib.parse.urlencode({
         "format": "json", "rows": "50", "projectid": project_id, "docty": doc_type,
-        "fl": "id,docty,display_title,disclosure_date,pdfurl,lang"})
+        "fl": "id,docty,display_title,disclosure_date,pdfurl,lang,owner"})
     data = get(f"{WDS}?{q}", timeout=45).json()
     out = []
     for key, val in data.get("documents", {}).items():
@@ -99,6 +102,7 @@ def list_docs(project_id, doc_type):
             "disclosure_date": (val.get("disclosure_date") or "")[:10],
             "lang": val.get("lang") or "",
             "pdfurl": val.get("pdfurl") or "",
+            "owner_unit": " ".join((val.get("owner") or "").split()),
         })
     return [d for d in out if d["doc_id"]]
 
@@ -205,6 +209,7 @@ def main():
                 "pdf_url": doc["pdfurl"],
                 "pdf_bytes": len(pdf_blob),
                 "pdf_sha256": hashlib.sha256(pdf_blob).hexdigest(),
+                "owner_unit": doc["owner_unit"],
             }
 
         if n % 10 == 0:

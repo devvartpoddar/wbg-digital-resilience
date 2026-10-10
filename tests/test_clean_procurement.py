@@ -515,104 +515,49 @@ def test_parse_plan_text_recovers_a_wrapped_reference_end_to_end():
     assert rows[0]["description"] == "Construction of the fibre duct"
 
 
-# ------------------------------------------------- carrying values forward
+# ------------------------------------------------- one row per package
 
 def _version(pv, date, **fields):
     base = {"package_id": "PK-1", "project_id": "P1", "plan_version": pv,
             "_plan_disclosure_date": date, "plan_disclosure_date": date,
             "borrower_ref": "PK-1", "borrower_ref_norm": "pk1",
-            "description": "Supply of fiber", "status": "unknown", "status_raw": "",
-            "method": "unknown", "method_raw": "", "category": "goods",
-            "category_raw": "Goods", "market_approach": "", "planned_date": "",
-            "revised_date": "", "estimated_amount": "0.00", "currency": "",
-            "amount_source": "", "amount_as_of": "", "amount_plan_doc": ""}
+            "description": "Supply of fiber", "description_match": "supply of fiber",
+            "status": "unknown", "status_raw": "", "estimated_amount": "",
+            "currency": "", "amount_source": ""}
     base.update(fields)
-    if not P.absent("estimated_amount", base["estimated_amount"]):
-        base.update(amount_source="plan", amount_as_of=date, amount_plan_doc=pv)
     return base
 
 
-class TestCarryForward:
-    """The newest plan version is not reliably the best-parsed one. A package can
-    carry an amount for years and then appear blank because the latest plan's
-    table was laid out differently and the column was lost. These assert that a
-    parse failure cannot overwrite a value the borrower actually stated."""
+class TestNewestVersion:
+    """The newest plan version's row is kept whole: nothing is carried from an
+    older one, neither status nor amount."""
 
     def _run(self, versions):
-        from collections import Counter
         kept, _sup = P.dedupe_packages(versions, Counter())
         return kept[0]
 
-    def test_a_later_blank_does_not_erase_an_earlier_amount(self):
+    def test_a_later_blank_amount_stays_blank(self):
         row = self._run([
-            _version("v1", "2020-01-01", estimated_amount="2000000.00"),
-            _version("v2", "2021-01-01", estimated_amount=""),
+            _version("v1", "2020-01-01", estimated_amount="2000000.00",
+                     amount_source="plan", currency="USD"),
+            _version("v2", "2021-01-01"),
         ])
-        assert row["estimated_amount"] == "2000000.00"
-        assert (row["amount_source"], row["amount_plan_doc"], row["amount_as_of"]) == \
-            ("earlier_plan", "v1", "2020-01-01")
+        assert (row["estimated_amount"], row["amount_source"], row["currency"]) == \
+            ("", "", "")
 
-    def test_a_later_real_value_beats_an_earlier_one(self):
-        """2,000,000 then blank then 1,000,000 keeps 1,000,000, not 2,000,000."""
-        row = self._run([
-            _version("v1", "2020-01-01", estimated_amount="2000000.00"),
-            _version("v2", "2021-01-01", estimated_amount="0.00"),
-            _version("v3", "2022-01-01", estimated_amount="1000000.00"),
-        ])
-        assert row["estimated_amount"] == "1000000.00"
-        assert (row["amount_source"], row["amount_plan_doc"]) == ("plan", "v3"), \
-            "the newest version stated it, so nothing was carried"
-
-    def test_zero_is_treated_as_not_yet_costed(self):
-        """In this corpus a package sits at 0.00 for its first several plan
-        versions before a real figure appears, so zero reads as absent."""
+    def test_a_later_zero_stays_zero(self):
         row = self._run([
             _version("v1", "2020-01-01", estimated_amount="200000.00"),
             _version("v2", "2021-01-01", estimated_amount="0.00"),
         ])
-        assert row["estimated_amount"] == "200000.00"
+        assert row["estimated_amount"] == "0.00"
 
     def test_status_is_never_carried_forward(self):
-        """A status is a fact at a point in time, so a silent newest version
-        leaves it unknown rather than inheriting a stale one.
-
-        This is the opposite of what this code did until the rule was changed,
-        and the older behaviour is the reason it is worth a test of its own: an
-        `unknown` here is a real answer about the present, while 'signed as of
-        four years ago' is a claim nobody made. Unknown statuses are confirmed
-        with the project teams, not manufactured."""
         row = self._run([
-            _version("v1", "2020-01-01", status="signed", status_raw="Signed"),
-            _version("v2", "2021-01-01", status="unknown", status_raw=""),
-        ])
-        assert row["status"] == "unknown"
-        assert row["status_raw"] == ""
-
-    def test_the_amount_is_still_carried_when_the_status_is_not(self):
-        """The two rules meet on one row, so assert them together: a version
-        that states neither inherits the amount and not the status."""
-        row = self._run([
-            _version("v1", "2020-01-01", status="signed", status_raw="Signed",
-                     estimated_amount="500.00"),
+            _version("v1", "2020-01-01", status="Signed", status_raw="Signed"),
             _version("v2", "2021-01-01"),
         ])
-        assert row["estimated_amount"] == "500.00"
-        assert row["status"] == "unknown"
-
-    def test_a_cancelled_status_is_not_overwritten_by_an_older_signed_one(self):
-        row = self._run([
-            _version("v1", "2020-01-01", status="signed", status_raw="Signed"),
-            _version("v2", "2021-01-01", status="cancelled", status_raw="Canceled"),
-        ])
-        assert row["status"] == "cancelled"
-
-    def test_nothing_is_invented_when_no_version_ever_stated_it(self):
-        row = self._run([
-            _version("v1", "2020-01-01"),
-            _version("v2", "2021-01-01"),
-        ])
-        assert row["status_raw"] == "" and row["status"] == "unknown"
-        assert row["amount_source"] == "" and row["amount_plan_doc"] == ""
+        assert (row["status"], row["status_raw"]) == ("unknown", "")
 
     def test_identity_and_description_come_from_the_newest_version(self):
         row = self._run([
@@ -622,45 +567,17 @@ class TestCarryForward:
         assert row["description"] == "Supply of fiber, revised"
         assert row["plan_version"] == "v2"
 
-    def test_a_carried_amount_says_which_plan_it_came_from(self):
-        row = self._run([
-            _version("v1", "2020-01-01", estimated_amount="500.00", currency="USD"),
-            _version("v2", "2021-01-01", status="signed", status_raw="Signed"),
-            _version("v3", "2022-01-01"),
-        ])
-        assert (row["amount_source"], row["amount_as_of"], row["amount_plan_doc"],
-                row["currency"]) == ("earlier_plan", "2020-01-01", "v1", "USD")
-        assert row["status"] == "unknown"
-
     def test_supersession_points_at_the_row_that_replaced_it(self):
-        """superseded_by was previously written as an empty string, so the older
-        rows existed with no pointer to what replaced them."""
-        from collections import Counter
         kept, sup = P.dedupe_packages(
             [_version("v1", "2020-01-01"), _version("v2", "2021-01-01")], Counter())
         assert len(sup) == 1
         assert sup[0]["superseded_by"] == "v2"
 
     def test_two_projects_sharing_a_reference_stay_separate(self):
-        from collections import Counter
         a = _version("v1", "2020-01-01"); a["project_id"] = "P1"
         b = _version("v1", "2020-01-01"); b["project_id"] = "P2"
         kept, _ = P.dedupe_packages([a, b], Counter())
-        assert len(kept) == 2
         assert {r["project_id"] for r in kept} == {"P1", "P2"}
-
-
-@pytest.mark.parametrize("field, value, expected", [
-    ("estimated_amount", "", True), ("estimated_amount", "0.00", True),
-    ("estimated_amount", "0", True), ("estimated_amount", "1.00", False),
-    ("estimated_amount", "not a number", True),
-    ("status", "unknown", True), ("status", "signed", False),
-    ("status_raw", "unknown", False),   # the borrower's own word, not ours
-    ("status_raw", "  ", True), ("method", "unknown", True),
-    ("planned_date", "2024-01-01", False), ("planned_date", "", True),
-])
-def test_absent_decides_what_counts_as_not_stated(field, value, expected):
-    assert P.absent(field, value) is expected
 
 
 # --- glued words and status sources (invented descriptions) -------------------
@@ -694,22 +611,20 @@ def test_real_words_and_acronyms_are_left_whole(word):
 
 
 def _pkg(status, disclosed, ref="R-1"):
-    return {"project_id": "P1", "borrower_ref_norm": ref, "status": status,
-            "_disclosed": disclosed}
+    return {"package_id": f"P1:{ref}", "project_id": "P1", "borrower_ref_norm": ref,
+            "status": status, "_disclosed": disclosed}
 
 
 def test_status_from_a_later_signed_award_beats_an_older_plan():
     rows = [_pkg("Pending Implementation", "2023-01-01")]
-    P.resolve_status(rows, [{"project_id": "P1", "borrower_ref_norm": "R-1",
-                             "signed_date": "2024-05-01"}], Counter())
+    P.resolve_status(rows, [{"package_id": "P1:R-1", "signed_date": "2024-05-01"}], Counter())
     assert (rows[0]["status"], rows[0]["status_source"], rows[0]["status_as_of"]) == \
         ("Signed", "award", "2024-05-01")
 
 
 def test_an_award_does_not_turn_completed_back_into_signed():
     rows = [_pkg("Completed", "2023-01-01")]
-    P.resolve_status(rows, [{"project_id": "P1", "borrower_ref_norm": "R-1",
-                             "signed_date": "2024-05-01"}], Counter())
+    P.resolve_status(rows, [{"package_id": "P1:R-1", "signed_date": "2024-05-01"}], Counter())
     assert (rows[0]["status"], rows[0]["status_source"]) == ("Completed", "plan")
 
 

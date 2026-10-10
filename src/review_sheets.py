@@ -44,8 +44,7 @@ PKG_COLS = [("package_id", 18), ("project_id", 10), ("plan_version", 10),
             ("is_placeholder", 8), ("method", 8), ("method_name", 18),
             ("method_source", 10), ("market_approach", 14), ("status_raw", 14),
             ("status", 14), ("status_source", 10), ("status_as_of", 11),
-            ("estimated_amount", 12), ("currency", 7), ("amount_source", 10),
-            ("amount_as_of", 11), ("planned_date", 11), ("ok", 6), ("note", 30)]
+            ("estimated_amount", 12), ("currency", 7), ("amount_source", 10), ("planned_date", 11), ("ok", 6), ("note", 30)]
 
 
 def cell_text(value):

@@ -33,6 +33,7 @@ DEFAULT_DSN = "postgresql:///work"
 
 # (table, path under data/). Everything is text unless typed below.
 TABLES = [
+    ("projects", "projects/projects.csv"),
     ("documents", "raw/documents.csv"),
     ("paragraphs", "appraisal/paragraphs.csv"),
     ("sentences", "appraisal/sentences.csv"),

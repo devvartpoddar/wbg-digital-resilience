@@ -18,12 +18,14 @@ written down once:
        pdf_text/       each PDF's text exactly as read, before cleaning
        text/           the Bank's text renditions (no longer fetched; kept)
        plans/ notices/ awards/   procurement plans and interface responses
+       projects/       each project's record from the projects interface
        documents.csv   the document list; fetch_log.csv every request made
   data/appraisal/    what the appraisal stages make
        text/           cleaned text, one file per document
        cache/          per-document reads kept to skip unchanged work
        paragraphs.csv sentences.csv rejected.csv components.csv
   data/procurement/  packages, notices, awards: raw and cleaned tables
+  data/projects/     projects.csv: one row per project (src/projects.py)
   data/reports/      every stage's report, and the run notes for the vault
   data/review/       spreadsheets for reading the output by eye
   data/runs/         a selection's exported results, when asked for (src/wbg.py)
@@ -65,6 +67,8 @@ LAYOUT = {
     "plans": "raw/plans",
     "notices_json": "raw/notices",
     "awards_json": "raw/awards",
+    "projects_json": "raw/projects",
+    "projects": "projects/projects.csv",
     "documents": "raw/documents.csv",
     "fetch_log": "raw/fetch_log.csv",
     "text": "appraisal/text",

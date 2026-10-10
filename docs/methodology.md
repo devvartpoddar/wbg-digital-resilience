@@ -27,10 +27,12 @@ Any model that meets all three may be used, including an external one. For an ex
 
 | Stage | State |
 |---|---|
-| Fetch appraisal documents (PDFs) and procurement records | Built |
+| Fetch appraisal documents (PDFs), procurement records and project records | Built |
+| Projects table: name, status, dates, practice, managing unit | Built |
 | Clean appraisal documents into paragraphs and sentences | Built; under review |
 | Collect each project's components and costs; tag paragraphs with their component | Built |
 | Clean procurement packages, notices and awards | Built; under review |
+| Link notices and awards to their plan package | Built |
 | Load into Postgres, write review sheets and the run report | Built |
 | Embed paragraphs into pgvector | Next, once cleaning is accepted |
 | Judge paragraphs for assets and measures | Next: a test of a pinned external decision model (referred to as Jev) that returns a yes probability |
@@ -40,10 +42,18 @@ Any model that meets all three may be used, including an external one. For an ex
 
 `./run.sh` (the same as `./wbg pipeline`) runs every stage below in this order, then loads Postgres, writes the review sheets and drafts the run note. `./wbg` does the same for a selection of the cohort:
 
-1. **Select.** `--project`, `--country` (country code), `--region` (case-insensitive, part of the name is enough) and `--fy` (approval fiscal year) filter the included rows of `inputs/config/cohort.csv`. Each takes several values; different filters combine with "and". A project outside the cohort is refused. On the current cohort, 5 included projects have no region or country recorded and 12 no approval year, so a region, country or year filter cannot select them; `--project` can.
-2. **Fetch only what is new.** `data/reports/stages.json` records which projects have been fetched, for appraisal documents and for procurement separately. `./wbg prepare` fetches only selected projects not recorded there; `--update` fetches the selected projects again. Fetching one project keeps every other project's rows (sections 2.1 and 3.1). A store made before this file existed counts every project it already holds as fetched.
+1. **Select.** Filters on the included rows of `inputs/config/cohort.csv`:
+   - `--project`;
+   - `--country` (country code);
+   - `--region` (case-insensitive, part of the name is enough);
+   - `--fy` (approval fiscal year);
+   - `--practice` (Global Practice name or code, or part of one: "digital", "transport");
+   - `--unit` (managing unit or its code, or part of one: "IDD04", "AFR EAST").
+
+   Each takes several values; different filters combine with "and". A project outside the cohort is refused. Region, country and year are the cohort's; where the cohort records none, the projects table's (section 1.1) is used. Practice and unit come from the projects table only, so they need a prepared store. A project with no value for a filter is not selected by it; `--project` always can.
+2. **Fetch only what is new.** `data/reports/stages.json` records which projects have been fetched, for appraisal documents, procurement and project records separately. `./wbg prepare` fetches only selected projects not recorded there; `--update` fetches the selected projects again. Fetching one project keeps every other project's rows (sections 2.1 and 3.1). A store made before this file existed counts every project it already holds as fetched.
 3. **Rebuild only what changed.** Every later stage runs over the whole store, never one project alone, so the shared tables stay whole. `stages.json` keeps a SHA-256 of each stage's code and input files; a stage runs only when that changes. Within a stage, the per-document caches (keyed on the PDF's checksum and the reading code's version) skip unchanged documents. A second `prepare` with nothing new does nothing.
-4. **Read and export.** `./wbg summary` prints, for each selected project, the latest procurement plan's date, its packages by status, the packages still to come (status Pending, Pending Implementation, Under Review or Planned) with their estimated value, how many of those have a planned date already past, the next planned date, open notices (deadline not yet passed) and signed contracts. `./wbg export` writes the same to `data/runs/<selection>-<date>/summary.xlsx` (sheets: projects, upcoming packages, open notices, components, the components and costs taken from each project's latest appraisal document), and with `--tables` every filtered table as CSV. A planned date already past is what the plan records, not evidence of delay: the plan may simply not have been updated.
+4. **Read and export.** `./wbg summary` prints, for each selected project, its status and closing date, the latest procurement plan's date, its packages by status, the packages still to come (status Pending, Pending Implementation, Under Review or Planned) with their estimated value, how many of those have a planned date already past, the next planned date, open notices (deadline not yet passed) and signed contracts. `./wbg export` writes the same to `data/runs/<selection>-<date>/summary.xlsx` (sheets: projects, with name, practice and managing unit; upcoming packages, each with the notices linked to it; open notices, each with its package's status and estimate; components, the components and costs taken from each project's latest appraisal document), and with `--tables` every filtered table as CSV. A planned date already past is what the plan records, not evidence of delay: the plan may simply not have been updated.
 
 Each stage reads only the files the earlier stages wrote, skips work whose inputs have not changed, and writes its own report to `data/reports/`. Every number marked "on the current run" comes from those reports and will move when the documents do.
 
@@ -56,10 +66,20 @@ Each stage reads only the files the earlier stages wrote, skips work whose input
 | Procurement plans | Every procurement plan disclosed for each project, as the text rendition the Bank publishes (plans are not read from PDF) | Documents and Reports interface, type "Procurement Plan" | `data/raw/plans/` |
 | Procurement notices | Every notice published for each project | Procurement notices interface | `data/raw/notices/` |
 | Contract awards | Every signed contract recorded for each project | Contract awards interface | `data/raw/awards/` |
+| Project records | Each project's name, status, approval and closing dates, region, country, lending instrument, commitment, Global Practice and top three sectors | Projects interface (`search.worldbank.org/api/v2/projects`), only the fields listed in `src/fetch_projects.py` | `data/raw/projects/` |
 
 Nothing else is pulled. The Bank's text renditions of appraisal documents are no longer fetched; the ones fetched earlier stay on disk and are not used. Every request is logged in `data/raw/fetch_log.csv`. A file already on disk is not downloaded again; when a forced re-download (`--refresh`) returns different bytes, the old file is kept beside the new one, named by its checksum. Nothing fetched is ever deleted or overwritten.
 
-Personal contact details in notices (names, e-mail addresses, telephone numbers) and the staff names in award records are not pulled.
+Personal contact details in notices (names, e-mail addresses, telephone numbers) and the staff names in award records are not pulled. The projects interface also publishes the project team's names and e-mail addresses; they are not requested. The appraisal documents' `owner` field (the unit that owns the document) is kept in `documents.csv` as `owner_unit`.
+
+### 1.1 The projects table (`src/fetch_projects.py`, `src/projects.py`)
+
+1. For each project, request its record from the projects interface, asking only for the fields above. The record is stored as `data/raw/projects/<project id>.json`; a record that changes between fetches keeps its old copy beside the new one. A project the interface has no record of is stored as an empty record and reported.
+2. One row per cohort project in `data/projects/projects.csv`:
+   - from the projects interface: `project_name`, `status` (Active, Closed, Pipeline), `approval_date`, `approval_fy`, `closing_date`, `region`, `country_code`, `country_name`, `lending_instrument`, `commitment_usd_m` (current total commitment, US$ millions), `practice` and `practice_code` (the Global Practice(s) leading the project), `sectors` (the top three, with their shares);
+   - from the appraisal documents: `managing_unit`, the owner recorded on the project's most recent appraisal document that records one, printed as recorded, with `unit_doc_id` and `unit_as_of` naming that document and its date; `unit_code` is the code inside it ("Digital Dev - AFR EAST/SOUTH (IDD04)" gives IDD04).
+   - `in_projects_interface` says whether the interface had a record.
+3. **What is not there.** Neither interface publishes the vice presidency as a field, so there is no such column. The document owner is uneven: usually a practice unit, sometimes a country office or a regional vice presidency's office, and blank on most recent papers, which is why the most recent document that records one is used.
 
 ## 2. Appraisal documents
 
@@ -253,12 +273,23 @@ Tables are kept in the tables for reading. They are not given to the model and a
 
 14. Package versions are grouped by project and normalised reference. A generic reference that one plan uses for several packages ("CS-INDV") is also grouped by description. `package_id` is "project:reference" (plus a short hash of the description for those).
 15. The newest version (by disclosure date) gives the row.
-16. **The estimated amount** is the only field carried from an older version: when the newest version printed no amount, or zero, the most recent version that printed one supplies it, with its currency. `amount_source` says where every amount came from: `plan` (the newest version), `earlier_plan`, `description`, or `earlier_plan_description`. `amount_as_of` and `amount_plan_doc` give that version's date and document. The actual amount is the newest version's.
+16. **Nothing is carried from an older version.** The newest version's row is kept whole: a status, amount or date it leaves blank stays blank, and a zero stays zero. `amount_source` says where the estimated amount came from: `plan` (the newest version's Estimated Amount cell) or `description` (a figure printed inside the description, when the cell was empty). The actual amount is also the newest version's.
 17. Older versions are written whole to `superseded_packages.csv`, each pointing at the version that replaced it.
-18. **Status with its evidence.** An older version's status is never carried forward. The more recent dated evidence wins, labelled in `status_source` and `status_as_of`:
+18. **Status with its evidence.** The more recent dated evidence wins, labelled in `status_source` and `status_as_of`:
     - `plan`: the newest version's own status, as of its disclosure date;
-    - `award`: a signed contract with the same project and normalised reference, as of signing. It never turns Completed or Terminated back into Signed;
+    - `award`: a signed contract linked to the package (step 19), as of signing. It never turns Completed or Terminated back into Signed;
     - `none`: no evidence; the status stays `unknown`.
+
+**Links (`src/links.py`):**
+
+19. Every notice and every award is linked to the plan package it was procured under, by project and normalised borrower reference. `package_id` names the package; `package_link` says how:
+    - `reference`: one package in the project has this reference;
+    - `reference_and_description`: several packages share the reference (a generic "CS-INDV"), and the description's match key picks one;
+    - `ambiguous`: several share it and the description does not pick one; left unlinked;
+    - `not_in_plan`: no package in the project has this reference (a plan not disclosed, or a reference printed differently);
+    - `no_reference`: the record carries none.
+
+    Nothing is linked on a guess. The award status in step 18 uses this link.
 
 On the current run:
 - 1,930 plan documents from 52 projects (9 projects published no plan); 116,919 package rows, one per plan version per package. 582 renditions parse to no package: 566 carry no reference anywhere (an empty table), 16 are parse failures.
@@ -320,15 +351,32 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
 ## 5. Storage
 
 - **Files**: `data/` in the main checkout (`/ygg/projects/wbg-digital-resilience/data/` on the box). Gitignored, never deleted. Every file has one home, defined once in `src/paths.py`:
-  - `raw/`: what was fetched, as published (`pdf/`, `pdf_text/`, `plans/`, `notices/`, `awards/`, `documents.csv`, `fetch_log.csv`, and the old `text/` renditions);
+  - `raw/`: what was fetched, as published (`pdf/`, `pdf_text/`, `plans/`, `notices/`, `awards/`, `projects/`, `documents.csv`, `fetch_log.csv`, and the old `text/` renditions);
   - `appraisal/`: cleaned text (`text/`), per-document caches (`cache/`), `paragraphs.csv`, `sentences.csv`, `rejected.csv`, `components.csv`;
   - `procurement/`: packages, notices and awards, raw and cleaned, and superseded package versions;
+  - `projects/`: `projects.csv`;
   - `embeddings/`: vectors and their index, when they come;
   - `reports/`: every stage's report and the run notes;
   - `review/`: the review spreadsheets;
   - `runs/`: exports for a selection, one folder per selection and date (`./wbg export`).
 
   `python src/paths.py` moves an older layout into this one. It only moves files, never overwrites, and does nothing the second time; `./wbg prepare` and `run.sh` run it first.
+- **How the tables join.** Every link is a column; nothing is joined on a guess.
+
+  | From | To | On |
+  |---|---|---|
+  | projects | cohort | `project_id` |
+  | documents | projects | `project_ids` (one document can serve several projects, joined with "\|") |
+  | paragraphs, sentences | documents | `doc_id`; sentences also `paragraph_id` |
+  | paragraphs | components | `doc_id` and `component_number` / `subcomponent_number` (the component the paragraph sits under) |
+  | components | documents | `doc_id`; the latest document's list is the project's current one |
+  | packages | projects | `project_id` |
+  | packages | components | `component_number` and `component` (matched by name or plan number, section 3.2) |
+  | superseded package versions | packages | `package_id` |
+  | notices, awards | packages | `package_id`, with `package_link` saying how (step 19) |
+  | notices, awards | projects | `project_id` |
+
+  So a paragraph about a component, the packages that buy it, the notices that tendered them and the contracts that were signed can be read together.
 - **Postgres**: schema `wbg` in database `work`, a queryable copy of the files.
 - **Embeddings, when they come**: `halfvec(3072)` with an HNSW index on cosine distance; plain `vector` cannot be indexed past 2,000 dimensions. Only paragraphs with `for_model` true are embedded. The full-precision vectors stay in the on-disk cache as the record.
 

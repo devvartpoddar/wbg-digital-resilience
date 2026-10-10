@@ -73,29 +73,68 @@ def _as_list(v):
     return [str(x).strip() for x in v if str(x).strip()]
 
 
-def select(project=None, country=None, region=None, fy=None, path=COHORT):
+# Columns a selection row takes from data/projects/projects.csv. Region,
+# country and approval year come from the cohort, and from the projects
+# interface only where the cohort is blank.
+PROJECT_COLS = ("project_name", "status", "closing_date", "practice", "practice_code",
+                "managing_unit", "unit_code")
+FALLBACK = ("region", "country_code", "approval_fy")
+
+
+def _projects(data):
+    path = where(data or data_root(), "projects")
+    if not os.path.exists(path):
+        return None
+    with open(path, newline="", encoding="utf-8") as fh:
+        return {r["project_id"]: r for r in csv.DictReader(fh)}
+
+
+def _has(values, *fields):
+    """Does any value occur, without regard to case, in any of the fields?"""
+    text = " | ".join(f.lower() for f in fields)
+    return any(v in text for v in values)
+
+
+def select(project=None, country=None, region=None, fy=None, practice=None, unit=None,
+           path=COHORT, data=None):
     """Cohort projects matching every filter given; all of them when none is.
 
-    project  project ids, a list or comma-separated ('P171528,P176932')
-    country  country codes as the cohort records them ('KE', '3W')
-    region   region names, matched without regard to case ('western and central')
-    fy       approval fiscal years ('2024')
+    project   project ids, a list or comma-separated ('P171528,P176932')
+    country   country codes ('KE', '3W')
+    region    region names, or part of one, without regard to case ('western')
+    fy        approval fiscal years ('2024')
+    practice  Global Practice name or code, or part of one ('digital', 'transport')
+    unit      managing unit or its code, or part of one ('IDD04', 'AFR EAST')
 
-    A project the cohort records no value for is not matched by that filter:
-    5 included projects have no region or country, 12 no approval year."""
-    rows = cohort(path)
+    Region, country and year are the cohort's, or the projects interface's
+    where the cohort records none. Practice and unit come from the projects
+    table (src/projects.py), so they need a prepared store. A project with no
+    value for a filter is not matched by it."""
+    rows = [dict(r) for r in cohort(path)]
+    info = _projects(data)
+    for r in rows:
+        p = (info or {}).get(r["project_id"], {})
+        for col in FALLBACK:
+            r[col] = r.get(col) or p.get(col, "")
+        for col in PROJECT_COLS:
+            r[col] = p.get(col, "")
     projects, countries = _as_list(project), [c.upper() for c in _as_list(country)]
     regions, years = [r.lower() for r in _as_list(region)], _as_list(fy)
+    pracs, units = [x.lower() for x in _as_list(practice)], [x.lower() for x in _as_list(unit)]
+    if (pracs or units) and info is None:
+        raise SystemExit("no projects table yet: run ./wbg prepare first")
     unknown = sorted(set(projects) - {r["project_id"] for r in rows})
     if unknown:
         raise SystemExit(f"not in the cohort (or not included): {', '.join(unknown)}")
     out = [r for r in rows
            if (not projects or r["project_id"] in projects)
-           and (not countries or r["country_code"].upper() in countries)
-           and (not regions or any(g in r["region"].lower() for g in regions))
-           and (not years or r["approval_fy"] in years)]
+           and (not countries or any(c in countries for c in r["country_code"].upper().split("|")))
+           and (not regions or _has(regions, r["region"]))
+           and (not years or r["approval_fy"] in years)
+           and (not pracs or _has(pracs, r["practice"], r["practice_code"]))
+           and (not units or _has(units, r["managing_unit"], r["unit_code"]))]
     parts = [*projects, *countries, *[g.replace(" ", "-") for g in regions],
-             *[f"fy{y}" for y in years]]
+             *[f"fy{y}" for y in years], *pracs, *units]
     name = "-".join(parts)[:80] if parts else "all"
     return Selection(out, re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-").lower())
 
@@ -105,6 +144,8 @@ def select(project=None, country=None, region=None, fy=None, path=COHORT):
 # Each stage after fetching: the script, the code it depends on, and the files
 # it reads. It runs when any of those changed since it last ran.
 STAGES = [
+    ("projects", "projects.py", ["projects.py"],
+     [("projects_json", "*.json"), ("documents",)]),
     ("clean", "clean.py",
      ["clean.py", "pdf_layout.py", "text_rules.py", "components.py", "sentences.py"],
      [("documents",), ("pdf", "*.pdf")]),
@@ -112,7 +153,7 @@ STAGES = [
      [("documents",), ("appraisal", "paragraphs.csv")]),
     ("audit", "audit.py", ["audit.py"], [("appraisal", "paragraphs.csv")]),
     ("clean_procurement", "clean_procurement.py",
-     ["clean_procurement.py", "glue.py", "text_rules.py", "plan_table.py"],
+     ["clean_procurement.py", "glue.py", "text_rules.py", "plan_table.py", "links.py"],
      [("procurement", "packages_raw.csv"), ("procurement", "notices_raw.csv"),
       ("procurement", "awards_raw.csv"), ("appraisal", "components.csv"),
       ("appraisal", "paragraphs.csv")]),
@@ -144,9 +185,10 @@ def _run(script, *args, data, tail=0):
 
 
 def _fingerprint(data, code, inputs):
-    """SHA-256 over the stage's code and the bytes of its input files. A file
-    matched by a pattern is fingerprinted by name and size, which is enough
-    for PDFs: their content checksums are in documents.csv, also an input."""
+    """SHA-256 over the stage's code and the bytes of its input files. A PDF
+    matched by a pattern is fingerprinted by name and size, which is enough:
+    its content checksum is in documents.csv, also an input. Any other file
+    matched by a pattern is read whole."""
     h = hashlib.sha256()
     for name in code:
         with open(os.path.join(SRC, name), "rb") as fh:
@@ -156,6 +198,9 @@ def _fingerprint(data, code, inputs):
         if "*" in path:
             for p in sorted(glob.glob(path)):
                 h.update(f"{os.path.basename(p)}:{os.path.getsize(p)}".encode())
+                if not p.endswith(".pdf"):
+                    with open(p, "rb") as fh:
+                        h.update(fh.read())
         elif os.path.exists(path):
             h.update(path.encode())
             with open(path, "rb") as fh:
@@ -179,12 +224,14 @@ def _load_state(data):
             return json.load(fh)
     except (OSError, ValueError):
         pass
-    seen = {"appraisal": set(), "procurement": set()}
+    seen = {"appraisal": set(), "procurement": set(), "projects": set()}
     for r in _read(where(data, "documents")):
         seen["appraisal"].update(p for p in r["project_ids"].split("|") if p)
     for name in ("packages_raw.csv", "notices_raw.csv", "awards_raw.csv"):
         seen["procurement"].update(r["project_id"] for r in
                                    _read(where(data, "procurement", name)))
+    seen["projects"].update(os.path.basename(p)[:-5] for p in
+                            glob.glob(where(data, "projects_json", "P*.json")))
     stamp = "before stages.json"
     return {"fetched": {k: {p: stamp for p in sorted(v)} for k, v in seen.items()}}
 
@@ -215,7 +262,8 @@ def prepare(sel=None, update=False, data=None, fetch=True):
     ran = []
     if fetch:
         today = datetime.date.today().isoformat()
-        for kind, script in (("appraisal", "fetch.py"), ("procurement", "fetch_procurement.py")):
+        for kind, script in (("appraisal", "fetch.py"), ("procurement", "fetch_procurement.py"),
+                             ("projects", "fetch_projects.py")):
             done = state.setdefault("fetched", {}).setdefault(kind, {})
             todo = [p for p in sel.ids if update or p not in done]
             if not todo:
@@ -255,12 +303,13 @@ def _in(sel, ids):
 def tables(sel=None, data=None, text=False):
     """The cleaned tables, cut to the selection, as lists of rows (dicts).
 
-    documents, paragraphs, sentences, components, packages, superseded_packages,
-    notices, awards. With text=True each paragraph also carries its text (the
+    projects, documents, paragraphs, sentences, components, packages,
+    superseded_packages, notices, awards. With text=True each paragraph also carries its text (the
     tables themselves store offsets, not text)."""
     data = data or data_root()
     sel = sel if sel is not None else select()
     out = {
+        "projects": [r for r in _read(where(data, "projects")) if r["project_id"] in sel],
         "documents": [r for r in _read(where(data, "documents")) if _in(sel, r["project_ids"])],
         "paragraphs": [r for r in _read(where(data, "appraisal", "paragraphs.csv"))
                        if _in(sel, r["project_ids"])],
@@ -327,8 +376,11 @@ def summary(sel=None, data=None, today=None, t=None):
         next_dates = sorted(r["planned_date"] for r in up if r["planned_date"] >= today)
         open_n = [n for n in g["notices"] if n["deadline_date"] and n["deadline_date"] >= today]
         rows.append({
-            "project_id": p, "country_code": c["country_code"], "region": c["region"],
-            "approval_fy": c["approval_fy"],
+            "project_id": p, "project_name": c.get("project_name", ""),
+            "country_code": c["country_code"], "region": c["region"],
+            "approval_fy": c["approval_fy"], "status": c.get("status", ""),
+            "closing_date": c.get("closing_date", ""), "practice": c.get("practice", ""),
+            "managing_unit": c.get("managing_unit", ""),
             "documents": len(docs),
             "documents_by_kind": "; ".join(f"{k} {v}" for k, v in sorted(kinds.items())),
             "latest_document_date": max((d["disclosure_date"] for d in docs), default=""),
@@ -373,13 +425,28 @@ def _latest_components(rows):
 
 
 def upcoming(sel=None, data=None, t=None):
-    """Packages still to come, one row each, soonest planned date first."""
+    """Packages still to come, one row each, soonest planned date first, with
+    the notices linked to each (links.py): how many, and the latest one's
+    publication date and deadline."""
     t = t or tables(sel, data)
     cols = ("project_id", "package_id", "borrower_ref", "description_clean", "category",
             "method", "method_name", "market_approach", "component_number", "component",
             "status", "status_source", "status_as_of", "planned_date", "revised_date",
             "estimated_amount", "currency", "amount_source", "plan_disclosure_date")
-    rows = [{k: r.get(k, "") for k in cols} for r in t["packages"] if r["status"] in UPCOMING]
+    notices = defaultdict(list)
+    for n in t["notices"]:
+        if n.get("package_id"):
+            notices[n["package_id"]].append(n)
+    rows = []
+    for r in t["packages"]:
+        if r["status"] not in UPCOMING:
+            continue
+        row = {k: r.get(k, "") for k in cols}
+        mine = sorted(notices[r["package_id"]], key=lambda n: n["publication_date"])
+        row["notices"] = len(mine)
+        row["latest_notice_date"] = mine[-1]["publication_date"] if mine else ""
+        row["latest_notice_deadline"] = mine[-1]["deadline_date"] if mine else ""
+        rows.append(row)
     return sorted(rows, key=lambda r: (r["planned_date"] or "9999", r["project_id"],
                                        r["package_id"]))
 
@@ -389,9 +456,18 @@ def open_notices(sel=None, data=None, today=None, t=None):
     today = today or datetime.date.today().isoformat()
     t = t or tables(sel, data)
     cols = ("project_id", "notice_id", "notice_type", "publication_date", "deadline_date",
-            "borrower_ref", "description_clean", "category", "method", "method_name")
-    rows = [{k: n.get(k, "") for k in cols} for n in t["notices"]
-            if n["deadline_date"] and n["deadline_date"] >= today]
+            "borrower_ref", "description_clean", "category", "method", "method_name",
+            "package_id", "package_link")
+    pk = {r["package_id"]: r for r in t["packages"]}
+    rows = []
+    for n in t["notices"]:
+        if not (n["deadline_date"] and n["deadline_date"] >= today):
+            continue
+        row = {k: n.get(k, "") for k in cols}
+        p = pk.get(n.get("package_id") or "", {})
+        row["package_status"] = p.get("status", "")
+        row["package_estimated_amount"] = p.get("estimated_amount", "")
+        rows.append(row)
     return sorted(rows, key=lambda r: (r["deadline_date"], r["project_id"], r["notice_id"]))
 
 
@@ -456,13 +532,19 @@ def _filters(ap):
     ap.add_argument("--country", action="append", help="country code as in the cohort")
     ap.add_argument("--region", action="append", help="region name, or part of one")
     ap.add_argument("--fy", action="append", help="approval fiscal year")
+    ap.add_argument("--practice", action="append",
+                    help="Global Practice name or code, or part of one ('digital')")
+    ap.add_argument("--unit", action="append",
+                    help="managing unit or its code, or part of one ('IDD04')")
 
 
 def _sel(args):
     return select(project=args.project and ",".join(args.project),
                   country=args.country and ",".join(args.country),
                   region=args.region and ",".join(args.region),
-                  fy=args.fy and ",".join(args.fy))
+                  fy=args.fy and ",".join(args.fy),
+                  practice=args.practice and ",".join(args.practice),
+                  unit=args.unit and ",".join(args.unit))
 
 
 def _print_rows(rows, cols):
@@ -504,12 +586,14 @@ def main(argv=None):
         return 0
     sel = _sel(args)
     if args.cmd == "list":
-        _print_rows(sel.rows, ["project_id", "country_code", "region", "approval_fy"])
+        _print_rows(sel.rows, ["project_id", "country_code", "region", "approval_fy",
+                               "status", "closing_date", "practice", "unit_code"])
         print(f"\n{len(sel)} projects")
     elif args.cmd == "prepare":
         prepare(sel, update=args.update, data=data)
     elif args.cmd == "summary":
-        _print_rows(summary(sel, data), ["project_id", "country_code", "latest_plan_date",
+        _print_rows(summary(sel, data), ["project_id", "country_code", "status",
+                                         "closing_date", "latest_plan_date",
                                          "packages", "upcoming_packages",
                                          "upcoming_estimated_usd",
                                          "upcoming_planned_date_passed", "next_planned_date",
