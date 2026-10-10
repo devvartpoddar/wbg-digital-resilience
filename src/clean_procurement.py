@@ -39,7 +39,7 @@ from text_rules import fold_chars                        # noqa: E402
 import plan_table                                        # noqa: E402
 import glue                                              # noqa: E402
 
-CLEAN_VERSION = "proc-clean-3"
+CLEAN_VERSION = "proc-clean-4"
 
 # Another package's borrower reference inside a description: the parser missed
 # a record boundary and stitched the next record on. Used to cut it off here and
@@ -905,7 +905,8 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
 # Everything else is deliberately NOT carried, status above all. A status is a
 # fact at a point in time, and 'Under Implementation' as of 2021 asserts
 # nothing about 2024; carrying it forward manufactures a present-tense claim
-# out of a stale one (resolve_status labels an older status instead). The
+# out of a stale one. A package whose newest plan prints no status is
+# 'unknown' unless a signed contract says otherwise (resolve_status). The
 # carried amount says where it came from in amount_source ('earlier_plan'),
 # amount_as_of (that plan's disclosure date) and amount_plan_doc (its
 # document), so nothing is taken on trust.
@@ -1030,15 +1031,6 @@ def dedupe_packages(rows, counters):
                     counters[f"carried_{field}"] += 1
                     carried = True
                     break
-        # The last status an EARLIER version stated, with that version's date.
-        # Not written into `status`: resolve_status decides, and labels it.
-        newest["_earlier_status"] = None
-        for older in reversed(versions[:-1]):
-            if not absent("status", older.get("status")):
-                newest["_earlier_status"] = (older["status"],
-                                             older.get("_plan_disclosure_date", ""),
-                                             older.get("plan_version", ""))
-                break
         if carried:
             counters["packages_with_a_carried_field"] += 1
         kept.append(newest)
@@ -1067,18 +1059,14 @@ def resolve_status(kept, awards, counters):
     """Give every package the best-evidenced status there is, and say where it
     came from and as of when.
 
-    Three sources, the most recent dated evidence winning:
+    Two sources, the more recent dated evidence winning:
 
-      plan          the newest plan version's own status, as of its disclosure
-      award         a signed contract in the awards data whose normalised
-                    borrower reference matches the package's, as of signing
-      earlier_plan  only when neither of the above says anything: the last
-                    status an older plan version printed, as of THAT plan
+      plan   the newest plan version's own status, as of its disclosure
+      award  a signed contract in the awards data whose normalised borrower
+             reference matches the package's, as of signing
 
-    `status_as_of` is what keeps the third one honest. A status is a fact at a
-    point in time; carrying it forward silently would turn 'Under
-    Implementation, 2021' into a claim about today. Labelled with its source and
-    its date it is the best available statement, and reads as what it is.
+    An older plan version's status is never used: it is a fact about that
+    plan's date, not about now. With neither source the status stays unknown.
     """
     signed = {}
     for a in awards:
@@ -1093,16 +1081,12 @@ def resolve_status(kept, awards, counters):
         d = signed.get((r["project_id"], r["borrower_ref_norm"]))
         if d and r["status"] not in CONTRACT_EXISTS:
             cands.append((d, "Signed", "award"))
-        if not cands and r.get("_earlier_status"):
-            st, when, _ = r["_earlier_status"]
-            cands.append((when, st, "earlier_plan"))
         if cands:
             when, st, src = max(cands)
             r["status"], r["status_source"], r["status_as_of"] = st, src, when
         else:
             r["status_source"], r["status_as_of"] = "none", ""
         counters[f"status_source_{r['status_source']}"] += 1
-        r.pop("_earlier_status", None)
         r.pop("_disclosed", None)
 
 

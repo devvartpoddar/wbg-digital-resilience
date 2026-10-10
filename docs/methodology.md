@@ -255,10 +255,9 @@ Tables are kept in the tables for reading. They are not given to the model and a
 15. The newest version (by disclosure date) gives the row.
 16. **The estimated amount** is the only field carried from an older version: when the newest version printed no amount, or zero, the most recent version that printed one supplies it, with its currency. `amount_source` says where every amount came from: `plan` (the newest version), `earlier_plan`, `description`, or `earlier_plan_description`. `amount_as_of` and `amount_plan_doc` give that version's date and document. The actual amount is the newest version's.
 17. Older versions are written whole to `superseded_packages.csv`, each pointing at the version that replaced it.
-18. **Status with its evidence.** The most recent dated evidence wins, labelled in `status_source` and `status_as_of`:
+18. **Status with its evidence.** An older version's status is never carried forward. The more recent dated evidence wins, labelled in `status_source` and `status_as_of`:
     - `plan`: the newest version's own status, as of its disclosure date;
     - `award`: a signed contract with the same project and normalised reference, as of signing. It never turns Completed or Terminated back into Signed;
-    - `earlier_plan`: only when neither of the above says anything, the last status an older version printed, as of that version;
     - `none`: no evidence; the status stays `unknown`.
 
 On the current run:
@@ -345,4 +344,4 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
 - **Projects with no package rows**: 9 projects publish no procurement plan (P169945, P170910, P171791, P180987, P181416, P506791, P508317, P508363, P511767), and 9 more have plans that parse to no package (P171099, P174620, P175218, P175987, P177158, P179204, P180693, P180807, P502532).
 - **Award descriptions** occasionally carry "?" where the interface lost an accented letter; that is in the source.
 - **One plan's references are slash-coded** ("…/PHN-20/CQS-002"), so its packages can carry a second reference in the description (6 packages).
-- **Status is a fact at a date.** An `earlier_plan` status is the last thing an older plan said, labelled with its date; it is not a claim about today.
+- **Status is a fact at a date.** `status_as_of` is the date of the plan or contract that stated it, not today. A package whose newest plan prints no status stays `unknown` unless a signed contract matches it; an older plan's status is not used.

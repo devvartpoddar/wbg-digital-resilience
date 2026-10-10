@@ -693,9 +693,9 @@ def test_real_words_and_acronyms_are_left_whole(word):
     assert glue.repair(word, _vocab()) == (word, 0)
 
 
-def _pkg(status, disclosed, ref="R-1", earlier=None):
+def _pkg(status, disclosed, ref="R-1"):
     return {"project_id": "P1", "borrower_ref_norm": ref, "status": status,
-            "_disclosed": disclosed, "_earlier_status": earlier}
+            "_disclosed": disclosed}
 
 
 def test_status_from_a_later_signed_award_beats_an_older_plan():
@@ -713,15 +713,18 @@ def test_an_award_does_not_turn_completed_back_into_signed():
     assert (rows[0]["status"], rows[0]["status_source"]) == ("Completed", "plan")
 
 
-def test_an_earlier_plan_status_is_used_only_when_nothing_newer_says_anything():
-    rows = [_pkg("unknown", "2024-01-01",
-                 earlier=("Under Implementation", "2022-03-01", "v3")),
-            _pkg("Canceled", "2024-01-01", ref="R-2",
-                 earlier=("Pending", "2021-01-01", "v1"))]
-    P.resolve_status(rows, [], Counter())
-    assert (rows[0]["status"], rows[0]["status_source"], rows[0]["status_as_of"]) == \
-        ("Under Implementation", "earlier_plan", "2022-03-01")
-    assert (rows[1]["status"], rows[1]["status_source"]) == ("Canceled", "plan")
+def test_an_older_plan_status_is_never_carried_to_the_newest_version():
+    # v1 printed a status; v2, the newest, printed none.
+    base = {"project_id": "P1", "borrower_ref_norm": "R-1", "borrower_ref": "R-1",
+            "description": "x", "description_match": "x", "estimated_amount": "",
+            "plan_version": ""}
+    rows = [dict(base, plan_version="v1", status="Under Implementation",
+                 _plan_disclosure_date="2022-03-01"),
+            dict(base, plan_version="v2", status="unknown",
+                 _plan_disclosure_date="2024-01-01")]
+    kept, _ = P.dedupe_packages(rows, Counter())
+    P.resolve_status(kept, [], Counter())
+    assert (kept[0]["status"], kept[0]["status_source"]) == ("unknown", "none")
 
 
 def test_no_evidence_stays_unknown_and_says_so():
