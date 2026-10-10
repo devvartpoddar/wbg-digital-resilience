@@ -68,6 +68,9 @@ FUNCTION_WORDS = {"and", "for", "the", "of", "with", "to", "in", "at", "on", "by
                   "from", "de", "du", "des", "la", "le", "les", "et", "pour",
                   "dans", "au", "aux", "en", "do", "da", "dos", "das", "para",
                   "e", "y", "el", "los", "las", "del", "con"}
+# What a clipped cell runs onto the next word: 'unconsultant', 'laconstruction'.
+# "in" is left out: English uses it as a prefix ("ineligibility").
+FUSED_LEFT = (SHORT_WORDS | FUNCTION_WORDS | {"une", "sur", "par"}) - {"in"}
 EN_FUNCTION = {"and", "for", "the", "of", "with", "to", "in", "at", "on", "by", "from"}
 EN_SHORT = {"of", "to", "in", "on", "at", "an", "by", "or", "as", "is", "it", "we",
             "be", "he", "if", "so", "no", "up", "us", "do", "go", "my", "me", "am"}
@@ -211,11 +214,11 @@ def _best_cut(token, vocab, names=None):
             ok = bool(pl) and bool(pr)
         else:
             ok = _known(left, vocab) and _known(right, vocab)
-        # A word the descriptions use whole, with a two-letter half, is far
-        # more likely a foreign word than a glue - 'formatos' is not 'format
-        # os' - unless the short half is a word English prose uses all the
-        # time, as in 'Provisionof'.
-        short = left if len(left) < 3 else right if len(right) < 3 else None
+        # A word the descriptions use whole, with a half of three letters or
+        # fewer, is far more likely a foreign word than a glue - 'formatos' is
+        # not 'format os', 'contable' not 'con table' - unless the short half
+        # is a word English prose uses all the time, as in 'Provisionof'.
+        short = left if len(left) <= 3 else right if len(right) <= 3 else None
         if ok and short and _known(token, vocab):
             prose = getattr(vocab, "prose", None) or {}
             if prose.get(short.lower(), 0) < 50:
@@ -234,6 +237,56 @@ def _best_cut(token, vocab, names=None):
     return best
 
 
+def _fused_cut(word, vocab):
+    """Where to split a word that is two common words run together - 'uncadre'
+    (un + cadre), 'unconsultant', 'laconstruction' - or None.
+
+    A clipped cell repeats the same fusion in many descriptions, so the fused
+    form can be frequent enough to pass as a word; it is still the defect when
+    both halves are far more common than it. The first half may be a short
+    function word ('un', 'la', 'du'); the second is a word of three letters or
+    more. One half must be a function word - the left one ('un', 'de', 'for'),
+    or a right one of four letters or more ('dans', 'pour') - since that is
+    what a clipped cell runs together; two content words ('Lit tre', 'UNI
+    DOS') are left alone. The cut where the rarer half is most common wins."""
+    w = word.lower()
+    wc = vocab.get(w, 0)
+    best, score = None, 0
+    for i in range(2, len(w) - 2):
+        left, right = w[:i], w[i:]
+        if right in ENDINGS:
+            continue
+        if not (left in FUSED_LEFT or (right in FUNCTION_WORDS and len(right) >= 4)):
+            continue
+        s = min(vocab.get(left, 0), vocab.get(right, 0))
+        if s >= max(RATIO * wc, MIN_SEEN) and s > score:
+            best, score = i, s
+    return best
+
+
+def unfuse(text, vocab, prose_vocab=None):
+    """Split the fused pairs that survive the other passes ('d'unconsultant'
+    -> "d'un consultant"), except a word the appraisal prose uses whole
+    ('another', 'information'). The prose is asked even for a French or
+    Spanish description, since English words occur in them ('[Insert name]').
+    Returns (text, splits)."""
+    n = 0
+    prose_vocab = prose_vocab if prose_vocab is not None else vocab
+
+    def fix(m):
+        nonlocal n
+        tok = m.group(0)
+        if len(tok) < 5 or _prose_word(tok, prose_vocab):
+            return tok
+        cut = _fused_cut(tok, vocab)
+        if cut is None:
+            return tok
+        n += 1
+        return tok[:cut] + " " + tok[cut:]
+
+    return WORD.sub(fix, text), n
+
+
 def rejoin(text, vocab):
     """The opposite defect: a space inserted INSIDE a word by a layout that
     broke the cell mid-word - 'S upply', 'Com missioning', 'Especi alist as'.
@@ -244,6 +297,10 @@ def rejoin(text, vocab):
     out, n, i = [], 0, 0
     while i < len(toks):
         joined = False
+        # Every join that passes is a candidate; the one making the more
+        # common word wins: 'prior itaires ayant' is 'prioritaires ayant'
+        # (54 uses), not 'prioritairesayant' (3).
+        candidates = []
         for k in (3, 2):
             if i + k > len(toks):
                 continue
@@ -307,11 +364,14 @@ def rejoin(text, vocab):
                 and not any(verdicts))
             if (len(whole) >= 4 or short_ok) and not all_words and \
                     vocab.get(whole.lower(), 0) >= MIN_SEEN:
-                out.append(parts[0] + "".join(parts[1:]))
-                n += k - 1
-                i += k
-                joined = True
-                break
+                candidates.append((vocab.get(whole.lower(), 0), k,
+                                   parts[0] + "".join(parts[1:])))
+        if candidates:
+            _count, k, merged = max(candidates)
+            out.append(merged)
+            n += k - 1
+            i += k
+            joined = True
         if not joined and i + 1 < len(toks) and _moved_space(toks[i], toks[i + 1], vocab):
             out.extend(_moved_space(toks[i], toks[i + 1], vocab))
             n += 1
@@ -355,6 +415,7 @@ def repair(text, vocab, names=None, lang="en"):
     nothing, and the descriptions' own vocabulary decides alone."""
     if not text:
         return text, 0
+    full = vocab
     if lang != "en":
         vocab = getattr(vocab, "foreign", vocab)
     text, n = rejoin(text, vocab)
@@ -377,4 +438,7 @@ def repair(text, vocab, names=None, lang="en"):
     # ('Consult ancyServices' -> 'Consult ancy Services'), or a space one
     # letter out ('forthe' -> 'fort he'), so the join pass runs once more.
     out, m = rejoin(out, vocab)
-    return out, n + k + j + m
+    # Last, two common words a clipped cell ran together, which the passes
+    # above can leave whole because the fused form recurs ('unconsultant').
+    out, f = unfuse(out, vocab, full)
+    return out, n + k + j + m + f

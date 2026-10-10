@@ -320,6 +320,8 @@ Plan cells are clipped at the column edge, so words come apart ("S upply", "Comm
   - no later fragment opens with a capital;
   - the fragments are not an acronym followed by a word ("I T equipment").
 
+  When both a two- and a three-fragment join pass, the one making the more common word wins ("prior itaires ayant" becomes "prioritaires ayant", 54 uses, not "prioritairesayant", 3).
+
   A function word at either end stays separate when the rest is already a word ("Pr ovision of" becomes "Provision of", but "Commissi on" becomes "Commission"). A three-letter join is allowed for a function word ("a nd") or for one- and two-letter shards ("E-G ov"). The first piece of a hyphenated word stays separate ("for e-commerce"), and so do letters that end a code ("ID4D P roject" becomes "ID4D Project").
 - **Moving a space.** "forth e" becomes "for the" when the second piece is not a word, and the first new word is a function word and the second a word the prose uses.
 - **Splitting.** A token is split when:
@@ -329,9 +331,11 @@ Plan cells are clipped at the column edge, so words come apart ("S upply", "Comm
   - it is not an acronym of six capitals or fewer;
   - it is not a mixed-case name the appraisal prose uses whole ("GovNet").
 
-  A token the descriptions repeat is split only when both halves are at least five times more common than it.
+  A token the descriptions repeat is split only when both halves are at least five times more common than it, and not into a half of three letters or fewer unless that half is a word English prose uses all the time ("contable" stays, not "con table").
+- **Fused pairs, last.** A clipped cell often runs a function word onto the next word, and repeats it across many descriptions, so the fused form can look like a word ("unconsultant" occurs in 149 descriptions). A token is split into a function word and a word when both halves are at least five times more common than the token, one half is a function word (the left one, or a right one of four letters or more such as "dans"), and the appraisal prose does not use the token whole ("another" stays). "in" is not counted, since English uses it as a prefix ("ineligibility").
 - **Punctuation.** A bracket or comma run into the next word gets a space.
-- **Order.** Join, split, then join once more, since a split can leave a fragment that only then has a neighbour.
+- **Order.** Join, split, join once more (a split can leave a fragment that only then has a neighbour), then split fused pairs.
+- **Accuracy, checked by hand.** On 120 randomly sampled edits, about 5% were wrong (for example "prop ice", "seg un do"); before the fused-pair pass and the join and short-half rules it was about 8%, and those rules changed 77 of 1,500 sampled descriptions, all for the better on inspection. The threshold of 3 uses was varied to 2, 5 and 10: about 3.5% of descriptions come out differently at 2 or 5. Appraisal text never goes through word repair; only package, notice and award descriptions do.
 
 The rules use four short hand-written lists, which block or permit a decision but never supply a word:
 - about 35 function words in English, French, Portuguese and Spanish;
