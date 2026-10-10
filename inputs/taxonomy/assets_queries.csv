@@ -1,0 +1,71 @@
+asset_id,query_id,query,active
+fiber,backbone,national fibre optic backbone network,true
+fiber,backhaul,fibre backhaul and transmission network expansion,true
+fiber,metro_ring,metropolitan fibre ring,true
+fiber,last_mile,last-mile fibre connections to public buildings and households,true
+fiber,ducts,ducts and conduits for laying fibre optic cable,true
+fiber,cross_border,cross-border terrestrial fibre link to neighbouring countries,true
+fiber,opgw,optical fibre on electricity transmission lines (OPGW),true
+fiber,ftth,fibre to the home and fibre to the premises,true
+fiber,trenching,trenching and civil works for fibre deployment,true
+mobile_towers,towers,telecommunication towers and masts,true
+mobile_towers,base_stations,mobile network base stations and cell sites,true
+mobile_towers,rural_coverage,rural mobile coverage sites in unserved areas,true
+mobile_towers,4g_rollout,4G and 5G mobile network rollout,true
+mobile_towers,microwave,microwave transmission links,true
+mobile_towers,passive,passive tower infrastructure: power supply shelter and grounding,true
+mobile_towers,sharing,shared tower and infrastructure sharing,true
+mobile_towers,ran,radio access network equipment,true
+mobile_towers,site_power,backup power and solar power for cell sites,true
+submarine_cable,cable,submarine fibre optic cable system,true
+submarine_cable,landing,cable landing station,true
+submarine_cable,international,international connectivity through an undersea cable,true
+submarine_cable,consortium,regional submarine cable consortium and capacity purchase,true
+submarine_cable,bandwidth,international bandwidth capacity,true
+submarine_cable,redundancy,redundant submarine cable route and second cable,true
+submarine_cable,repair,submarine cable repair and maintenance,true
+data_hosting,gov_dc,government data centre,true
+data_hosting,national_dc,national data centre,true
+data_hosting,tier,tier III data centre certification,true
+data_hosting,dr_site,disaster recovery site and backup data centre,true
+data_hosting,server_room,server rooms and hosting equipment,true
+data_hosting,gov_cloud,government cloud and sovereign cloud platform,true
+data_hosting,colocation,colocation and hosting services,true
+data_hosting,cooling_power,data centre power supply and cooling,true
+data_hosting,migration,migration of government systems to the cloud,true
+data_hosting,storage,data storage and backup infrastructure,true
+cybersecurity,cert,computer emergency response team (CERT or CSIRT),true
+cybersecurity,soc,security operations centre,true
+cybersecurity,strategy,national cybersecurity strategy and legislation,true
+cybersecurity,cii,protection of critical information infrastructure,true
+cybersecurity,incident,cyber incident response and threat monitoring,true
+cybersecurity,audit,penetration testing and security audits,true
+cybersecurity,pki,public key infrastructure and digital certificates,true
+cybersecurity,capacity,cybersecurity skills and capacity building,true
+dpi,digital_id,digital identification system,true
+dpi,crvs,civil registration and vital statistics,true
+dpi,payments,digital payments platform and government-to-person transfers,true
+dpi,interop,interoperability and data exchange platform,true
+dpi,portal,e-government service portal,true
+dpi,signatures,digital signatures and online authentication,true
+dpi,registries,foundational registries and social registry,true
+dpi,enterprise_arch,government enterprise architecture and shared platforms,true
+dpi,unique_id,unique identification number for residents,true
+drm_ews,ews,early warning system,true
+drm_ews,hydromet,hydro-meteorological monitoring stations,true
+drm_ews,radar,weather radar and forecasting systems,true
+drm_ews,alerting,emergency alerts broadcast to mobile phones,true
+drm_ews,responders,emergency communications network for first responders,true
+drm_ews,risk_platform,disaster risk information platform,true
+drm_ews,emergency_line,911 emergency response platform,true
+drm_ews,floods,flood and cyclone warning,true
+drm_ews,hazard_maps,geospatial hazard and risk mapping,true
+access_connectivity,usf,universal service fund,true
+access_connectivity,affordability,affordable internet access,true
+access_connectivity,subsidies,subsidies for devices and connectivity,true
+access_connectivity,public_wifi,public Wi-Fi access points,true
+access_connectivity,community,community networks,true
+access_connectivity,schools_health,connecting schools and health facilities to the internet,true
+access_connectivity,literacy,digital literacy training,true
+access_connectivity,coverage_gap,closing the mobile coverage gap in rural areas,true
+access_connectivity,smartphones,access to smartphones and devices,true

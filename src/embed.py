@@ -40,7 +40,9 @@ import units  # noqa: E402
 DEFAULT_MODEL = "openai/text-embedding-3-large"
 DEFAULT_DIM = 3072
 DEFAULT_BASE = "https://openrouter.ai/api/v1"
-KEY_VAR = "OPENROUTER_API_KEY"
+# Named for this project, so the credential is not mistaken for, or reused as,
+# a general OpenRouter key. On the box: sudo ygg creds set wbg-openrouter-key.
+KEY_VAR = "WBG_OPENROUTER_KEY"
 
 # For the report only. The provider's invoice is the real number; this exists so
 # a dry run can say roughly what a full run will cost before it costs it.

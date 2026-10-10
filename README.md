@@ -12,6 +12,9 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
 ./wbg list    --practice digital      # by Global Practice; --unit IDD04 by managing unit
 ./wbg export  --fy 2024 --tables      # write the selection's results to data/runs/<name>-<date>/
 ./wbg sensitivity                     # how much the cleaned text depends on its paragraph, tag and sentence settings
+./wbg embed --dry-run                 # what embedding the sentences would cost; without --dry-run it embeds (needs WBG_OPENROUTER_KEY)
+./wbg search assets                   # score every sentence against every asset definition and phrase (inputs/taxonomy/)
+./wbg hits assets --min-percentile 99.5 --top 100 --country KE   # filter the scores; writes hits and paragraphs CSVs
 python -m pytest                      # tests (locally)
 ```
 
