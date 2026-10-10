@@ -70,3 +70,15 @@ def test_an_exchange_rate_line_is_not_a_subcomponent():
             {"block": "heading", "char_start": "16", "char_end": str(len(text)), "page_from": "9"}]
     got = K.read_headings(rows, text)
     assert [(c["level"], c["number"]) for c in got] == [("component", "2")]
+
+
+def test_a_numbered_row_with_no_cost_is_the_next_component():
+    grid = [["Component Name", "Cost (US$)"],
+            ["1. Rural radio masts", "10,000,000.00"],
+            ["2. Weather stations", "5,000,000.00"],
+            ["3. Shared data hosting", None],
+            ["and backup", None]]
+    got = K.read_datasheet(grid)
+    assert [(c["number"], c["name"]) for c in got] == [
+        ("1", "Rural radio masts"), ("2", "Weather stations"),
+        ("3", "Shared data hosting and backup")]

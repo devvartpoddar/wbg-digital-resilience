@@ -9,6 +9,7 @@ Writes data/raw/pdf_text/{doc_id}.txt            the PDF's text as read, before 
        data/appraisal/paragraphs.csv  one row per paragraph, offsets into the clean file
        data/appraisal/sentences.csv   one row per sentence, offsets into the same file
        data/appraisal/rejected.csv    every unit dropped, with a reason
+       data/appraisal/document_parts.csv     which project each stretch of a document belongs to
        data/reports/clean.txt
 
 Paragraph text is not stored in the table. To read a paragraph, slice its clean
@@ -25,7 +26,13 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 from text_rules import TOKEN, ROMAN, annex_match  # noqa: E402
+from keys import project_parts, project_at  # noqa: E402
 
+# Which project each stretch of a document belongs to (keys.project_parts):
+# one part holding the interface's listing, or a combined document split at
+# its data sheets.
+DOC_PART_COLS = ["doc_id", "part", "char_start", "char_end", "project_ids", "assigned_by",
+                 "listed_project_ids"]
 PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
              "section_title", "block", "char_start", "char_end", "n_tokens",
              "text_sha256", "page_from", "page_to", "parser",
@@ -182,6 +189,7 @@ def main():
     before = previous_hashes(paras_path)
 
     paras, rejected, sents, stats = [], [], [], Counter()
+    doc_parts = []
     per_doc, not_cleaned = [], []
 
     for n, doc in enumerate(docs, 1):
@@ -203,6 +211,13 @@ def main():
         write_if_changed(where(args.data, "pdf_text", f"{did}.txt"), raw)
         write_if_changed(os.path.join(clean_dir, f"{did}.txt"), clean)
 
+        # Which project each stretch of the document belongs to: a combined
+        # appraisal document is split at its data sheets (keys.py).
+        parts = project_parts(clean, doc["project_ids"])
+        for n, (start, end, owners, how) in enumerate(parts, 1):
+            doc_parts.append({"doc_id": did, "part": n, "char_start": start,
+                              "char_end": end, "project_ids": owners, "assigned_by": how,
+                              "listed_project_ids": doc["project_ids"]})
         kept, doc_paras = 0, []
         tagger = components.Tagger()
         for ordinal, (a, b, path, title, block, p0, p1, meta) in enumerate(spans, 1):
@@ -219,7 +234,7 @@ def main():
             src = meta.get("src") or ["", ""]
             doc_paras.append({
                 "paragraph_id": pid, "doc_id": did,
-                "project_ids": doc["project_ids"], "ordinal": ordinal,
+                "project_ids": project_at(parts, a), "ordinal": ordinal,
                 "section_path": path, "section_title": title[:120], "block": block,
                 "char_start": a, "char_end": b, "n_tokens": ntok,
                 "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
@@ -295,9 +310,11 @@ def main():
             f"{len(unstable)} paragraphs changed text with the parser unchanged, "
             f"e.g. {unstable[:3]}: the PDF read is not reproducible. Nothing written.")
 
+    doc_parts.sort(key=lambda r: (r["doc_id"], r["part"]))
     for name, rows, cols in (("paragraphs.csv", paras, PARA_COLS),
                              ("rejected.csv", rejected, REJ_COLS),
-                             ("sentences.csv", sents, SENT_COLS)):
+                             ("sentences.csv", sents, SENT_COLS),
+                             ("document_parts.csv", doc_parts, DOC_PART_COLS)):
         path = where(args.data, "appraisal", name)
         with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")

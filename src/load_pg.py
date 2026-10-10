@@ -39,6 +39,7 @@ TABLES = [
     ("paragraphs", "appraisal/paragraphs.csv"),
     ("sentences", "appraisal/sentences.csv"),
     ("rejected", "appraisal/rejected.csv"),
+    ("document_parts", "appraisal/document_parts.csv"),
     ("components", "appraisal/components.csv"),
     ("packages", "procurement/packages.csv"),
     ("superseded_packages", "procurement/superseded_packages.csv"),

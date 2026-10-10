@@ -174,26 +174,32 @@ Tables are kept in the tables for reading. They are not given to the model and a
 ### 2.5 Paragraphs and sentences (`src/clean.py`)
 
 1. A document is cleaned only when its PDF was read and holds at least 2,000 characters of text; a scan with no text layer, or an unreadable PDF, is listed in the report and not cleaned. (none on the current run.)
-2. A unit with fewer than 5 words is dropped, unless it is a heading or a section or annex title, and recorded in `data/appraisal/rejected.csv` with its reason. (4,345 on the current run.)
-3. Each kept unit becomes a row of `data/appraisal/paragraphs.csv` with: a positional identifier (`{doc_id}:p00042`), the project(s), section path and title, block, character offsets into the cleaned text file (the text itself is not stored in the table), word count, SHA-256 of the text, pages, the parser's identity, `for_model`, `list_item`, `lead_in_id` (blank when the lead-in was itself dropped), `table_id`, `raw_start`/`raw_end`, and the component tags (section 2.6).
-4. `for_model` is true for `narrative`, `annex` and `footnote` paragraphs, except a footnote that is only a reference and a link (fewer than 15 words besides "[link]"). It is false for front matter, tables and headings. Embedding and the decision model read only these paragraphs. (18,475 of 56,512 paragraphs: 10,394 narrative, 4,193 annex and 3,888 footnotes on the current run.)
-5. Narrative and annex paragraphs are split into sentences, stored in `data/appraisal/sentences.csv` as offsets inside their paragraph. A boundary is a full stop, question or exclamation mark followed by a space and a capital, digit or opening bracket, except:
+2. **Which project each part of a document belongs to.** The documents interface files a combined appraisal document under every operation it appraises. The Inclusive Digitalization in Eastern and Southern Africa (IDEA) programme document is listed under the regional IDEA project (P502532), DRC, Angola and Malawi. It is the regional operation's document (its first data sheet names P502532), followed by one annex per country, each opening with that country's own data sheet, then annexes for the whole programme. The document is therefore split into parts, recorded in `data/appraisal/document_parts.csv`:
+   - before the first country annex: the operation the first data sheet names;
+   - each annex holding a later data sheet: the operation that data sheet names (by its Operation ID), up to the next annex heading with a different number (a table can repeat its annex's title on every row);
+   - after the last such annex: every listed project (`programme_wide`).
+
+   A paragraph takes the project(s) of the part it starts in, and components are read part by part, so each country keeps its own list and costs. A document listed under one project, or one whose data sheets name none of its listed projects, is one part with the listing (a parent project and its additional financing share a paper that names no single operation). On the current run one document is split: IDEA, into the regional part, DRC, Angola, Malawi and a programme-wide part.
+3. A unit with fewer than 5 words is dropped, unless it is a heading or a section or annex title, and recorded in `data/appraisal/rejected.csv` with its reason. (4,345 on the current run.)
+4. Each kept unit becomes a row of `data/appraisal/paragraphs.csv` with: a positional identifier (`{doc_id}:p00042`), the project(s), section path and title, block, character offsets into the cleaned text file (the text itself is not stored in the table), word count, SHA-256 of the text, pages, the parser's identity, `for_model`, `list_item`, `lead_in_id` (blank when the lead-in was itself dropped), `table_id`, `raw_start`/`raw_end`, and the component tags (section 2.6).
+5. `for_model` is true for `narrative`, `annex` and `footnote` paragraphs, except a footnote that is only a reference and a link (fewer than 15 words besides "[link]"). It is false for front matter, tables and headings. Embedding and the decision model read only these paragraphs. (18,475 of 56,512 paragraphs: 10,394 narrative, 4,193 annex and 3,888 footnotes on the current run.)
+6. Narrative and annex paragraphs are split into sentences, stored in `data/appraisal/sentences.csv` as offsets inside their paragraph. A boundary is a full stop, question or exclamation mark followed by a space and a capital, digit or opening bracket, except:
    - after an abbreviation (e.g., i.e., etc., No., para., U.S., Mr., Fig., months and about forty others), or a single-letter initial;
    - inside the leading paragraph number ("38.");
    - where the sentence so far has fewer than three words ("See above." stays with what follows).
    Footnotes are not split: they are mostly references.
-6. The re-parse check: before writing, each paragraph is compared with the previous run's. A paragraph whose text changed while the parser did not means the read is not reproducible; the run stops and writes nothing. A change under a new parser is expected and is counted in the report.
-7. A paragraph identifier repeated across documents stops the run (it would mean a regional document was listed twice).
+7. The re-parse check: before writing, each paragraph is compared with the previous run's. A paragraph whose text changed while the parser did not means the read is not reproducible; the run stops and writes nothing. A change under a new parser is expected and is counted in the report.
+8. A paragraph identifier repeated across documents stops the run (it would mean a regional document was listed twice).
 
 ### 2.6 Components (`src/components.py`)
 
 **Collected per project, into `data/appraisal/components.csv`:**
 
 1. Pages that hold a component table are found in the cleaned text, by the column headings "Component Name" or "Current Component".
-2. All tables on that page and the next are read from the PDF, top to bottom, as one grid. A restructuring paper's table of changes is read first (current and proposed names, cost, action); otherwise the data sheet's component table (name and cost). Costs are in millions of US dollars; a figure over 10,000 is read as dollars and converted.
+2. All tables on that page and the next are read from the PDF, top to bottom, as one grid. A restructuring paper's table of changes is read first (current and proposed names, cost, action); otherwise the data sheet's component table (name and cost). Costs are in millions of US dollars; a figure over 10,000 is read as dollars and converted. A row with no cost continues the name above it, unless it opens with "Component N" or the next component's number ("3. ...", whose cost is printed on the next page). Rows whose name holds no word are dropped, and the list ends at a financing line ("IDA", "Front-end Fee", "Total").
 3. Body headings "Component N: ..." and "Sub-component N.M: ..." add components and sub-components, with any cost printed in the heading.
 4. Each name is cleaned: its number and printed cost removed, a following sentence cut off ("... This component will ..."), figures from neighbouring columns removed, a name read twice collapsed, and a heading that opens in lower case discarded. "Unallocated" and contingency budget lines are kept but not numbered; the Contingent Emergency Response Component (CERC) keeps its number.
-5. One row per component or sub-component per document that states it: projects, document, kind, disclosure date, where it was read (`datasheet`, `restructuring`, `heading`), level, number, name, cost, action, page. The reads are cached against the PDF, the pages searched and the module's code. (950 rows covering all 70 projects on the current run.)
+5. One row per component or sub-component per document that states it: projects, document, kind, disclosure date, where it was read (`datasheet`, `restructuring`, `heading`), level, number, name, cost, action, page. The reads are cached against the PDF, the pages searched and the module's code. (966 rows covering all 70 projects on the current run.)
 
 **Paragraphs are tagged by position:**
 
@@ -355,7 +361,7 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
 
 - **Files**: `data/` in the main checkout (`/ygg/projects/wbg-digital-resilience/data/` on the box). Gitignored, never deleted. Every file has one home, defined once in `src/paths.py`:
   - `raw/`: what was fetched, as published (`pdf/`, `pdf_text/`, `plans/`, `notices/`, `awards/`, `projects/`, `documents.csv`, `fetch_log.csv`, and the old `text/` renditions);
-  - `appraisal/`: cleaned text (`text/`), per-document caches (`cache/`), `paragraphs.csv`, `sentences.csv`, `rejected.csv`, `components.csv`;
+  - `appraisal/`: cleaned text (`text/`), per-document caches (`cache/`), `paragraphs.csv`, `sentences.csv`, `rejected.csv`, `components.csv`, `document_parts.csv`;
   - `procurement/`: packages, notices and awards, raw and cleaned, and superseded package versions;
   - `projects/`: `projects.csv`;
   - `embeddings/`: vectors and their index, when they come;
@@ -369,7 +375,7 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
   | From | To | On |
   |---|---|---|
   | projects | cohort | `project_id` |
-  | documents | projects | `project_ids` (one document can serve several projects, joined with "\|") |
+  | documents, paragraphs | projects | `document_parts.csv`: which project each stretch of a document belongs to (section 2.5); a paragraph's `project_ids` are its part's |
   | paragraphs, sentences | documents | `doc_id`; sentences also `paragraph_id` |
   | paragraphs | components | `doc_id` and `component_number` / `subcomponent_number` (the component the paragraph sits under) |
   | components | documents | `doc_id`; the latest document's list is the project's current one |

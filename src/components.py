@@ -48,7 +48,7 @@ from collections import Counter, defaultdict
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
-from keys import name_key  # noqa: E402
+from keys import name_key, project_parts, project_at  # noqa: E402
 
 COMP_WORD = r"(?:Component|Composante|Componente|Komponen)"
 COMP_HEAD = re.compile(
@@ -286,7 +286,11 @@ def read_datasheet(grid):
         # that names one component.
         name = next((t for t in texts if re.match(rf"^{COMP_WORD}\s*\d", t, re.I)),
                     texts[-1] if texts else "")
-        if not nums and out and name and not re.match(rf"^{COMP_WORD}\s*\d", name, re.I):
+        # ... unless it opens with the next component's number ("3. Increasing
+        # access ...": a row whose cost is printed on the next page).
+        opens_next = re.match(rf"^(?:{COMP_WORD}\s*)?{len(out) + 1}\s*[.:]\s", name, re.I)
+        if not nums and out and name and not opens_next \
+                and not re.match(rf"^{COMP_WORD}\s*\d", name, re.I):
             out[-1]["name"] = (out[-1]["name"] + " " + name).strip()
             continue
         if not name:
@@ -451,8 +455,34 @@ def read_headings(rows, text):
     return out
 
 
-def main():
+def read_table_pages(pdf_path, pages):
+    """The component list from the first of these pages that holds one.
+
+    A data sheet is often drawn as one small table per row, and runs onto the
+    next page: every piece on a page and the next is read, top to bottom, as
+    one grid. Rows with no name are a misread grid and are dropped, so a table
+    that yields only those is passed over."""
     import pdfplumber
+    with pdfplumber.open(pdf_path) as pdf:
+        for pno in pages:
+            grid = []
+            for q in (pno, pno + 1):
+                if q <= len(pdf.pages):
+                    for t in sorted(pdf.pages[q - 1].find_tables(), key=lambda t: t.bbox[1]):
+                        grid += t.extract()
+            width = max((len(r) for r in grid), default=0)
+            grid = [list(r) + [None] * (width - len(r)) for r in grid]
+            rs = [c for c in read_restructuring(grid) if _has_name(c["name"])]
+            src = "restructuring"
+            if not rs:
+                rs = [c for c in read_datasheet(grid) if _has_name(c["name"])]
+                src = "datasheet"
+            if rs:
+                return [dict(c, source=src, page=pno) for c in _tidy(rs)]
+    return []
+
+
+def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
@@ -481,69 +511,53 @@ def main():
             continue
         with open(clean_path, encoding="utf-8") as fh:
             text = fh.read()
-        base = {"project_ids": doc["project_ids"], "doc_id": did, "doc_kind": doc["doc_kind"],
+        base = {"doc_id": did, "doc_kind": doc["doc_kind"],
                 "disclosure_date": doc["disclosure_date"]}
+        # A combined appraisal document is split at its data sheets, each part
+        # belonging to its own operation (keys.project_parts); a document of
+        # one project is one part. Each part's tables and headings are read
+        # on their own, so one country's "Component 1" does not hide another's.
+        parts = project_parts(text, doc["project_ids"])
 
         # Pages holding a component table, found in the cleaned text so the
         # PDF is opened only at those pages. Searched over the whole text, not
         # paragraph by paragraph: a table's heading line can fall between two
         # kept paragraphs, and then belongs to the page of the one before it.
         starts = sorted((int(r["char_start"]), int(r["page_from"] or 0)) for r in rows)
-        pages = set()
+        pages_by_part = defaultdict(set)
         for m in re.finditer(r"component\s*name|current component", text, re.I):
             before = [pg for s, pg in starts if s <= m.start()]
             if before and before[-1]:
-                pages.add(before[-1])
-        pages = sorted(pages)
-        found = []
+                pages_by_part[project_at(parts, m.start())].add(before[-1])
         pdf_path = where(args.data, "pdf", f"{did}.pdf")
-        # Keyed on the PDF, the pages searched and this module's code, so a
-        # change to any of them reads the tables again.
-        key = ":".join([doc.get("pdf_sha256") or "", ",".join(map(str, sorted(pages))),
-                        READER_VERSION])
-        if pages and os.path.exists(pdf_path):
-            if key in cache:
-                found = cache[key]
-            else:
-                with pdfplumber.open(pdf_path) as pdf:
-                    for pno in pages:
-                        # A data sheet is often drawn as one small table per
-                        # row, and runs onto the next page: read every piece
-                        # on this page and the next, top to bottom, as one grid.
-                        grid = []
-                        for q in (pno, pno + 1):
-                            if q <= len(pdf.pages):
-                                tabs = sorted(pdf.pages[q - 1].find_tables(),
-                                              key=lambda t: t.bbox[1])
-                                for t in tabs:
-                                    grid += t.extract()
-                        width = max((len(r) for r in grid), default=0)
-                        grid = [list(r) + [None] * (width - len(r)) for r in grid]
-                        # Rows with no name are a misread grid: drop them, so
-                        # a table that yields only those is passed over.
-                        rs = [c for c in read_restructuring(grid) if _has_name(c["name"])]
-                        src = "restructuring"
-                        if not rs:
-                            rs = [c for c in read_datasheet(grid) if _has_name(c["name"])]
-                            src = "datasheet"
-                        if rs:
-                            found = [dict(c, source=src, page=pno) for c in _tidy(rs)]
-                            break
-                cache[key] = found
-            used[key] = found
-        for c in found:
-            c = dict(c, name=clean_name(c["name"]) or c["name"])
-            out.append(dict(base, level="component", **c))
-            stats[f"rows_{c['source']}"] += 1
-        if found:
-            stats[f"docs_{found[0]['source']}"] += 1
-        heads = read_headings(rows, text)
-        heads = [dict(c, name=clean_name(c["name"])) for c in heads]
-        heads = [c for c in heads if c["name"]]
-        for c in heads:
-            out.append(dict(base, source="heading", **c))
-        if heads:
-            stats["docs_heading"] += 1
+        for owners in dict.fromkeys(p[2] for p in parts):
+            pages = sorted(pages_by_part.get(owners, ()))
+            found = []
+            # Keyed on the PDF, the pages searched and this module's code, so a
+            # change to any of them reads the tables again.
+            key = ":".join([doc.get("pdf_sha256") or "", ",".join(map(str, pages)),
+                            READER_VERSION])
+            if pages and os.path.exists(pdf_path):
+                if key in cache:
+                    found = cache[key]
+                else:
+                    found = read_table_pages(pdf_path, pages)
+                    cache[key] = found
+                used[key] = found
+            for c in found:
+                c = dict(c, name=clean_name(c["name"]) or c["name"])
+                out.append(dict(base, project_ids=owners, level="component", **c))
+                stats[f"rows_{c['source']}"] += 1
+            if found:
+                stats[f"docs_{found[0]['source']}"] += 1
+            part_rows = [r for r in rows if project_at(parts, int(r["char_start"])) == owners]
+            heads = read_headings(part_rows, text)
+            heads = [dict(c, name=clean_name(c["name"])) for c in heads]
+            heads = [c for c in heads if c["name"]]
+            for c in heads:
+                out.append(dict(base, project_ids=owners, source="heading", **c))
+            if heads:
+                stats["docs_heading"] += 1
 
     with open(cache_path + ".part", "w", encoding="utf-8") as fh:
         json.dump(used, fh, sort_keys=True)
@@ -551,7 +565,7 @@ def main():
 
     for r in out:
         r["name_key"] = name_key(r["name"])
-    out.sort(key=lambda r: (r["doc_id"], r["source"], r["level"],
+    out.sort(key=lambda r: (r["doc_id"], r["project_ids"], r["source"], r["level"],
                             [int(x) for x in r["number"].split(".") if x.isdigit()]))
     with open(where(args.data, "appraisal", "components.csv"), "w", newline="",
               encoding="utf-8") as fh:

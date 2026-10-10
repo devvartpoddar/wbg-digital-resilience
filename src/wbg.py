@@ -147,7 +147,8 @@ STAGES = [
     ("projects", "projects.py", ["projects.py"],
      [("projects_json", "*.json"), ("documents",), ("cohort",)]),
     ("clean", "clean.py",
-     ["clean.py", "pdf_layout.py", "text_rules.py", "components.py", "sentences.py"],
+     ["clean.py", "pdf_layout.py", "text_rules.py", "components.py", "sentences.py",
+      "keys.py"],
      [("documents",), ("pdf", "*.pdf")]),
     ("components", "components.py", ["components.py", "text_rules.py", "keys.py"],
      [("documents",), ("appraisal", "paragraphs.csv")]),
@@ -332,9 +333,21 @@ def tables(sel=None, data=None, text=False):
     tables themselves store offsets, not text)."""
     data = data or data_root()
     sel = sel if sel is not None else select()
+    # A document belongs to the projects its parts belong to
+    # (document_parts.csv): its listing, or, for a combined appraisal
+    # document, the operations its data sheets name.
+    owners = defaultdict(list)
+    for r in _read(where(data, "appraisal", "document_parts.csv")):
+        for p in r["project_ids"].split("|"):
+            if p not in owners[r["doc_id"]]:
+                owners[r["doc_id"]].append(p)
+    docs = [dict(r, listed_project_ids=r["project_ids"],
+                 project_ids="|".join(sorted(owners[r["doc_id"]])) if owners.get(r["doc_id"])
+                 else r["project_ids"])
+            for r in _read(where(data, "documents"))]
     out = {
         "projects": [r for r in _read(where(data, "projects")) if r["project_id"] in sel],
-        "documents": [r for r in _read(where(data, "documents")) if _in(sel, r["project_ids"])],
+        "documents": [r for r in docs if _in(sel, r["project_ids"])],
         "paragraphs": [r for r in _read(where(data, "appraisal", "paragraphs.csv"))
                        if _in(sel, r["project_ids"])],
         "components": [r for r in _read(where(data, "appraisal", "components.csv"))
