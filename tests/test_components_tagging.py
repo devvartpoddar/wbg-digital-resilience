@@ -82,3 +82,15 @@ def test_a_numbered_row_with_no_cost_is_the_next_component():
     assert [(c["number"], c["name"]) for c in got] == [
         ("1", "Rural radio masts"), ("2", "Weather stations"),
         ("3", "Shared data hosting and backup")]
+
+
+def test_a_restructuring_keeps_the_cost_before_and_after():
+    grid = [["Current Component Name", "Current Cost (USD)", "Action",
+             "Proposed Component Name", "Proposed Cost (USD)"],
+            ["Component 1: Rural radio masts", "40,000,000.00", "Revised",
+             "Component 1: Rural radio masts", "2,000,000.00"],
+            ["Component 2: Project management", "4,000,000.00", "No Change",
+             "Component 2: Project management", "4,000,000.00"]]
+    got = K.read_restructuring(grid)
+    assert [(c["cost_usd_m"], c["cost_before_usd_m"], c["action"]) for c in got] == \
+        [("2.00", "40.00", "Revised"), ("4.00", "4.00", "No Change")]

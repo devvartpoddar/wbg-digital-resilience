@@ -149,7 +149,8 @@ class Tagger:
 # documents and with procurement: a paragraph and a package under one
 # component meet on it even when a restructuring renumbered it.
 COMP_COLS = ["project_ids", "doc_id", "doc_kind", "disclosure_date", "source", "level",
-             "number", "name", "name_key", "cost_usd_m", "action", "page"]
+             "number", "name", "name_key", "cost_usd_m", "cost_before_usd_m", "action",
+             "page"]
 NUM = re.compile(r"^\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$")
 # A row that ends the component list: what the data sheet prints after it.
 # The lender's name ("IDA") and the front-end fee are financing lines.
@@ -305,8 +306,9 @@ def read_datasheet(grid):
 def read_restructuring(grid):
     """Components from a 'Current Component Name | Current Cost | Action |
     Proposed Component Name | Proposed Cost' table, or []. The proposed name
-    and cost are what stand after the paper; the action ('Revised', 'New',
-    'Marked for Deletion', 'No Change') says what happened."""
+    and cost are what stand after the paper, the current cost is kept as
+    cost_before_usd_m, and the action ('Revised', 'New', 'Marked for
+    Deletion', 'No Change') says what happened."""
     rows = [[_cell(c) for c in r] for r in _explode(grid)]
     for i, r in enumerate(rows):
         if re.search(r"current component", " ".join(r), re.I):
@@ -363,7 +365,12 @@ def read_restructuring(grid):
             break
         number, clean_name = _split_number(name, len(out) + 1)
         out.append({"number": number, "name": clean_name,
-                    "cost_usd_m": _to_millions(cost, "millions"), "action": action})
+                    "cost_usd_m": _to_millions(cost, "millions"),
+                    # The cost before the paper, when it prints one beside the
+                    # proposed cost: a restructuring that cuts or adds funds.
+                    "cost_before_usd_m": _to_millions(before[-1], "millions")
+                    if before and after else "",
+                    "action": action})
     return out
 
 
