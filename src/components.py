@@ -49,6 +49,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 from keys import name_key, project_parts, project_at  # noqa: E402
+from pdf_layout import _title_line  # noqa: E402
 
 COMP_WORD = r"(?:Component|Composante|Componente|Komponen)"
 COMP_HEAD = re.compile(
@@ -437,9 +438,16 @@ def read_headings(rows, text):
     annexes."""
     out, seen = [], set()
     for r in rows:
-        if r["block"] != "heading":
-            continue
         s = text[int(r["char_start"]):int(r["char_end"])]
+        if r["block"] != "heading":
+            # A title that leads in a list ('Component 3: Growing the Digital
+            # Economy. The proposed changes include:' then its items) heads
+            # the paragraph that holds the list: its first line is read.
+            first = s.split("\n", 1)[0]
+            if r["block"] not in ("narrative", "annex") or first == s \
+                    or not _title_line(first):
+                continue
+            s = first
         m = COMP_HEAD.match(s)
         level, number, name = None, None, None
         if m:

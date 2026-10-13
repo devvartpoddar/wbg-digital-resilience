@@ -432,6 +432,7 @@ def _continues_inline_list(line, before):
 def _title_line(text):
     """A component, figure or table title standing as its own line: read as
     a heading, so never the lead-in of a list or an item of one."""
+    text = GLYPH_BULLET.sub("", text, count=1).strip()
     return bool(TITLE_LINE.match(text)) and len(text.split()) <= 30 \
         and not re.search(r"[.;]$", text) and "\n" not in text
 

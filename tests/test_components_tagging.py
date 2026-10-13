@@ -102,3 +102,16 @@ def test_a_cost_wrapped_inside_its_cell_is_still_a_cost():
             ["Digital public services", "125,000,000.0\n0"]]
     assert [(c["name"], c["cost_usd_m"]) for c in K.read_datasheet(grid)] == \
         [("Digital access", "53.40"), ("Digital public services", "125.00")]
+
+
+def test_a_title_leading_in_a_list_is_read_as_a_heading():
+    text = ("Component 3: Shared Data Hosting. The proposed changes include:\n(a) a new "
+            "site;\n(b) backup power.\n\nComponent 4 will finance the remaining works.\n"
+            "(a) roads.")
+    cut = text.index("\n\n")
+    rows = [{"block": "narrative", "char_start": "0", "char_end": str(cut), "page_from": "5"},
+            {"block": "narrative", "char_start": str(cut + 2), "char_end": str(len(text)),
+             "page_from": "5"}]
+    got = K.read_headings(rows, text)
+    assert [(c["level"], c["number"]) for c in got] == [("component", "3")]
+    assert got[0]["name"].startswith("Shared Data Hosting")

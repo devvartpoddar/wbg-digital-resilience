@@ -174,3 +174,7 @@ def test_a_component_title_is_neither_a_lead_in_nor_a_list_item():
     assert PL._title_line("Sub-component 2.3: Building a National Data Center (US$5.5 million)")
     assert not PL._title_line("Component 2 will finance the following activities.")
     assert not PL._title_line("Component 2: Public Sector Support\nIntegrated platforms")
+
+
+def test_a_title_set_as_a_bullet_is_still_a_title():
+    assert PL._title_line("• Sub-component 2.3: Building a National Data Center")
