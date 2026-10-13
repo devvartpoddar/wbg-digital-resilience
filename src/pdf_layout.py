@@ -429,6 +429,13 @@ def _continues_inline_list(line, before):
     return bool(inline) and m.group(1) in _next_markers(inline[-1])
 
 
+def _title_line(text):
+    """A component, figure or table title standing as its own line: read as
+    a heading, so never the lead-in of a list or an item of one."""
+    return bool(TITLE_LINE.match(text)) and len(text.split()) <= 30 \
+        and not re.search(r"[.;]$", text) and "\n" not in text
+
+
 def _opens_block(line, before):
     """Does this line start a new paragraph or list item, rather than continue
     the one above? A bullet glyph always does. A number or enumerator only does
@@ -677,21 +684,27 @@ def extract(pdf, raw_out=None):
             # not finished and the line opens in lower case, so it continues.
             loose = pno == ppno and prev == "body" and unfinished \
                 and re.match(r"[a-z]", text) and l["top"] - pl["top"] <= LOOSE_GAP * pitch
-            if (same_page or page_turn or resumed or loose) and not opens_block:
-                u = units[last_body]
-                u[1] = _dehyphenate(u[1], text, vocab)
-                u[3] = pno
-                extend(u, l)
-                joined = True
             # A list item belongs to the paragraph above it: '(b) Active
             # infrastructure...' means nothing without 'Sub-component 1.1 will
             # finance:'. It joins that paragraph on a line of its own, across a
             # page turn and its footnotes, but not past a heading, a caption or
-            # a table, which start a new context.
-            elif opens_block and LIST_ITEM.match(text) and prev in ("body", "footnote") \
-                    and pno - ppno <= 1:
+            # a table, which start a new context. A component's title line is
+            # a heading, not a lead-in: the items under it are one paragraph,
+            # and a title set as a bullet is never an item.
+            item = GLYPH_BULLET.sub("", text, count=1).strip()
+            listed = bool(LIST_ITEM.match(text)) \
+                and (opens_block or _continues_inline_list(text, units[last_body][1])) \
+                and prev in ("body", "footnote") and pno - ppno <= 1 \
+                and not _title_line(units[last_body][1]) and not _title_line(item)
+            if listed:
                 u = units[last_body]
-                u[1] = u[1].rstrip() + "\n" + GLYPH_BULLET.sub("", text, count=1).strip()
+                u[1] = u[1].rstrip() + "\n" + item
+                u[3] = pno
+                extend(u, l)
+                joined = True
+            elif (same_page or page_turn or resumed or loose) and not opens_block:
+                u = units[last_body]
+                u[1] = _dehyphenate(u[1], text, vocab)
                 u[3] = pno
                 extend(u, l)
                 joined = True
@@ -741,8 +754,7 @@ def extract(pdf, raw_out=None):
             elif m_letter and kind == "heading" and sec_path and not annex_seen:
                 sec_path = f"{sec_path.split('.')[0]}.{m_letter.group(1)}"
                 sec_title = m_letter.group(2).strip(" .:-")
-        if block == "body" and TITLE_LINE.match(text) and len(text.split()) <= 30 \
-                and not re.search(r"[.;]$", text):
+        if block == "body" and _title_line(text):
             block = "heading"
         if block == "body":
             block = ("frontmatter" if not roman_seen else

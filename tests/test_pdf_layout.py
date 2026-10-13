@@ -167,3 +167,10 @@ def test_a_form_answer_alone_is_not_a_sentence(answer):
     t = f"Describe any project alternatives considered to avoid impacts. {answer}"
     assert [t[a:b] for a, b in S.split(t)] == [
         "Describe any project alternatives considered to avoid impacts."]
+
+
+def test_a_component_title_is_neither_a_lead_in_nor_a_list_item():
+    assert PL._title_line("Component 2: Public Sector Support for Digital Economy")
+    assert PL._title_line("Sub-component 2.3: Building a National Data Center (US$5.5 million)")
+    assert not PL._title_line("Component 2 will finance the following activities.")
+    assert not PL._title_line("Component 2: Public Sector Support\nIntegrated platforms")
