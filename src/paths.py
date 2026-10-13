@@ -82,6 +82,8 @@ LAYOUT = {
     "review": "review",
     "runs": "runs",
     "search": "search",
+    "classify": "classify",
+    "labels": "labels",
     "fetch_status": "reports/fetch_status",
 }
 

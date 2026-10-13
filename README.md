@@ -14,6 +14,10 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
 ./wbg sensitivity                     # how much the cleaned text depends on its paragraph, tag and sentence settings
 ./wbg search assets                   # embed the sentences (only what is not cached) and score them against
                                       # every asset definition and phrase in inputs/taxonomy/; --dry-run shows the cost
+./wbg classify assets --limit 20      # grade paragraphs against each asset with the decision model (smoke test);
+./wbg classify assets                 # the full run asks only what is not stored; --dry-run shows the cost
+python src/check_sheet.py assets      # a sheet of paragraphs for a person to grade (data/review/check_assets_s1.xlsx)
+python src/evaluate.py assets         # store the grades as labels; precision and recall by cut-off
 python -m pytest                      # tests (locally)
 ```
 

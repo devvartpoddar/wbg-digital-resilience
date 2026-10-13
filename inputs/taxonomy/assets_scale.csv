@@ -1,0 +1,5 @@
+grade,description
+0,The passage is not about {name}.
+1,"{name} is mentioned only as background, context, a risk, a lesson or another party's work; this project neither finances nor supports it."
+2,"This project supports {name} without paying for the asset itself: technical assistance, policy, regulation, studies, strategies or capacity building."
+3,"This project finances {name}: building, buying, installing, upgrading, connecting or operating it."

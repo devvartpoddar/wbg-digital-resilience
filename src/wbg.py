@@ -621,6 +621,11 @@ def main(argv=None):
                                       "score them against a label set in inputs/taxonomy/")
     p.add_argument("label_set", help="assets, measures")
     p.add_argument("--dry-run", action="store_true", help="what it would embed, and cost")
+    p = sub.add_parser("classify", help="grade every model paragraph against a label set "
+                                        "with the decision model (only what is not stored)")
+    p.add_argument("label_set", help="assets, measures")
+    p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
+    p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
                                            "paragraph, component-tag and sentence settings")
     p.add_argument("--docs", type=int, default=10,
@@ -643,6 +648,11 @@ def main(argv=None):
         dry = ["--dry-run"] if args.dry_run else []
         _run("embed.py", *dry, data=data)
         _run("search.py", args.label_set, *dry, data=data)
+        return 0
+    if args.cmd == "classify":
+        extra = (["--dry-run"] if args.dry_run else []) + \
+            (["--limit", str(args.limit)] if args.limit else [])
+        _run("classify.py", args.label_set, *extra, data=data)
         return 0
     if args.cmd == "sensitivity":
         _run("sensitivity.py", "--docs", str(args.docs),
