@@ -153,3 +153,11 @@ def test_the_manifest_says_what_was_run(store):
     out = _score(store)
     m = json.load(open(os.path.join(out, "manifest.json")))
     assert (m["labels"], m["queries"], m["units"]) == (2, 4, len(UNITS))
+
+
+def test_a_dry_run_before_any_embedding_says_what_it_would_do(tmp_path, store):
+    _, tax, calls = store
+    said = []
+    assert search.search("assets", str(tmp_path / "empty"), model=MODEL, dim=DIM, taxonomy=tax,
+                         dry_run=True, log=said.append) is None
+    assert "2 labels, 4 queries" in said[0] and calls == []

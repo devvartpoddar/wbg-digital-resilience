@@ -189,6 +189,15 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
            log=print):
     """Score every unit against every query of the label set; returns the run
     folder (None on a dry run)."""
+    if dry_run and not all(os.path.exists(p) for p in _paths(data)):
+        # Before the first embedding run there is no index to version against:
+        # say what the label set holds and what its queries would cost.
+        queries = load_queries(name, taxonomy)
+        root = embed.cache_root(data, model, dim)
+        new = sum(1 for q in queries if embed.read_cached(root, q["text_sha256"], dim) is None)
+        log(f"{name}: {len({q['label_id'] for q in queries})} labels, {len(queries)} queries; "
+            f"--dry-run: {new} query text(s) to embed once sentences are embedded")
+        return None
     out, queries = run_folder(name, data, model, dim, taxonomy)
     labels = len({q["label_id"] for q in queries})
     log(f"{name}: {labels} labels, {len(queries)} queries -> {out}")
