@@ -52,8 +52,10 @@ from keys import name_key, project_parts, project_at  # noqa: E402
 from pdf_layout import _title_line  # noqa: E402
 
 COMP_WORD = r"(?:Component|Composante|Componente|Komponen)"
+# The number is followed by punctuation ('Component 2: ...') or, in some
+# templates, by the title alone ('Component 1 Extending digital connectivity').
 COMP_HEAD = re.compile(
-    rf"^\s*{COMP_WORD}\s*(\d{{1,2}})\s*[:.\-–)]\s*(.+?)\s*$", re.I)
+    rf"^\s*{COMP_WORD}\s*(\d{{1,2}})(?:\s*[:.\-–)]\s*|\s+(?=(?-i:[A-Z(])))(.+?)\s*$", re.I)
 SUB_HEAD = re.compile(
     r"^\s*(?:Sub-?component|Sous-composante|Subcomponente)?\s*(\d{1,2})\.(\d{1,2})\.?"
     r"\s*[:.\-–)]?\s*([A-ZÀ-Þ].+?)\s*$", re.I)
@@ -65,15 +67,21 @@ COST_IN_TEXT = re.compile(
 MENTION = re.compile(
     r"\b(?:Sub-?components?|Components?|Composantes?|Sous-composantes?|Componentes?|"
     r"Subcomponentes?)\s+((?:\d{1,2}(?:\.\d{1,2})?)"
-    r"(?:\s*(?:,|and|&|et|e|y|or|to|-|–)\s*\d{1,2}(?:\.\d{1,2})?)*)", re.I)
+    r"(?!\d)(?:\s*(?:,|and|&|et|e|y|or|to|-|–)\s*\d{1,2}(?:\.\d{1,2})?(?![\d.]?\d))*)", re.I)
 RUN_IN_NUMBER = re.compile(r"^\s*\d{1,3}\.\s+")
 RUN_IN_COMP = re.compile(rf"^\s*{COMP_WORD}\s*(\d{{1,2}})\s*[:.\-\u2013)]\s*[A-Z]")
+
+
 def _reader_version():
+    """The table reader's identity: this file, the text rules and the
+    pdfplumber version, which decides how a table is read."""
+    import pdfplumber
     here = os.path.dirname(os.path.abspath(__file__))
     h = hashlib.sha256()
     for name in ("components.py", "text_rules.py"):
         with open(os.path.join(here, name), "rb") as fh:
             h.update(fh.read())
+    h.update(pdfplumber.__version__.encode())
     return h.hexdigest()[:10]
 
 
@@ -101,10 +109,27 @@ class Tagger:
         # close_at_section=False keeps a component open until the next
         # component heading; src/sensitivity.py compares the two.
         self.close_at_section = close_at_section
-        self.comp, self.sub, self.home = "", "", None
+        self._close()
 
     def _close(self):
         self.comp, self.sub, self.home = "", "", None
+        # The titles as the headings print them, so a paragraph under a
+        # component the data sheet did not list still carries its name.
+        self.comp_name, self.sub_name = "", ""
+
+    def _open(self, comp, name, path):
+        self.comp, self.sub, self.home = comp, "", path
+        self.comp_name, self.sub_name = clean_name(name), ""
+        return self.comp, ""
+
+    def _open_sub(self, m, name, path):
+        # A sub-component heading N.M belongs to component N: if another
+        # component is open, the heading that would have opened N was missed,
+        # so N is opened here rather than the sub-component ignored.
+        if m.group(1) != self.comp:
+            self.comp, self.comp_name, self.home = m.group(1), "", path
+        self.sub, self.sub_name = f"{m.group(1)}.{m.group(2)}", clean_name(name)
+        return self.comp, self.sub
 
     def see(self, text, block, section_path):
         path = section_path or ""
@@ -120,30 +145,29 @@ class Tagger:
         if not short and block in ("narrative", "annex"):
             head = RUN_IN_NUMBER.sub("", text, count=1)
             m = SUB_WORD_HEAD.match(head[:200])
-            if m and (not self.comp or m.group(1) == self.comp):
-                if not self.comp:
-                    self.home = path
-                self.comp, self.sub = m.group(1), f"{m.group(1)}.{m.group(2)}"
-                return self.comp, self.sub
+            # A run-in title ends at its first full stop.
+            title = re.split(r"\.\s+", head[:200])[0]
+            if m:
+                return self._open_sub(m, title, path)
             m = RUN_IN_COMP.match(head)
             if m:
-                self.comp, self.sub, self.home = m.group(1), "", path
-                return self.comp, ""
+                return self._open(m.group(1), title, path)
         if block == "heading" or short:
             m = COMP_HEAD.match(text)
             if m:
-                self.comp, self.sub, self.home = m.group(1), "", path
-                return self.comp, ""
+                return self._open(m.group(1), m.group(2), path)
             # A numbered sub-component title is a heading even when set in
             # plain type, if it carries a cost: '1.2. Infrastructure ... (US$15.3
             # million equivalent)'.
             titled = block == "heading" or bool(COST_IN_TEXT.search(text))
-            m = SUB_WORD_HEAD.match(text) or (SUB_HEAD.match(text) if titled else None)
+            m = SUB_WORD_HEAD.match(text)
+            if m:
+                return self._open_sub(m, text, path)
+            # A bare 'N.M Title' is a sub-component only under component N:
+            # elsewhere it is as likely a numbered paragraph or a table row.
+            m = SUB_HEAD.match(text) if titled else None
             if m and (not self.comp or m.group(1) == self.comp):
-                if not self.comp:
-                    self.home = path
-                self.comp, self.sub = m.group(1), f"{m.group(1)}.{m.group(2)}"
-                return self.comp, self.sub
+                return self._open_sub(m, text, path)
         return self.comp, self.sub
 
 
@@ -393,7 +417,9 @@ def clean_name(name):
     if m:
         n = n[:m.start()]
     n = n.split("**")[0]
-    n = re.split(r"\.\s+(?=(?:This|The|It|These|Under)\b)", n)[0]
+    n = re.split(r"\.\s+(?=(?:This|The|It|These|Under|Proposed)\b)", n)[0]
+    # A cost printed as ' - $30.00m)' rather than in brackets.
+    n = re.sub(r"\s*[-\u2013]?\s*(?:US)?\$\s*[\d.,]+\s*(?:m|million)?\)?\s*$", "", n)
     n = re.sub(r"(?:\s+(?:[\d.,]+|N/A))+$", "", n)
     n = re.sub(r"\s+The World Bank$", "", n)     # the page footer, read into the cell
     n = n.strip(" :-\u2013(.;,")
@@ -588,11 +614,12 @@ def main():
         r["name_key"] = name_key(r["name"])
     out.sort(key=lambda r: (r["doc_id"], r["project_ids"], r["source"], r["level"],
                             [int(x) for x in r["number"].split(".") if x.isdigit()]))
-    with open(where(args.data, "appraisal", "components.csv"), "w", newline="",
-              encoding="utf-8") as fh:
+    dest = where(args.data, "appraisal", "components.csv")
+    with open(dest + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=COMP_COLS, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
         w.writerows(out)
+    os.replace(dest + ".part", dest)
 
     projects = defaultdict(set)
     for r in out:

@@ -64,8 +64,13 @@ def test_a_project_outside_the_cohort_is_refused(cohort):
 
 def test_a_selection_is_named_for_its_filters(cohort):
     assert wbg.select(region="Western and Central", fy="2024", path=cohort).name == \
-        "western-and-central-fy2024"
+        "region-western-and-central-fy2024"
     assert wbg.select(path=cohort).name == "all"
+    # The filter's name is part of the folder name, and blank filters are refused.
+    assert wbg.select(project="p000001", path=cohort).name == "project-p000001"
+    assert wbg.select(fy="FY24", path=cohort).name == "fy2024"
+    with pytest.raises(SystemExit):
+        wbg.select(region=" ", path=cohort)
 
 
 @pytest.fixture
@@ -147,7 +152,7 @@ def test_export_writes_the_summary_workbook(store, cohort):
     from openpyxl import load_workbook
     sel = wbg.select(project="P000001", path=cohort)
     out = wbg.export(sel, data=store, today="2026-10-10")
-    assert out.endswith(os.path.join("runs", "p000001-2026-10-10"))
+    assert out.endswith(os.path.join("runs", "project-p000001-2026-10-10"))
     wb = load_workbook(os.path.join(out, "summary.xlsx"))
     assert wb.sheetnames == ["projects", "upcoming packages", "open notices", "components"]
 
@@ -155,8 +160,16 @@ def test_export_writes_the_summary_workbook(store, cohort):
 def test_prepare_fetches_only_what_is_new_and_skips_what_did_not_change(
         store, cohort, monkeypatch):
     calls = []
-    monkeypatch.setattr(wbg, "_run", lambda script, *a, data, tail=0: calls.append(
-        (script, a)))
+    outputs = {script: outs for _, script, _, _, outs in wbg.STAGES}
+
+    def run(script, *a, data, tail=0):
+        calls.append((script, a))
+        for spec in outputs.get(script, []):          # a stage writes its outputs
+            path = wbg.where(data, *spec)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            if not os.path.exists(path):
+                open(path, "w").close()
+    monkeypatch.setattr(wbg, "_run", run)
     sel = wbg.select(project="P000001", path=cohort)
     wbg.prepare(sel, data=store)
     # The store already holds P000001's documents and packages: nothing to fetch.
@@ -165,6 +178,10 @@ def test_prepare_fetches_only_what_is_new_and_skips_what_did_not_change(
     calls.clear()
     wbg.prepare(sel, data=store)
     assert [s for s, _ in calls] == ["paths.py"], "nothing changed, nothing reruns"
+    calls.clear()
+    os.remove(wbg.where(store, "appraisal", "components.csv"))
+    wbg.prepare(sel, data=store)
+    assert "components.py" in [s for s, _ in calls], "a missing output is rebuilt"
     calls.clear()
     wbg.prepare(wbg.select(project="P000002", path=cohort), data=store)
     assert ("fetch_procurement.py", ("--projects", "P000002")) in calls

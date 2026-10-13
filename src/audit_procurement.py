@@ -29,7 +29,6 @@ import glue                                                # noqa: E402
 # words the cleaner used.
 VOCAB, NAMES = {}, None
 
-PROC_DIR = "procurement"
 
 CHECKS = []
 
@@ -299,7 +298,7 @@ ENUM_FIELDS = {
 
 
 def load(data, table):
-    path = os.path.join(data, PROC_DIR, f"{table}.csv")
+    path = where(data, "procurement", f"{table}.csv")
     if not os.path.exists(path):
         return None
     with open(path, newline="", encoding="utf-8") as fh:

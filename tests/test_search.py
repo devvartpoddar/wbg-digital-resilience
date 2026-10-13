@@ -162,3 +162,31 @@ def test_a_dry_run_before_any_embedding_says_what_it_would_do(tmp_path, store):
     assert search.search("assets", str(tmp_path / "empty"), model=MODEL, dim=DIM, taxonomy=tax,
                          dry_run=True, log=said.append) is None
     assert "2 labels, 4 queries" in said[0] and calls == []
+
+
+def test_a_run_is_not_read_against_another_sentence_index(store):
+    data, _, _ = store
+    out = _score(store)
+    idx = os.path.join(data, "embeddings", "sentence_index.csv")
+    with open(idx) as fh:
+        lines = fh.readlines()
+    with open(idx, "w") as fh:
+        fh.writelines(lines[:-1])                       # one unit fewer
+    with pytest.raises(SystemExit):
+        search.hits(out, data, top=1)
+
+
+def test_the_percentile_filter_takes_the_best_percentile_over_the_labels_queries(store):
+    data, _, _ = store
+    out = _score(store)
+    # The footnote's best raw cosine for towers is the definition's, but it
+    # is the top unit of the 'cell site' phrase: it passes at the 100th.
+    got = search.hits(out, data, labels=["towers"], min_percentile=100.0)
+    assert "D:p00003" in [r["unit_id"] for r in got]
+
+
+def test_a_label_set_with_no_active_label_is_refused(tmp_path):
+    _csv(tmp_path / "x.csv", ["x_id", "x_name", "definition", "active"],
+         [["a", "A", "d", "false"]])
+    with pytest.raises(SystemExit):
+        search.load_queries("x", str(tmp_path))

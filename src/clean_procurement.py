@@ -41,7 +41,7 @@ import plan_table                                        # noqa: E402
 import glue                                              # noqa: E402
 import links                                             # noqa: E402
 
-CLEAN_VERSION = "proc-clean-9"
+CLEAN_VERSION = "proc-clean-10"
 
 # Another package's borrower reference inside a description: the parser missed
 # a record boundary and stitched the next record on. Used to cut it off here and
@@ -49,8 +49,6 @@ CLEAN_VERSION = "proc-clean-9"
 REF_INLINE = re.compile(r"[A-Z]{2,}-[A-Z0-9]{1,12}-[0-9]{2,10}-(?:CW|GD|GO|CS|NC)-\w{2,5}"
                         r"|\b(?=[A-Z0-9-]*[0-9])[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){1,5}\s*/\s")
 
-
-PROC_DIR = "procurement"
 
 
 WS_RE = re.compile(r"\s+")
@@ -762,7 +760,7 @@ PACKAGE_COLS = [
     "description_clean", "description_match", "description_sha256",
     "description_lang", "lot_or_phase", "component_number", "component",
     "component_source", "component_doc_id",
-    "glue_repairs", "is_rebid", "is_placeholder", "superseded_by", "clean_version",
+    "glue_repairs", "is_rebid", "is_placeholder", "clean_version",
     "category", "method", "method_name", "method_source", "method_raw",
     "market_approach", "status", "status_raw", "status_source", "status_as_of",
     "planned_date", "revised_date", "estimated_amount", "currency",
@@ -876,7 +874,6 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
             "glue_repairs": repairs,
             "is_rebid": str(marks["is_rebid"]).lower(),
             "is_placeholder": str(is_placeholder(clean)).lower(),
-            "superseded_by": "",
             "clean_version": CLEAN_VERSION,
             "category": category,
             "method": method,
@@ -944,7 +941,9 @@ def dedupe_packages(rows, counters):
                                          r.get("package_version_id") or "")):
         same = (r["project_id"], r["plan_version"], r["borrower_ref_norm"],
                 r.get("description_match"), r.get("estimated_amount"), r.get("actual_amount"),
-                r.get("status"), r.get("planned_date"), r.get("method"), r.get("category"))
+                r.get("status"), r.get("planned_date"), r.get("revised_date"),
+                r.get("method"), r.get("market_approach"), r.get("category"),
+                r.get("component_number"))
         if same in printed:
             counters["package_rows_printed_twice_in_a_version"] += 1
             continue
@@ -1020,13 +1019,15 @@ def resolve_status(kept, awards, counters):
             signed[a["package_id"]] = d
     for r in kept:
         cands = []
+        # (date, precedence, ...): on the same date a signed contract is the
+        # firmer fact, so it wins rather than the alphabet deciding.
         if r["status"] != "unknown":
-            cands.append((r.get("_disclosed", ""), r["status"], "plan"))
+            cands.append((r.get("_disclosed", ""), 0, r["status"], "plan"))
         d = signed.get(r["package_id"])
         if d and r["status"] not in CONTRACT_EXISTS:
-            cands.append((d, "Signed", "award"))
+            cands.append((d, 1, "Signed", "award"))
         if cands:
-            when, st, src = max(cands)
+            when, _, st, src = max(cands)
             r["status"], r["status_source"], r["status_as_of"] = st, src, when
         else:
             r["status_source"], r["status_as_of"] = "none", ""

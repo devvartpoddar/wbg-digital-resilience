@@ -37,7 +37,8 @@ PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
              "section_title", "block", "char_start", "char_end", "n_tokens",
              "text_sha256", "page_from", "page_to", "parser",
              "for_model", "list_item", "table_id", "raw_start", "raw_end",
-             "component_number", "subcomponent_number", "component_mentions"]
+             "component_number", "component_name", "subcomponent_number",
+             "subcomponent_name", "component_mentions"]
 REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
 
 
@@ -214,8 +215,8 @@ def main():
         # Which project each stretch of the document belongs to: a combined
         # appraisal document is split at its data sheets (keys.py).
         parts = project_parts(clean, doc["project_ids"])
-        for n, (start, end, owners, how) in enumerate(parts, 1):
-            doc_parts.append({"doc_id": did, "part": n, "char_start": start,
+        for k, (start, end, owners, how) in enumerate(parts, 1):
+            doc_parts.append({"doc_id": did, "part": k, "char_start": start,
                               "char_end": end, "project_ids": owners, "assigned_by": how,
                               "listed_project_ids": doc["project_ids"]})
         kept, doc_paras = 0, []
@@ -244,7 +245,10 @@ def main():
                 "list_item": str(bool(meta.get("list_item"))).lower(),
                 "table_id": f"{did}:t{meta['table']:03d}" if "table" in meta else "",
                 "raw_start": src[0], "raw_end": src[1],
-                "component_number": comp, "subcomponent_number": sub,
+                "component_number": comp,
+                "component_name": tagger.comp_name if comp else "",
+                "subcomponent_number": sub,
+                "subcomponent_name": tagger.sub_name if sub else "",
                 "component_mentions": "|".join(components.mentions(body)),
             })
             kept += 1

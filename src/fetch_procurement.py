@@ -58,7 +58,11 @@ PAGE = 500
 # them. Only the pairs we can locate reliably are used; see parse_plan_text.
 DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 AMOUNT_RE = re.compile(r"^[\d,]+\.\d{2}$")
-REF_RE = re.compile(r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){1,5})\s*/\s*(.*)$")
+# The reference grammar is plan_table's (REF_TOKEN), so where a table's rows
+# begin and where a record begins are one rule.
+_SEP, _FIELD = plan_table.REF_SEP, plan_table.REF_FIELD
+REF_TOKEN = plan_table.REF_TOKEN
+REF_RE = re.compile(rf"^\s*({REF_TOKEN})\s*/\s*(.*)$")
 # Does a rendition's text look like it carries borrower references at all? Used
 # only to tell an empty package table apart from a parse failure.
 PLAN_REF_SHAPE = re.compile(r"\b[A-Z]{2,}[-\u2013][A-Z0-9]{1,12}[-\u2013][0-9]{3,}")
@@ -253,9 +257,8 @@ def _join_wrapped(parts):
 # merged line has to be a record boundary REF_RE accepts, so a merge that would
 # produce something that is not a reference at all is not made.
 REF_WRAP_HEAD = re.compile(
-    r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){1,5}[-\u2013\u2014]?)"
-    r"(\s{2,}.*)?$")
-REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9][A-Z0-9\u2013\u2014-]{0,20})\s*/\s*(.*)$")
+    rf"^\s*({REF_TOKEN}(?:[-\u2013\u2014]\(?[0-9.]*)?)(\s{{2,}}.*)?$")
+REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9(][A-Z0-9().\u2013\u2014-]{0,20})\s*/\s*(.*)$")
 
 # A second, different separation, and the one that costs the most. Here the
 # reference is COMPLETE on its own line and the '/ description' that belongs
@@ -279,7 +282,7 @@ REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9][A-Z0-9\u2013\u2014-]{0,20})\s*/\s*(.*
 # line to hold nothing else misses the shape wherever the layout kept its
 # columns: 474 of the first sample's 496 renditions.
 REF_ALONE = re.compile(
-    r"^\s*([A-Z][A-Z0-9]{1,}(?:[-\u2013\u2014]\s?[A-Z0-9]+){2,5})(\s{2,}\S.*)?\s*$")
+    rf"^\s*([A-Z][A-Z0-9]{{1,}}(?:{_SEP}{_FIELD}){{2,7}})(\s{{2,}}\S.*)?\s*$")
 SLASH_TAIL = re.compile(r"^\s*(/\s*\S.*)$")
 # The observed gap is one or two lines. Four allows some slack without letting
 # the scan wander into the next record.
@@ -326,6 +329,20 @@ def _join_wrapped_refs(lines):
                 j = i + d
                 if j >= len(lines):
                     break
+                # A head that ends on a dash or an open bracket was clipped
+                # mid-reference, so a next line like 'GO-RFB / Procurement of'
+                # is its tail, not a new record - though it has a record's
+                # shape. A tail carries no activity number; a new record does.
+                clipped = re.search(r"[-\u2013\u2014(.]$", head.group(1))
+                early = REF_WRAP_TAIL.match(lines[j]) if clipped and d == 1 else None
+                if early and not re.search(r"\d{3,}", early.group(1)):
+                    candidate = f"{head.group(1)}{early.group(1)} / {early.group(2)}"
+                    candidate += head.group(2) or ""
+                    if REF_RE.match(candidate):
+                        out.append(candidate)
+                        i = j + 1
+                        joined = True
+                        break
                 if REF_RE.match(lines[j]) or REF_ALONE.match(lines[j]):
                     break               # the next record started; do not cross it
                 if SLASH_TAIL.match(lines[j]):
@@ -456,7 +473,8 @@ def _parse_collapsed(tables, doc_meta):
     A document whose columns came apart gives up its figures wholesale rather
     than risk attaching one package's amount to another's reference. It keeps
     its references and descriptions, which are still the borrower's and still
-    correct, and the figures come from its earlier renditions instead.
+    correct; its packages carry no figures (nothing is carried forward from
+    an earlier rendition).
     """
     rows, all_rows, refused = [], [], False
     per_table = []
@@ -703,15 +721,21 @@ def _status_token(body):
         return "Pending Implementation"
     if found:
         return found
-    heads = {}
+    # Each status by the longest head of it the row prints (ten characters
+    # at least). The longest wins, so 'en cours d'execut' is d'exécution and
+    # not d'examen, and a status's full head beats a short one found inside
+    # another cell ('implementa' in a component named '... implementation').
+    best, length = set(), 0
     for tok in STATUS_TOKENS:
         _, dt = _match_form(tok)
-        if len(dt) >= 10 and dt[:10] in flat:
-            heads.setdefault(dt[:10], set()).add(tok)
-    hits = {t for ts in heads.values() for t in ts}
-    if len(hits) != 1:
+        n = next((k for k in range(len(dt), 9, -1) if dt[:k] in flat), 0)
+        if n > length:
+            best, length = {tok}, n
+        elif n and n == length:
+            best.add(tok)
+    if len(best) != 1:
         return ""
-    t = hits.pop()
+    t = best.pop()
     return t[:1].upper() + t[1:]
 
 
@@ -879,6 +903,17 @@ def _fetch_plan_file(path, url, refresh, delay):
     return blob, True
 
 
+# Fields naming or reaching a person: the procurement contact on a notice and
+# the Bank staff member on an award. Nothing reads them, and they are not
+# kept: a response is stored without them.
+PERSONAL = {"contact_name", "contact_email", "contact_phone_no", "contact_address",
+            "teammemfullname"}
+
+
+def _without_personal(record):
+    return {k: v for k, v in record.items() if k not in PERSONAL}
+
+
 def collect_notices(projects, data, log, refresh, delay):
     raw_dir = where(data, "notices_json")
     os.makedirs(raw_dir, exist_ok=True)
@@ -906,6 +941,7 @@ def collect_notices(projects, data, log, refresh, delay):
                     if len(batch) < PAGE or offset > 20000:
                         break
                     time.sleep(delay)
+                records = [_without_personal(r) for r in records]
                 blob = json.dumps(records, ensure_ascii=False, sort_keys=True,
                                   indent=0).encode()
                 store_keeping_old(path, blob)
@@ -960,6 +996,7 @@ def collect_awards(projects, data, log, refresh, delay):
                     if len(batch) < PAGE or offset > 20000:
                         break
                     time.sleep(delay)
+                records = [_without_personal(r) for r in records]
                 blob = json.dumps(records, ensure_ascii=False, sort_keys=True,
                                   indent=0).encode()
                 store_keeping_old(path, blob)

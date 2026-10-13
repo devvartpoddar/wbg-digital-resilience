@@ -463,11 +463,8 @@ def main():
             # for_model existed has no such column and is taken whole.
             rows = [r for r in csv.DictReader(fh) if r.get("for_model", "true") == "true"]
         id_field = "paragraph_id"
-    words_by_sha = {}
     if args.limit:
         rows = rows[:args.limit]
-    for row in rows:
-        words_by_sha[row["text_sha256"]] = int(row["n_tokens"])
 
     order, unique, empty = resolve(args.data, rows, id_field)
     root = cache_root(args.data, args.model, args.dim)
@@ -475,7 +472,7 @@ def main():
     have = {sha for sha in unique if read_cached(root, sha, args.dim) is not None}
     todo = [sha for sha in unique if sha not in have]
     chars = sum(len(unique[s]) for s in todo)
-    words = sum(words_by_sha.get(s, 0) for s in todo)
+    words = sum(len(unique[s].split()) for s in todo)
     lo, hi = token_range(words, chars)
 
     log(f"{args.unit + ':':<17}{len(rows):,}" + (f"  (--limit {args.limit})" if args.limit else ""))

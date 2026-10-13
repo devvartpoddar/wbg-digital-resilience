@@ -12,15 +12,15 @@ the sample back to the whole corpus.
 The person sees the passage, its context and the label, never the model's
 answer, so the grade is their own.
 
-Reads  data/classify/<set>-<version>/  (the newest), data/search/<set>-<version>/
-       (the newest, if any), data/appraisal/, inputs/taxonomy/<set>.csv, <set>_scale.csv
+Reads  data/classify/<set>-<version>/ and data/search/<set>-<version>/ (if any): the
+       runs for the label set and text as they stand now, data/appraisal/, inputs/taxonomy/<set>.csv, <set>_scale.csv
 Writes data/review/check_<set>_s<seed>.xlsx       the sheet: fill the grade column
        data/review/check_<set>_s<seed>.key.csv    what was drawn and from where
 
   python3 src/check_sheet.py assets             5 per stratum, seed 1
   python3 src/check_sheet.py assets --per 8 --seed 2
 """
-import argparse, csv, glob, os, random, sys
+import argparse, csv, os, random, sys
 
 import numpy
 
@@ -33,18 +33,23 @@ from search import TAXONOMY, _rows  # noqa: E402
 # A paragraph the search places in this top share for a label counts as a
 # search hit when looking for disagreements. Only the sampling uses it.
 SEARCH_TOP = 0.05
-KEY_COLS = ["row_id", "label_id", "paragraph_id", "text_sha256", "stratum", "stratum_size",
-            "stratum_drawn", "search_best", "classify_dir", "search_dir"]
+KEY_COLS = ["row_id", "label_id", "paragraph_id", "text_sha256", "question_sha256",
+            "scale_sha256", "stratum", "stratum_size", "stratum_drawn", "search_best",
+            "classify_dir", "search_dir"]
 SHEET_COLS = [("row_id", 8), ("label", 22), ("label means", 40), ("paragraph_id", 18),
               ("project", 10), ("section", 22), ("component", 18), ("passage", 90),
               ("grade", 8), ("note", 30)]
 
 
-def newest(data, kind, name):
-    """The most recently written run folder for the label set, or None."""
-    runs = [d for d in glob.glob(where(data, kind, f"{name}-*"))
-            if os.path.exists(os.path.join(d, "manifest.json"))]
-    return max(runs, key=os.path.getmtime) if runs else None
+def current_search(name, data, taxonomy=TAXONOMY):
+    """The search run for the label set and sentence index as they stand
+    now, or None."""
+    import search
+    try:
+        out, _ = search.run_folder(name, data, taxonomy=taxonomy)
+    except SystemExit:
+        return None
+    return out if os.path.exists(os.path.join(out, "manifest.json")) else None
 
 
 def search_best(folder, data):
@@ -52,9 +57,8 @@ def search_best(folder, data):
     paragraph's units}, or {} without a search run."""
     if not folder:
         return {}
-    scores = numpy.load(os.path.join(folder, "scores.npy"), mmap_mode="r")
-    queries = _rows(os.path.join(folder, "queries.csv"))
-    index = _rows(where(data, "embeddings", "sentence_index.csv"))
+    import search
+    queries, scores, index = search.load_run(folder, data)
     out = {}
     for lab in sorted({q["label_id"] for q in queries}):
         cols = [i for i, q in enumerate(queries) if q["label_id"] == lab]
@@ -94,13 +98,18 @@ def draw(scores, best, per, seed):
 
 
 def build(name, data, per=5, seed=1, taxonomy=TAXONOMY):
-    cdir = newest(data, "classify", name)
+    # Both runs must be the ones for the labels and text as they stand now,
+    # or the grades would be keyed to text the classifier never saw.
+    cdir = classify.current_run(name, data, taxonomy)
     if not cdir:
-        raise SystemExit(f"check_sheet: no classification of {name} yet - run "
+        raise SystemExit(f"check_sheet: no classification of {name} as it stands - run "
                          f"./wbg classify {name} first")
-    sdir = newest(data, "search", name)
+    sdir = current_search(name, data, taxonomy)
     labels, scale = classify.load_labels(name, taxonomy)
     lab = {x["id"]: x for x in labels}
+    qsha = classify.question_shas(classify.questions(labels, scale))
+    import evaluate
+    ssha = evaluate.scale_sha(scale)
     scores = _rows(os.path.join(cdir, "scores.csv"))
     best = search_best(sdir, data)
     paras = {p["row"]["paragraph_id"]: p for p in classify.paragraphs(data)}
@@ -111,7 +120,9 @@ def build(name, data, per=5, seed=1, taxonomy=TAXONOMY):
     for i, (r, stratum, size, drawn) in enumerate(picked, 1):
         p = paras[r["paragraph_id"]]
         key.append({"row_id": i, "label_id": r["label_id"], "paragraph_id": r["paragraph_id"],
-                    "text_sha256": p["row"]["text_sha256"], "stratum": stratum,
+                    "text_sha256": p["row"]["text_sha256"],
+                    "question_sha256": qsha[r["label_id"]], "scale_sha256": ssha,
+                    "stratum": stratum,
                     "stratum_size": size, "stratum_drawn": drawn,
                     "search_best": best.get((r["label_id"], r["paragraph_id"]), ""),
                     "classify_dir": os.path.basename(cdir),

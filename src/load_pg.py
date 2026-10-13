@@ -2,9 +2,11 @@
 """Load the cleaned tables into Postgres, schema wbg, so they can be queried.
 
 Reads  data/projects/projects.csv, data/raw/documents.csv,
-       data/appraisal/{paragraphs,sentences,rejected,
+       data/appraisal/{paragraphs,sentences,rejected,document_parts,
        components}.csv (+ data/appraisal/text/ for their text),
-       data/procurement/*.csv
+       data/procurement/{packages,superseded_packages,notices,awards}.csv
+       (the *_raw tables, the search and classification runs, and the labels
+       are not loaded: labels are read by evaluation alone, AGENTS.md rule 9)
 Writes Postgres: wbg.<table> for each, and wbg.loads (one row per load)
 
 The CSV files stay the source; these tables are a queryable copy of them, and
@@ -47,8 +49,9 @@ TABLES = [
     ("awards", "procurement/awards.csv"),
 ]
 INTEGER = {"ordinal", "char_start", "char_end", "n_tokens", "n_chars",
-           "page_from", "page_to", "raw_start", "raw_end"}
-NUMERIC = {"estimated_amount", "actual_amount", "total_amount", "supplier_amount"}
+           "page_from", "page_to", "raw_start", "raw_end", "approval_fy"}
+NUMERIC = {"estimated_amount", "actual_amount", "total_amount", "supplier_amount",
+           "cost_usd_m", "cost_before_usd_m", "commitment_usd_m"}
 INDEXED = {"doc_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
            "contract_id", "unit_id", "borrower_ref_norm"}
 

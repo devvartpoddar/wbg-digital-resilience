@@ -103,7 +103,10 @@ def project_row(pid, rec, docs):
     return {
         "project_id": pid,
         # true, false (the interface has no record), or blank (not fetched)
-        "in_projects_interface": str(bool(rec)).lower() if fetched else "",
+        # A record holding nothing but its own id is no record: the
+        # interface lists the id of a dropped project and nothing else.
+        "in_projects_interface": str(bool(set(rec or {}) - {"id"})).lower()
+        if fetched else "",
         "project_name": " ".join((rec.get("project_name") or "").split()),
         "status": rec.get("status") or "",
         "approval_date": _iso(rec.get("boardapprovaldate")),

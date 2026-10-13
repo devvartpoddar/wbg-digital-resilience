@@ -52,11 +52,21 @@ SECTION_RE = re.compile(
     re.I)
 ANCHOR_RE = re.compile(r"Activity Reference No")
 
+# A borrower reference, the one grammar the plan reader uses everywhere: an
+# agency prefix, then up to seven fields joined by one or two dashes. Besides
+# the plain shape the corpus prints, each of which lost a project's records
+# until it was allowed: a space inside a field followed by its dash ('GE-OPEN
+# NET-198838-CS-INDV'), spaces round a dash ('ZR-UGP - PTN-527452-GO-RFQ'), a
+# doubled dash ('GH-MOC--286422-CS-QCBS'), a numbered suffix ('...-CS-INDV-
+# 4.1.4', '...-GO-RFB-C1.2') and a bracketed lot ('...-GO-RFB-(1.2)').
+REF_SEP = r"\s?[-\u2013\u2014]{1,2}\s?"
+REF_FIELD = rf"(?:[A-Z0-9]+ [A-Z0-9]+(?={REF_SEP})|[A-Z0-9]+(?:\.[0-9]+)*|\([0-9.]+\)?)"
+REF_TOKEN = rf"[A-Z][A-Z0-9]{{1,}}(?:{REF_SEP}{REF_FIELD}){{1,7}}"
+
 # A data row begins where the first column holds a borrower reference. The
 # reference is the only thing that reliably starts a record: STEP prints it
 # first in the first column of every row of every section.
-ROW_START_RE = re.compile(
-    r"^\s*([A-Z][A-Z0-9]{1,}(?:[-–—]\s?[A-Z0-9]+){1,6})\s*(/|$)")
+ROW_START_RE = re.compile(rf"^\s*({REF_TOKEN})\s*(/|$)")
 
 # The STEP columns, in print order, per section. A rendition may break a
 # heading across lines, and omits columns the plan does not use, but it never
@@ -478,17 +488,17 @@ def collapsed_is_aligned(rows, floor=0.8):
     different orders - one Niger plan prints the third row's description before
     the first row's amounts, and reading it by sequence attaches GS-2's figures
     to a different package entirely. That is the failure worth spending
-    coverage to avoid: a package with no amount is a gap an older plan version
-    can fill, while a package with someone else's amount is wrong and looks
-    right.
+    coverage to avoid: a package with no amount is an honest gap, while a
+    package with someone else's amount is wrong and looks right.
 
     A rendition that kept its rows together puts a money line inside nearly
     every record; one that scattered them does not. The separation on the
     corpus is wide: the five intact renditions read 95.4% to 98.1%, the two
     scattered ones 23.2% and 53.2%. The floor sits in the gap, not near either
     side, so it is not a delicate choice - but it is a choice, and it spends
-    Mozambique's 42 readable records to refuse its scattered ones. They are not
-    lost: that project's older renditions keep their columns and parse.
+    Mozambique's 42 readable records to refuse its scattered ones: their
+    references and descriptions are kept, without figures, and that project's
+    older renditions keep their columns and parse.
     """
     if not rows:
         return True
@@ -513,6 +523,8 @@ def split_ref_chain(desc, fallback):
         tok = parts[i].strip()
         if not re.fullmatch(r"[A-Z0-9][A-Z0-9\u2013\u2014-]{1,40}", tok):
             break
+        if tok.isdigit():
+            break               # a year or a number ('.../2023 / ...') is not a reference
         if re.search(r"\d", tok):
             ref = tok
         elif i > 0:

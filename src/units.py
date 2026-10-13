@@ -15,7 +15,9 @@ to re-join:
                        the component heading the paragraph sits under, in its
                        own document's numbering
   component_key        that component's name_key (keys.name_key): the same
-                       component in another document, even renumbered
+                       component in another document, even renumbered. From
+                       components.csv, or failing that from the title the
+                       heading printed (paragraphs.csv component_name)
   char_start, char_end offsets into data/appraisal/text/<doc_id>.txt
   n_tokens, text_sha256
   lead_in_start, lead_in_end
@@ -35,6 +37,7 @@ import csv
 import os
 import re
 
+from keys import name_key
 from paths import where
 
 UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block",
@@ -104,7 +107,10 @@ def search_units(data):
                 "section_path": p["section_path"],
                 "component_number": p.get("component_number", ""),
                 "subcomponent_number": p.get("subcomponent_number", ""),
-                "component_key": keys.get((p["doc_id"], p["component_number"]), "")
+                # The data sheet's name first; else the title the heading
+                # printed (a run-in title the data sheet does not list).
+                "component_key": (keys.get((p["doc_id"], p["component_number"]))
+                                  or name_key(p.get("component_name", "")))
                 if p.get("component_number") else ""}
 
     out = []

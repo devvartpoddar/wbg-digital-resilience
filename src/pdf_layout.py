@@ -271,6 +271,8 @@ def _clean_table(rows, vocab):
 
     titles = [r for r in grid[:h] if len([v for v in r if v]) == 1]
     caption = next((v for v in titles[-1] if v), None) if titles else None
+    if caption and not re.search(r"[^\W_]", caption):
+        caption = None              # a lone bullet glyph in a cell, not a title
     header_row = list(grid[h])
     header = list(header_row)
     body = grid[h + 1:]
@@ -727,7 +729,8 @@ def extract(pdf, raw_out=None):
         # join (a list straight after a heading or a table).
         if GLYPH_BULLET.match(text):
             text = GLYPH_BULLET.sub("", text, count=1).strip()
-            meta["list_item"] = True
+            if kind == "body":
+                meta["list_item"] = True
         elif kind == "body" and BULLET_OPEN.match(text):
             meta["list_item"] = True
         text, n_links = URL.subn("[link]", text)
@@ -760,7 +763,9 @@ def extract(pdf, raw_out=None):
         if block == "body":
             block = ("frontmatter" if not roman_seen else
                      "annex" if annex_seen else "narrative")
-            if C.looks_tabular(text):
+            # Before the first section, a table is front matter like any
+            # other table there (below).
+            if roman_seen and C.looks_tabular(text):
                 block = "table"
         elif block == "table" and not roman_seen:
             block = "frontmatter"

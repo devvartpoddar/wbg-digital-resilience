@@ -143,3 +143,31 @@ def test_a_graded_sheet_becomes_labels_and_a_measurement(store):
     assert "| 0.5 | 1.00 | 1.00 |" in report
     with pytest.raises(SystemExit):              # a graded sheet is never overwritten
         check_sheet.build("assets", data, per=5, seed=1, taxonomy=tax)
+
+
+def test_a_refusal_stops_the_run_and_stores_nothing(store, monkeypatch):
+    calls = []
+
+    def refuse(body, **kw):
+        calls.append(1)
+        raise classify.Refused("HTTP 402: no credit")
+    monkeypatch.setattr(classify, "decide", refuse)
+    with pytest.raises(SystemExit):
+        _run(store)
+    data, _, _ = store
+    assert not os.path.exists(classify.cache_root(data, classify.MODEL))
+
+
+def test_a_change_in_what_is_sent_is_a_new_version(store):
+    data, tax, _ = store
+    first = _run(store)
+    _csv(os.path.join(data, "appraisal", "components.csv"), ["doc_id", "source", "number",
+                                                             "name"],
+         [{"doc_id": "D", "source": "datasheet", "number": "1", "name": "Renamed"}])
+    assert _run(store) != first
+
+
+def test_expected_grade_is_computed_from_the_probabilities(store):
+    out = _run(store)
+    rows = list(csv.DictReader(open(os.path.join(out, "scores.csv"))))
+    assert rows[0]["expected"] == "1.700"          # 0*0.1 + 1*0.1 + 2*0.8

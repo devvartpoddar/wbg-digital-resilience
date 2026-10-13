@@ -60,3 +60,8 @@ def test_a_project_the_interface_does_not_know_keeps_a_row():
     row = projects.project_row("P000009", {}, [])
     assert row["in_projects_interface"] == "false"
     assert row["project_name"] == "" and row["managing_unit"] == ""
+
+
+def test_a_record_holding_only_its_id_is_no_record():
+    row = projects.project_row("P000009", {"id": "P000009"}, [])
+    assert row["in_projects_interface"] == "false"

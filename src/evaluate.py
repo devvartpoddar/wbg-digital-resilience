@@ -6,9 +6,11 @@ A person grades paragraphs in data/review/check_<set>_s<seed>.xlsx
 (src/check_sheet.py). This script:
 
 1. stores each grade in data/labels/<set>.csv, keyed by the SHA-256 of the
-   paragraph text, the label set, the label and the scale it was graded on,
-   never by position (AGENTS.md rule 9). A later grade of the same text and
-   label replaces an earlier one;
+   paragraph text, the label set, the label, and the SHA-256 of the exact
+   question (the label's name and definition and the grades) it was graded
+   under, as recorded when the sheet was drawn - never by position (AGENTS.md
+   rules 3 and 9). A later grade of the same text under the same question
+   replaces an earlier one;
 2. for each label, measures precision and recall at a range of cut-offs:
    the classifier's probability that the grade is at least k, and the
    search's best cosine score. The sheet was drawn by stratum, so every graded
@@ -31,8 +33,8 @@ from paths import data_root, where  # noqa: E402
 import classify  # noqa: E402
 from search import TAXONOMY, _rows  # noqa: E402
 
-LABEL_COLS = ["label_set", "label_id", "text_sha256", "scale_sha256", "grade",
-              "paragraph_id", "source", "graded_on"]
+LABEL_COLS = ["label_set", "label_id", "text_sha256", "question_sha256", "scale_sha256",
+              "grade", "paragraph_id", "source", "graded_on"]
 THRESHOLDS = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 
 
@@ -55,25 +57,26 @@ def read_grades(xlsx):
     return out
 
 
-def store_labels(name, data, key, grades, scale, source):
+def store_labels(name, data, key, grades, source):
     path = where(data, "labels", f"{name}.csv")
     current = {}
     if os.path.exists(path):
         for r in _rows(path):
-            current[(r["label_id"], r["text_sha256"], r["scale_sha256"])] = r
+            current[(r["label_id"], r["text_sha256"], r["question_sha256"])] = r
     today = datetime.date.today().isoformat()
-    sha = scale_sha(scale)
     for k in key:
         if k["row_id"] in grades:
-            current[(k["label_id"], k["text_sha256"], sha)] = {
+            current[(k["label_id"], k["text_sha256"], k["question_sha256"])] = {
                 "label_set": name, "label_id": k["label_id"], "text_sha256": k["text_sha256"],
-                "scale_sha256": sha, "grade": grades[k["row_id"]],
-                "paragraph_id": k["paragraph_id"], "source": source, "graded_on": today}
+                "question_sha256": k["question_sha256"], "scale_sha256": k["scale_sha256"],
+                "grade": grades[k["row_id"]], "paragraph_id": k["paragraph_id"],
+                "source": source, "graded_on": today}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=LABEL_COLS, lineterminator="\n")
         w.writeheader()
-        w.writerows(sorted(current.values(), key=lambda r: (r["label_id"], r["text_sha256"])))
+        w.writerows(sorted(current.values(), key=lambda r: (r["label_id"], r["text_sha256"],
+                                                             r["question_sha256"])))
     os.replace(path + ".part", path)
     return path
 
@@ -97,7 +100,7 @@ def evaluate(name, data, seed=1, taxonomy=TAXONOMY):
     key = _rows(base + ".key.csv")
     grades = read_grades(base + ".xlsx")
     labels, scale = classify.load_labels(name, taxonomy)
-    lpath = store_labels(name, data, key, grades, scale, os.path.basename(base))
+    lpath = store_labels(name, data, key, grades, os.path.basename(base))
     cdir = where(data, "classify", key[0]["classify_dir"])
     probs = {(r["label_id"], r["paragraph_id"]): r for r in _rows(os.path.join(cdir,
                                                                              "scores.csv"))}

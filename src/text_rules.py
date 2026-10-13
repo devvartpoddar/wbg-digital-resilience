@@ -104,7 +104,6 @@ def annex_match(line):
 
 
 
-GUTTER = re.compile(r"\S {6,}\S")
 
 
 def looks_tabular(body):
@@ -113,13 +112,9 @@ def looks_tabular(body):
     drop it - the results framework and disbursement tables hold real numbers -
     but keep it out of the narrative block so a text search does not hit it.
 
-    Must run BEFORE whitespace is collapsed: the column gutters are the single
-    most reliable signal, and collapsing destroys them. Two or more wide gutters
-    means the line was a table row whatever its wording, which catches the
-    results-framework tables that the numeric test misses because their
-    indicator names are wordy."""
-    if len(GUTTER.findall(body)) >= 2:
-        return True
+    It reads unit text, whose whitespace the PDF reader has already collapsed,
+    so column gutters are not a signal here; tables the reader recognises as
+    tables never reach it."""
     toks = TOKEN.findall(body)
     if len(toks) < 6:
         return False

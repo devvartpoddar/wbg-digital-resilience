@@ -115,3 +115,30 @@ def test_a_title_leading_in_a_list_is_read_as_a_heading():
     got = K.read_headings(rows, text)
     assert [(c["level"], c["number"]) for c in got] == [("component", "3")]
     assert got[0]["name"].startswith("Shared Data Hosting")
+
+
+def test_a_heading_with_no_colon_opens_its_component_and_names_it():
+    t = K.Tagger()
+    t.see("Component 5: Project implementation", "heading", "II.B")
+    assert t.see("Component 1 Extending rural connectivity (US$45 million equivalent)",
+                 "heading", "II.B") == ("1", "")
+    assert t.comp_name == "Extending rural connectivity"
+    # 'Component 1 will support...' is a sentence, not a heading.
+    assert not K.COMP_HEAD.match("Component 1 will support the extension")
+
+
+def test_a_subcomponent_heading_opens_its_own_component_when_another_is_open():
+    t = K.Tagger()
+    t.see("Component 2: Digital finance", "heading", "II.B")
+    long = "51. Sub-component 3.1 - Strengthening the data ecosystem. " + "word " * 40
+    assert t.see(long, "narrative", "II.B") == ("3", "3.1")
+    assert t.sub_name == "Strengthening the data ecosystem"
+
+
+@pytest.mark.parametrize("text,found", [
+    ("Components 1 and 3 will finance", ["1", "3"]),
+    ("Component 3, 911 Central dispatch", ["3"]),
+    ("Component 324 refers", []),
+    ("Sub-component 2.1 and 2.2", ["2.1", "2.2"])])
+def test_mentions_read_whole_numbers_only(text, found):
+    assert K.mentions(text) == found

@@ -59,6 +59,7 @@ def link_all(records, packages, counters=None, name="records"):
     index = package_index(packages)
     for r in records:
         r["package_id"], r["package_link"] = link_one(r, index)
+        assert r["package_link"] in LINKS, r["package_link"]
         if counters is not None:
             counters[f"{name}_link_{r['package_link']}"] += 1
     return records

@@ -16,12 +16,14 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
                                       # every asset definition and phrase in inputs/taxonomy/; --dry-run shows the cost
 ./wbg classify assets --limit 20      # grade paragraphs against each asset with the decision model (smoke test);
 ./wbg classify assets                 # the full run asks only what is not stored; --dry-run shows the cost
-python src/check_sheet.py assets      # a sheet of paragraphs for a person to grade (data/review/check_assets_s1.xlsx)
-python src/evaluate.py assets         # store the grades as labels; precision and recall by cut-off
+$PY src/check_sheet.py assets         # a sheet of paragraphs for a person to grade (data/review/check_assets_s1.xlsx)
+$PY src/evaluate.py assets            # store the grades as labels; precision and recall by cut-off
 python -m pytest                      # tests (locally)
 ```
 
-Selections filter the cohort (`inputs/config/cohort.csv`): `--project`, `--country`, `--region` (part of the name is enough), `--fy`, `--practice` and `--unit`, each repeatable or comma-separated, combined with "and". The same functions are importable: `from wbg import select, prepare, summary, upcoming, open_notices, tables, export`.
+`$PY` is the box's Python, `/opt/yggdrasil/venvs/work/bin/python` (`./wbg` finds it on its own). Review sheets already written are kept, since they may hold notes; `--seed` draws a fresh one.
+
+Selections filter the cohort (`inputs/config/cohort.csv`): `--project`, `--country`, `--region` (part of the name is enough), `--fy` (2024, FY24 or FY2024), `--practice` and `--unit`, each repeatable or comma-separated, combined with "and". The same functions are importable: `from wbg import select, prepare, summary, upcoming, open_notices, tables, export`.
 
 Data goes to the main checkout's `data/` folder (never committed), laid out as `src/paths.py` describes. The cleaned tables also go to Postgres, schema `wbg`. The review sheets for reading the cleaning by eye are in `data/review/`.
 

@@ -19,14 +19,21 @@ written down once:
        text/           the Bank's text renditions (no longer fetched; kept)
        plans/ notices/ awards/   procurement plans and interface responses
        projects/       each project's record from the projects interface
-       documents.csv   the document list; fetch_log.csv every request made
+       documents.csv   the document list; fetch_log.csv the procurement
+                       listings, notices and awards requests
   data/appraisal/    what the appraisal stages make
        text/           cleaned text, one file per document
        cache/          per-document reads kept to skip unchanged work
        paragraphs.csv sentences.csv rejected.csv components.csv
+       document_parts.csv
   data/procurement/  packages, notices, awards: raw and cleaned tables
   data/projects/     projects.csv: one row per project (src/projects.py)
-  data/reports/      every stage's report, and the run notes for the vault
+  data/embeddings/   the vector cache, sentence_emb.npy, sentence_index.csv
+  data/classify/     stored decision-model responses and one folder per label
+                     set and version (src/classify.py)
+  data/labels/       grades a person gave, one file per label set (src/evaluate.py)
+  data/reports/      every stage's report, the run notes for the vault, and
+                     fetch_status/ (what each fetcher fully read)
   data/review/       spreadsheets for reading the output by eye
   data/runs/         a selection's exported results, when asked for (src/wbg.py)
   data/search/       a label set's scores over the sentences, one folder per

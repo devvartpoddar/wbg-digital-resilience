@@ -55,7 +55,7 @@ def main():
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--n", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0, help="same seed gives the same draw")
-    ap.add_argument("--block", default="", help="narrative | annex | frontmatter | template:*")
+    ap.add_argument("--block", default="", help="narrative | annex | footnote | frontmatter | table | heading")
     ap.add_argument("--section", default="", help="section_path prefix, e.g. II or ANNEX 2")
     ap.add_argument("--grep", default="", help="regex the paragraph text must match")
     ap.add_argument("--min-tokens", type=int, default=0)
@@ -114,6 +114,7 @@ def main():
 
     body = "\n".join(out)
     dest = args.out or where(args.data, "review", "review_sample.txt")
+    os.makedirs(os.path.dirname(os.path.abspath(dest)), exist_ok=True)
     with open(dest, "w", encoding="utf-8") as fh:
         fh.write(body + "\n")
     print(body)

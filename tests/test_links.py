@@ -75,3 +75,8 @@ def test_an_award_names_the_notices_of_its_reference_and_package():
                "package_id": "P1:cs-indv:bbbb"}]
     links.link_awards_to_notices(awards, notices)
     assert [a["notice_ids"] for a in awards] == ["N1", "N2", ""]
+
+
+def test_every_status_the_map_gives_is_a_known_label():
+    import clean_procurement as CP
+    assert set(CP.STATUS_MAP.values()) <= set(CP.STATUS_LABELS)

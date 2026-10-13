@@ -118,8 +118,16 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
             r[col] = r.get(col) or p.get(col, "")
         for col in PROJECT_COLS:
             r[col] = p.get(col, "")
-    projects, countries = _as_list(project), [c.upper() for c in _as_list(country)]
-    regions, years = [r.lower() for r in _as_list(region)], _as_list(fy)
+    given = {"project": project, "country": country, "region": region, "fy": fy,
+             "practice": practice, "unit": unit}
+    blank = [k for k, v in given.items() if v is not None and not _as_list(v)]
+    if blank:
+        raise SystemExit(f"empty filter: --{', --'.join(blank)}")
+    projects = [p.upper() for p in _as_list(project)]
+    countries = [c.upper() for c in _as_list(country)]
+    regions = [r.lower() for r in _as_list(region)]
+    years = [re.sub(r"(?i)^fy\s*", "", y) for y in _as_list(fy)]
+    years = [f"20{y}" if len(y) == 2 and y.isdigit() else y for y in years]
     pracs, units = [x.lower() for x in _as_list(practice)], [x.lower() for x in _as_list(unit)]
     if (pracs or units) and info is None:
         raise SystemExit("no projects table yet: run ./wbg prepare first")
@@ -133,10 +141,16 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
            and (not years or r["approval_fy"] in years)
            and (not pracs or _has(pracs, r["practice"], r["practice_code"]))
            and (not units or _has(units, r["managing_unit"], r["unit_code"]))]
-    parts = [*projects, *countries, *[g.replace(" ", "-") for g in regions],
-             *[f"fy{y}" for y in years], *pracs, *units]
-    name = "-".join(parts)[:80] if parts else "all"
-    return Selection(out, re.sub(r"[^A-Za-z0-9._-]+", "-", name).strip("-").lower())
+    # Each value carries its filter's name, so '--practice digital' and
+    # '--unit digital' do not share a folder; a long name keeps a hash of
+    # the whole.
+    parts = [*[f"project-{x}" for x in projects], *[f"country-{x}" for x in countries],
+             *[f"region-{x}" for x in regions], *[f"fy{y}" for y in years],
+             *[f"practice-{x}" for x in pracs], *[f"unit-{x}" for x in units]]
+    name = re.sub(r"[^A-Za-z0-9._-]+", "-", "-".join(parts)).strip("-").lower() or "all"
+    if len(name) > 80:
+        name = name[:71].rstrip("-") + "-" + hashlib.sha256(name.encode()).hexdigest()[:8]
+    return Selection(out, name)
 
 
 # ------------------------------------------------------------------ preparing
@@ -144,26 +158,47 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
 # Each stage after fetching: the script, the code it depends on, and the files
 # it reads. It runs when any of those changed since it last ran.
 STAGES = [
-    ("projects", "projects.py", ["projects.py"],
-     [("projects_json", "*.json"), ("documents",), ("cohort",)]),
+    ("projects", "projects.py", ["projects.py", "fetch.py"],
+     [("projects_json", "*.json"), ("documents",), ("cohort",)],
+     [("projects",)]),
     ("clean", "clean.py",
      ["clean.py", "pdf_layout.py", "text_rules.py", "components.py", "sentences.py",
       "keys.py"],
-     [("documents",), ("pdf", "*.pdf")]),
-    ("components", "components.py", ["components.py", "text_rules.py", "keys.py"],
-     [("documents",), ("appraisal", "paragraphs.csv")]),
-    ("audit", "audit.py", ["audit.py"], [("appraisal", "paragraphs.csv")]),
+     [("documents",), ("pdf", "*.pdf")],
+     [("appraisal", "paragraphs.csv"), ("appraisal", "sentences.csv"),
+      ("appraisal", "document_parts.csv")]),
+    ("components", "components.py", ["components.py", "pdf_layout.py", "text_rules.py",
+                                     "keys.py"],
+     [("documents",), ("appraisal", "paragraphs.csv")],
+     [("appraisal", "components.csv")]),
+    ("audit", "audit.py", ["audit.py"], [("appraisal", "paragraphs.csv")],
+     [("reports", "audit.txt")]),
     ("clean_procurement", "clean_procurement.py",
      ["clean_procurement.py", "glue.py", "text_rules.py", "plan_table.py", "links.py",
       "keys.py"],
      [("procurement", "packages_raw.csv"), ("procurement", "notices_raw.csv"),
       ("procurement", "awards_raw.csv"), ("appraisal", "components.csv"),
-      ("appraisal", "paragraphs.csv")]),
+      ("appraisal", "paragraphs.csv")],
+     [("procurement", "packages.csv"), ("procurement", "notices.csv"),
+      ("procurement", "awards.csv"), ("procurement", "superseded_packages.csv")]),
     ("audit_procurement", "audit_procurement.py",
      ["audit_procurement.py", "glue.py", "clean_procurement.py"],
      [("procurement", "packages.csv"), ("procurement", "notices.csv"),
-      ("procurement", "awards.csv")]),
+      ("procurement", "awards.csv"), ("procurement", "packages_raw.csv"),
+      ("procurement", "notices_raw.csv"), ("procurement", "awards_raw.csv"),
+      ("text", "*.txt")],
+     [("reports", "audit_procurement.txt")]),
 ]
+
+
+def _library_versions():
+    """The PDF reader's version: an upgrade changes how text is read, so
+    every stage after it must run again (AGENTS.md rule 7)."""
+    try:
+        from importlib.metadata import version
+        return f"pdfplumber={version('pdfplumber')}"
+    except Exception:
+        return "pdfplumber=unknown"
 
 
 def _python():
@@ -193,6 +228,7 @@ def _fingerprint(data, code, inputs):
     its content checksum is in documents.csv, also an input. Any other file
     matched by a pattern is read whole."""
     h = hashlib.sha256()
+    h.update(_library_versions().encode())
     for name in code:
         with open(os.path.join(SRC, name), "rb") as fh:
             h.update(name.encode() + fh.read())
@@ -215,6 +251,21 @@ def _fingerprint(data, code, inputs):
                     h.update(block)
         else:
             h.update(f"{label}:missing".encode())
+    return h.hexdigest()
+
+
+def _outputs(data, outputs):
+    """SHA-256 over a stage's output files, or None if any is missing: a
+    stage whose output was removed or replaced is not up to date, whatever
+    its inputs say."""
+    h = hashlib.sha256()
+    for spec in outputs:
+        path = where(data, *spec)
+        if not os.path.exists(path):
+            return None
+        with open(path, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
     return h.hexdigest()
 
 
@@ -298,12 +349,20 @@ def prepare(sel=None, update=False, data=None, fetch=True):
                 done[p] = today
             _save_state(data, state)
             ran.append(script)
-    for name, script, code, inputs in STAGES:
+    for name, script, code, inputs, outputs in STAGES:
         fp = _fingerprint(data, code, inputs)
-        if state.get("stages", {}).get(name) == fp:
+        rec = state.get("stages", {}).get(name)
+        if isinstance(rec, str):                 # a state file from before outputs
+            rec = {"in": rec, "out": None}
+        out = _outputs(data, outputs)
+        if rec and rec["in"] == fp and out is not None and rec["out"] in (None, out):
+            if rec["out"] is None:
+                state["stages"][name] = {"in": fp, "out": out}
+                _save_state(data, state)
             continue
         _run(script, data=data, tail=2 if name.startswith("audit") else 0)
-        state.setdefault("stages", {})[name] = _fingerprint(data, code, inputs)
+        state.setdefault("stages", {})[name] = {"in": _fingerprint(data, code, inputs),
+                                                "out": _outputs(data, outputs)}
         _save_state(data, state)
         ran.append(name)
     if not ran:
@@ -353,9 +412,11 @@ def tables(sel=None, data=None, text=False):
         "components": [r for r in _read(where(data, "appraisal", "components.csv"))
                        if _in(sel, r["project_ids"])],
     }
-    docs = {r["doc_id"] for r in out["documents"]}
+    # By paragraph, not document: a shared document's other parts belong to
+    # other projects.
+    paras = {r["paragraph_id"] for r in out["paragraphs"]}
     out["sentences"] = [r for r in _read(where(data, "appraisal", "sentences.csv"))
-                        if r["doc_id"] in docs]
+                        if r["paragraph_id"] in paras]
     for name in ("packages", "superseded_packages", "notices", "awards"):
         out[name] = [r for r in _read(where(data, "procurement", f"{name}.csv"))
                      if r["project_id"] in sel]

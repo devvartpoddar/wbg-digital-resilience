@@ -37,7 +37,7 @@ def test_a_running_line_fingerprint_ignores_spacing_and_page_numbers():
         T.fingerprint("Rural Radio Project(P999001) 13")
 
 
-def test_tabular_detection_reads_gutters_before_whitespace_collapses():
+def test_a_row_of_figures_reads_as_tabular():
     laid_out = "Households reached       Number      0.00        1,200       2,400"
     assert T.looks_tabular(laid_out)
     assert not T.looks_tabular("The project will build masts in three districts.")

@@ -63,11 +63,6 @@ TAXONOMY = os.path.join(ROOT, "inputs", "taxonomy")
 QUERY_COLS = ["query_id", "label_id", "kind", "text", "text_sha256"]
 CONTEXT = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "component_number",
            "subcomponent_number", "component_key"]
-HIT_COLS = ["label_id", "rank", "score", "percentile", "best_query_id", "best_query",
-            "queries_agreeing", "queries"] + CONTEXT
-PARA_COLS = ["label_id", "paragraph_id", "doc_id", "project_ids", "component_number",
-             "component_key", "best_score", "best_percentile", "best_unit_id",
-             "best_query_id", "units_hit"]
 # Rows of the sentence matrix scored at a time, so memory stays flat.
 BLOCK = 20_000
 
@@ -95,6 +90,8 @@ def load_queries(name, folder=TAXONOMY):
     if not id_col or not name_col or "definition" not in rows[0]:
         raise SystemExit(f"search: {path} needs an *_id, a *_name and a definition column")
     labels = [r for r in rows if _active(r)]
+    if not labels:
+        raise SystemExit(f"search: {path} has no active label")
     ids = [r[id_col].strip() for r in labels]
     if len(ids) != len(set(ids)):
         raise SystemExit(f"search: {path} repeats a label id")
@@ -223,6 +220,7 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump({"label_set": name, "version": os.path.basename(out).rsplit("-", 1)[1],
                    "labels": labels, "queries": len(queries), "units": n_units,
+                   "index_sha256": _sha_file(idx),
                    "model": model, "dimensions": dim, "created_at":
                    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
                   fh, indent=2, sort_keys=True)
@@ -235,6 +233,29 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
 
 
 # ---------------------------------------------------------------- the filters
+
+def _sha_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
+
+
+def load_run(folder, data):
+    """(queries, scores, index) of a scored run, refusing one scored against
+    another sentence index: its rows would be read against the wrong units."""
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
+        manifest = json.load(fh)
+    idx = _paths(data)[1]
+    index = _rows(idx)
+    scores = numpy.load(os.path.join(folder, "scores.npy"), mmap_mode="r")
+    if scores.shape[0] != len(index) or \
+            manifest.get("index_sha256", _sha_file(idx)) != _sha_file(idx):
+        raise SystemExit(f"search: {os.path.basename(folder)} was scored against another "
+                         f"sentence index; run ./wbg search again")
+    return _rows(os.path.join(folder, "queries.csv")), scores, index
+
 
 def percentiles(scores):
     """Each score's percentile among all units for the same query (0-100],
@@ -250,11 +271,13 @@ def percentiles(scores):
 
 def hits(folder, data, min_score=None, min_percentile=None, top=None, labels=None,
          projects=None, kinds=None):
-    """The units that pass every filter given, per label, best first."""
-    queries = _rows(os.path.join(folder, "queries.csv"))
-    scores = numpy.load(os.path.join(folder, "scores.npy"))
+    """The units that pass every filter given, per label, best first. A unit's
+    score is its best cosine over the label's queries; its percentile is its
+    best percentile over them, which may come from another query: raw cosine
+    is not comparable between queries, a percentile within each is."""
+    queries, scores, index = load_run(folder, data)
+    scores = numpy.asarray(scores)
     pct = percentiles(scores)
-    index = _rows(_paths(data)[1])
     by_label = defaultdict(list)
     for j, q in enumerate(queries):
         by_label[q["label_id"]].append(j)
@@ -266,7 +289,7 @@ def hits(folder, data, min_score=None, min_percentile=None, top=None, labels=Non
         sub = scores[:, cols]
         best_col = sub.argmax(axis=1)
         best = sub[numpy.arange(len(sub)), best_col]
-        best_pct = pct[:, cols][numpy.arange(len(sub)), best_col]
+        best_pct = pct[:, cols].max(axis=1)
         agree = (pct[:, cols] >= (min_percentile or 100.0)).sum(axis=1) \
             if min_percentile is not None else numpy.zeros(len(sub), dtype=int)
         keep = numpy.ones(len(sub), dtype=bool)

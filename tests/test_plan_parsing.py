@@ -452,3 +452,30 @@ class TestTheWrapJoinAndTheLoanCell:
         assert not any("ZZ-AAAAA-111111-CS-INDV / Belongs to neither" in l for l in out)
         assert any("ZZ-BBBBB-222222-GO-RFQ / A different package" in l for l in out)
 
+
+
+@pytest.mark.parametrize("line,ref", [
+    ("GE-OPEN NET-198838-CS-INDV / HLD Consultant", "GE-OPEN NET-198838-CS-INDV"),
+    ("GH-MOC--286422-CS-QCBS / Legal framework", "GH-MOC--286422-CS-QCBS"),
+    ("ZR-UGP - PTN-527452-GO-RFQ / Mise en place", "ZR-UGP - PTN-527452-GO-RFQ"),
+    ("RW-RISA-309523-GO-RFB-(1.2) / Purchase of laptops", "RW-RISA-309523-GO-RFB-(1.2)"),
+    ("MN-MDDC-406526-CS-INDV-4.1.4 / Technical Specialist", "MN-MDDC-406526-CS-INDV-4.1.4")])
+def test_unusual_reference_shapes_are_read(line, ref):
+    m = F.REF_RE.match(line)
+    assert m and m.group(1) == ref
+
+
+def test_a_clipped_head_takes_a_tail_that_looks_like_a_record():
+    lines = [" ET-AAAAA-BBBBB-160097-", "GO-RFB / Procurement of servers"]
+    assert F._join_wrapped_refs(lines) == ["ET-AAAAA-BBBBB-160097-GO-RFB / Procurement of servers"]
+
+
+def test_a_year_after_a_slash_is_not_the_reference():
+    assert PT.split_ref_chain("INDV-001-HDAP / 2023 / Specialist", "INDV-001-HDAP")[0] == \
+        "INDV-001-HDAP"
+
+
+def test_a_stored_response_keeps_no_personal_field():
+    rec = {"id": "OP1", "contact_name": "x", "contact_email": "y", "teammemfullname": "z",
+           "bid_description": "Servers"}
+    assert F._without_personal(rec) == {"id": "OP1", "bid_description": "Servers"}

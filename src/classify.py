@@ -50,7 +50,7 @@ ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 PRICE_PER_MTOK = 0.042
 # The endpoint takes 32,000 tokens per request; a request is refused well
 # before that rather than truncated.
-MAX_REQUEST_CHARS = 90_000
+MAX_REQUEST_CHARS = 60_000
 BLOCKS = ("narrative", "annex")
 WORKERS = 6
 SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
@@ -60,6 +60,11 @@ SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "labe
 
 class TransportError(RuntimeError):
     """A request did not yield a usable answer; it is retried on a later run."""
+
+
+class Refused(RuntimeError):
+    """The endpoint refused the request outright (bad key, no credit, bad
+    payload): every other request would be refused too, so the run stops."""
 
 
 # ------------------------------------------------------------------ the labels
@@ -73,6 +78,8 @@ def load_labels(name, folder=TAXONOMY):
     labels = [{"id": r[id_col].strip(), "name": r[name_col].strip(),
                "definition": " ".join(r["definition"].split())}
               for r in rows if _active(r)]
+    if not labels:
+        raise SystemExit(f"classify: {name}.csv has no active label")
     path = os.path.join(folder, f"{name}_scale.csv")
     if not os.path.exists(path):
         raise SystemExit(f"classify: {path} is missing: the grades are a person's "
@@ -122,10 +129,15 @@ def paragraphs(data, blocks=BLOCKS):
         if hashlib.sha256(body.encode("utf-8")).hexdigest() != r["text_sha256"]:
             raise SystemExit(f"classify: {r['paragraph_id']} does not match its recorded "
                              f"hash - re-run src/clean.py first")
-        comp = r.get("subcomponent_number") or r.get("component_number") or ""
+        # The sub-component if there is one, else the component: its number
+        # and the data sheet's name, or failing that the heading's own title.
+        sub = r.get("subcomponent_number") or ""
+        comp = sub or r.get("component_number") or ""
+        name = names.get((did, comp)) or \
+            (r.get("subcomponent_name") if sub else r.get("component_name")) or ""
         state = {"section": r.get("section_title", ""), "passage": body}
         if comp:
-            state["component"] = f"{comp} {names.get((did, comp), '')}".strip()
+            state["component"] = f"{comp} {name}".strip()
         out.append({"row": r, "state": state})
     return out
 
@@ -170,6 +182,8 @@ def write_cached(root, sha, response):
 def check(response, qs, n_grades):
     """A response is stored only if every question has a full set of grade
     probabilities."""
+    if not isinstance(response, dict):
+        raise TransportError(f"response is not an object: {str(response)[:200]}")
     answers = response.get("answers") or {}
     for qid in qs:
         a = answers.get(qid) or {}
@@ -190,8 +204,7 @@ def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
             if r.status_code in (408, 409, 429, 500, 502, 503, 504, 520, 522, 524, 529):
                 raise TransportError(f"HTTP {r.status_code}: {r.text[:200]}")
             if 400 <= r.status_code < 500:
-                raise SystemExit(f"classify: HTTP {r.status_code} from {endpoint}\n  "
-                                 f"{r.text[:500]}")
+                raise Refused(f"HTTP {r.status_code} from {endpoint}: {r.text[:500]}")
             r.raise_for_status()
             try:
                 return r.json()
@@ -225,6 +238,10 @@ def fetch_missing(todo, root, qs, n_grades, *, api_key, log, workers=WORKERS):
                 stored += 1
             except TransportError as exc:
                 failures.append((futures[f], str(exc)[:200]))
+            except Refused as exc:
+                pool.shutdown(wait=True, cancel_futures=True)
+                raise SystemExit(f"classify: refused, stopping ({stored:,} stored so far; "
+                                 f"run again to resume): {exc}")
             if n % 500 == 0 or n == len(todo):
                 log(f"  {n:,}/{len(todo):,} asked, {stored:,} stored, "
                     f"{len(failures)} failed, US${cost:.3f}")
@@ -233,12 +250,13 @@ def fetch_missing(todo, root, qs, n_grades, *, api_key, log, workers=WORKERS):
 
 # ------------------------------------------------------------------- the run
 
-def version(model, qs, paras):
+def version(paras, shas):
+    """Over every paragraph id and the SHA-256 of the exact request sent for
+    it (model, state and questions), so anything that changes what is asked
+    gives a new version."""
     h = hashlib.sha256()
-    h.update(model.encode())
-    h.update(json.dumps(qs, sort_keys=True).encode())
-    for p in paras:
-        h.update(f"{p['row']['paragraph_id']}:{p['row']['text_sha256']}\n".encode())
+    for p, sha in zip(paras, shas):
+        h.update(f"{p['row']['paragraph_id']}:{sha}\n".encode())
     return h.hexdigest()[:12]
 
 
@@ -247,13 +265,14 @@ def score_rows(p, response, labels):
     for lab in labels:
         a = response["answers"][lab["id"]]
         probs = [float(a["probabilities"][k]) for k in sorted(a["probabilities"], key=int)]
+        total = sum(probs) or 1.0
         r = p["row"]
         out.append({"paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
                     "project_ids": r["project_ids"],
                     "component_number": r.get("component_number", ""),
                     "label_id": lab["id"],
                     "grade": max(range(len(probs)), key=lambda i: probs[i]),
-                    "expected": f"{float(a.get('score', 0)):.3f}",
+                    "expected": f"{sum(i * q for i, q in enumerate(probs)) / total:.3f}",
                     "confidence": f"{float(a.get('confidence', 0)):.3f}",
                     **{f"p{i}": (f"{probs[i]:.4f}" if i < len(probs) else "")
                        for i in range(5)},
@@ -261,10 +280,9 @@ def score_rows(p, response, labels):
     return out
 
 
-def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
-             dry_run=False, log=print, workers=WORKERS):
-    """Classify the label set; returns the run folder (None on a dry run or
-    when requests failed - run again to resume)."""
+def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0):
+    """Everything a run would send, without sending it: (labels, scale,
+    questions, [(paragraph, request body)], request SHA-256s, run folder)."""
     labels, scale = load_labels(name, taxonomy)
     qs = questions(labels, scale)
     paras = paragraphs(data)
@@ -275,13 +293,34 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         if len(json.dumps(body, ensure_ascii=False)) > MAX_REQUEST_CHARS:
             raise SystemExit(f"classify: {p['row']['paragraph_id']} makes a request over "
                              f"{MAX_REQUEST_CHARS:,} characters; not truncated")
-    root = cache_root(data, model)
     shas = [request_sha(b) for _, b in bodies]
+    prefix = "smoke_" if limit else ""
+    out = where(data, "classify", f"{prefix}{name}-{version(paras, shas)}")
+    return labels, scale, qs, bodies, shas, out
+
+
+def current_run(name, data, taxonomy=TAXONOMY):
+    """The run folder for the label set and paragraphs as they stand now, or
+    None if that run has not been written."""
+    out = plan(name, data, taxonomy=taxonomy)[-1]
+    return out if os.path.exists(os.path.join(out, "manifest.json")) else None
+
+
+def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
+             dry_run=False, log=print, workers=WORKERS):
+    """Classify the label set; returns the run folder (None on a dry run or
+    when requests failed - run again to resume)."""
+    labels, scale, qs, bodies, shas, out = plan(name, data, model=model, taxonomy=taxonomy,
+                                                limit=limit)
+    log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} paragraphs")
+    if os.path.exists(os.path.join(out, "manifest.json")):
+        log(f"  already written: {out}")
+        return out
+    root = cache_root(data, model)
     missing = [(s, b) for s, (_, b) in zip(shas, bodies) if read_cached(root, s) is None]
     todo = list({s: (s, b) for s, b in missing}.values())   # identical paragraphs ask once
     chars = sum(len(json.dumps(b, ensure_ascii=False)) for _, b in todo)
-    log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(paras):,} paragraphs")
-    log(f"  stored already: {len(paras) - len(missing):,}; to ask: {len(todo):,} "
+    log(f"  stored already: {len(bodies) - len(missing):,}; to ask: {len(todo):,} "
         f"(about {chars / 4 / 1e6:.1f}M tokens, US${chars / 4 / 1e6 * PRICE_PER_MTOK:.2f})")
     if dry_run:
         log("  --dry-run: no request made, nothing written")
@@ -299,11 +338,6 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
             log(f"    {sha[:12]}: {err}")
         return None
 
-    prefix = "smoke_" if limit else ""
-    out = where(data, "classify", f"{prefix}{name}-{version(model, qs, paras)}")
-    if os.path.exists(os.path.join(out, "manifest.json")):
-        log(f"  already written: {out}")
-        return out
     rows, served = [], {}
     for (p, _), sha in zip(bodies, shas):
         response = read_cached(root, sha)
@@ -317,14 +351,16 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         w.writerows(rows)
     manifest = {"label_set": name, "model_requested": model, "models_served": served,
                 "endpoint": ENDPOINT, "labels": [lab["id"] for lab in labels],
-                "scale": scale, "paragraphs": len(paras), "questions": qs}
+                "scale": scale, "paragraphs": len(bodies), "questions": qs,
+                "question_sha256": question_shas(qs)}
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=1, ensure_ascii=False)
     os.replace(part, out)
+    prefix = "smoke_" if limit else ""
     report = where(data, "reports", f"{prefix}classify_{name}.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:
-        fh.write(f"{name}: {len(paras):,} paragraphs x {len(labels)} labels -> {out}\n"
+        fh.write(f"{name}: {len(bodies):,} paragraphs x {len(labels)} labels -> {out}\n"
                  f"models served: {served}\n")
         for lab in labels:
             grades = [r["grade"] for r in rows if r["label_id"] == lab["id"]]
@@ -334,6 +370,13 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         log(f"  warning: more than one model snapshot served: {served}")
     log(f"  wrote {out}")
     return out
+
+
+def question_shas(qs):
+    """{label_id: SHA-256 of the exact question asked}: a grade a person gave
+    under one wording of a label is not a grade under another."""
+    return {k: hashlib.sha256(json.dumps(v, sort_keys=True).encode("utf-8")).hexdigest()
+            for k, v in qs.items()}
 
 
 def main():
