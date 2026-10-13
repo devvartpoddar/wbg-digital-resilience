@@ -102,7 +102,7 @@ Each PDF is read by layout with pdfplumber 0.11.10 (the version is pinned in req
 
 **Page by page:**
 
-1. Drop every character set at an angle, read from its text matrix. This removes the "Public Disclosure Authorized" stamp down the page margin.
+1. Drop every character set at an angle, read from its text matrix. This removes the "Public Disclosure Authorized" stamp down the page margin. Drop every character drawn wholly outside the page: some documents set a "For Official Use Only" stamp off the left edge, printed five times over, which would otherwise be read into the body line level with it.
 2. Read the lines of text with their position, size, and whether they are bold or italic. A line made only of characters under 6 points is dropped.
 3. Keep a copy of every line exactly as the PDF gives it. Together these form the document's raw text, written to `data/raw/pdf_text/{doc_id}.txt` (one line per line, a form feed between pages).
 4. Within each line:
@@ -131,13 +131,16 @@ Each PDF is read by layout with pdfplumber 0.11.10 (the version is pinned in req
 **Lines are grouped into units (paragraphs):**
 
 15. A body line continues the paragraph above when it follows at the normal line spacing on the same page (up to 1.45 times the median spacing, `pdf_layout.LINE_GAP`); or the paragraph had not finished its sentence and the page turned; or the paragraph had not finished its sentence, the line opens in lower case, and a table, heading or footnote came in between; or the paragraph had not finished its sentence, the line opens in lower case, and it sits within three line-spacings (`pdf_layout.LOOSE_GAP`; a paragraph set with looser spacing).
-16. A line does not continue the paragraph when it opens a new block: a bullet glyph always does; a paragraph number ("23.") or an enumerator ("(ii)", "a)", "3)") does only when the text before it ended at a stopping point (. : ; ! ? or a closing bracket or quote, or "and"/"or"). A wrapped cross-reference such as "as described in sub-part (ii) above" therefore stays one paragraph.
+16. A line does not continue the paragraph when it opens a new block: a bullet glyph always does; a paragraph number ("23.") or an enumerator ("(ii)", "a)", "3)") does only when the text before it ended at a stopping point (. : ; ! ? or a closing bracket or quote, or "and"/"or"). A wrapped cross-reference such as "as described in sub-part (ii) above" therefore stays one paragraph. An enumerator that is the next in a list the paragraph began inline ("... best practices on: (a) civil registration;" then a line "(b) national identification ...") does not open a block either.
+
+    A list item - a line opening with a bullet glyph or an enumerator that opens a block - joins the paragraph above it on a line of its own, rather than starting a paragraph: "(b) Active infrastructure procurement" means nothing without "Sub-component 1.1 will finance:". It joins across a page turn and the footnotes in between, but not past a heading, a caption or a table, which start a new context; a list there starts its own paragraph. Its bullet glyph is removed. So a paragraph is its lead-in and all its items, one per line.
+
 17. A word broken by a hyphen at a line end is joined without the hyphen when the document uses the whole word unbroken elsewhere; otherwise the hyphen is real and kept ("climate-resilient").
 18. A footnote line that does not open with a number continues the footnote above; the number a footnote opens with is removed from its text (a year such as 2016 at the start is not mistaken for one).
 
 **Each unit is then finished:**
 
-19. A leading bullet glyph is removed and the unit is marked `list_item`. A unit opening with an enumerator is also marked `list_item`. The last body paragraph ending in ":" before a list is recorded as the list's lead-in (`lead_in_id`).
+19. A unit that opens with a list item (a list with no paragraph above to join, step 16) has its bullet glyph removed and is marked `list_item`.
 20. Every web address becomes "[link]", including the pieces a line break left after a space. (1,881 on the current run.)
 21. A unit with no letter or digit at all (a lone "$" from a logo) is dropped. (113 on the current run.)
 22. Sections: a line such as "II. PROJECT DESCRIPTION" opens a top-level section; "ANNEX 2: ..." opens an annex (only after the first top-level section, so the contents page cannot); a lettered heading "B. Project Components" opens a sub-section. Each unit records its section path ("II.B") and title.
@@ -183,13 +186,15 @@ Tables are kept in the tables for reading. They are not given to the model and a
 
    A paragraph takes the project(s) of the part it starts in, and components are read part by part, so each country keeps its own list and costs. A document listed under one project, or one whose data sheets name none of its listed projects, is one part with the listing (a parent project and its additional financing share a paper that names no single operation). On the current run one document is split: IDEA, into the regional part, DRC, Angola, Malawi and a programme-wide part.
 3. A unit with fewer than 5 words is dropped, unless it is a heading or a section or annex title, and recorded in `data/appraisal/rejected.csv` with its reason. (5,065 on the current run.)
-4. Each kept unit becomes a row of `data/appraisal/paragraphs.csv` with: a positional identifier (`{doc_id}:p00042`), the project(s), section path and title, block, character offsets into the cleaned text file (the text itself is not stored in the table), word count, SHA-256 of the text, pages, the parser's identity, `for_model`, `list_item`, `lead_in_id` (blank when the lead-in was itself dropped), `table_id`, `raw_start`/`raw_end`, and the component tags (section 2.6).
+4. Each kept unit becomes a row of `data/appraisal/paragraphs.csv` with: a positional identifier (`{doc_id}:p00042`), the project(s), section path and title, block, character offsets into the cleaned text file (the text itself is not stored in the table), word count, SHA-256 of the text, pages, the parser's identity, `for_model`, `list_item`, `table_id`, `raw_start`/`raw_end`, and the component tags (section 2.6).
 5. `for_model` is true for `narrative`, `annex` and `footnote` paragraphs, except a footnote that is only a reference and a link (fewer than 15 words besides "[link]"). It is false for front matter, tables and headings. Embedding and the decision model read only these paragraphs. (18,475 of 55,792 paragraphs: 10,394 narrative, 4,193 annex and 3,888 footnotes on the current run.)
 6. Narrative and annex paragraphs are split into sentences, stored in `data/appraisal/sentences.csv` as offsets inside their paragraph. A boundary is a full stop, question or exclamation mark followed by a space and a capital, digit or opening bracket, except:
    - after an abbreviation (e.g., i.e., etc., No., para., U.S., Mr., Fig., months and about forty others), or a single-letter initial;
    - inside the leading paragraph number ("38.");
    - where the sentence so far has fewer than three words ("See above." stays with what follows).
-   Footnotes are not split: they are mostly references.
+   Each list item is its own sentence, however short: each line of a paragraph (a list set out line by line, section 2.2 step 16) is split on its own, and an inline list ("... on: (a) civil registration; (b) national ID; and (c) ...") is cut after the colon or semicolon before each enumerator. A search then finds the item that names an asset or a measure.
+   A form answer standing alone ("N/A", "None", "Not applicable") is not a sentence and is left out.
+   Footnotes are not split: they are mostly references, and each is one search unit.
 7. The re-parse check: before writing, each paragraph is compared with the previous run's. A paragraph whose text changed while the parser did not means the read is not reproducible; the run stops and writes nothing. A change under a new parser is expected and is counted in the report.
 8. A paragraph identifier repeated across documents stops the run (it would mean a regional document was listed twice).
 
@@ -354,7 +359,7 @@ The rules use four short hand-written lists, which block or permit a decision bu
 Each check has a gate in the tests, set just above the measured rate, so a regression fails.
 
 **Reading by eye** (`src/review_sheets.py`): two spreadsheets in `data/review/` with empty `ok` and `note` columns.
-- *Paragraphs*: 100 paragraphs drawn from those given to the model. Each shows the cleaned text, its sentences, and the stretch of raw PDF text it was built from (including anything cleaning removed from between its lines).
+- *Paragraphs*: 100 paragraphs drawn from those given to the model. Each shows the cleaned text, its sentences as the pipeline wrote them (a footnote is marked as searched whole), and the stretch of raw PDF text it was built from (including anything cleaning removed from between its lines).
 - *Packages*: 100 packages with the raw description beside every cleaned field.
 
 An existing sheet is never overwritten; a new draw takes a new `--seed`.

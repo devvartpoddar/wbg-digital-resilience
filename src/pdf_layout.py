@@ -143,6 +143,20 @@ def _not_rotated(obj):
     return abs(m[1]) < 0.1 and abs(m[2]) < 0.1
 
 
+def _on_page(bbox):
+    """A filter dropping characters drawn wholly outside the page: the 'For
+    Official Use Only' stamp some documents set off the left edge, five
+    copies deep, which a line reader otherwise pulls into the body line
+    level with it ('FFFFFooooorrrrr OOOOOffff...')."""
+    x0, top, x1, bottom = bbox
+
+    def keep(obj):
+        if obj.get("object_type") != "char":
+            return True
+        return obj["x1"] > x0 and obj["x0"] < x1 and obj["bottom"] > top and obj["top"] < bottom
+    return keep
+
+
 def _page_lines(page):
     """(lines, raw): the level lines on a page as dicts (top, bottom, x0, x1,
     size, bold, italic, text, raw_i), and every line exactly as the PDF gives
@@ -381,6 +395,38 @@ def _contents_entry(text):
 
 
 GLYPH_BULLET = re.compile(r"^\s*[•●▪■◦](?:\s+|(?=[A-Z]))")
+LIST_ITEM = re.compile(f"{BULLET_OPEN.pattern}|{GLYPH_BULLET.pattern}")
+
+
+ROMAN_SEQ = ["i", "ii", "iii", "iv", "v", "vi", "vii", "viii", "ix", "x", "xi", "xii"]
+LINE_MARKER = re.compile(r"^\s*\(?([a-z]|[ivx]{1,4}|\d{1,2})[\).]\s")
+INLINE_MARKER = re.compile(r"(?<=[\s:;,])\(([a-z]|[ivx]{1,4}|\d{1,2})\)\s")
+
+
+def _next_markers(marker):
+    """The markers that follow this one in a list: '(a)' -> b, '(ii)' -> iii,
+    '(3)' -> 4. 'i' is both a letter and a numeral, so both successors."""
+    out = set()
+    if marker.isdigit():
+        out.add(str(int(marker) + 1))
+    if len(marker) == 1 and marker.isalpha() and marker < "z":
+        out.add(chr(ord(marker) + 1))
+    if marker in ROMAN_SEQ[:-1]:
+        out.add(ROMAN_SEQ[ROMAN_SEQ.index(marker) + 1])
+    return out
+
+
+def _continues_inline_list(line, before):
+    """Does this line carry on a list the paragraph began inline? '... best
+    practices on: (a) civil registration systems;' then a new line '(b)
+    national identification systems; (c) ...': the list is the paragraph's,
+    so (b) does not open a paragraph of its own. Only when the paragraph did
+    not itself open with a marker - then its items are separate list items."""
+    m = LINE_MARKER.match(line)
+    if not m:
+        return False
+    inline = INLINE_MARKER.findall(before)
+    return bool(inline) and m.group(1) in _next_markers(inline[-1])
 
 
 def _opens_block(line, before):
@@ -392,6 +438,8 @@ def _opens_block(line, before):
     if GLYPH_BULLET.match(line):
         return True
     if not (C.NUMBERED_PARA.match(line) or BULLET_OPEN.match(line)):
+        return False
+    if _continues_inline_list(line, before):
         return False
     tail = before.rstrip()
     return bool(re.search(r"[.:;!?)\"]$", tail) or re.search(r"\b(?:and|or)$", tail))
@@ -406,15 +454,15 @@ def extract(pdf, raw_out=None):
     sheet shows a paragraph's source without searching for it.
 
     spans: (start, end, section_path, section_title, block, page_from, page_to,
-            meta) - meta holds, where they apply: list_item, lead_in (index of
-            the span that introduces the list), and for a table row its table
-            number, row, cells, header and caption
+            meta) - meta holds, where they apply: list_item, and for a table row
+            its table number, row, cells, header and caption. A list set out
+            line by line sits in the paragraph above it, one item per line
     """
     stats = Counter()
     pages, tables = [], []
     raw_parts, cursor = [], 0
     for page in pdf.pages:
-        page = page.filter(_not_rotated)
+        page = page.filter(_not_rotated).filter(_on_page(page.bbox))
         lines, raw = _page_lines(page)
         offs = []
         for r in raw:
@@ -635,6 +683,18 @@ def extract(pdf, raw_out=None):
                 u[3] = pno
                 extend(u, l)
                 joined = True
+            # A list item belongs to the paragraph above it: '(b) Active
+            # infrastructure...' means nothing without 'Sub-component 1.1 will
+            # finance:'. It joins that paragraph on a line of its own, across a
+            # page turn and its footnotes, but not past a heading, a caption or
+            # a table, which start a new context.
+            elif opens_block and LIST_ITEM.match(text) and prev in ("body", "footnote") \
+                    and pno - ppno <= 1:
+                u = units[last_body]
+                u[1] = u[1].rstrip() + "\n" + GLYPH_BULLET.sub("", text, count=1).strip()
+                u[3] = pno
+                extend(u, l)
+                joined = True
         if not joined:
             start("body", text, pno, line=l)
             last_body = len(units) - 1
@@ -645,12 +705,12 @@ def extract(pdf, raw_out=None):
     clean_parts, spans, cursor = [], [], 0
     sec_path, sec_title = "", ""
     annex_seen = roman_seen = False
-    lead_in = None                  # index in spans of the sentence that opens a list
     for kind, text, p0, p1, meta in units:
         text = text.strip()
         meta = dict(meta)
         # A bullet glyph is layout, not text: strip it and record that the
-        # unit is a list item, with the sentence that introduced the list.
+        # unit opens with a list item - one with no paragraph above it to
+        # join (a list straight after a heading or a table).
         if GLYPH_BULLET.match(text):
             text = GLYPH_BULLET.sub("", text, count=1).strip()
             meta["list_item"] = True
@@ -691,12 +751,6 @@ def extract(pdf, raw_out=None):
                 block = "table"
         elif block == "table" and not roman_seen:
             block = "frontmatter"
-        if meta.get("list_item") and lead_in is not None:
-            meta["lead_in"] = lead_in
-        elif kind == "body" and not meta.get("list_item"):
-            lead_in = len(spans) if re.search(r":$", text) else None
-        if block == "heading":
-            lead_in = None
         clean_parts.append(text + "\n\n")
         spans.append((cursor, cursor + len(text), sec_path, sec_title[:120], block, p0, p1,
                       meta))

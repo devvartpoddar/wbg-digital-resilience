@@ -65,6 +65,12 @@ def _corpus(tmp_path, for_model="true"):
                     "char_start": 0, "char_end": len(clean), "raw_start": start,
                     "raw_end": len(raw) - 1, "for_model": for_model,
                     "block": "narrative"})
+    with open(data / "appraisal" / "sentences.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=["sentence_id", "paragraph_id", "char_start",
+                                           "char_end"])
+        w.writeheader()
+        w.writerow({"sentence_id": "D1:p00001:s001", "paragraph_id": "D1:p00001",
+                    "char_start": 4, "char_end": len(clean)})
     return data, raw[start:len(raw) - 1]
 
 
@@ -73,6 +79,9 @@ def test_the_raw_column_is_the_pdf_text_the_paragraph_came_from(tmp_path):
     rows, missed = RS.paragraph_rows(str(data), 5, 1)
     assert missed == 0 and rows[0]["raw"] == expected
     assert "Page 4 of 9" in rows[0]["raw"]          # what cleaning removed is shown
+    # The sentences shown are the pipeline's own, read back from sentences.csv.
+    assert rows[0]["sentences"] == "[1] The ministry will build shelters on raised " \
+        "plinths above the flood line."
 
 
 def test_paragraphs_not_given_to_the_model_are_not_sampled(tmp_path):

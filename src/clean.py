@@ -36,7 +36,7 @@ DOC_PART_COLS = ["doc_id", "part", "char_start", "char_end", "project_ids", "ass
 PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
              "section_title", "block", "char_start", "char_end", "n_tokens",
              "text_sha256", "page_from", "page_to", "parser",
-             "for_model", "list_item", "lead_in_id", "table_id", "raw_start", "raw_end",
+             "for_model", "list_item", "table_id", "raw_start", "raw_end",
              "component_number", "subcomponent_number", "component_mentions"]
 REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
 
@@ -242,8 +242,6 @@ def main():
                 "for_model": str(block in MODEL_BLOCKS
                                  and not citation_only(body, block)).lower(),
                 "list_item": str(bool(meta.get("list_item"))).lower(),
-                "lead_in_id": (f"{did}:p{meta['lead_in'] + 1:05d}"
-                               if "lead_in" in meta else ""),
                 "table_id": f"{did}:t{meta['table']:03d}" if "table" in meta else "",
                 "raw_start": src[0], "raw_end": src[1],
                 "component_number": comp, "subcomponent_number": sub,
@@ -260,13 +258,6 @@ def main():
                         "n_tokens": len(TOKEN.findall(st)),
                         "text_sha256": hashlib.sha256(st.encode("utf-8")).hexdigest(),
                     })
-        # A list's introducing sentence may itself have been dropped as too
-        # short; then the list has no lead-in to point at.
-        ids = {p["paragraph_id"] for p in doc_paras}
-        for p in doc_paras:
-            if p["lead_in_id"] and p["lead_in_id"] not in ids:
-                p["lead_in_id"] = ""
-                stats["lead_in_dropped"] += 1
         paras.extend(doc_paras)
         # Retention: how much of the PDF's text survives cleaning. Headers,
         # page numbers, contents lines and footnote markers are a few per

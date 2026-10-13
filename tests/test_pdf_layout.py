@@ -65,7 +65,8 @@ def test_a_contents_entry_without_leaders_is_recognised(line, expected):
 @pytest.mark.parametrize("line,before,expected", [
     ("• Inclusion of women", "the following:", True),
     ("(ii) above; and support for", "as described in sub-part", False),
-    ("(ii) establishment of a centre", "support for (i) a study;", True),
+    # The next item of a list the paragraph began inline continues it.
+    ("(ii) establishment of a centre", "support for (i) a study;", False),
     ("23. The project will", "as a result.", True),
     ("23. The project will", "reaching about", False),
 ])
@@ -86,7 +87,8 @@ def test_dehyphenation_follows_the_document():
     ("38. Component 3 seeks to enhance, e.g. data centres. It will finance U.S. kit.",
      ["38. Component 3 seeks to enhance, e.g. data centres.", "It will finance U.S. kit."]),
     ("The project will finance: (a) towers; (b) fiber. No. 5 is excluded.",
-     ["The project will finance: (a) towers; (b) fiber.", "No. 5 is excluded."]),
+     # Each item of an inline list is its own sentence, however short.
+     ["The project will finance:", "(a) towers;", "(b) fiber.", "No. 5 is excluded."]),
     ("It costs US$3.2 million (see Annex 2). Mr. J. Smith agreed.",
      ["It costs US$3.2 million (see Annex 2).", "Mr. J. Smith agreed."]),
     ("No full stop at the end", ["No full stop at the end"]),
@@ -119,3 +121,49 @@ def test_a_rotated_character_is_dropped_and_a_level_one_kept():
     assert PL._not_rotated({"object_type": "char", "matrix": (1, 0, 0, 1, 5, 5)})
     assert not PL._not_rotated({"object_type": "char", "matrix": (0, 1, -1, 0, 5, 5)})
     assert PL._not_rotated({"object_type": "rect"})
+
+
+def test_an_inline_list_is_split_one_item_per_sentence():
+    t = ("The Project draws on: (a) civil registration systems; (b) national "
+         "identification systems; and (c) legal frameworks for privacy. It also draws "
+         "on other projects.")
+    assert [t[a:b] for a, b in S.split(t)] == [
+        "The Project draws on:", "(a) civil registration systems;",
+        "(b) national identification systems; and",
+        "(c) legal frameworks for privacy.", "It also draws on other projects."]
+
+
+def test_a_list_begun_inline_carries_on_across_a_line_break():
+    before = "57. The Project draws on best practices on: (a) civil registration systems;"
+    assert PL._opens_block("(b) national identification systems; (c) legal", before) is False
+    # A paragraph that is itself a list item: the next item is its own.
+    assert PL._opens_block("(b) next item", "(a) first item of a bulleted list;") is True
+    # Only the next marker in sequence continues the list.
+    assert PL._opens_block("(c) a later item", "on: (a) civil registration;") is True
+
+
+def test_a_character_drawn_off_the_page_is_dropped():
+    keep = PL._on_page((0, 0, 600, 800))
+    char = {"object_type": "char", "x0": 10, "x1": 15, "top": 100, "bottom": 110}
+    assert keep(char)
+    assert not keep(dict(char, x0=-110, x1=-105))     # the stamp left of the page
+    assert keep(dict(char, x0=-2, x1=3))              # half on the page stays
+    assert keep({"object_type": "rect", "x0": -50, "x1": -40, "top": 0, "bottom": 5})
+
+
+def test_a_list_set_out_line_by_line_splits_one_item_per_sentence():
+    t = ("36. Sub-component 1.2 will finance consultancies for:\n(a) technical "
+         "analysis;\n(b) towers; and\n(c) procurement support.")
+    assert [t[a:b] for a, b in S.split(t)] == [
+        "36. Sub-component 1.2 will finance consultancies for:", "(a) technical analysis;",
+        "(b) towers; and", "(c) procurement support."]
+    # A one-word item stands alone on its own line.
+    t = "The project will finance:\nFiber\nTowers"
+    assert [t[a:b] for a, b in S.split(t)] == ["The project will finance:", "Fiber", "Towers"]
+
+
+@pytest.mark.parametrize("answer", ["N/A", "N/A.", "None", "Not applicable."])
+def test_a_form_answer_alone_is_not_a_sentence(answer):
+    t = f"Describe any project alternatives considered to avoid impacts. {answer}"
+    assert [t[a:b] for a, b in S.split(t)] == [
+        "Describe any project alternatives considered to avoid impacts."]

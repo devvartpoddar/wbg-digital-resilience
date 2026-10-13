@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Write two plain spreadsheets for reading the cleaning by eye.
 
-Reads  data/appraisal/paragraphs.csv, data/appraisal/text/{doc_id}.txt,
+Reads  data/appraisal/{paragraphs,sentences}.csv, data/appraisal/text/{doc_id}.txt,
        data/raw/pdf_text/{doc_id}.txt, data/procurement/packages.csv
-Writes data/review/paragraphs_s{seed}.xlsx    100 paragraphs: cleaned, split into
+Writes data/review/paragraphs_s{seed}.xlsx    100 paragraphs: cleaned, the pipeline's
                                               sentences, and the raw text beside them
        data/review/packages_s{seed}.xlsx      100 packages, raw next to cleaned
 
@@ -30,7 +30,6 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where                    # noqa: E402
 from review import draw                        # noqa: E402
-import sentences                               # noqa: E402
 
 CELL_MAX = 32_000          # Excel refuses a cell over 32,767 characters
 
@@ -86,6 +85,11 @@ def paragraph_rows(data, n, seed):
     paras = [r for r in read_csv(where(data, "appraisal", "paragraphs.csv"))
              if r.get("for_model") == "true"]
     picked = draw(paras, n, seed)
+    wanted = {r["paragraph_id"] for r in picked}
+    sents = {}
+    for x in read_csv(where(data, "appraisal", "sentences.csv")):
+        if x["paragraph_id"] in wanted:
+            sents.setdefault(x["paragraph_id"], []).append(x)
     clean_cache, raw_cache = {}, {}
     out, missed = [], 0
     for r in sorted(picked, key=lambda r: r["paragraph_id"]):
@@ -102,11 +106,14 @@ def paragraph_rows(data, n, seed):
             found, missed = "(no PDF text for this paragraph)", missed + 1
         else:
             found = raw[int(r["raw_start"]):int(r["raw_end"])]
-        cuts = sentences.split(body)
-        out.append(dict(r, cleaned=body,
-                        sentences="\n".join(f"[{k}] {body[a:b]}" for k, (a, b)
-                                             in enumerate(cuts, 1)),
-                        raw=found))
+        # The pipeline's own search units: a paragraph's sentences, or a
+        # footnote whole (footnotes are mostly references and are not split).
+        a0 = int(r["char_start"])
+        cuts = [(int(x["char_start"]) - a0, int(x["char_end"]) - a0)
+                for x in sents.get(r["paragraph_id"], [])]
+        shown = "\n".join(f"[{k}] {body[a:b]}" for k, (a, b) in enumerate(cuts, 1)) \
+            if cuts else "(not split: searched whole)" if r["block"] == "footnote" else ""
+        out.append(dict(r, cleaned=body, sentences=shown, raw=found))
     return out, missed
 
 
