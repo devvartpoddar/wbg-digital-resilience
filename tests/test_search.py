@@ -52,7 +52,8 @@ def store(tmp_path, monkeypatch):
         row = {"row": i, "unit_id": u, "kind": "footnote" if u == "D:p00003" else "sentence",
                "paragraph_id": p, "doc_id": "D", "project_ids": proj, "block": "narrative",
                "section_path": "II", "component_number": "1", "subcomponent_number": "",
-               "component_key": "masts", "text_sha256": f"{i:064d}"}
+               "component_key": "masts", "text_sha256": f"{i:064d}",
+               "lead_in_start": "", "lead_in_end": ""}
         rows.append([row[c] for c in embed.SENTENCE_INDEX_COLS])
     _csv(data / "embeddings" / "sentence_index.csv", embed.SENTENCE_INDEX_COLS, rows)
     tax = tmp_path / "taxonomy"

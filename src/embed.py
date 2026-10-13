@@ -305,7 +305,8 @@ def resolve(data_dir, rows, id_field="paragraph_id"):
 
     Returns (order, unique, empty) where order is [(paragraph_id, sha)] in file
     order, unique is {sha: text}, and empty lists paragraphs that resolved to
-    nothing.
+    nothing. For a list item the text, and so the sha, is its lead-in and
+    the item together (units.lead_ins).
     """
     cache, order, unique, empty = {}, [], {}, []
     for row in rows:
@@ -324,6 +325,13 @@ def resolve(data_dir, rows, id_field="paragraph_id"):
         if not body.strip():
             empty.append(row[id_field])
             continue
+        # A list item is embedded with the sentence that introduces its list
+        # (units.lead_ins), so '(b) towers;' carries what the towers are for.
+        # The cache is keyed on the text actually embedded.
+        if row.get("lead_in_start"):
+            lead = cache[did][int(row["lead_in_start"]):int(row["lead_in_end"])]
+            body = lead + "\n" + body
+            sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
         if len(body) > MAX_TEXT_CHARS:
             raise SystemExit(
                 f"embed: {row[id_field]} is {len(body):,} characters, over "

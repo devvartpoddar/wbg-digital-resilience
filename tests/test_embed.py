@@ -558,3 +558,17 @@ def test_the_key_is_read_from_the_project_key_file_when_the_variable_is_unset(
     os.chmod(path, 0o644)
     with pytest.raises(SystemExit):
         E.read_key("")          # readable beyond its owner: refused
+
+
+def test_a_list_item_is_embedded_with_its_lead_in(tmp_path):
+    text = "The project will finance:\n(a) towers;"
+    os.makedirs(tmp_path / "appraisal" / "text")
+    (tmp_path / "appraisal" / "text" / "D.txt").write_text(text, encoding="utf-8")
+    item = "(a) towers;"
+    row = {"unit_id": "D:p00001:s002", "doc_id": "D", "char_start": "26",
+           "char_end": str(len(text)), "text_sha256": hashlib.sha256(item.encode()).hexdigest(),
+           "lead_in_start": "0", "lead_in_end": "25"}
+    order, unique, _ = E.resolve(str(tmp_path), [row], "unit_id")
+    want = "The project will finance:\n(a) towers;"
+    assert order == [("D:p00001:s002", hashlib.sha256(want.encode()).hexdigest())]
+    assert list(unique.values()) == [want]

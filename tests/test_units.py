@@ -45,3 +45,24 @@ def test_units_are_model_sentences_and_whole_footnotes_with_their_context(tmp_pa
         ("D:p00001:s001", "sentence", "masts"),
         # A footnote is one unit; untagged, it takes no unnumbered component's key.
         ("D:p00002", "footnote", "")]
+
+
+def test_a_list_item_carries_its_lead_in():
+    text = "36. Sub-component 1.2 will finance:\n(a) towers;\n(b) fiber. It also pays staff."
+    para = {"char_start": "0", "char_end": str(len(text)), "list_item": "false"}
+
+    def sent(i, piece):
+        a = text.index(piece)
+        return {"sentence_id": f"s{i}", "char_start": str(a), "char_end": str(a + len(piece))}
+    sents = [sent(1, "36. Sub-component 1.2 will finance:"), sent(2, "(a) towers;"),
+             sent(3, "(b) fiber."), sent(4, "It also pays staff.")]
+    lead = (0, len("36. Sub-component 1.2 will finance:"))
+    assert units.lead_ins(para, sents, text) == {"s2": lead, "s3": lead, "s4": lead}
+    # An inline list: the sentence before the enumerators is the lead-in.
+    text = "The project draws on: (a) civil registration; (b) national ID."
+    para = {"char_start": "0", "char_end": str(len(text)), "list_item": "false"}
+    sents = [sent(1, "The project draws on:"), sent(2, "(a) civil registration;"),
+             sent(3, "(b) national ID.")]
+    assert units.lead_ins(para, sents, text) == {"s2": (0, 21), "s3": (0, 21)}
+    # A paragraph that is itself a list item has no lead-in.
+    assert units.lead_ins(dict(para, list_item="true"), sents, text) == {}
