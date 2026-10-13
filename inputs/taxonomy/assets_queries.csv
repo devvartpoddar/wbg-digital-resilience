@@ -2,12 +2,14 @@ asset_id,query_id,query,active
 fiber,backbone,national fibre optic backbone network,true
 fiber,backhaul,fibre backhaul and transmission network expansion,true
 fiber,metro_ring,metropolitan fibre ring,true
-fiber,last_mile,last-mile fibre connections to public buildings and households,true
+fiber,last_mile,last-mile fibre connections to homes and businesses,true
 fiber,ducts,ducts and conduits for laying fibre optic cable,true
-fiber,cross_border,cross-border terrestrial fibre link to neighbouring countries,true
 fiber,opgw,optical fibre on electricity transmission lines (OPGW),true
 fiber,ftth,fibre to the home and fibre to the premises,true
 fiber,trenching,trenching and civil works for fibre deployment,true
+fiber,middle_mile,middle mile fibre network,true
+fiber,dark_fiber,dark fibre leasing and open access fibre,true
+fiber,terrestrial,terrestrial fibre optic network deployment,true
 mobile_towers,towers,telecommunication towers and masts,true
 mobile_towers,base_stations,mobile network base stations and cell sites,true
 mobile_towers,rural_coverage,rural mobile coverage sites in unserved areas,true
@@ -17,6 +19,9 @@ mobile_towers,passive,passive tower infrastructure: power supply shelter and gro
 mobile_towers,sharing,shared tower and infrastructure sharing,true
 mobile_towers,ran,radio access network equipment,true
 mobile_towers,site_power,backup power and solar power for cell sites,true
+mobile_towers,mobile_broadband,mobile broadband network expansion,true
+mobile_towers,spectrum,spectrum assignment for mobile broadband,true
+submarine_cable,cross_border,cross-border terrestrial fibre link to neighbouring countries,true
 submarine_cable,cable,submarine fibre optic cable system,true
 submarine_cable,landing,cable landing station,true
 submarine_cable,international,international connectivity through an undersea cable,true
@@ -24,16 +29,20 @@ submarine_cable,consortium,regional submarine cable consortium and capacity purc
 submarine_cable,bandwidth,international bandwidth capacity,true
 submarine_cable,redundancy,redundant submarine cable route and second cable,true
 submarine_cable,repair,submarine cable repair and maintenance,true
+submarine_cable,gateway,international internet gateway,true
+submarine_cable,regional_links,regional connectivity linking neighbouring countries' networks,true
+submarine_cable,landlocked,access to the sea for a landlocked country's international connectivity,true
 data_hosting,gov_dc,government data centre,true
 data_hosting,national_dc,national data centre,true
 data_hosting,tier,tier III data centre certification,true
-data_hosting,dr_site,disaster recovery site and backup data centre,true
 data_hosting,server_room,server rooms and hosting equipment,true
 data_hosting,gov_cloud,government cloud and sovereign cloud platform,true
 data_hosting,colocation,colocation and hosting services,true
 data_hosting,cooling_power,data centre power supply and cooling,true
 data_hosting,migration,migration of government systems to the cloud,true
 data_hosting,storage,data storage and backup infrastructure,true
+data_hosting,ixp,internet exchange point (IXP),true
+data_hosting,data_infra,data infrastructure for storing and processing government data,true
 cybersecurity,cert,computer emergency response team (CERT or CSIRT),true
 cybersecurity,soc,security operations centre,true
 cybersecurity,strategy,national cybersecurity strategy and legislation,true
@@ -46,11 +55,14 @@ dpi,digital_id,digital identification system,true
 dpi,crvs,civil registration and vital statistics,true
 dpi,payments,digital payments platform and government-to-person transfers,true
 dpi,interop,interoperability and data exchange platform,true
-dpi,portal,e-government service portal,true
+dpi,portal,e-government service portal,false
 dpi,signatures,digital signatures and online authentication,true
 dpi,registries,foundational registries and social registry,true
-dpi,enterprise_arch,government enterprise architecture and shared platforms,true
+dpi,enterprise_arch,government enterprise architecture and shared platforms,false
 dpi,unique_id,unique identification number for residents,true
+dpi,data_protection,personal data protection and data governance,true
+dpi,data_protection_law,data protection law and data protection authority,true
+drm_ews,dr_site,disaster recovery site and backup data centre,true
 drm_ews,ews,early warning system,true
 drm_ews,hydromet,hydro-meteorological monitoring stations,true
 drm_ews,radar,weather radar and forecasting systems,true
@@ -60,12 +72,17 @@ drm_ews,risk_platform,disaster risk information platform,true
 drm_ews,emergency_line,911 emergency response platform,true
 drm_ews,floods,flood and cyclone warning,true
 drm_ews,hazard_maps,geospatial hazard and risk mapping,true
+drm_ews,continuity,business continuity and disaster recovery of government systems,true
+drm_ews,eoc,emergency operations centre,true
 access_connectivity,usf,universal service fund,true
 access_connectivity,affordability,affordable internet access,true
 access_connectivity,subsidies,subsidies for devices and connectivity,true
 access_connectivity,public_wifi,public Wi-Fi access points,true
 access_connectivity,community,community networks,true
 access_connectivity,schools_health,connecting schools and health facilities to the internet,true
-access_connectivity,literacy,digital literacy training,true
+access_connectivity,literacy,digital literacy training,false
 access_connectivity,coverage_gap,closing the mobile coverage gap in rural areas,true
 access_connectivity,smartphones,access to smartphones and devices,true
+access_connectivity,public_buildings,connecting government offices and public buildings in rural areas with fibre,true
+access_connectivity,last_mile_institutions,last-mile fibre to schools and health facilities,true
+access_connectivity,universal_access,universal access to broadband for underserved communities,true
