@@ -1,0 +1,97 @@
+asset_id,query_id,query,active
+fiber,fiber-01,fiber optic,true
+fiber,fiber-02,fibre optic,true
+fiber,fiber-03,optical fiber,true
+fiber,fiber-04,backbone network,true
+fiber,fiber-05,national backbone,true
+fiber,fiber-06,middle mile,true
+fiber,fiber-07,backhaul,true
+fiber,fiber-08,last mile,true
+fiber,fiber-09,dark fiber,true
+fiber,fiber-10,terrestrial fiber,true
+fiber,fiber-11,cross-border connectivity,true
+mobile_towers,mobile_towers-01,mobile broadband,true
+mobile_towers,mobile_towers-02,mobile network,true
+mobile_towers,mobile_towers-03,mobile coverage,true
+mobile_towers,mobile_towers-04,4G,true
+mobile_towers,mobile_towers-05,5G,true
+mobile_towers,mobile_towers-06,3G,true
+mobile_towers,mobile_towers-07,spectrum,true
+mobile_towers,mobile_towers-08,base station,true
+mobile_towers,mobile_towers-09,radio access network,true
+mobile_towers,mobile_towers-10,microwave,true
+mobile_towers,mobile_towers-11,passive infrastructure,true
+mobile_towers,mobile_towers-12,tower,true
+mobile_towers,mobile_towers-13,mast,true
+submarine_cable,submarine_cable-01,submarine cable,true
+submarine_cable,submarine_cable-02,submarine,true
+submarine_cable,submarine_cable-03,subsea cable,true
+submarine_cable,submarine_cable-04,undersea,true
+submarine_cable,submarine_cable-05,undersea cable,true
+submarine_cable,submarine_cable-06,landing station,true
+submarine_cable,submarine_cable-07,cable landing,true
+submarine_cable,submarine_cable-08,international bandwidth,true
+data_hosting,data_hosting-01,data center,true
+data_hosting,data_hosting-02,data centre,true
+data_hosting,data_hosting-03,data hosting,true
+data_hosting,data_hosting-04,data infrastructure,true
+data_hosting,data_hosting-05,government cloud,true
+data_hosting,data_hosting-06,cloud computing,true
+data_hosting,data_hosting-07,sovereign cloud,true
+data_hosting,data_hosting-08,disaster recovery,true
+data_hosting,data_hosting-09,Tier III,true
+data_hosting,data_hosting-10,colocation,true
+data_hosting,data_hosting-11,server room,true
+cybersecurity,cybersecurity-01,cybersecurity,true
+cybersecurity,cybersecurity-02,security operations center,true
+cybersecurity,cybersecurity-03,computer emergency response team,true
+cybersecurity,cybersecurity-04,CERT,true
+cybersecurity,cybersecurity-05,CSIRT,true
+cybersecurity,cybersecurity-06,incident response,true
+cybersecurity,cybersecurity-07,public key infrastructure,true
+cybersecurity,cybersecurity-08,PKI,true
+cybersecurity,cybersecurity-09,information security,true
+cybersecurity,cybersecurity-10,data protection,true
+cybersecurity,cybersecurity-11,cybercrime,true
+cybersecurity,cybersecurity-12,data privacy,true
+cybersecurity,cybersecurity-13,threat intelligence,true
+dpi,dpi-01,digital public infrastructure,true
+dpi,dpi-02,digital public services,true
+dpi,dpi-03,digital identity,true
+dpi,dpi-04,digital identification,true
+dpi,dpi-05,foundational ID,true
+dpi,dpi-06,civil registration,true
+dpi,dpi-07,national ID,true
+dpi,dpi-08,data exchange,true
+dpi,dpi-09,interoperability,true
+dpi,dpi-10,e-services,true
+dpi,dpi-11,digital payment,true
+dpi,dpi-12,e-signature,true
+drm_ews,drm_ews-01,early warning,true
+drm_ews,drm_ews-02,disaster risk management,true
+drm_ews,drm_ews-03,disaster risk,true
+drm_ews,drm_ews-04,hydrometeorological,true
+drm_ews,drm_ews-05,meteorological,true
+drm_ews,drm_ews-06,geospatial,true
+drm_ews,drm_ews-07,emergency response,true
+drm_ews,drm_ews-08,emergency operations center,true
+drm_ews,drm_ews-09,emergency communication,true
+drm_ews,drm_ews-10,seismic,true
+drm_ews,drm_ews-11,flood,true
+access_connectivity,access_connectivity-01,universal service fund,true
+access_connectivity,access_connectivity-02,universal service,true
+access_connectivity,access_connectivity-03,universal access,true
+access_connectivity,access_connectivity-04,affordability,true
+access_connectivity,access_connectivity-05,device affordability,true
+access_connectivity,access_connectivity-06,digital divide,true
+access_connectivity,access_connectivity-07,digital inclusion,true
+access_connectivity,access_connectivity-08,coverage gap,true
+access_connectivity,access_connectivity-09,access gap,true
+access_connectivity,access_connectivity-10,public access,true
+access_connectivity,access_connectivity-11,school connectivity,true
+satellite,satellite-01,satellite,true
+satellite,satellite-02,satellite connectivity,true
+satellite,satellite-03,satellite broadband,true
+satellite,satellite-04,VSAT,true
+satellite,satellite-05,low earth orbit,true
+satellite,satellite-06,satellite backhaul,true
