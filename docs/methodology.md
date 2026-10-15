@@ -33,7 +33,7 @@ Any model that meets all three may be used, including an external one. For an ex
 | Collect each project's components and costs; tag paragraphs with their component | Built |
 | Clean procurement packages, notices and awards | Built; under review |
 | Link notices and awards to their plan package | Built |
-| Load into Postgres, write review sheets and the run report | Built |
+| Record a data release; load into Postgres (tables, results, vectors, keys, views for Metabase); write review sheets and the run report | Built |
 | Embed the search units (sentences, and whole footnotes) | Built; runs as part of `./wbg search <set>` |
 | Search sentences for each asset and measure; roll up to paragraphs | Built for any label set in `inputs/taxonomy/` (`./wbg search assets`, `./wbg search measures`); the measures list is a first draft from the seed, awaiting review |
 | Grade every narrative and annex model paragraph against each asset and measure with a decision model | Built (`./wbg classify <set>`); not yet run: needs the key |
@@ -43,7 +43,7 @@ Any model that meets all three may be used, including an external one. For an ex
 
 ## 0. Running it
 
-`./run.sh` (the same as `./wbg pipeline`) runs the fetch and every stage of sections 1 to 4 in this order, then loads Postgres, writes the review sheets (a sheet already written is kept, as it may hold notes; a new `--seed` draws a fresh one) and drafts the run note. Search, classification and the check sheet (sections 5 and 5a) are run on their own, as each costs a model call; each keys its output on its content. `./wbg` does the same for a selection of the cohort:
+`./run.sh` (the same as `./wbg pipeline`) runs the fetch and every stage of sections 1 to 4 in this order, then records a data release, loads Postgres, writes the review sheets (a sheet already written is kept, as it may hold notes; a new `--seed` draws a fresh one) and drafts the run note. Search, classification and the check sheet (sections 5 and 5a) are run on their own, as each costs a model call; each keys its output on its content. `./wbg` does the same for a selection of the cohort:
 
 1. **Select.** Filters on the included rows of `inputs/config/cohort.csv`:
    - `--project`;
@@ -373,7 +373,16 @@ An existing sheet is never overwritten; a new draw takes a new `--seed`.
 
   On the current run (local copy): paragraph joining is stable (a tighter line gap changes 1.2% of the model text in the sample, a looser one 3.7%, the loose gap nothing); closing component tags at the section change matters a great deal (running on, 10,086 model paragraphs would be tagged instead of 3,349); sentences move a little (word minimum 2 or 4: 5.6% or 3.6% of the 10,835 narrative and annex model paragraphs split differently; no abbreviation list: 2.2%).
 
-**Postgres** (`src/load_pg.py`): projects, documents, paragraphs, sentences, rejected units, document parts, components, packages, superseded packages, notices and awards are loaded into schema `wbg` in database `work`, with paragraph and sentence text resolved from the offsets; amounts, costs and years load as numbers. The raw procurement tables, the search and classification runs and the labels are not loaded (labels are read by evaluation alone). A table whose file has not changed is not reloaded.
+**Postgres** (`src/load_pg.py`), schema `wbg` in database `work`, for querying and for Metabase:
+
+- *Tables.* Projects, documents, paragraphs and sentences (with their text resolved from the offsets), rejected units, document parts, components, packages, superseded packages, notices and awards; `taxonomy` (every label's name and definition); `search_best` (for each label and search unit of the current search run: best cosine, best percentile and the query that matched); `classify_scores` (the current classification run's grades); `sentence_vectors` (each unit's embedding, as `halfvec` with an HNSW index from pgvector 0.7, plain `vector` unindexed before); `releases` and `data_release` (below). Amounts, costs, scores and years load as numbers. The raw procurement tables and the labels are not loaded (labels are read by evaluation alone).
+- *Keys.* Primary keys on every identifier and foreign keys for every join (paragraph to document, sentence to paragraph, package, notice and award to project, notice and award to package, grades and search results to paragraph), declared `NOT VALID` so an orphan row is reported by the audits rather than failing the load. Metabase follows them from row to row.
+- *Views* (`sql/views/`, rebuilt on every load): `v_packages` (with project name, country, region, practice, unit and approval year), `v_paragraphs` (with text and document title, kind and date), `v_notices` and `v_awards` (with their package's description, status, planned date, estimate and component), `v_classified_paragraphs` (grades with label names and text) and `v_search_paragraphs` (each paragraph's best unit per label). A view over a table not yet loaded is skipped and reported.
+- *Similarity.* `wbg.similar(unit_id, k)` returns the k units nearest a given unit by their stored embeddings, with no outside call. A search for a new phrase needs that phrase embedded first; it is not built yet (it depends on how the box lets the database reach the embedding service).
+- *Access.* `sql/metabase_role.sql` grants a read-only login `SELECT` on the schema.
+- A table whose source has not changed is not reloaded; a replaced table takes its keys and dependent views with it, and both are put back at the end of every load.
+
+**Data releases** (`src/release.py`, `./wbg release`, `./wbg status`). A release records which data the store holds and how it was made: the git commit and whether the code or the hand-kept inputs had uncommitted changes, the SHA-256 of the cohort and every taxonomy file, the PDF reader's version, when each project was last fetched, the rows and SHA-256 of every output table, and the search and classification runs present. Its id is a hash of the tables, inputs and runs, so the same data is the same release however often it is cut; a new release keeps a compressed copy of the cleaned tables (about 10 MB) in `data/releases/<id>/`, and `data/releases/index.csv` lists them all. The pipeline cuts one before every Postgres load and after every search or classification run; `wbg.data_release` names the release Postgres holds, so a Metabase card can show "data as of". `./wbg status` says which commit the code is at and whether origin/main is ahead, which release the data is, which stages are out of date with the code, and when each kind of record was last fetched.
 
 **Reports** (`src/run_report.py`): drafts a run note in `data/reports/`, which is copied into the notes vault at `Projects/WBG Digital Resilience/Reports/`. Reports never go into the repository.
 
@@ -417,6 +426,7 @@ The state sent with each paragraph is its section title, its sub-component (or c
   - `search/`: one folder per label set and version (section 5);
   - `classify/`: stored decision-model responses (`cache/`) and one folder per label set and version (section 5a);
   - `labels/`: grades a person gave, one file per label set (section 5a);
+  - `releases/`: one folder per data release with its manifest and a copy of the cleaned tables, and `index.csv`;
   - `reports/`: every stage's report and the run notes;
   - `review/`: the review spreadsheets;
   - `runs/`: exports for a selection, one folder per selection and date (`./wbg export`).

@@ -314,6 +314,23 @@ def _save_state(data, state):
     os.replace(path + ".part", path)
 
 
+def stale_stages(data=None):
+    """The stages whose code, inputs or outputs differ from when they last
+    ran: what ./wbg prepare would run now."""
+    data = data or data_root()
+    recorded = _load_state(data).get("stages", {})
+    out = []
+    for name, _script, code, inputs, outputs in STAGES:
+        rec = recorded.get(name)
+        if isinstance(rec, str):
+            rec = {"in": rec, "out": None}
+        out_now = _outputs(data, outputs)
+        if not rec or rec["in"] != _fingerprint(data, code, inputs) or out_now is None \
+                or rec["out"] not in (None, out_now):
+            out.append(name)
+    return out
+
+
 def prepare(sel=None, update=False, data=None, fetch=True):
     """Bring the store up to date for a selection.
 
@@ -693,27 +710,43 @@ def main(argv=None):
                    help="documents to re-read from the PDF for the paragraph test")
     p.add_argument("--skip-paragraphs", action="store_true",
                    help="skip the slow paragraph test")
-    p = sub.add_parser("pipeline", help="everything run.sh does: prepare all, load, "
-                                        "review sheets, run report")
+    sub.add_parser("status", help="which code and which data release the store is at, "
+                                  "and what is out of date")
+    sub.add_parser("release", help="record the store's current data as a release "
+                                   "(data/releases/), if it changed")
+    p = sub.add_parser("pipeline", help="everything run.sh does: prepare all, release, "
+                                        "load, review sheets, run report")
     p.add_argument("--update", action="store_true", help="fetch every project again")
     args = ap.parse_args(argv)
 
     data = data_root()
     if args.cmd == "pipeline":
         prepare(select(), update=args.update, data=data)
+        _run("release.py", data=data)
         _run("load_pg.py", data=data)
         _run("review_sheets.py", data=data)
         _run("run_report.py", "--topic", "Pipeline run", data=data)
+        return 0
+    if args.cmd == "status":
+        import release
+        print("\n".join(release.status(data)))
+        return 0
+    if args.cmd == "release":
+        _run("release.py", data=data)
         return 0
     if args.cmd == "search":
         dry = ["--dry-run"] if args.dry_run else []
         _run("embed.py", *dry, data=data)
         _run("search.py", args.label_set, *dry, data=data)
+        if not dry:
+            _run("release.py", data=data)
         return 0
     if args.cmd == "classify":
         extra = (["--dry-run"] if args.dry_run else []) + \
             (["--limit", str(args.limit)] if args.limit else [])
         _run("classify.py", args.label_set, *extra, data=data)
+        if not extra:
+            _run("release.py", data=data)
         return 0
     if args.cmd == "sensitivity":
         _run("sensitivity.py", "--docs", str(args.docs),

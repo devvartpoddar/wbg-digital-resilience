@@ -32,6 +32,7 @@ written down once:
   data/classify/     stored decision-model responses and one folder per label
                      set and version (src/classify.py)
   data/labels/       grades a person gave, one file per label set (src/evaluate.py)
+  data/releases/     one folder per data release, and index.csv (src/release.py)
   data/reports/      every stage's report, the run notes for the vault, and
                      fetch_status/ (what each fetcher fully read)
   data/review/       spreadsheets for reading the output by eye
@@ -91,6 +92,7 @@ LAYOUT = {
     "search": "search",
     "classify": "classify",
     "labels": "labels",
+    "releases": "releases",
     "fetch_status": "reports/fetch_status",
 }
 

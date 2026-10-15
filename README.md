@@ -11,6 +11,8 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
 ./wbg summary --country KE            # where each selected project stands (plans, upcoming packages, notices, contracts)
 ./wbg list    --practice digital      # by Global Practice; --unit IDD04 by managing unit
 ./wbg export  --fy 2024 --tables      # write the selection's results to data/runs/<name>-<date>/
+./wbg status                          # which code and which data release the store is at; what is out of date
+./wbg release                         # record the current data as a release (the pipeline does this itself)
 ./wbg sensitivity                     # how much the cleaned text depends on its paragraph, tag and sentence settings
 ./wbg search assets                   # embed the sentences (only what is not cached) and score them against
                                       # every asset definition and phrase in inputs/taxonomy/; --dry-run shows the cost

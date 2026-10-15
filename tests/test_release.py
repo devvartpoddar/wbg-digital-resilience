@@ -1,0 +1,45 @@
+"""Data releases (src/release.py) on an invented store."""
+import csv
+import os
+import sys
+
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                "src"))
+import release  # noqa: E402
+
+
+def _store(tmp_path):
+    data = tmp_path / "data"
+    (data / "procurement").mkdir(parents=True)
+    with open(data / "procurement" / "packages.csv", "w", newline="") as fh:
+        w = csv.writer(fh)
+        w.writerow(["package_id", "project_id"])
+        w.writerow(["P1:A-1", "P1"])
+    return str(data)
+
+
+def test_the_same_data_is_the_same_release(tmp_path):
+    data = _store(tmp_path)
+    first = release.cut(data, log=lambda *_: None)
+    assert release.cut(data, log=lambda *_: None) == first
+    rows = release.releases(data)
+    assert [r["release_id"] for r in rows] == [first] and rows[0]["packages"] == "1"
+    assert os.path.exists(os.path.join(data, "releases", first, "tables.tar.gz"))
+
+
+def test_changed_data_is_a_new_release_and_the_old_one_is_kept(tmp_path):
+    data = _store(tmp_path)
+    first = release.cut(data, log=lambda *_: None)
+    with open(os.path.join(data, "procurement", "packages.csv"), "a") as fh:
+        fh.write("P1:B-2,P1\n")
+    second = release.cut(data, log=lambda *_: None)
+    assert second != first
+    assert [r["release_id"] for r in release.releases(data)] == [first, second]
+    assert os.path.exists(os.path.join(data, "releases", first, "manifest.json"))
+
+
+def test_status_names_the_code_and_the_release(tmp_path):
+    data = _store(tmp_path)
+    rid = release.cut(data, log=lambda *_: None)
+    lines = release.status(data)
+    assert lines[0].startswith("code:") and rid in lines[1]
