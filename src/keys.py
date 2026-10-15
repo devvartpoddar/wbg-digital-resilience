@@ -74,8 +74,13 @@ def project_parts(text, listed):
                      not any(b[1] != number for b in before if a <= b[0])] or [start])
         closes = min([a for a, n in annexes if a > start and n != number] or [len(text)])
         if opens > cursor:
-            parts.append((cursor, opens, first_op if not parts or parts[-1][2] == first_op
-                          else "|".join(projects), "datasheet_operation_id"))
+            # Before the first country annex the text is the first data
+            # sheet's operation; a stretch between two country annexes that
+            # holds no data sheet belongs to the programme as a whole.
+            if not parts or parts[-1][2] == first_op:
+                parts.append((cursor, opens, first_op, "datasheet_operation_id"))
+            else:
+                parts.append((cursor, opens, "|".join(projects), "programme_wide"))
         parts.append((opens, closes, op, "datasheet_operation_id"))
         cursor = closes
     if cursor < len(text):

@@ -479,3 +479,20 @@ def test_a_stored_response_keeps_no_personal_field():
     rec = {"id": "OP1", "contact_name": "x", "contact_email": "y", "teammemfullname": "z",
            "bid_description": "Servers"}
     assert F._without_personal(rec) == {"id": "OP1", "bid_description": "Servers"}
+
+
+def test_the_planned_actual_band_is_not_a_status(monkeypatch):
+    import fetch_procurement as F
+    assert F.HEADER_LINE_RE.match("  Planned   Actual   Planned   Actual")
+    assert F.HEADER_LINE_RE.match("Planned")
+    assert not F.HEADER_LINE_RE.match("Planned maintenance of the data centre")
+
+
+def test_figures_one_space_apart_are_both_read():
+    import fetch_procurement as F
+    rec = {"col0": ["Supply of servers"], "ref": "X-1", "body": ["Post  Request for Bids  Open - National 100,000.00 0.00  Signed  2024-01-01  2024-06-01"]}
+    meta = {"project_id": "P1", "doc_id": "D1", "disclosure_date": "2024-01-01",
+            "content_sha256": "x", "fetched_at": "t"}
+    row = F._plan_row(rec, "GOODS", True, meta, 1)
+    assert row["estimated_amount"] == "100000.00" and row["actual_amount"] == "0.00"
+    assert row["status_raw"] == "Signed"

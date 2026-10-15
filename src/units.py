@@ -35,16 +35,15 @@ not split them).
 """
 import csv
 import os
-import re
 
 from keys import name_key
 from paths import where
+from sentences import ITEM_MARKER
 
 UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block",
              "section_path", "component_number", "subcomponent_number", "component_key",
              "char_start", "char_end", "n_tokens", "text_sha256", "lead_in_start",
              "lead_in_end"]
-ITEM_MARKER = re.compile(r"^\s*(?:\((?:[a-z]|[ivx]{1,4}|\d{1,2})\)|[a-z]\.|[ivx]{1,4}\.)\s")
 
 
 def _read(path):
@@ -70,7 +69,11 @@ def component_keys(data):
 def _text(cache, data, doc_id):
     if doc_id not in cache:
         path = where(data, "text", f"{doc_id}.txt")
-        cache[doc_id] = open(path, encoding="utf-8").read() if os.path.exists(path) else None
+        if os.path.exists(path):
+            with open(path, encoding="utf-8") as fh:
+                cache[doc_id] = fh.read()
+        else:
+            cache[doc_id] = None
     return cache[doc_id]
 
 

@@ -60,7 +60,7 @@ ENDINGS = {"es", "er", "ers", "eur", "eurs", "ies", "us", "one", "res", "ops",
            "ism", "ize", "ise", "ent", "ant", "ique", "iques", "ation", "ations",
            "tion", "tions", "ness", "ship", "ful", "less", "ous", "ic", "ics",
            # Spanish and Portuguese plurals: 'formatos' is not 'format os'.
-           "os", "as", "ões", "ción", "ción", "ação"}
+           "os", "as", "ões", "ción", "ação"}
 WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
 # Words after which a capitalised token is a new word even when the corpus has
 # not seen it: 'andPemba', 'forZanzibar'.

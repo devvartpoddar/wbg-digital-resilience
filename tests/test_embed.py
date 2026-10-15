@@ -135,10 +135,9 @@ class Stub:
 
 def run(tmp_path, stub, monkeypatch, *extra):
     data = os.path.join(str(tmp_path), "data")
-    meta = os.path.join(str(tmp_path), "meta")
     monkeypatch.setattr(E, "embed_texts", stub)
     monkeypatch.setattr(sys, "argv", [
-        "embed.py", "--data", data, "--meta", meta, "--dim", str(DIM),
+        "embed.py", "--data", data, "--dim", str(DIM),
         "--model", MODEL, "--unit", "paragraphs", *extra])
     return E.main()
 
@@ -332,7 +331,7 @@ def test_index_rows_are_contiguous_from_zero(corpus, monkeypatch):
 
 def test_manifest_records_what_was_run(corpus, monkeypatch):
     run(corpus, Stub(), monkeypatch)
-    manifest = json.load(open(os.path.join(str(corpus), "meta", "embeddings",
+    manifest = json.load(open(os.path.join(str(corpus), "data", "embeddings",
                                            "embedding_manifest.json"), encoding="utf-8"))
     assert manifest["model_requested"] == MODEL
     assert manifest["dimensions"] == DIM
@@ -346,7 +345,7 @@ def test_manifest_records_what_was_run(corpus, monkeypatch):
 
 def test_manifest_counts_paragraphs_left_without_a_vector(corpus, monkeypatch):
     run(corpus, Stub(fail_on=[DOCS["D002"][1]]), monkeypatch)
-    manifest = json.load(open(os.path.join(str(corpus), "meta", "embeddings",
+    manifest = json.load(open(os.path.join(str(corpus), "data", "embeddings",
                                            "embedding_manifest.json"), encoding="utf-8"))
     assert manifest["paragraphs_without_a_vector"] == 1
     assert manifest["rows_embedded"] == 5

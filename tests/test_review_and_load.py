@@ -146,3 +146,16 @@ def test_load_is_idempotent(tmp_path, monkeypatch, capsys):
     with psycopg.connect(os.environ["WBG_PG_TEST"]) as conn:
         texts = [r[0] for r in conn.execute("SELECT text FROM wbg.paragraphs ORDER BY 1")]
     assert texts == ["Alpha beta gamma.", "Delta epsilon."]
+
+
+def test_dates_flags_and_stamps_are_typed_for_metabase():
+    bad = {}
+    assert L.col_type("planned_date") == "date" and L.col_type("status_as_of") == "date"
+    assert L.col_type("fetched_at") == "timestamptz" and L.col_type("for_model") == "boolean"
+    assert L.convert("planned_date", "2024-06-30", bad) == "2024-06-30"
+    assert L.convert("planned_date", "30/06/2024", bad) is None
+    assert L.convert("for_model", "true", bad) is True
+    assert L.convert("for_model", "yes", bad) is None
+    assert L.convert("fetched_at", "2026-10-13T14:31:08Z", bad) == "2026-10-13T14:31:08Z"
+    assert L.convert("fetched_at", "yesterday", bad) is None
+    assert bad == {"planned_date": 1, "for_model": 1, "fetched_at": 1}

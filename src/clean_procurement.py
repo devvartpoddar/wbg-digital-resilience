@@ -31,17 +31,17 @@ import argparse, csv, hashlib, os, re, sys
 import unicodedata
 from collections import Counter, defaultdict
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 
 from text_rules import fold_chars                       # noqa: E402
 from keys import name_key                                 # noqa: E402
+from dates import iso_date                                # noqa: E402
 import plan_table                                        # noqa: E402
 import glue                                              # noqa: E402
 import links                                             # noqa: E402
 
-CLEAN_VERSION = "proc-clean-10"
+CLEAN_VERSION = "proc-clean-11"
 
 # Another package's borrower reference inside a description: the parser missed
 # a record boundary and stitched the next record on. Used to cut it off here and
@@ -127,8 +127,7 @@ _MARK_RUN = (rf"{_MARK_NO}(?:\s*(?:-|\u2013|&|,|to|and|et|e|y|\u00e0|a)\s*{_MARK
 LOT_PHASE_RE = re.compile(
     r"(?i:\b(LOTS?|LOTES?|PHASES?|FASES?|ETAPAS?|TRANCHES?))\s*"
     r"(?i:N[O\u00ba\u00b0]?\.?\s*)?[-#:/\u2013]?\s*(" + _MARK_RUN + ")")
-REBID_RE = re.compile(r"[\(\[]?\s*\b(RE-?BID(?:DING)?|RE-?TENDER|RELANCE)\b\s*[\)\]]?"
-                      r"|\(?\bREBID\b\)?", re.I)
+REBID_RE = re.compile(r"[\(\[]?\s*\b(RE-?BID(?:DING)?|RE-?TENDER|RELANCE)\b\s*[\)\]]?", re.I)
 
 
 def split_markers(description):
@@ -185,9 +184,13 @@ _METHOD_WORDS = (r"(?:Request for (?:Bids|Quota|Propos)|Direct Selection|Quality
                  r"Consultant individuel)")
 _APPROACH_WORDS = r"(?:(?:Open|Limited|Direct)\s*-\s*(?:National|Internationa)|Single Stage)"
 _REVIEW_WORDS = r"(?:Post|Prior|A posteriori|A priori|Posterior|Previa|Pr[eé]via)"
+# A review type ('Post', 'Prior') is cut only when a method or a market
+# approach follows it: on its own it is as likely a word of the description
+# ('Mbeya Post', 'Prior Lake'). A market approach or 'Single Stage' is never
+# prose and is cut wherever it ends the text.
 CELL_TAIL = re.compile(
     rf"\s(?:{_REVIEW_WORDS}\s+(?=.*?(?:{_METHOD_WORDS}|{_APPROACH_WORDS}))"
-    rf"|{_METHOD_WORDS}(?=.*?{_APPROACH_WORDS})|{_APPROACH_WORDS}|{_REVIEW_WORDS}$"
+    rf"|{_METHOD_WORDS}(?=.*?{_APPROACH_WORDS})|{_APPROACH_WORDS}"
     r"|Estimated\s+Actual)")
 CELL_HEAD = re.compile(
     rf"^\s*(?:(?:Single Stage\s*-\s*(?:One|Two)(?:\s*E(?:nvelope)?)?|{_APPROACH_WORDS}l?)\s*)+")
@@ -344,13 +347,13 @@ def norm_ref(ref):
 LANG_MARKERS = {
     "en": {"the", "of", "and", "for", "supply", "services", "installation",
            "construction", "provision", "with", "to", "a", "study", "support"},
-    "fr": {"de", "des", "du", "des", "et", "pour", "la", "le", "les", "d",
+    "fr": {"de", "des", "du", "et", "pour", "la", "le", "les", "d",
            "fourniture", "travaux", "recrutement", "prestation", "acquisition",
            "construction", "l", "au", "aux", "dans"},
     "es": {"de", "del", "y", "para", "la", "el", "los", "las", "suministro",
            "obras", "servicios", "consultoría", "adquisición", "con", "en",
            "construcción"},
-    "pt": {"de", "do", "da", "e", "para", "a", "o", "os", "as", "fornecimento",
+    "pt": {"de", "do", "da", "e", "para", "a", "o", "os", "as",
            "fornecimento", "obras", "serviços", "aquisição", "com", "em",
            "construção", "contratação"},
 }
@@ -725,8 +728,37 @@ def norm_approach(value):
 
 DATELINE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|"
                          r"\d{1,2}[- ][A-Za-z]{3}[- ]\d{4})\b")
-MONEY_RE = re.compile(r"(?:US\$|USD|\$|EUR|€|GBP|£)\s?([\d.,]+)"
-                      r"|([\d.,]+)\s?(?:US\$|USD|EUR|€|GBP|£)")
+# A figure with a currency mark on either side, and the scale word a plan
+# sometimes writes after it ('US$ 1.5 million', 'USD 2 M', '3 milliards FCFA').
+_SCALE = r"(?:millions?|mn|m|millones|milh[oõ]es|milliards?|billions?|bn|b)"
+MONEY_RE = re.compile(
+    rf"(?:US\$|USD|\$|EUR|€|GBP|£)\s?([\d.,]+)(?:\s?({_SCALE})\b)?"
+    rf"|([\d.,]+)(?:\s?({_SCALE}))?\s?(?:US\$|USD|EUR|€|GBP|£)", re.I)
+_MILLION = {"million", "millions", "mn", "m", "millones", "milhoes", "milhões"}
+_BILLION = {"billion", "billions", "bn", "b", "milliard", "milliards"}
+
+
+def money_value(figure, scale=""):
+    """The figure as printed, read as a number: '12,500.00' and '1,5' (a
+    decimal comma: a comma followed by one or two digits and no point) and
+    scaled by a following 'million' or 'billion'. None when unreadable."""
+    raw = (figure or "").strip().strip(".,")
+    if not raw:
+        return None
+    if re.fullmatch(r"\d{1,3}(?:\.\d{3})*,\d{1,2}", raw):
+        raw = raw.replace(".", "").replace(",", ".")
+    else:
+        raw = raw.replace(",", "")
+    try:
+        value = float(raw)
+    except ValueError:
+        return None
+    s = (scale or "").lower()
+    if s in _MILLION:
+        value *= 1e6
+    elif s in _BILLION:
+        value *= 1e9
+    return value
 
 
 def desc_sha256(text):
@@ -741,15 +773,14 @@ def extract_amount_and_date(text):
     amount = ""
     m = MONEY_RE.search(text or "")
     if m:
-        raw = (m.group(1) or m.group(2) or "").replace(",", "")
-        try:
-            amount = f"{float(raw):.2f}"
-        except ValueError:
-            amount = ""
+        value = money_value(m.group(1) or m.group(3), m.group(2) or m.group(4))
+        amount = "" if value is None else f"{value:.2f}"
+    # Stored as ISO or not at all: the summaries compare dates as strings.
+    # A numeric date that reads both ways ('03/06/2024') is left blank.
     date = ""
     m = DATELINE_RE.search(text or "")
     if m:
-        date = m.group(1)
+        date = iso_date(m.group(1))
     return amount, date
 
 

@@ -142,3 +142,25 @@ def test_a_subcomponent_heading_opens_its_own_component_when_another_is_open():
     ("Sub-component 2.1 and 2.2", ["2.1", "2.2"])])
 def test_mentions_read_whole_numbers_only(text, found):
     assert K.mentions(text) == found
+
+
+def test_a_bare_decimal_heading_opens_nothing_without_its_component():
+    import components
+    t = components.Tagger()
+    assert t.see("1.2 Sectoral and Institutional Context", "heading", "I") == ("", "")
+    t.see("Component 1: Connectivity", "heading", "II.B")
+    assert t.see("1.2 Last-mile access", "heading", "II.B") == ("1", "1.2")
+
+
+def test_read_headings_takes_a_bare_decimal_heading_only_under_its_component():
+    import components
+    text = "1.2 Sectoral Context\nComponent 1: Connectivity\n1.2 Last-mile access\n"
+    rows, pos = [], 0
+    for line in text.splitlines(keepends=True):
+        rows.append({"char_start": pos, "char_end": pos + len(line.rstrip("\n")),
+                     "block": "heading", "page_from": 1})
+        pos += len(line)
+    found = components.read_headings(rows, text)
+    assert [(r["level"], r["number"]) for r in found] == [("component", "1"),
+                                                          ("subcomponent", "1.2")]
+    assert found[1]["name"] == "Last-mile access"

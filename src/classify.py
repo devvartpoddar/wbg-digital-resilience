@@ -38,10 +38,10 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import embed  # noqa: E402
+import labels  # noqa: E402
 from search import TAXONOMY, _active, _rows  # noqa: E402
 
 MODEL = "typesafe/jev-1.13"
@@ -72,13 +72,14 @@ class Refused(RuntimeError):
 def load_labels(name, folder=TAXONOMY):
     """(labels, scale): the active labels [{id, name, definition}] and the
     grade descriptions, lowest first, with {name} standing for the label."""
+    folder = folder or labels.folder(name)
     rows = _rows(os.path.join(folder, f"{name}.csv"))
     id_col = next(c for c in rows[0] if c.endswith("_id"))
     name_col = next(c for c in rows[0] if c.endswith("_name"))
-    labels = [{"id": r[id_col].strip(), "name": r[name_col].strip(),
+    active = [{"id": r[id_col].strip(), "name": r[name_col].strip(),
                "definition": " ".join(r["definition"].split())}
               for r in rows if _active(r)]
-    if not labels:
+    if not active:
         raise SystemExit(f"classify: {name}.csv has no active label")
     path = os.path.join(folder, f"{name}_scale.csv")
     if not os.path.exists(path):
@@ -88,7 +89,7 @@ def load_labels(name, folder=TAXONOMY):
              for r in sorted(_rows(path), key=lambda r: int(r["grade"]))]
     if not 2 <= len(scale) <= 5:
         raise SystemExit(f"classify: {path} needs 2 to 5 grades")
-    return labels, scale
+    return active, scale
 
 
 def questions(labels, scale):
@@ -381,7 +382,8 @@ def question_shas(qs):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("label_set", help="assets, measures")
+    ap.add_argument("label_set", help="a label set in inputs/taxonomy/ or analysis/labels/: "
+                                      "assets, measures")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--model", default=MODEL)
     ap.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")

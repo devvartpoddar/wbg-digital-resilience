@@ -42,6 +42,7 @@ from paths import data_root, where, write_fetch_status  # noqa: E402
 
 import plan_table                                     # noqa: E402
 from fetch import get, read_cohort            # noqa: E402
+from dates import iso_date                    # noqa: E402
 from clean_procurement import (                        # noqa: E402
     STATUS_MAP, METHOD_TEXT, fold_chars,
 )
@@ -54,8 +55,7 @@ PLAN_DOCTY = "Procurement Plan"
 PAGE = 500
 
 
-# The metadata columns of the STEP plan table, in the order the header prints
-# them. Only the pairs we can locate reliably are used; see parse_plan_text.
+# A date and a figure as a plan prints them in its milestone and amount cells.
 DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 AMOUNT_RE = re.compile(r"^[\d,]+\.\d{2}$")
 # The reference grammar is plan_table's (REF_TOKEN), so where a table's rows
@@ -76,7 +76,10 @@ HEADER_LINE_RE = re.compile(
     r"Project Implementation agency|Loan / Credit No|Description\b.*Component|"
     r"General Information|Country:|Project ID|Project Name|Executing Agency|"
     r"Date of the Procurement Plan|Period covered|Revised Plan Date|"
-    r"PROCUREMENT|PLAN\s*$)")
+    r"PROCUREMENT|PLAN\s*$|"
+    # The 'Planned  Actual' band under the milestone headings, reprinted on
+    # a page turn: read as a cell it was taken for the status 'Planned'.
+    r"(?:Planned|Actual)(?:\s+(?:Planned|Actual))*\s*$)")
 # The closed value sets STEP prints in the Method, Market Approach and Process
 # Status cells. The method and status words are the keys of the maps that
 # clean_procurement turns into the Bank's codes and STEP's labels, so the word
@@ -637,8 +640,10 @@ def _plan_row(rec, section, has_estimated, doc_meta, index):
     numbers = DATE_RE.findall(body)
     # The figures in print order: Estimated then Actual where the table has an
     # Estimated column; only the Actual where it does not (older plans).
+    # Figures never hold a space, so any whitespace separates them: two
+    # figures printed one space apart are two figures.
     figures = []
-    for tok in re.split(r" {2,}|\s{3,}", body):
+    for tok in re.split(r"\s+", body):
         if AMOUNT_RE.match(tok.strip()):
             try:
                 figures.append(float(tok.replace(",", "")))
@@ -1059,21 +1064,10 @@ def _join_sector(v):
     return str(v or "")
 
 
-_MONTHS = {m: i + 1 for i, m in enumerate(
-    ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"])}
-
-
 def _iso_date(v):
-    """The interfaces mix ISO timestamps and '14-Sep-2026'."""
-    s = str(v or "").strip()
-    if not s:
-        return ""
-    if re.match(r"^\d{4}-\d{2}-\d{2}", s):
-        return s[:10]
-    m = re.match(r"^(\d{1,2})-([A-Za-z]{3})-(\d{4})$", s)
-    if m and m.group(2).title() in _MONTHS:
-        return f"{m.group(3)}-{_MONTHS[m.group(2).title()]:02d}-{int(m.group(1)):02d}"
-    return s
+    """The interfaces mix ISO timestamps and '14-Sep-2026'; anything else
+    is stored blank (dates.iso_date), never as printed."""
+    return iso_date(v)
 
 
 # -------------------------------------------------------------------- the diff
@@ -1082,7 +1076,6 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--cohort", default=os.path.join(ROOT, "inputs/config/cohort.csv"))
     ap.add_argument("--data", default=data_root())
-    ap.add_argument("--meta", default=data_root())
     ap.add_argument("--limit", type=int, default=0, help="first N projects (smoke run)")
     ap.add_argument("--projects", default="",
                     help="comma-separated project ids: fetch only these; the other "
@@ -1107,7 +1100,7 @@ def main():
     proc_dir = where(args.data, "procurement")
     os.makedirs(proc_dir, exist_ok=True)
 
-    log = FetchLog(where(args.meta, "fetch_log"))
+    log = FetchLog(where(args.data, "fetch_log"))
     t0 = time.time()
 
     plan_rows, listing_fail, no_plan, plan_fail, free_chars = [], [], [], [], []
@@ -1163,8 +1156,10 @@ def main():
                                       else str(r.get(k, "")) for k in order))
         write_csv(path, cols, rows)
     log.write()
-    write_fetch_status(args.data, "procurement", sorted(plans_ok & notices_ok & awards_ok),
-                       sorted(asked - (plans_ok & notices_ok & awards_ok)))
+    # With --skip-plans the plan rows are kept as they were, which is not a
+    # failed fetch: the status covers only what this run asked for.
+    done = (asked if args.skip_plans else plans_ok) & notices_ok & awards_ok
+    write_fetch_status(args.data, "procurement", sorted(done), sorted(asked - done))
 
     distinct_versions = len({(r["project_id"], r["plan_version"]) for r in prep})
     distinct_hashes = len({r["content_sha256"] for r in prep})

@@ -24,11 +24,12 @@ Neither source publishes the vice presidency as a field, so there is no such
 column. A project the interface has no record of keeps its cohort row with
 in_projects_interface=false.
 """
-import argparse, csv, datetime, json, os, re, sys
+import argparse, csv, json, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 from fetch import ROOT, read_cohort  # noqa: E402
+from dates import iso_date  # noqa: E402
 
 COLS = ["project_id", "in_projects_interface", "project_name", "status",
         "approval_date", "approval_fy", "closing_date", "region", "country_code",
@@ -46,14 +47,9 @@ _NOT_A_UNIT = {"", "N/A", "NA"}
 
 
 def _iso(value):
-    """'2023-03-31T00:00:00Z' or '10/31/2028 12:00:00 AM' -> '2023-03-31'."""
-    v = (value or "").strip()
-    if re.match(r"\d{4}-\d{2}-\d{2}", v):
-        return v[:10]
-    try:
-        return datetime.datetime.strptime(v.split()[0], "%m/%d/%Y").date().isoformat()
-    except (ValueError, IndexError):
-        return ""
+    """'2023-03-31T00:00:00Z' or '10/31/2028 12:00:00 AM' -> '2023-03-31'. The
+    projects interface writes month first."""
+    return iso_date(value, "mdy")
 
 
 def _unique(seq):

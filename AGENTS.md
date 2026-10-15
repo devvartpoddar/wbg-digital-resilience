@@ -6,7 +6,9 @@
 
 The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement records, finds which digital assets a project finances and which climate resilience measures it commits to for them, and links that to upcoming procurement. The output helps an advisor decide which Task Team Leaders (TTLs, the staff leading each operation) to talk to, and when. Anything outside the four questions in `docs/methodology.md` does not belong here.
 
-**Current focus: cleaning and paragraph splitting, for both corpora.** Nothing downstream is worth building until a person has read the cleaned text and accepted it.
+**Two parts.** `src/` is the pipeline: fetch, clean, embed, score, classify, load. It takes any label set by name and does not know what a measure is. `inputs/taxonomy/` holds the assets (changed rarely), `analysis/labels/` the measures and any set being tried (changed freely), `analysis/sql/` questions over the Postgres schema. Keep analysis assumptions out of `src/`; keep pipeline mechanics out of `analysis/`.
+
+**Current focus: the first search and classification runs, then grading.** The cleaned text has been read; no cut-off is chosen until a person has graded the check sheet.
 
 ## Where it runs
 
@@ -28,7 +30,7 @@ Every decision the pipeline makes must be **repeatable** (same text, same answer
 
 1. **Never delete data to save space, and never treat a stage's input as disposable.** If disk is a problem, say so.
 2. **No document text in git.** Tables carry identifiers, offsets and checksums. Text lives in `data/` and in Postgres, on the box. Test fixtures are invented.
-3. **Hand-maintained inputs are read, never written.** `inputs/config/` and `inputs/taxonomy/` are kept by people. Changing an asset or measure definition invalidates every label collected under it, so if a task seems to need it, stop and ask.
+3. **Hand-maintained inputs are read, never written.** `inputs/config/`, `inputs/taxonomy/` and `analysis/labels/` are kept by people. Changing an asset definition invalidates every label collected under it, so if a task seems to need it, stop and ask. A set in `analysis/labels/` may be added or revised freely: every run is keyed on its exact wording, and grades are keyed on the question they were given under.
 4. **Secrets come from the environment or the project key file.** The embedding key is `$WBG_OPENROUTER_KEY` or `.secrets/wbg-openrouter-key` in the main checkout (gitignored, mode 0600, owned by the account that runs the pipeline). Never in a committed file, a command line or a log. If you see one anywhere else, stop, say so and recommend rotation.
 5. **Identifiers are deterministic.** A re-run on unchanged input produces byte-identical identifiers and outputs.
 6. **Stages are resumable and skip unchanged work**, keyed on content checksums. On this hardware, reprocessing everything is expensive in hours, not just in principle.

@@ -43,3 +43,16 @@ def test_status_names_the_code_and_the_release(tmp_path):
     rid = release.cut(data, log=lambda *_: None)
     lines = release.status(data)
     assert lines[0].startswith("code:") and rid in lines[1]
+
+
+def test_an_interrupted_cut_is_finished_by_the_next_one(tmp_path, monkeypatch):
+    import json, os
+    data = _store(tmp_path)
+    rid = release.cut(data, log=lambda *_: None)
+    folder = os.path.join(data, "releases", rid)
+    assert os.path.exists(os.path.join(folder, "manifest.json"))
+    # The index row is lost (the process died between the manifest and it).
+    os.remove(os.path.join(data, "releases", "index.csv"))
+    assert release.cut(data, log=lambda *_: None) == rid
+    assert [r["release_id"] for r in release.releases(data)] == [rid]
+    assert release.status(data)[1].startswith(f"data:     release {rid}")

@@ -53,6 +53,29 @@ FURNITURE_TEXT = re.compile(
 # word or a closing bracket, 'hoped44', 'process104.'. Only removed when the
 # page's own footnotes define that number.
 INLINE_MARK = re.compile(r"(?<=[a-z\)\]\"'])(\d{1,3})(?=[\s,.;:)]|$)")
+# The word a candidate marker is glued to. A number after a capital letter
+# (IDA19) never matches; one after a word that carries a capital past its
+# first letter (IPv6, Wi-Fi6, GovNet2) is a version, not a footnote.
+_MARK_WORD = re.compile(r"([A-Za-z][\w-]*)$")
+
+
+def strip_inline_marks(text, defined, stats):
+    """Remove a footnote number glued to a word ('hoped44') when the page's
+    footnotes define that number. A number after a capital (IDA19) never
+    matches; one after a word with a capital past its first letter (IPv6,
+    Wi-Fi6, GovNet2) is a version or a name and stays."""
+    if not defined:
+        return text
+
+    def repl(m):
+        word = _MARK_WORD.search(text, 0, m.start())
+        if word and any(c.isupper() for c in word.group(1)[1:]):
+            return m.group(0)
+        if int(m.group(1)) in defined:
+            stats["inline_marks_removed"] += 1
+            return ""
+        return m.group(0)
+    return INLINE_MARK.sub(repl, text)
 # A web address, including the pieces a line break left after a space
 # ('https://www.example.org/en/ country/report.pdf'). Replaced by "[link]": it
 # costs the model many tokens and says nothing about assets or measures.
@@ -552,12 +575,7 @@ def extract(pdf, raw_out=None):
             defined_by_page[pno] if pno < len(defined_by_page) else set())
 
         def unmark(text):
-            def repl(m):
-                if int(m.group(1)) in defined:
-                    stats["inline_marks_removed"] += 1
-                    return ""
-                return m.group(0)
-            return INLINE_MARK.sub(repl, text) if defined else text
+            return strip_inline_marks(text, defined, stats)
 
         emitted_tables = set()
         for i, l in enumerate(keep):

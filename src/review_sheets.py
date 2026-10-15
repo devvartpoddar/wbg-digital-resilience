@@ -26,10 +26,8 @@ them, and the page break if the paragraph crossed one.
 """
 import argparse, csv, os, sys
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where                    # noqa: E402
-from review import draw                        # noqa: E402
 
 CELL_MAX = 32_000          # Excel refuses a cell over 32,767 characters
 
@@ -44,6 +42,26 @@ PKG_COLS = [("package_id", 18), ("project_id", 10), ("plan_version", 10),
             ("method_source", 10), ("market_approach", 14), ("status_raw", 14),
             ("status", 14), ("status_source", 10), ("status_as_of", 11),
             ("estimated_amount", 12), ("currency", 7), ("amount_source", 10), ("planned_date", 11), ("ok", 6), ("note", 30)]
+
+
+def draw(pool, n, seed, key="doc_id"):
+    """Seeded draw spread across groups (documents, projects), so one long
+    document cannot dominate and the same seed reproduces the same rows."""
+    import random
+    rng = random.Random(seed)
+    by_group = {}
+    for r in pool:
+        by_group.setdefault(r[key], []).append(r)
+    order = sorted(by_group)
+    rng.shuffle(order)
+    buckets = {g: list(by_group[g]) for g in order}
+    picked, i = [], 0
+    while len(picked) < min(n, len(pool)):
+        bucket = buckets[order[i % len(order)]]
+        if bucket:
+            picked.append(bucket.pop(rng.randrange(len(bucket))))
+        i += 1
+    return picked
 
 
 def cell_text(value):
@@ -73,7 +91,10 @@ def write_sheet(path, cols, rows):
         for cell in row:
             cell.alignment = wrap
     ws.freeze_panes = "A2"
-    wb.save(path)
+    # Written aside and renamed: a sheet that exists is kept on later runs
+    # as it may hold notes, so a half-written one must never exist.
+    wb.save(path + ".part")
+    os.replace(path + ".part", path)
 
 
 def read_csv(path):
@@ -98,8 +119,11 @@ def paragraph_rows(data, n, seed):
             with open(where(data, "text", f"{did}.txt"), encoding="utf-8") as fh:
                 clean_cache[did] = fh.read()
             path = where(data, "pdf_text", f"{did}.txt")
-            raw_cache[did] = open(path, encoding="utf-8").read() \
-                if os.path.exists(path) else None
+            if os.path.exists(path):
+                with open(path, encoding="utf-8") as fh:
+                    raw_cache[did] = fh.read()
+            else:
+                raw_cache[did] = None
         body = clean_cache[did][int(r["char_start"]):int(r["char_end"])]
         raw = raw_cache[did]
         if raw is None or r.get("raw_start", "") == "":

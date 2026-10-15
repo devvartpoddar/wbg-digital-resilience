@@ -22,7 +22,6 @@ Only the PDF is read. A document whose PDF is missing, unreadable or a scan
 import argparse, csv, hashlib, os, re, sys
 from collections import Counter
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 from text_rules import TOKEN, ROMAN, annex_match  # noqa: E402
@@ -45,6 +44,10 @@ REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
 # A PDF whose text layer holds fewer characters than this is a scan, not a
 # document that can be read by layout.
 PDF_MIN_CHARS = 2000
+# A unit with fewer words than this is dropped (headings and section titles
+# aside). Varying it would change rejected.csv with nothing recording why,
+# so it is a constant, not a flag.
+MIN_TOKENS = 5
 # Footnotes are mostly references ('ITU. 2021. Global Cybersecurity Index
 # 2020.'), which a sentence splitter can only cut into nonsense.
 SENTENCE_BLOCKS = {"narrative", "annex"}
@@ -142,13 +145,16 @@ def layout_cached(data, docs, workers):
             for n, (did, text, spans, stats, raw, err) in enumerate(
                     ex.map(_layout_job, [(d, p) for d, p, _, _ in todo]), 1):
                 sha, cache = meta[did]
+                out[did] = (text, spans, stats, err, raw)
+                if err:
+                    # Not cached: a failed read may be the box, not the PDF
+                    # (memory, a half-written file), and is tried again.
+                    continue
                 tmp = cache + ".part"
                 with open(tmp, "w", encoding="utf-8") as fh:
                     json.dump({"pdf_sha256": sha, "parser": version, "text": text,
-                               "spans": spans, "stats": stats, "error": err,
-                               "raw": raw}, fh)
+                               "spans": spans, "stats": stats, "raw": raw}, fh)
                 os.replace(tmp, cache)
-                out[did] = (text, spans, stats, err, raw)
                 if n % 10 == 0:
                     print(f"    ...{n}/{len(todo)} PDFs read", flush=True)
     return out
@@ -168,8 +174,6 @@ def main():
     import components
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=data_root())
-    ap.add_argument("--limit", type=int, default=0)
-    ap.add_argument("--min-tokens", type=int, default=5)
     ap.add_argument("--workers", type=int, default=3,
                     help="PDF reading processes; the box has four cores")
     args = ap.parse_args()
@@ -181,8 +185,6 @@ def main():
 
     with open(where(args.data, "documents"), newline="", encoding="utf-8") as fh:
         docs = list(csv.DictReader(fh))
-    if args.limit:
-        docs = docs[:args.limit]
 
     layouts = layout_cached(args.data, docs, args.workers)
     version = parser_version()
@@ -192,6 +194,10 @@ def main():
     paras, rejected, sents, stats = [], [], [], Counter()
     doc_parts = []
     per_doc, not_cleaned = [], []
+    # The text files are written only once every check below has passed, so
+    # a run that stops writes nothing: the tables and the text files always
+    # belong to the same read.
+    staged = []
 
     for n, doc in enumerate(docs, 1):
         did = doc["doc_id"]
@@ -209,8 +215,8 @@ def main():
         for k, v in lstats.items():
             stats[k] += v
         clean = text
-        write_if_changed(where(args.data, "pdf_text", f"{did}.txt"), raw)
-        write_if_changed(os.path.join(clean_dir, f"{did}.txt"), clean)
+        staged.append((where(args.data, "pdf_text", f"{did}.txt"), raw))
+        staged.append((os.path.join(clean_dir, f"{did}.txt"), clean))
 
         # Which project each stretch of the document belongs to: a combined
         # appraisal document is split at its data sheets (keys.py).
@@ -226,7 +232,7 @@ def main():
             pid = f"{did}:p{ordinal:05d}"
             comp, sub = tagger.see(body, block, path)
             ntok = len(TOKEN.findall(body))
-            if ntok < args.min_tokens and block != "heading" \
+            if ntok < MIN_TOKENS and block != "heading" \
                     and not (ROMAN.match(body) or annex_match(body)):
                 rejected.append({"unit_id": pid, "doc_id": did,
                                  "reason": "too_short", "n_chars": len(body)})
@@ -294,7 +300,7 @@ def main():
     for pid, (sha, parser) in before.items():
         p = now.get(pid)
         if p is None:
-            gone += 1 if not args.limit else 0
+            gone += 1
         elif p["text_sha256"] != sha:
             if parser == p["parser"]:
                 unstable.append(pid)
@@ -305,6 +311,8 @@ def main():
             f"{len(unstable)} paragraphs changed text with the parser unchanged, "
             f"e.g. {unstable[:3]}: the PDF read is not reproducible. Nothing written.")
 
+    for path, body in staged:
+        write_if_changed(path, body)
     doc_parts.sort(key=lambda r: (r["doc_id"], r["part"]))
     for name, rows, cols in (("paragraphs.csv", paras, PARA_COLS),
                              ("rejected.csv", rejected, REJ_COLS),

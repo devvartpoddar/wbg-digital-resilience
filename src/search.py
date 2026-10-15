@@ -54,12 +54,15 @@ from collections import defaultdict
 
 import numpy
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import embed  # noqa: E402
 
-TAXONOMY = os.path.join(ROOT, "inputs", "taxonomy")
+import labels  # noqa: E402
+
+# Label sets live in inputs/taxonomy/ (the pipeline's) and analysis/labels/
+# (analysis sets); `taxonomy=None` finds the set in either (src/labels.py).
+TAXONOMY = None
 QUERY_COLS = ["query_id", "label_id", "kind", "text", "text_sha256"]
 CONTEXT = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "component_number",
            "subcomponent_number", "component_key"]
@@ -81,6 +84,7 @@ def _active(r):
 def load_queries(name, folder=TAXONOMY):
     """[{query_id, label_id, kind, text, text_sha256}] for a label set: each
     active label's definition, then its active phrases."""
+    folder = folder or labels.folder(name)
     path = os.path.join(folder, f"{name}.csv")
     rows = _rows(path)
     if not rows:
@@ -89,14 +93,14 @@ def load_queries(name, folder=TAXONOMY):
     name_col = next((c for c in rows[0] if c.endswith("_name")), None)
     if not id_col or not name_col or "definition" not in rows[0]:
         raise SystemExit(f"search: {path} needs an *_id, a *_name and a definition column")
-    labels = [r for r in rows if _active(r)]
-    if not labels:
+    active = [r for r in rows if _active(r)]
+    if not active:
         raise SystemExit(f"search: {path} has no active label")
-    ids = [r[id_col].strip() for r in labels]
+    ids = [r[id_col].strip() for r in active]
     if len(ids) != len(set(ids)):
         raise SystemExit(f"search: {path} repeats a label id")
     out = []
-    for r in labels:
+    for r in active:
         lid = r[id_col].strip()
         text = f"{r[name_col].strip()}: {' '.join(r['definition'].split())}"
         out.append({"query_id": f"{lid}:definition", "label_id": lid,
@@ -250,11 +254,16 @@ def load_run(folder, data):
     idx = _paths(data)[1]
     index = _rows(idx)
     scores = numpy.load(os.path.join(folder, "scores.npy"), mmap_mode="r")
-    if scores.shape[0] != len(index) or \
-            manifest.get("index_sha256", _sha_file(idx)) != _sha_file(idx):
+    idx_sha = _sha_file(idx)
+    if scores.shape[0] != len(index) or manifest.get("index_sha256", idx_sha) != idx_sha:
         raise SystemExit(f"search: {os.path.basename(folder)} was scored against another "
                          f"sentence index; run ./wbg search again")
     return _rows(os.path.join(folder, "queries.csv")), scores, index
+
+
+def run_labels(folder):
+    """The label ids a scored run holds, in order."""
+    return list(dict.fromkeys(q["label_id"] for q in _rows(os.path.join(folder, "queries.csv"))))
 
 
 def percentiles(scores):
@@ -341,7 +350,8 @@ def _write(path, cols, rows):
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
-    ap.add_argument("label_set", help="a file in inputs/taxonomy/ without .csv: assets, measures")
+    ap.add_argument("label_set", help="a label set in inputs/taxonomy/ or analysis/labels/ "
+                                      "(the file name without .csv): assets, measures")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()

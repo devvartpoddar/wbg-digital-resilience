@@ -178,3 +178,16 @@ def test_a_component_title_is_neither_a_lead_in_nor_a_list_item():
 
 def test_a_title_set_as_a_bullet_is_still_a_title():
     assert PL._title_line("• Sub-component 2.3: Building a National Data Center")
+
+
+def test_a_glued_footnote_number_goes_but_a_version_number_stays():
+    from collections import Counter
+    import pdf_layout as P
+    stats = Counter()
+    defined = {6, 44}
+    assert P.strip_inline_marks("as hoped44 for", defined, stats) == "as hoped for"
+    assert P.strip_inline_marks("routed over IPv6 and Wi-Fi6 links", defined, stats) == \
+        "routed over IPv6 and Wi-Fi6 links"
+    assert P.strip_inline_marks("under IDA19 terms", defined, stats) == "under IDA19 terms"
+    assert P.strip_inline_marks("in phase6 of", {3}, stats) == "in phase6 of"
+    assert stats["inline_marks_removed"] == 1

@@ -147,7 +147,7 @@ def sentence_rules(data, minimums=WORD_MINIMUMS):
 
 def report(data, n_docs, skip_paragraphs=False):
     lines = ["# Sensitivity of the cleaned text to three settings", "",
-             f"Run {time.strftime('%Y-%m-%d %H:%M')}. Nothing the pipeline writes was changed.", ""]
+             "Nothing the pipeline writes was changed.", ""]
     if not skip_paragraphs:
         docs = sample_documents(data, n_docs)
         res = paragraph_gaps(data, docs)
