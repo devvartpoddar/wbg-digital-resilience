@@ -729,3 +729,30 @@ def test_a_row_printed_twice_identically_is_one_package():
             _version("v1", "2020-01-01", estimated_amount="25.80", package_version_id="d:00002")]
     kept, sup = P.dedupe_packages(rows, Counter())
     assert len(kept) == 1 and not sup
+
+
+# ------------------------------------------------- amounts and dates in text, again
+
+def test_an_amount_in_the_text_keeps_its_scale_word_and_decimal_comma():
+    assert P.extract_amount_and_date("Supply of servers US$ 1.5 million")[0] == "1500000.00"
+    assert P.extract_amount_and_date("Travaux USD 2,5 millions")[0] == "2500000.00"
+    assert P.extract_amount_and_date("Audit USD 1,5")[0] == "1.50"
+    assert P.extract_amount_and_date("Audit USD 1,500")[0] == "1500.00"
+    assert P.extract_amount_and_date("Audit 3 bn USD")[0] == "3000000000.00"
+
+
+def test_a_date_in_the_text_is_stored_as_iso_or_not_at_all():
+    assert P.extract_amount_and_date("delivery by 30/06/2024")[1] == "2024-06-30"
+    assert P.extract_amount_and_date("delivery by 14-Sep-2026")[1] == "2026-09-14"
+    # Both readings fit: nothing is stored rather than a guess.
+    assert P.extract_amount_and_date("delivery by 03/06/2024")[1] == ""
+
+
+def test_a_lone_review_word_at_the_end_is_part_of_the_description():
+    desc, cells = P.split_cells("Rehabilitation of Mbeya Post")
+    assert desc == "Rehabilitation of Mbeya Post" and cells == ""
+    desc, cells = P.split_cells("Training of staff on Prior")
+    assert desc == "Training of staff on Prior"
+    # With a method or approach after it, the review word is a cell.
+    desc, cells = P.split_cells("Supply of laptops Post Request for Bids Open - National")
+    assert desc == "Supply of laptops"

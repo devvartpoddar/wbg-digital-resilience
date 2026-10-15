@@ -61,3 +61,19 @@ def test_an_annex_title_repeated_on_table_rows_does_not_end_the_annex():
             "ANNEX 3: Programme\nShared.\n")
     assert _owner(text, "P000001|P000003", "Component 2: Radios") == "P000001"
     assert _owner(text, "P000001|P000003", "Shared.") == "P000001|P000003"
+
+
+def test_a_stretch_between_country_annexes_with_no_data_sheet_is_programme_wide():
+    from keys import project_parts
+    text = ("DATASHEET Operation ID P000001 regional\n"
+            "ANNEX 1 country one DATASHEET Operation ID P000002 text\n"
+            "ANNEX 2 something shared, no data sheet\n"
+            "ANNEX 3 country two DATASHEET Operation ID P000003 text\n"
+            "ANNEX 4 programme wide\n")
+    parts = project_parts(text, "P000001|P000002|P000003")
+    hows = [(owners, how) for _, _, owners, how in parts]
+    assert hows[0] == ("P000001", "datasheet_operation_id")
+    assert hows[1] == ("P000002", "datasheet_operation_id")
+    assert hows[2] == ("P000001|P000002|P000003", "programme_wide")
+    assert hows[3] == ("P000003", "datasheet_operation_id")
+    assert hows[4] == ("P000001|P000002|P000003", "programme_wide")

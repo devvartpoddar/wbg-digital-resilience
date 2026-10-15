@@ -6,22 +6,28 @@ Reads  data/projects/projects.csv, data/raw/documents.csv,
        components}.csv (+ data/appraisal/text/ for their text),
        data/procurement/{packages,superseded_packages,notices,awards}.csv
        the current search and classification runs, data/embeddings/,
-       inputs/taxonomy/, data/releases/, sql/views/
+       every label set (src/labels.py), data/releases/, sql/views/
        (the *_raw tables and the labels are not loaded: labels are read by
        evaluation alone, AGENTS.md rule 9)
-Writes Postgres: wbg.<table> for each, the results tables (search_best,
-       classify_scores, sentence_vectors, taxonomy), releases and data_release,
-       keys between them, the views in sql/views/, and wbg.loads (one row per
-       load, with the release it loaded); first it cuts a release (release.py)
+Writes Postgres: wbg.<table> for each, paragraph_projects (one row per
+       paragraph and project, so a paragraph joins its project), the results
+       tables (search_best, search_paragraphs, classify_scores,
+       sentence_vectors, taxonomy), releases and data_release, keys between
+       them, the views and functions in sql/views/, and wbg.loads (one row
+       per load, with the release it loaded); first it cuts a release
+       (release.py)
 
 The CSV files stay the source; these tables are a queryable copy of them, and
 can be rebuilt from them at any time. Paragraph text, which the CSV leaves out
 (it is an offset into data/appraisal/text/), is resolved here into a text column - the
 database is on the box, and text never leaves the box.
 
-Each table is replaced inside one transaction, so a reader never sees half a
-table. A table whose source file has not changed since its last load (same
-SHA-256) is skipped, so re-running is cheap. --force reloads everything.
+Columns are typed for Metabase: dates as date, timestamps as timestamptz,
+flags as boolean, counts as integer, amounts as numeric; a value that does not
+parse is NULL and counted. Each table is replaced inside one transaction, so a
+reader never sees half a table. A table whose source file has not changed
+since its last load (same SHA-256) is skipped, so re-running is cheap.
+--force reloads everything.
 
 Connection: $WBG_PG, default postgresql:///work (the box's agents database,
 peer authentication over the local socket - no password anywhere).
@@ -29,12 +35,13 @@ peer authentication over the local socket - no password anywhere).
   python3 src/load_pg.py
   python3 src/load_pg.py --force
 """
-import argparse, csv, glob, hashlib, os, sys
+import argparse, csv, glob, hashlib, os, re, sys
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
+import labels  # noqa: E402
 
 SCHEMA = "wbg"
 DEFAULT_DSN = "postgresql:///work"
@@ -53,12 +60,20 @@ TABLES = [
     ("notices", "procurement/notices.csv"),
     ("awards", "procurement/awards.csv"),
 ]
-INTEGER = {"ordinal", "char_start", "char_end", "n_tokens", "n_chars",
-           "page_from", "page_to", "raw_start", "raw_end", "approval_fy"}
+INTEGER = {"ordinal", "char_start", "char_end", "n_tokens", "n_chars", "page_from", "page_to",
+           "raw_start", "raw_end", "approval_fy", "pdf_bytes", "page", "part", "glue_repairs",
+           "rank", "queries_agreeing", "queries", "grade", "n_rows", "paragraphs", "packages",
+           "notices", "awards", "sentences_embedded"}
 NUMERIC = {"estimated_amount", "actual_amount", "total_amount", "supplier_amount",
-           "cost_usd_m", "cost_before_usd_m", "commitment_usd_m"}
+           "cost_usd_m", "cost_before_usd_m", "commitment_usd_m", "score", "percentile",
+           "best_score", "best_percentile", "expected", "confidence", "p0", "p1", "p2", "p3",
+           "p4"}
+BOOLEAN = {"for_model", "list_item", "is_rebid", "is_placeholder", "in_latest_plan",
+           "in_projects_interface", "code_dirty", "active", "included"}
 INDEXED = {"doc_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
-           "contract_id", "unit_id", "borrower_ref_norm"}
+           "contract_id", "unit_id", "borrower_ref_norm", "label_id", "label_set"}
+_ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+_ISO_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$")
 
 
 def sha256_file(path):
@@ -70,15 +85,23 @@ def sha256_file(path):
 
 
 def col_type(name):
+    """The column's Postgres type, from its name: every *_date and *_as_of
+    column is a date, every *_at a timestamp, the flags boolean."""
     if name in INTEGER:
         return "integer"
     if name in NUMERIC:
         return "numeric"
+    if name in BOOLEAN:
+        return "boolean"
+    if name.endswith(("_date", "_as_of")):
+        return "date"
+    if name.endswith("_at"):
+        return "timestamptz"
     return "text"
 
 
 def convert(name, value, bad):
-    """'' -> NULL; integers and amounts parsed, unparseable ones NULL and counted."""
+    """'' -> NULL; typed values parsed, unparseable ones NULL and counted."""
     if value is None or value == "":
         return None
     kind = col_type(name)
@@ -87,6 +110,19 @@ def convert(name, value, bad):
             return int(value)
         if kind == "numeric":
             return float(value.replace(",", ""))
+        if kind == "boolean":
+            v = value.strip().lower()
+            if v in ("true", "false"):
+                return v == "true"
+            raise ValueError(value)
+        if kind == "date":
+            if not _ISO_DATE.match(value):
+                raise ValueError(value)
+            return value
+        if kind == "timestamptz":
+            if not _ISO_STAMP.match(value):
+                raise ValueError(value)
+            return value
     except ValueError:
         bad[name] = bad.get(name, 0) + 1
         return None
@@ -120,10 +156,12 @@ def load_table(conn, data, table, rel, release_id=""):
         return load_rows(conn, table, cols, rows, sha256_file(path), release_id)
 
 
-def load_rows(conn, table, cols, rows, source_sha, release_id="", types=None):
+def load_rows(conn, table, cols, rows, source_sha, release_id="", types=None, after=()):
     """Replace wbg.<table> with rows, in one transaction. A table it replaces
     takes its dependent views and keys with it (CASCADE); finish() puts them
-    back after every load."""
+    back after every load. `after` is SQL run inside the same transaction
+    once the rows are in (an index that must exist before the load counts
+    as done)."""
     types = types or {}
     bad = {}
     ident = f"{SCHEMA}.{table}"
@@ -141,46 +179,83 @@ def load_rows(conn, table, cols, rows, source_sha, release_id="", types=None):
         for c in cols:
             if c in INDEXED:
                 cur.execute(f'CREATE INDEX ON {ident} ("{c}")')
+        for sql in after:
+            cur.execute(sql)
         cur.execute(f"INSERT INTO {SCHEMA}.loads (table_name, source_sha256, n_rows, "
                     f"loaded_at, release_id) VALUES (%s, %s, %s, %s, %s)",
-                    (table, source_sha, n,
-                     datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), release_id))
+                    (table, source_sha, n, _now(), release_id))
     return n, bad
+
+
+def _now():
+    return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
+# ------------------------------------------------------------ derived tables
+
+def paragraph_projects(data):
+    """(source sha, rows) for wbg.paragraph_projects: one row per paragraph
+    and project, from the pipe-joined project_ids, so Metabase can follow a
+    paragraph to its project with a key."""
+    path = where(data, "appraisal", "paragraphs.csv")
+    if not os.path.exists(path):
+        return None, []
+
+    def rows():
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                for p in r["project_ids"].split("|"):
+                    if p:
+                        yield {"paragraph_id": r["paragraph_id"], "project_id": p,
+                               "doc_id": r["doc_id"]}
+    return sha256_file(path) + ":projects", rows()
 
 
 # ------------------------------------------------------------ results tables
 #
 # The search and the classifier write versioned runs; Postgres holds the run
-# for the label set and text as they stand now, one table each across label
-# sets, so a reader filters by label_set rather than finding the right table.
+# for each label set and the text as they stand now, one table each across
+# label sets, so a reader filters by label_set rather than finding the right
+# table. Label sets are every set in inputs/taxonomy/ and analysis/labels/
+# (src/labels.py) that has a current run.
 
-LABEL_SETS = ("assets", "measures")
 
-
-def search_rows(data):
-    """(source sha, rows) for wbg.search_best: per label set, label and unit,
-    the best cosine over the label's queries, the best percentile and the
-    query that matched. None without a current search run."""
+def search_tables(data):
+    """(source sha, best rows, rollup rows) for wbg.search_best (per label
+    and unit: the best cosine over the label's queries, the best percentile
+    and the query that matched) and wbg.search_paragraphs (per label and
+    paragraph: its best unit). The best rows stream, label by label; the
+    rollup is collected as they pass. None without any current run."""
     import search
-    rows, shas = [], []
-    for name in LABEL_SETS:
+    folders = []
+    for name in labels.label_sets():
         try:
             folder, _ = search.run_folder(name, data)
         except SystemExit:
             continue
-        if not os.path.exists(os.path.join(folder, "manifest.json")):
-            continue
-        shas.append(os.path.basename(folder))
-        for h in search.hits(folder, data):
-            rows.append(dict(h, label_set=name, run=os.path.basename(folder)))
-    return ("|".join(shas), rows) if rows else (None, [])
+        if os.path.exists(os.path.join(folder, "manifest.json")):
+            folders.append((name, folder))
+    if not folders:
+        return None, None, None
+    rollup = []
+
+    def best():
+        for name, folder in folders:
+            run = os.path.basename(folder)
+            for lid in search.run_labels(folder):
+                rows = search.hits(folder, data, labels=[lid])
+                for h in rows:
+                    yield dict(h, label_set=name, run=run)
+                rollup.extend(dict(r, label_set=name, run=run)
+                              for r in search.paragraph_rollup(rows))
+    return "|".join(os.path.basename(f) for _, f in folders), best(), rollup
 
 
 def classify_rows(data):
     """(source sha, rows) for wbg.classify_scores from the current runs."""
     import classify
     rows, runs = [], []
-    for name in LABEL_SETS:
+    for name in labels.label_sets():
         try:
             folder = classify.current_run(name, data)
         except SystemExit:
@@ -198,28 +273,36 @@ SEARCH_COLS = ["label_set", "run", "label_id", "rank", "unit_id", "kind", "parag
                "doc_id", "project_ids", "component_number", "subcomponent_number",
                "component_key", "score", "percentile", "best_query_id", "best_query",
                "queries_agreeing", "queries"]
+ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "project_ids",
+               "component_number", "component_key", "best_score", "best_percentile",
+               "best_unit_id", "best_query_id", "units_hit"]
 CLASSIFY_COLS = ["label_set", "run", "paragraph_id", "doc_id", "project_ids",
                  "component_number", "label_id", "grade", "expected", "confidence",
                  "p0", "p1", "p2", "p3", "p4", "model_served"]
-NUMERIC.update({"score", "percentile", "expected", "confidence", "p0", "p1", "p2", "p3",
-                "p4"})
-INTEGER.update({"rank", "queries_agreeing", "queries", "grade"})
-INDEXED.update({"label_id", "label_set"})
+INTEGER.add("units_hit")
+
+
+def vector_kind(conn, dim):
+    """The pgvector column type for dim dimensions, or None without the
+    extension: halfvec with an HNSW index from pgvector 0.7 (plain vector
+    cannot be indexed past 2,000 dimensions), plain vector unindexed before."""
+    ver = conn.execute("SELECT extversion FROM pg_extension WHERE extname = 'vector'"
+                       ).fetchone()
+    if not ver:
+        return None
+    half = tuple(int(x) for x in ver[0].split(".")[:2]) >= (0, 7)
+    return f"{'halfvec' if half else 'vector'}({dim})"
 
 
 def load_vectors(conn, data, release_id, force):
     """wbg.sentence_vectors: one row per search unit with its embedding, so a
-    query can ask for the units nearest any other (pgvector). halfvec with an
-    HNSW index where pgvector is 0.7 or later (3,072 dimensions is over plain
-    vector's indexable limit); plain vector, unindexed, before that."""
+    query can ask for the units nearest any other (pgvector). The index is
+    built inside the load's transaction, so an interrupted build leaves no
+    load recorded and the next run does it again."""
     npy = where(data, "embeddings", "sentence_emb.npy")
     idx = where(data, "embeddings", "sentence_index.csv")
     if not (os.path.exists(npy) and os.path.exists(idx)):
         return "skipped: no embeddings yet"
-    ver = conn.execute("SELECT extversion FROM pg_extension WHERE extname = 'vector'"
-                       ).fetchone()
-    if not ver:
-        return "skipped: the vector extension is not installed in this database"
     sha = sha256_file(npy) + sha256_file(idx)
     if not force and _last_sha(conn, "sentence_vectors") == sha:
         return "unchanged"
@@ -227,8 +310,12 @@ def load_vectors(conn, data, release_id, force):
     matrix = numpy.load(npy, mmap_mode="r")
     with open(idx, newline="", encoding="utf-8") as fh:
         index = list(csv.DictReader(fh))
-    half = tuple(int(x) for x in ver[0].split(".")[:2]) >= (0, 7)
-    kind = f"{'halfvec' if half else 'vector'}({matrix.shape[1]})"
+    if len(index) != matrix.shape[0]:
+        raise SystemExit("load_pg: sentence_emb.npy and sentence_index.csv disagree on rows; "
+                         "run ./wbg search again")
+    kind = vector_kind(conn, matrix.shape[1])
+    if kind is None:
+        return "skipped: the vector extension is not installed in this database"
 
     def rows():
         for i, r in enumerate(index):
@@ -237,11 +324,11 @@ def load_vectors(conn, data, release_id, force):
                    "doc_id": r["doc_id"], "project_ids": r["project_ids"],
                    "text_sha256": r["text_sha256"], "embedding": vec}
     cols = ["unit_id", "paragraph_id", "doc_id", "project_ids", "text_sha256", "embedding"]
+    half = kind.startswith("halfvec")
+    after = [f"CREATE INDEX ON {SCHEMA}.sentence_vectors USING hnsw "
+             f"(embedding halfvec_cosine_ops)"] if half else []
     n, _ = load_rows(conn, "sentence_vectors", cols, rows(), sha, release_id,
-                     types={"embedding": kind})
-    if half:
-        conn.execute(f"CREATE INDEX ON {SCHEMA}.sentence_vectors USING hnsw "
-                     f"(embedding halfvec_cosine_ops)")
+                     types={"embedding": kind}, after=after)
     return f"{n:>8} rows ({kind}{', HNSW index' if half else ', no index'})"
 
 
@@ -251,17 +338,25 @@ def load_vectors(conn, data, release_id, force):
 # declared NOT VALID: they describe the joins without the load failing over
 # an orphan row, which the audits report instead.
 
-PRIMARY = {"projects": "project_id", "documents": "doc_id", "paragraphs": "paragraph_id",
-           "sentences": "sentence_id", "packages": "package_id", "notices": "notice_id",
-           "awards": "contract_id", "sentence_vectors": "unit_id"}
+PRIMARY = {"projects": ("project_id",), "documents": ("doc_id",),
+           "paragraphs": ("paragraph_id",), "sentences": ("sentence_id",),
+           "packages": ("package_id",), "notices": ("notice_id",), "awards": ("contract_id",),
+           "sentence_vectors": ("unit_id",), "document_parts": ("doc_id", "part"),
+           "paragraph_projects": ("paragraph_id", "project_id"),
+           "search_paragraphs": ("label_set", "label_id", "paragraph_id"),
+           "classify_scores": ("label_set", "label_id", "paragraph_id"),
+           "taxonomy": ("label_set", "label_id"), "releases": ("release_id",)}
 FOREIGN = [("paragraphs", "doc_id", "documents"), ("sentences", "paragraph_id", "paragraphs"),
            ("sentences", "doc_id", "documents"), ("components", "doc_id", "documents"),
            ("document_parts", "doc_id", "documents"), ("packages", "project_id", "projects"),
            ("notices", "project_id", "projects"), ("awards", "project_id", "projects"),
            ("notices", "package_id", "packages"), ("awards", "package_id", "packages"),
            ("superseded_packages", "package_id", "packages"),
+           ("paragraph_projects", "paragraph_id", "paragraphs"),
+           ("paragraph_projects", "project_id", "projects"),
            ("classify_scores", "paragraph_id", "paragraphs"),
            ("search_best", "paragraph_id", "paragraphs"),
+           ("search_paragraphs", "paragraph_id", "paragraphs"),
            ("sentence_vectors", "paragraph_id", "paragraphs")]
 SQL_DIR = os.path.join(ROOT, "sql")
 
@@ -276,10 +371,15 @@ def _last_sha(conn, table):
     return last[0] if last and _exists(conn, table) else None
 
 
+def _function_exists(conn, name):
+    return bool(conn.execute("SELECT 1 FROM pg_proc WHERE proname = %s", (name,)).fetchone())
+
+
 def finish(conn, log=print):
-    """Keys and views, put back after every load (a replaced table drops
-    them). A view over a table not loaded yet is skipped and reported."""
-    for table, col in PRIMARY.items():
+    """Keys, views and functions, put back after every load (a replaced
+    table drops them). A key that cannot be added (a duplicate id) and a
+    view over a table not loaded yet are skipped and reported, never fatal."""
+    for table, cols in PRIMARY.items():
         if not _exists(conn, table):
             continue
         has = conn.execute("SELECT 1 FROM pg_constraint WHERE conrelid = %s::regclass "
@@ -287,9 +387,10 @@ def finish(conn, log=print):
         if not has:
             try:
                 with conn.transaction():
-                    conn.execute(f'ALTER TABLE {SCHEMA}.{table} ADD PRIMARY KEY ("{col}")')
+                    conn.execute(f'ALTER TABLE {SCHEMA}.{table} ADD PRIMARY KEY ('
+                                 + ", ".join(f'"{c}"' for c in cols) + ")")
             except Exception as exc:                  # noqa: BLE001
-                log(f"  key {table}.{col}: not added ({str(exc).splitlines()[0]})")
+                log(f"  key {table}.{'+'.join(cols)}: not added ({str(exc).splitlines()[0]})")
     for table, col, ref in FOREIGN:
         if not (_exists(conn, table) and _exists(conn, ref)):
             continue
@@ -297,53 +398,68 @@ def finish(conn, log=print):
         has = conn.execute("SELECT 1 FROM pg_constraint WHERE conname = %s AND "
                            "conrelid = %s::regclass", (name, f"{SCHEMA}.{table}")).fetchone()
         if not has:
-            with conn.transaction():
-                conn.execute(f'ALTER TABLE {SCHEMA}.{table} ADD CONSTRAINT {name} '
-                             f'FOREIGN KEY ("{col}") REFERENCES {SCHEMA}.{ref} '
-                             f'("{PRIMARY[ref]}") NOT VALID')
+            try:
+                with conn.transaction():
+                    conn.execute(f'ALTER TABLE {SCHEMA}.{table} ADD CONSTRAINT {name} '
+                                 f'FOREIGN KEY ("{col}") REFERENCES {SCHEMA}.{ref} '
+                                 f'("{PRIMARY[ref][0]}") NOT VALID')
+            except Exception as exc:                  # noqa: BLE001
+                log(f"  key {name}: not added ({str(exc).splitlines()[0]})")
+    vec = None
+    if _exists(conn, "sentence_vectors"):
+        vec = conn.execute("SELECT format_type(atttypid, atttypmod) FROM pg_attribute WHERE "
+                           "attrelid = %s::regclass AND attname = 'embedding'",
+                           (f"{SCHEMA}.sentence_vectors",)).fetchone()[0]
     for path in sorted(glob.glob(os.path.join(SQL_DIR, "views", "*.sql"))):
         with open(path, encoding="utf-8") as fh:
             sql = fh.read()
+        if "openrouter(" in sql and not _function_exists(conn, "openrouter"):
+            log(f"  {os.path.basename(path)}: skipped (no openrouter() function in this "
+                f"database; it comes with the box's Metabase setup)")
+            continue
+        if "{VECTOR}" in sql:
+            if not vec:
+                log(f"  {os.path.basename(path)}: skipped (no sentence_vectors yet)")
+                continue
+            sql = sql.replace("{VECTOR}", vec)
         try:
             with conn.transaction():
                 conn.execute(sql)
         except Exception as exc:                      # noqa: BLE001
-            log(f"  view {os.path.basename(path)}: skipped ({str(exc).splitlines()[0]})")
+            log(f"  {os.path.basename(path)}: skipped ({str(exc).splitlines()[0]})")
 
 
 def taxonomy_rows():
-    """Every label of every label set in inputs/taxonomy/, so a reader sees
+    """Every label of every label set (src/labels.py), so a reader sees
     names and definitions next to label ids."""
     rows = []
-    for path in sorted(glob.glob(os.path.join(ROOT, "inputs", "taxonomy", "*.csv"))):
-        name = os.path.basename(path)[:-4]
-        if name.endswith(("_queries", "_scale")):
-            continue
-        with open(path, newline="", encoding="utf-8") as fh:
-            for r in csv.DictReader(fh):
-                id_col = next(c for c in r if c.endswith("_id"))
-                name_col = next(c for c in r if c.endswith("_name"))
-                rows.append({"label_set": name, "label_id": r[id_col], "name": r[name_col],
-                             "definition": r.get("definition", ""),
-                             "active": r.get("active", ""), "version": r.get("version", "")})
+    for name in labels.label_sets():
+        for r in labels.load_set(name):
+            rows.append({"label_set": name, "label_id": r["id"], "name": r["name"],
+                         "definition": r["definition"], "active": r["active"],
+                         "version": r["version"], "folder": r["folder"]})
     return rows
 
 
 def load_release(conn, data, release_id):
     """wbg.releases: every release cut (data/releases/index.csv), and
-    wbg.data_release: the one this load is."""
+    wbg.data_release: the one this load is, with when each kind of record
+    was last fetched, so a card can say 'data as of'."""
     import release
     rows = release.releases(data)
     if rows:
         load_rows(conn, "releases", release.INDEX_COLS, rows,
                   sha256_file(where(data, "releases", "index.csv")), release_id)
     m = release.manifest(data)
-    load_rows(conn, "data_release", ["release_id", "commit", "code_dirty", "loaded_at",
-                                     "fetched"],
+    fetched = {k: v.get("latest", "") for k, v in m["fetched"].items()}
+    load_rows(conn, "data_release",
+              ["release_id", "commit", "code_dirty", "loaded_at", "appraisal_fetched_date",
+               "procurement_fetched_date", "projects_fetched_date"],
               [{"release_id": release_id, "commit": m["code"]["commit"][:12],
-                "code_dirty": str(m["code"]["dirty"]).lower(),
-                "loaded_at": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
-                "fetched": "; ".join(f"{k} {v['latest']}" for k, v in m["fetched"].items())}],
+                "code_dirty": str(m["code"]["dirty"]).lower(), "loaded_at": _now(),
+                "appraisal_fetched_date": fetched.get("appraisal", ""),
+                "procurement_fetched_date": fetched.get("procurement", ""),
+                "projects_fetched_date": fetched.get("projects", "")}],
               release_id, release_id)
 
 
@@ -357,6 +473,11 @@ def main():
     import psycopg
     import release
     release_id = release.cut(args.data)
+
+    def note(bad):
+        return ("  unparseable -> NULL: " + ", ".join(f"{k}={v}" for k, v in sorted(bad.items()))
+                if bad else "")
+
     with psycopg.connect(args.dsn, autocommit=True) as conn:
         conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
         conn.execute(f"CREATE TABLE IF NOT EXISTS {SCHEMA}.loads ("
@@ -371,24 +492,50 @@ def main():
                 print(f"  {table:<20} unchanged")
                 continue
             n, bad = load_table(conn, args.data, table, rel, release_id)
-            note = ("  unparseable -> NULL: "
-                    + ", ".join(f"{k}={v}" for k, v in sorted(bad.items()))) if bad else ""
-            print(f"  {table:<20} {n:>8} rows{note}")
-        for table, cols, make in (("search_best", SEARCH_COLS, search_rows),
-                                  ("classify_scores", CLASSIFY_COLS, classify_rows)):
-            sha, rows = make(args.data)
-            if sha is None:
-                print(f"  {table:<20} skipped: no current run")
-            elif not args.force and _last_sha(conn, table) == sha:
-                print(f"  {table:<20} unchanged")
-            else:
-                n, _ = load_rows(conn, table, cols, rows, sha, release_id)
-                print(f"  {table:<20} {n:>8} rows")
+            print(f"  {table:<20} {n:>8} rows{note(bad)}")
+
+        sha, rows = paragraph_projects(args.data)
+        if sha is None:
+            print(f"  {'paragraph_projects':<20} skipped: no paragraphs")
+        elif not args.force and _last_sha(conn, "paragraph_projects") == sha:
+            print(f"  {'paragraph_projects':<20} unchanged")
+        else:
+            n, _ = load_rows(conn, "paragraph_projects", ["paragraph_id", "project_id", "doc_id"],
+                             rows, sha, release_id)
+            print(f"  {'paragraph_projects':<20} {n:>8} rows")
+
+        sha, best, rollup = search_tables(args.data)
+        if sha is None:
+            print(f"  {'search_best':<20} skipped: no current run")
+        elif not args.force and _last_sha(conn, "search_best") == sha \
+                and _last_sha(conn, "search_paragraphs") == sha:
+            print(f"  {'search_best':<20} unchanged")
+        else:
+            n, _ = load_rows(conn, "search_best", SEARCH_COLS, best, sha, release_id,
+                             after=[f"CREATE INDEX ON {SCHEMA}.search_best "
+                                    f"(label_set, label_id, paragraph_id, score DESC)"])
+            print(f"  {'search_best':<20} {n:>8} rows")
+            n, _ = load_rows(conn, "search_paragraphs", ROLLUP_COLS, rollup, sha, release_id)
+            print(f"  {'search_paragraphs':<20} {n:>8} rows")
+
+        sha, rows = classify_rows(args.data)
+        if sha is None:
+            print(f"  {'classify_scores':<20} skipped: no current run")
+        elif not args.force and _last_sha(conn, "classify_scores") == sha:
+            print(f"  {'classify_scores':<20} unchanged")
+        else:
+            n, _ = load_rows(conn, "classify_scores", CLASSIFY_COLS, rows, sha, release_id)
+            print(f"  {'classify_scores':<20} {n:>8} rows")
+
         tax = taxonomy_rows()
-        load_rows(conn, "taxonomy", ["label_set", "label_id", "name", "definition", "active",
-                                     "version"], tax,
-                  hashlib.sha256(repr(tax).encode()).hexdigest(), release_id)
-        print(f"  {'taxonomy':<20} {len(tax):>8} rows")
+        tax_sha = hashlib.sha256(repr(tax).encode()).hexdigest()
+        if not args.force and _last_sha(conn, "taxonomy") == tax_sha:
+            print(f"  {'taxonomy':<20} unchanged")
+        else:
+            load_rows(conn, "taxonomy", ["label_set", "label_id", "name", "definition",
+                                         "active", "version", "folder"], tax, tax_sha,
+                      release_id)
+            print(f"  {'taxonomy':<20} {len(tax):>8} rows")
         print(f"  {'sentence_vectors':<20} {load_vectors(conn, args.data, release_id, args.force)}")
         load_release(conn, args.data, release_id)
         finish(conn)

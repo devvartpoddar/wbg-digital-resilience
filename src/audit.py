@@ -18,7 +18,6 @@ example paragraph ids so any hit can be pulled up with review.py.
 import argparse, csv, os, re, sys, unicodedata
 from collections import Counter, defaultdict
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 
@@ -26,20 +25,12 @@ from paths import data_root, where  # noqa: E402
 # and front matter are not prose, so prose checks would only produce noise.
 PROSE_BLOCKS = ("narrative", "annex")
 
-# Model tokens per word, MEASURED rather than assumed.
-#
-# The full corpus was embedded with openai/text-embedding-3-large on 2026-09-15.
-# The API reported 3,027,632 tokens for the 28,181 unique texts, which carried
-# 2,287,945 words and 15,557,234 characters. So this text runs 1.32 tokens per
-# word and 5.14 characters per token: the per-word rule of thumb was accurate to
-# under 2%, and the one-token-per-four-characters rule overshot by 28%. The
-# earlier version of this file said to budget the character end, which would
-# have over-provisioned by about a third.
-#
-# This holds for THIS tokeniser on THIS kind of text. A different model, or a
-# corpus in another language, needs its own number - take it from the
-# tokens_reported field of data/embeddings/embedding_manifest.json, which records what the
-# API actually billed rather than what anyone predicted.
+# Model tokens per word, measured rather than assumed: the ratio the API
+# reported when an earlier, paragraph-level corpus was embedded with
+# openai/text-embedding-3-large (3,027,632 tokens for 2,287,945 words, on
+# 2026-09-15). Only the ratio is used here, for an estimate column. It holds
+# for this tokeniser on this kind of text; the sentence manifest in
+# data/embeddings/ records what each run actually billed.
 TOKENS_PER_WORD = 3_027_632 / 2_287_945
 
 CHECKS = []

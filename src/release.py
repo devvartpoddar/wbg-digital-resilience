@@ -30,6 +30,7 @@ import argparse, csv, glob, hashlib, json, os, subprocess, sys, tarfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
+import labels  # noqa: E402
 
 # The tables a release covers: everything a reader or Postgres sees.
 TABLES = [
@@ -70,6 +71,14 @@ def _git(*args):
         return out.stdout.strip() if out.returncode == 0 else ""
     except (OSError, subprocess.SubprocessError):
         return ""
+
+
+def _is_ancestor(commit, of):
+    try:
+        return subprocess.run(["git", "-C", ROOT, "merge-base", "--is-ancestor", commit, of],
+                              capture_output=True, timeout=20).returncode == 0
+    except (OSError, subprocess.SubprocessError):
+        return False
 
 
 def code_state():
@@ -113,15 +122,17 @@ def manifest(data):
             tables[name] = {"rows": _rows(path), "sha256": sha256_file(path)}
     inputs = {"cohort_sha256": sha256_file(os.path.join(ROOT, "inputs", "config",
                                                         "cohort.csv")),
-              "taxonomy": {os.path.basename(p): sha256_file(p) for p in
-                           sorted(glob.glob(os.path.join(ROOT, "inputs", "taxonomy", "*")))},
+              "taxonomy": {os.path.relpath(p, ROOT): sha256_file(p) for d in labels.LABEL_DIRS
+                           for p in sorted(glob.glob(os.path.join(d, "*.csv")))},
               "libraries": _library()}
     code = code_state()
     runs = {"search": _runs(data, "search"), "classify": _runs(data, "classify")}
     # The data's identity: the same tables from the same inputs are the same
-    # release whatever commit is checked out now; the commit that first made
-    # it is recorded when it is cut.
-    ident = hashlib.sha256(json.dumps([tables, inputs, runs],
+    # release whatever commit is checked out now, and whatever library
+    # version is installed now (that is recorded, not identifying); the commit
+    # that first made it is recorded when it is cut.
+    identity = {k: v for k, v in inputs.items() if k != "libraries"}
+    ident = hashlib.sha256(json.dumps([tables, identity, runs],
                                       sort_keys=True).encode()).hexdigest()[:10]
     return {"release_id": f"r-{ident}", "code": code, "inputs": inputs,
             "fetched": _fetched(data), "tables": tables, "runs": runs}
@@ -131,7 +142,10 @@ def cut(data, log=print):
     """The current release id, writing the release if it is new."""
     m = manifest(data)
     folder = where(data, "releases", m["release_id"])
-    if os.path.exists(os.path.join(folder, "manifest.json")):
+    # Known only when both its manifest and its index row exist: an
+    # interrupted cut is finished on the next one, not taken as done.
+    if os.path.exists(os.path.join(folder, "manifest.json")) and \
+            any(r["release_id"] == m["release_id"] for r in releases(data)):
         log(f"release {m['release_id']}: unchanged")
         return m["release_id"]
     m["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -142,8 +156,9 @@ def cut(data, log=print):
             if os.path.exists(path):
                 tar.add(path, arcname=f"{name}.csv")
     os.replace(os.path.join(folder, "tables.tar.gz.part"), os.path.join(folder, "tables.tar.gz"))
-    with open(os.path.join(folder, "manifest.json"), "w", encoding="utf-8") as fh:
+    with open(os.path.join(folder, "manifest.json.part"), "w", encoding="utf-8") as fh:
         json.dump(m, fh, indent=1, sort_keys=True)
+    os.replace(os.path.join(folder, "manifest.json.part"), os.path.join(folder, "manifest.json"))
     index = where(data, "releases", "index.csv")
     new = not os.path.exists(index)
     t = m["tables"]
@@ -179,9 +194,16 @@ def status(data):
     known = {r["release_id"]: r for r in releases(data)}
     head = m["code"]["commit"]
     remote = _git("rev-parse", "origin/main")
+    # origin/main as last fetched: this does not fetch, so the line is as
+    # fresh as the last git fetch or pull.
+    if not remote or remote == head:
+        against = "" if not remote else " = origin/main (as last fetched)"
+    elif _is_ancestor(head, remote):
+        against = f" - behind origin/main {remote[:12]} (as last fetched): run git pull"
+    else:
+        against = f" - not on origin/main {remote[:12]} (as last fetched)"
     lines = [f"code:     {head[:12]}" + (" (uncommitted changes)" if m["code"]["dirty"] else "")
-             + ("" if not remote else " = origin/main" if remote == head
-                else f" - origin/main is {remote[:12]}: run git pull")]
+             + against]
     if m["release_id"] in known:
         r = known[m["release_id"]]
         lines.append(f"data:     release {r['release_id']} cut {r['created_at']} "

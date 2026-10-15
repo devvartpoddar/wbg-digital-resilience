@@ -49,12 +49,13 @@ class Selection:
         self.rows = rows
         self.name = name
         self.ids = [r["project_id"] for r in rows]
+        self._ids = set(self.ids)
 
     def __len__(self):
         return len(self.ids)
 
     def __contains__(self, pid):
-        return pid in set(self.ids)
+        return pid in self._ids
 
     def __repr__(self):
         return f"Selection({self.name!r}, {len(self)} projects)"
@@ -348,7 +349,8 @@ def prepare(sel=None, update=False, data=None, fetch=True):
     state = _load_state(data)
     ran = []
     if fetch:
-        today = datetime.date.today().isoformat()
+        # UTC, like every other timestamp the pipeline records.
+        today = datetime.datetime.now(datetime.timezone.utc).date().isoformat()
         for kind, script in (("appraisal", "fetch.py"), ("procurement", "fetch_procurement.py"),
                              ("projects", "fetch_projects.py")):
             done = state.setdefault("fetched", {}).setdefault(kind, {})
@@ -696,12 +698,13 @@ def main(argv=None):
     p.add_argument("--name", help="folder name (default: from the filters)")
     p.add_argument("--tables", action="store_true", help="also write every table as CSV")
     p = sub.add_parser("search", help="embed the sentences (only what is not cached) and "
-                                      "score them against a label set in inputs/taxonomy/")
-    p.add_argument("label_set", help="assets, measures")
+                                      "score them against a label set (inputs/taxonomy/ or "
+                                      "analysis/labels/)")
+    p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     p.add_argument("--dry-run", action="store_true", help="what it would embed, and cost")
     p = sub.add_parser("classify", help="grade every model paragraph against a label set "
                                         "with the decision model (only what is not stored)")
-    p.add_argument("label_set", help="assets, measures")
+    p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
     p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "

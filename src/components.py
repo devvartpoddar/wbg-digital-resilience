@@ -45,7 +45,6 @@ paragraphs.csv:
 import argparse, csv, hashlib, json, os, re, sys
 from collections import Counter, defaultdict
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 from keys import name_key, project_parts, project_at  # noqa: E402
@@ -166,7 +165,7 @@ class Tagger:
             # A bare 'N.M Title' is a sub-component only under component N:
             # elsewhere it is as likely a numbered paragraph or a table row.
             m = SUB_HEAD.match(text) if titled else None
-            if m and (not self.comp or m.group(1) == self.comp):
+            if m and self.comp and m.group(1) == self.comp:
                 return self._open_sub(m, text, path)
         return self.comp, self.sub
 
@@ -479,7 +478,13 @@ def read_headings(rows, text):
         if m:
             level, number, name = "component", m.group(1), m.group(2)
         else:
-            m = SUB_WORD_HEAD.match(s) or SUB_HEAD.match(s)
+            # 'Sub-component 2.1: ...' always; a bare '2.1 Title' only once
+            # component 2 has been seen, else it is a numbered section.
+            m = SUB_WORD_HEAD.match(s)
+            if not m:
+                m = SUB_HEAD.match(s)
+                if m and ("component", m.group(1)) not in seen:
+                    m = None
             if m:
                 level, number, name = "subcomponent", f"{m.group(1)}.{m.group(2)}", m.group(3)
         if not level or (level, number) in seen:
@@ -500,6 +505,15 @@ def read_headings(rows, text):
         out.append({"level": level, "number": number, "name": name,
                     "cost_usd_m": value, "action": "", "page": r["page_from"]})
     return out
+
+
+def _sha256_file(path):
+    import hashlib
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    return h.hexdigest()
 
 
 def read_table_pages(pdf_path, pages):
@@ -582,8 +596,9 @@ def main():
             found = []
             # Keyed on the PDF, the pages searched and this module's code, so a
             # change to any of them reads the tables again.
-            key = ":".join([doc.get("pdf_sha256") or "", ",".join(map(str, pages)),
-                            READER_VERSION])
+            sha = doc.get("pdf_sha256") or (_sha256_file(pdf_path) if os.path.exists(pdf_path)
+                                            else "")
+            key = ":".join([sha, ",".join(map(str, pages)), READER_VERSION])
             if pages and os.path.exists(pdf_path):
                 if key in cache:
                     found = cache[key]

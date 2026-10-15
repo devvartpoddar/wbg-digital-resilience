@@ -202,11 +202,11 @@ def read_key(key_file):
     line. Never from an argument: an argument is visible in `ps` to every
     account on the box and lands in whatever log records the command.
 
-    A key file is checked for its mode before it is read. /srv/yggdrasil is a
-    0755 tree and sits inside raven's read-only file jail, so a credential
-    dropped there casually is readable by every local account AND through the
-    MCP mount. Refusing a loose file up front is cheaper than discovering that
-    afterwards.
+    A key file is checked for its mode before it is read. The project folder
+    on the box is readable by every local account and through raven's
+    read-only file mount, so a credential dropped there casually would be
+    readable by both. Refusing a loose file up front is cheaper than
+    discovering that afterwards.
     """
     if not key_file:
         key = os.environ.get(KEY_VAR, "").strip()
@@ -419,6 +419,23 @@ def assemble(npy_path, index, root, dim, log):
     os.replace(tmp, npy_path)
 
 
+def _same_file(a, b):
+    try:
+        if os.path.getsize(a) != os.path.getsize(b):
+            return False
+        with open(a, "rb") as fa, open(b, "rb") as fb:
+            return fa.read() == fb.read()
+    except OSError:
+        return False
+
+
+def _matrix_shape(path):
+    try:
+        return tuple(numpy.load(path, mmap_mode="r").shape)
+    except (OSError, ValueError):
+        return None
+
+
 def fmt_range(lo, hi, unit=""):
     return f"{lo:,.0f} - {hi:,.0f}{unit}"
 
@@ -435,7 +452,6 @@ def token_range(words, chars):
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=data_root())
-    ap.add_argument("--meta", default=data_root())
     ap.add_argument("--model", default=DEFAULT_MODEL)
     ap.add_argument("--dim", type=int, default=DEFAULT_DIM)
     ap.add_argument("--base-url", default=DEFAULT_BASE)
@@ -521,7 +537,6 @@ def main():
         os.makedirs(d, exist_ok=True)
 
     log("")
-    assemble(npy_path, index, root, args.dim, log)
     with open(idx_path + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh, lineterminator="\n")
         if args.unit == "sentences":
@@ -536,7 +551,16 @@ def main():
             w.writerow(INDEX_COLS)
             for i, (pid, sha) in enumerate(index):
                 w.writerow([i, pid, sha])
-    os.replace(idx_path + ".part", idx_path)
+    # The matrix is rows of the cache in index order, so when the index is
+    # the one on disk and nothing was fetched, the matrix on disk is current
+    # and is not written again (it is large; a run with nothing new is cheap).
+    if stats["stored"] == 0 and _same_file(idx_path + ".part", idx_path) \
+            and _matrix_shape(npy_path) == (len(index), args.dim):
+        os.remove(idx_path + ".part")
+        log(f"  {os.path.basename(npy_path)} unchanged")
+    else:
+        assemble(npy_path, index, root, args.dim, log)
+        os.replace(idx_path + ".part", idx_path)
 
     spend = stats["tokens"] / 1e6 * PRICE_PER_MTOK
     manifest = {
@@ -560,11 +584,7 @@ def main():
         "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         "host": socket.gethostname(),
     }
-    if args.limit:
-        man_path = where(args.data, "embeddings", f"smoke_{man_name}")
-    else:
-        man_path = where(args.meta, "embeddings", man_name)
-        os.makedirs(os.path.dirname(man_path), exist_ok=True)
+    man_path = where(args.data, "embeddings", f"{prefix}{man_name}")
     with open(man_path, "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=2, sort_keys=True)
         fh.write("\n")

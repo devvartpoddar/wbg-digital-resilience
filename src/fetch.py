@@ -128,8 +128,11 @@ def fetch_pdf(doc, pdf_dir, counts, notes, pid, delay):
         notes.append(f"{pid}\t{doc['doc_id']}\tPDF FETCH FAILED\t{exc}")
         return None
     if not blob.startswith(b"%PDF"):
+        # A throttled interface answers with an HTML page and status 200.
+        # That is a failed download, tried again on the next run, not a fact
+        # about the document.
         counts["pdf_missing"] += 1
-        notes.append(f"{pid}\t{doc['doc_id']}\tpdfurl did not return a PDF")
+        notes.append(f"{pid}\t{doc['doc_id']}\tPDF FETCH FAILED\tpdfurl did not return a PDF")
         return None
     tmp = dest + ".part"
     with open(tmp, "wb") as fh:
@@ -194,11 +197,12 @@ def main():
                 by_doc[doc["doc_id"]]["_projects"].add(pid)
                 continue
             pdf_path = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
-            cached = os.path.exists(pdf_path)
             pdf_blob = fetch_pdf(doc, pdf_dir, counts, notes, pid, args.delay)
             if not pdf_blob:
                 continue
-            when = os.path.getmtime(pdf_path) if cached else time.time()
+            # The file's own time, on this run and every later one, so a
+            # re-listing of an unchanged document leaves documents.csv as it was.
+            when = os.path.getmtime(pdf_path)
             by_doc[doc["doc_id"]] = {
                 "_projects": {pid},
                 "doc_id": doc["doc_id"], "doc_type": doc["doc_type"],
@@ -223,6 +227,13 @@ def main():
         with open(docs_csv, newline="", encoding="utf-8") as fh:
             for old in csv.DictReader(fh):
                 kept = {p for p in old["project_ids"].split("|") if p and p not in listed}
+                if not kept and old["doc_id"] not in by_doc and \
+                        os.path.exists(os.path.join(pdf_dir, f"{old['doc_id']}.pdf")):
+                    # Listed this run, but the listing no longer names a
+                    # document whose PDF is on disk: a shorter listing (a
+                    # paged or throttled answer) must not shrink the corpus.
+                    kept = {p for p in old["project_ids"].split("|") if p}
+                    counts["kept_not_relisted"] = counts.get("kept_not_relisted", 0) + 1
                 if not kept:
                     continue
                 if old["doc_id"] in by_doc:

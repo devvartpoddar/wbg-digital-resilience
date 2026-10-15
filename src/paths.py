@@ -37,6 +37,7 @@ written down once:
                      fetch_status/ (what each fetcher fully read)
   data/review/       spreadsheets for reading the output by eye
   data/runs/         a selection's exported results, when asked for (src/wbg.py)
+  data/archive/      tables an earlier version wrote and nothing reads (kept, never deleted)
   data/search/       a label set's scores over the sentences, one folder per
                      label set and version (src/search.py)
 
@@ -94,6 +95,7 @@ LAYOUT = {
     "labels": "labels",
     "releases": "releases",
     "fetch_status": "reports/fetch_status",
+    "archive": "archive",
 }
 
 
@@ -136,6 +138,11 @@ _MOVES = [
     ("audit_report.txt", "reports/audit.txt"),
     ("components_report.txt", "reports/components.txt"),
     ("review_sample.txt", "review/review_sample.txt"),
+    # Tables an earlier version wrote and nothing reads any more. Never
+    # deleted (AGENTS.md rule 1): moved aside, out of every stage's way.
+    ("appraisal/document_projects.csv", "archive/"),
+    ("procurement/package_changes.csv", "archive/"),
+    ("review/review_sample.txt", "archive/"),
 ]
 
 

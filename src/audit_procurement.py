@@ -18,7 +18,6 @@ see the real distribution rather than the one the checks assume.
 import argparse, csv, os, re, sys, unicodedata
 from collections import Counter, defaultdict
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 
