@@ -37,6 +37,7 @@ WATERMARK_MAX_SIZE = 6.0      # the rotated disclosure stamp is set at ~4.7pt
 SUPERSCRIPT_RATIO = 0.80      # a footnote marker is set at most this size of its line
 SMALL_RATIO = 0.93            # footnote body type: smaller than body text by this much
 FOOTNOTE_SIZE_SLACK = 0.5     # a footnote line is set no larger than the footnotes' numbered lines plus this
+FOOTNOTE_GAP = 2.0           # footnotes set in the text's own type start after a gap this many line steps wide
 FOOTNOTE_MAX_UNNUMBERED = 8   # a carried footnote with no number of its own runs at most this many lines
 FOOTNOTE_NUMBER = re.compile(r"^\d{1,3}(?!\d)(?![.,]\d)\s*\S")
 HEADER_REPEAT = 0.30          # a line at the same height on this share of pages is furniture
@@ -441,6 +442,17 @@ def _footnote_start(lines, body):
             start = i
         else:
             break
+    # Text set in the footnotes' own type (an annex table in small type)
+    # gives a run reaching up the page. There the footnotes start after the
+    # last wide gap that a numbered line follows.
+    top, bottom = lines[0]["top"], lines[-1]["top"]
+    if start < len(lines) - 1 and lines[start]["top"] < (top + bottom) / 2:
+        gaps = [lines[i]["top"] - lines[i - 1]["top"] for i in range(start + 1, len(lines))]
+        step = statistics.median(gaps)
+        for i in range(len(lines) - 1, start, -1):
+            if lines[i]["top"] - lines[i - 1]["top"] > FOOTNOTE_GAP * step \
+                    and FOOTNOTE_NUMBER.match(lines[i]["text"]):
+                return i
     return start
 
 

@@ -193,8 +193,8 @@ def test_a_glued_footnote_number_goes_but_a_version_number_stays():
     assert stats["inline_marks_removed"] == 1
 
 
-def _typed(size, text):
-    return {"size": size, "text": text}
+def _typed(size, text, top=0):
+    return {"size": size, "text": text, "top": top}
 
 
 def test_footnotes_are_the_small_numbered_type_at_the_foot_of_a_page():
@@ -217,3 +217,10 @@ def test_a_page_set_small_with_no_footnote_is_not_a_footnote():
 def test_a_short_carried_footnote_below_body_text_is_a_footnote():
     page = [_typed(11, "Body text.")] * 20 + [_typed(9, "continued from the page before.")]
     assert PL._footnote_start(page, 11) == 20
+
+
+def test_footnotes_in_the_texts_own_small_type_start_after_the_gap():
+    page = [_typed(11, "ANNEX 2: GENDER ANALYSIS", 100)] + \
+        [_typed(9, "Benin: women used the internet less,63 such as", 150 + 11 * i) for i in range(30)] + \
+        [_typed(9, "63 World Bank. 2025. Benin gender data.", 500), _typed(9, "64 Afrobarometer. 2020.", 511)]
+    assert PL._footnote_start(page, 11) == 31
