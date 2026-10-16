@@ -271,8 +271,8 @@ def classify_rows(data):
 
 SEARCH_COLS = ["label_set", "run", "label_id", "rank", "unit_id", "kind", "paragraph_id",
                "doc_id", "project_ids", "component_number", "subcomponent_number",
-               "component_key", "score", "percentile", "best_query_id", "best_query",
-               "queries_agreeing", "queries"]
+               "component_key", "copies", "score", "percentile", "best_query_id",
+               "best_query", "queries_agreeing", "queries"]
 ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "component_key", "best_score", "best_percentile",
                "best_unit_id", "best_query_id", "units_hit"]

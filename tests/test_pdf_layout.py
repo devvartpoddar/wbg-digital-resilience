@@ -191,3 +191,29 @@ def test_a_glued_footnote_number_goes_but_a_version_number_stays():
     assert P.strip_inline_marks("under IDA19 terms", defined, stats) == "under IDA19 terms"
     assert P.strip_inline_marks("in phase6 of", {3}, stats) == "in phase6 of"
     assert stats["inline_marks_removed"] == 1
+
+
+def _typed(size, text):
+    return {"size": size, "text": text}
+
+
+def test_footnotes_are_the_small_numbered_type_at_the_foot_of_a_page():
+    page = [_typed(11, "Body text runs here."), _typed(11, "More body text."),
+            _typed(9, "12 World Bank. 2022. A report."), _typed(9, "a second line of it")]
+    assert PL._footnote_start(page, 11) == 2
+
+
+def test_an_annex_set_a_point_smaller_keeps_its_text_above_its_footnotes():
+    page = [_typed(10, "Annex text in smaller type.")] * 30 + \
+        [_typed(9, "72 Areas to be covered."), _typed(9, "the footnote goes on")]
+    assert PL._footnote_start(page, 11) == 30
+
+
+def test_a_page_set_small_with_no_footnote_is_not_a_footnote():
+    page = [_typed(10, "Annex text in smaller type.")] * 30
+    assert PL._footnote_start(page, 11) == 30
+
+
+def test_a_short_carried_footnote_below_body_text_is_a_footnote():
+    page = [_typed(11, "Body text.")] * 20 + [_typed(9, "continued from the page before.")]
+    assert PL._footnote_start(page, 11) == 20

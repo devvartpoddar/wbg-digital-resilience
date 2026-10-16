@@ -64,8 +64,10 @@ import labels  # noqa: E402
 # (analysis sets); `taxonomy=None` finds the set in either (src/labels.py).
 TAXONOMY = None
 QUERY_COLS = ["query_id", "label_id", "kind", "text", "text_sha256"]
+# 'copies': the units printing the same text in other documents (an
+# additional financing repeating its appraisal document), searched once.
 CONTEXT = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "component_number",
-           "subcomponent_number", "component_key"]
+           "subcomponent_number", "component_key", "copies"]
 # Rows of the sentence matrix scored at a time, so memory stays flat.
 BLOCK = 20_000
 
@@ -315,7 +317,7 @@ def hits(folder, data, min_score=None, min_percentile=None, top=None, labels=Non
             rows = rows[:top]
         for rank, i in enumerate(rows, 1):
             q = queries[cols[best_col[i]]]
-            out.append(dict({c: index[i][c] for c in CONTEXT}, label_id=lid, rank=rank,
+            out.append(dict({c: index[i].get(c, "") for c in CONTEXT}, label_id=lid, rank=rank,
                             score=f"{best[i]:.6f}", percentile=f"{best_pct[i]:.3f}",
                             best_query_id=q["query_id"], best_query=q["text"],
                             queries_agreeing=int(agree[i]), queries=len(cols)))

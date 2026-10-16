@@ -66,8 +66,11 @@ CHUNK_CHARS = 200_000
 MAX_TEXT_CHARS = 28_000
 
 INDEX_COLS = ["row", "paragraph_id", "text_sha256"]
+# A searched unit is never left out or a copy; 'copies' lists the units that
+# print the same text in other documents (units.copies), pipe-separated.
 SENTENCE_INDEX_COLS = ["row"] + [c for c in units.UNIT_COLS
-                                 if c not in ("char_start", "char_end", "n_tokens")]
+                                 if c not in ("char_start", "char_end", "n_tokens",
+                                              "left_out", "copy_of")] + ["copies"]
 
 # What each unit writes: (matrix, index, manifest, report).
 OUTPUTS = {
@@ -470,7 +473,13 @@ def main():
         print(msg, flush=True)
 
     if args.unit == "sentences":
-        rows, id_field = units.search_units(args.data), "unit_id"
+        every = units.search_units(args.data)
+        dupes = units.copies(every)
+        rows = [dict(u, copies="|".join(dupes.get(u["unit_id"], [])))
+                for u in every if not u["left_out"] and not u["copy_of"]]
+        id_field = "unit_id"
+        log(f"left out:        {sum(1 for u in every if u['left_out']):,} references and "
+            f"fragments, {sum(1 for u in every if u['copy_of']):,} copies of another unit")
     else:
         with open(where(args.data, "appraisal", "paragraphs.csv"), newline="",
                   encoding="utf-8") as fh:

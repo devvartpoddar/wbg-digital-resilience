@@ -66,3 +66,45 @@ def test_a_list_item_carries_its_lead_in():
     assert units.lead_ins(para, sents, text) == {"s2": (0, 21), "s3": (0, 21)}
     # A paragraph that is itself a list item has no lead-in.
     assert units.lead_ins(dict(para, list_item="true"), sents, text) == {}
+
+
+def test_references_and_fragments_are_left_out_but_commitments_never():
+    assert units.left_out("footnote", "World Bank. 2021. Climate Risk Country Profile: Rwanda. [link]", False) == "reference"
+    assert units.left_out("footnote", "Caribbean Digital Transformation Project (P171528)", False) == "reference"
+    # A footnote saying what the project will do is searched, however short.
+    assert units.left_out("footnote", "Survey work will take account of climate-related risks.", False) == ""
+    assert units.left_out("footnote", "Tier 3 data centres are designed for 99.98 percent availability "
+                          "and have redundant power and cooling paths throughout.", False) == ""
+    assert units.left_out("sentence", "14. Project Risk Assessment and Mitigation.", False) == "fragment"
+    assert units.left_out("sentence", "(iii) governance.", False) == "fragment"
+    # A list item is read with its lead-in, so it is never a fragment.
+    assert units.left_out("sentence", "(b) towers;", True) == ""
+    assert units.left_out("sentence", "Towers will be raised.", False) == ""
+
+
+def test_a_repeated_text_is_searched_once_and_its_copies_are_named(tmp_path):
+    data = str(tmp_path)
+    ap = os.path.join(data, "appraisal")
+    line = "The project will bury fibre cables along flood-prone routes."
+    os.makedirs(os.path.join(ap, "text"))
+    for d in ("A", "B"):
+        with open(os.path.join(ap, "text", f"{d}.txt"), "w") as fh:
+            fh.write(line)
+    _write(os.path.join(ap, "paragraphs.csv"), PARA_COLS, [
+        {"paragraph_id": f"{d}:p00001", "doc_id": d, "project_ids": "P1", "block": "narrative",
+         "for_model": "true", "char_start": 0, "char_end": len(line)} for d in ("A", "B")])
+    _write(os.path.join(ap, "sentences.csv"), SENT_COLS, [
+        {"sentence_id": f"{d}:p00001:s001", "paragraph_id": f"{d}:p00001", "doc_id": d,
+         "char_start": 0, "char_end": len(line), "n_tokens": 10, "text_sha256": "a"}
+        for d in ("A", "B")])
+    got = units.search_units(data)
+    assert [(u["unit_id"], u["left_out"], u["copy_of"]) for u in got] == [
+        ("A:p00001:s001", "", ""), ("B:p00001:s001", "", "A:p00001:s001")]
+    assert units.copies(got) == {"A:p00001:s001": ["B:p00001:s001"]}
+
+
+def test_a_table_row_is_searched_when_its_cells_read_as_prose():
+    assert units.prose_row("Climate Action — Activity: Areas covered by the programme will target "
+                           "provinces most affected by floods and droughts, with resilient designs for towers.")
+    assert not units.prose_row("Table 1. Project Costs — Component 1: 2.4 13.3 9.8 0.0 11.0 0.0 2.4 24.3")
+    assert not units.prose_row("Results — Indicator: Share of schools connected (Percentage)")

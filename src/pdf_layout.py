@@ -36,6 +36,9 @@ import text_rules as C
 WATERMARK_MAX_SIZE = 6.0      # the rotated disclosure stamp is set at ~4.7pt
 SUPERSCRIPT_RATIO = 0.80      # a footnote marker is set at most this size of its line
 SMALL_RATIO = 0.93            # footnote body type: smaller than body text by this much
+FOOTNOTE_SIZE_SLACK = 0.5     # a footnote line is set no larger than the footnotes' numbered lines plus this
+FOOTNOTE_MAX_UNNUMBERED = 8   # a carried footnote with no number of its own runs at most this many lines
+FOOTNOTE_NUMBER = re.compile(r"^\d{1,3}(?!\d)(?![.,]\d)\s*\S")
 HEADER_REPEAT = 0.30          # a line at the same height on this share of pages is furniture
 TOC_LINE = re.compile(r"(\.{3,}|\s\.\s\.\s)\s*\d{1,4}\s*$")
 PAGE_NUM = re.compile(r"^\s*(?:Page\s+)?\d{1,4}(?:\s+of\s+\d{1,4})?\s*$", re.I)
@@ -409,6 +412,38 @@ def _dehyphenate(left, right, vocab):
     return left + " " + right
 
 
+def _footnote_start(lines, body):
+    """Index of the first footnote line on a page (len(lines) if none).
+
+    Footnotes are the unbroken run of small-type lines at the foot of the
+    page, set no larger than the smallest of their numbered lines: an annex
+    set a point smaller than the body, with footnotes smaller still, keeps
+    its own text. A
+    run with no numbered line is a footnote carried from the previous page
+    only while it is short and leaves body text above it; otherwise it is
+    body text set small (a page, or the end of one, in annex type)."""
+    small = len(lines)
+    while small and lines[small - 1]["size"] < SMALL_RATIO * body:
+        small -= 1
+    run = lines[small:]
+    if not run:
+        return len(lines)
+    numbered = [l["size"] for l in run if FOOTNOTE_NUMBER.match(l["text"])]
+    if not numbered:
+        # A carried footnote: short, with body text above it.
+        return small if small and len(run) <= FOOTNOTE_MAX_UNNUMBERED else len(lines)
+    # The footnotes' own type is the smallest their numbered lines are set
+    # in; larger small type above them is the page's text.
+    foot = min(numbered)
+    start = len(lines)
+    for i in range(len(lines) - 1, small - 1, -1):
+        if lines[i]["size"] <= foot + FOOTNOTE_SIZE_SLACK:
+            start = i
+        else:
+            break
+    return start
+
+
 def _contents_entry(text):
     """A contents line without dot leaders: a section or annex heading that
     ends in a bare page number, 'V. KEY RISKS 25'. A body heading does not end
@@ -552,13 +587,7 @@ def extract(pdf, raw_out=None):
                 stats["furniture_lines"] += 1
                 continue
             keep.append(l)
-        # Footnotes: the unbroken run of small-type lines at the foot of the page.
-        fn_from = len(keep)
-        for i in range(len(keep) - 1, -1, -1):
-            if keep[i]["size"] < SMALL_RATIO * body:
-                fn_from = i
-            else:
-                break
+        fn_from = _footnote_start(keep, body)
         kept_pages.append(keep)
         fn_starts.append(fn_from)
         defined_by_page.append({int(m.group(1)) for x in keep[fn_from:]
