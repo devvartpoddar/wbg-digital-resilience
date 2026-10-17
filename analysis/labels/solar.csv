@@ -1,0 +1,2 @@
+measure_id,measure_name,definition,active,version,note
+solar,Solar and renewable power for digital assets,"Solar or other renewable power for the digital assets a project finances or the sites it connects: solar panels or photovoltaic systems at telecom sites, schools, community centres or data centres; solar-powered equipment or kits; off-grid renewable systems with battery storage; requirements that operators or data centres use renewable energy.",true,v1,Trial: a measure found end to end with the active-learning loop.
