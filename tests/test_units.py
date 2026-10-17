@@ -110,3 +110,24 @@ def test_a_table_row_is_searched_when_its_cells_read_as_prose():
                            "provinces most affected by floods and droughts, with resilient designs for towers.")
     assert not units.prose_row("Table 1. Project Costs — Component 1: 2.4 13.3 9.8 0.0 11.0 0.0 2.4 24.3")
     assert not units.prose_row("Results — Indicator: Share of schools connected (Percentage)")
+
+
+def test_a_long_prose_table_row_is_searched_sentence_by_sentence_with_its_caption():
+    caption = "Climate Action — Activity"
+    cell = ("A mapping atlas will be purchased for the telecoms regulator to map climate risk areas. "
+            "TA will be provided to the regulator to enable Government to push out emergency weather "
+            "alerts through operators' networks. TA will be provided to ministries to define a Digital "
+            "and Climate Strategy with an interministerial committee and dedicated support for climate "
+            "adaptation and mitigation across government agencies and sectors.")
+    text = f"{caption}: {cell}"
+    p = {"paragraph_id": "D:p00009", "char_start": "0", "char_end": str(len(text)),
+         "n_tokens": "70", "text_sha256": "x"}
+    got = units.table_units(p, text)
+    assert [u["unit_id"] for u in got] == ["D:p00009:t001", "D:p00009:t002", "D:p00009:t003"]
+    # Later sentences carry the caption as their lead-in; the first holds it already.
+    assert got[0]["lead_in_start"] == "" and text[got[1]["lead_in_start"]:got[1]["lead_in_end"]] == "Climate Action"
+    assert text[got[1]["char_start"]:got[1]["char_end"]].startswith("TA will be provided to the regulator")
+    # A short row stays whole.
+    short = {"paragraph_id": "D:p00010", "char_start": "0", "char_end": "40", "n_tokens": "8",
+             "text_sha256": "y"}
+    assert [u["unit_id"] for u in units.table_units(short, "Results — Indicator: schools connected")] == ["D:p00010"]

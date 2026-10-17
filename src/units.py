@@ -50,12 +50,14 @@ embed.py embeds and indexes every unit that is neither left out nor a copy.
 Nothing is deleted: search_units() still lists them all.
 """
 import csv
+import hashlib
 import os
 import re
 
 from keys import name_key
 from paths import where
 from sentences import ITEM_MARKER
+from sentences import split as split_sentences
 
 UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block",
              "section_path", "component_number", "subcomponent_number", "component_key",
@@ -129,6 +131,37 @@ def prose_row(text):
     tokens = cells.split()
     return (len(WORD.findall(cells)) >= PROSE_WORDS and bool(ROW_VERB.search(cells))
             and sum(bool(NUMBER.match(t)) for t in tokens) < PROSE_MAX_NUMBERS * len(tokens))
+
+
+TABLE_SPLIT_WORDS = 60   # a prose row longer than this is searched sentence by sentence
+
+
+def table_units(p, text):
+    """A prose table row as search units: whole if short; else one unit per
+    sentence, each read with the row's caption in front (as a list item is
+    read with its lead-in). A row holding a column of bullets ('TA will be
+    provided to...', 'A mapping atlas...') states several commitments, and
+    one vector for all of them matches none of them well."""
+    a, z = int(p["char_start"]), int(p["char_end"])
+    row = text[a:z]
+    whole = {"unit_id": p["paragraph_id"], "kind": "table", "char_start": p["char_start"],
+             "char_end": p["char_end"], "n_tokens": p["n_tokens"],
+             "text_sha256": p["text_sha256"], "lead_in_start": "", "lead_in_end": ""}
+    if len(WORD.findall(row)) <= TABLE_SPLIT_WORDS:
+        return [whole]
+    cut = row.find(" — ")
+    caption = (a, a + cut) if cut > 0 else None
+    out = []
+    for n, (s, e) in enumerate(split_sentences(row), 1):
+        body = row[s:e]
+        lead = caption if caption and s > cut else None
+        out.append({"unit_id": f"{p['paragraph_id']}:t{n:03d}", "kind": "table",
+                    "char_start": a + s, "char_end": a + e,
+                    "n_tokens": len(body.split()),
+                    "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                    "lead_in_start": lead[0] if lead else "",
+                    "lead_in_end": lead[1] if lead else ""})
+    return out or [whole]
 
 
 def _same_text(text):
@@ -231,17 +264,16 @@ def search_units(data):
         if p["block"] == "table" and not BOILERPLATE_SECTION.search(p.get("section_title", "")):
             text = _text(texts, data, p["doc_id"])
             if text is not None and prose_row(text[int(p["char_start"]):int(p["char_end"])]):
-                out.append(dict(context(p), unit_id=p["paragraph_id"], kind="table",
-                                char_start=p["char_start"], char_end=p["char_end"],
-                                n_tokens=p["n_tokens"], text_sha256=p["text_sha256"],
-                                lead_in_start="", lead_in_end=""))
+                out.extend(dict(context(p), **u) for u in table_units(p, text))
     out.sort(key=lambda u: (u["doc_id"], u["unit_id"]))
     first = {}
     for u in out:
         text = _text(texts, data, u["doc_id"]) or ""
         body = text[int(u["char_start"]):int(u["char_end"])]
         lead = text[int(u["lead_in_start"]):int(u["lead_in_end"])] if u["lead_in_start"] else ""
-        u["left_out"] = left_out(u["kind"], body, bool(lead))
+        # A table sentence's caption is context, not a list lead-in: a scrap
+        # of a cell ('(Adaptation)') is still left out.
+        u["left_out"] = left_out(u["kind"], body, bool(lead) and u["kind"] != "table")
         u["copy_of"] = ""
         if not u["left_out"]:
             same = _same_text(lead + "\n" + body)

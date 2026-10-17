@@ -37,6 +37,7 @@ WATERMARK_MAX_SIZE = 6.0      # the rotated disclosure stamp is set at ~4.7pt
 SUPERSCRIPT_RATIO = 0.80      # a footnote marker is set at most this size of its line
 SMALL_RATIO = 0.93            # footnote body type: smaller than body text by this much
 FOOTNOTE_SIZE_SLACK = 0.5     # a footnote line is set no larger than the footnotes' numbered lines plus this
+IN_TABLE_SHARE = 0.9          # a line is in a table when this share of its width lies within it
 FOOTNOTE_GAP = 2.0           # footnotes set in the text's own type start after a gap this many line steps wide
 FOOTNOTE_MAX_UNNUMBERED = 8   # a carried footnote with no number of its own runs at most this many lines
 FOOTNOTE_NUMBER = re.compile(r"^\d{1,3}(?!\d)(?![.,]\d)\s*\S")
@@ -384,9 +385,18 @@ def _row_text(cells, header, caption):
 
 
 def _in_box(line, box):
+    """Whether a line belongs to a table: its middle is within the table's
+    height and most of its width within the table's. A bullet glyph hung in
+    the margin left of the ruling ('•' at x 23, the table from x 36) leaves
+    the line in the table; requiring the whole line inside split every
+    bulleted cell, its first line read as body text and the rest as table."""
     x0, top, x1, bottom = box
     mid = (line["top"] + line["bottom"]) / 2
-    return top - 1 <= mid <= bottom + 1 and line["x0"] >= x0 - 2 and line["x1"] <= x1 + 2
+    if not top - 1 <= mid <= bottom + 1:
+        return False
+    width = max(line["x1"] - line["x0"], 1e-6)
+    overlap = min(line["x1"], x1) - max(line["x0"], x0)
+    return overlap >= IN_TABLE_SHARE * width
 
 
 def _furniture(pages):

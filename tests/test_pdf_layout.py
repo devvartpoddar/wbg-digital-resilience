@@ -224,3 +224,13 @@ def test_footnotes_in_the_texts_own_small_type_start_after_the_gap():
         [_typed(9, "Benin: women used the internet less,63 such as", 150 + 11 * i) for i in range(30)] + \
         [_typed(9, "63 World Bank. 2025. Benin gender data.", 500), _typed(9, "64 Afrobarometer. 2020.", 511)]
     assert PL._footnote_start(page, 11) == 31
+
+
+def test_a_bulleted_line_hung_left_of_a_table_is_in_the_table():
+    box = (36, 90, 576, 709)
+    bullet = {"x0": 23, "x1": 560, "top": 179, "bottom": 189}
+    assert PL._in_box(bullet, box)
+    # A line beside the table, mostly outside it, is not.
+    assert not PL._in_box({"x0": 0, "x1": 60, "top": 179, "bottom": 189}, box)
+    # Nor one above it.
+    assert not PL._in_box({"x0": 40, "x1": 500, "top": 50, "bottom": 60}, box)
