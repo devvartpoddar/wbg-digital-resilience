@@ -40,6 +40,10 @@ written down once:
   data/archive/      tables an earlier version wrote and nothing reads (kept, never deleted)
   data/search/       a label set's scores over the sentences, one folder per
                      label set and version (src/search.py)
+  data/commitment/   p_commitment and firmness for every searched unit, one
+                     folder per version of the index (src/commitment.py)
+  data/candidates/   each label's candidate units, one folder per label set
+                     and version (src/candidates.py)
 
 Order of precedence for the data root:
   1. $WBG_DATA, if set
@@ -91,6 +95,8 @@ LAYOUT = {
     "review": "review",
     "runs": "runs",
     "search": "search",
+    "commitment": "commitment",
+    "candidates": "candidates",
     "classify": "classify",
     "labels": "labels",
     "releases": "releases",

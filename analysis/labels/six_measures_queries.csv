@@ -1,0 +1,35 @@
+measure_id,query_id,query,active
+cra,q1,a site-specific climate risk assessment will be conducted for the infrastructure,true
+cra,q2,climate and disaster risk assessment to inform the design and siting,true
+cra,q3,assessment of the climate resilience of existing telecom infrastructure,true
+cra,q4,climate risk assessments to be conducted by the operator and built into the tender,true
+cra,q5,hazard mapping to identify areas exposed to high climate risk,true
+cra,q6,national or sector-wide climate vulnerability assessment of telecom infrastructure,true
+fibre_burial,q1,fibre optic cables laid underground to protect them from floods and storms,true
+fibre_burial,q2,the choice between aerial and underground cable depends on the hazard risk,true
+fibre_burial,q3,aerial cables deployed to minimise flood risk and allow rapid repair,true
+fibre_burial,q4,climate-proof conduits and ducts for buried fibre,true
+fibre_burial,q5,underground fibre is less likely to be damaged by typhoons than aerial cable,true
+fibre_burial,q6,cable route chosen according to flood and landslide risk,true
+id_targeting,q1,digital ID used to target cash transfers to households affected by disasters,true
+id_targeting,q2,social registry to identify climate vulnerable households for emergency payments,true
+id_targeting,q3,ID system integrated with social registries for disaster cash transfers,true
+id_targeting,q4,backup of civil registry and ID records against disasters,true
+id_targeting,q5,mobile registration teams after disasters to replace lost documents,true
+id_targeting,q6,data exchange between ID and beneficiary registries for targeting,true
+ews,q1,early warning alerts sent to citizens through mobile networks,true
+ews,q2,cell broadcast and SMS disaster alerts using the Common Alerting Protocol,true
+ews,q3,early warning communication infrastructure such as sirens and radio,true
+ews,q4,weather and hazard monitoring data feeding early warning systems,true
+ews,q5,national early warning strategy,true
+redundancy,q1,network redundancy so traffic can be rerouted if a cable is cut,true
+redundancy,q2,ring topology and alternative routes for the backbone network,true
+redundancy,q3,geographically redundant data centres and a disaster recovery site,true
+redundancy,q4,route diversity to avoid single points of failure,true
+redundancy,q5,cloud hosting distributed across regions,true
+redundancy,q6,a second submarine cable for redundancy,true
+backup_power,q1,solar power with battery backup for telecom sites,true
+backup_power,q2,backup generators to keep equipment running during outages,true
+backup_power,q3,renewable energy so connectivity continues when the grid fails,true
+backup_power,q4,uninterruptible power supply for data centres,true
+backup_power,q5,mobile base towers with three days of battery backup,true

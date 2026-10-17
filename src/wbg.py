@@ -707,6 +707,18 @@ def main(argv=None):
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
     p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
+    p = sub.add_parser("candidates", help="every unit a label's patterns or its embedding "
+                                          "top N find, with p_commitment, firmness and types "
+                                          "(after ./wbg search)")
+    p.add_argument("label_set", help="any set in analysis/labels/ or inputs/taxonomy/")
+    p.add_argument("--top", type=int, default=1000, help="embedding depth per label")
+    p = sub.add_parser("words", help="the words that set a label's candidates apart from "
+                                     "the corpus: what types it has")
+    p.add_argument("label_set")
+    p.add_argument("label_id")
+    p.add_argument("--top", type=int, default=1000)
+    p.add_argument("--committed", action="store_true",
+                   help="only candidates with p_commitment >= 0.5")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
                                            "paragraph, component-tag and sentence settings")
     p.add_argument("--docs", type=int, default=10,
@@ -750,6 +762,13 @@ def main(argv=None):
         _run("classify.py", args.label_set, *extra, data=data)
         if not extra:
             _run("release.py", data=data)
+        return 0
+    if args.cmd == "candidates":
+        _run("candidates.py", args.label_set, "--top", str(args.top), data=data)
+        return 0
+    if args.cmd == "words":
+        _run("candidates.py", args.label_set, args.label_id, "--words", "--top", str(args.top),
+             *(["--committed"] if args.committed else []), data=data)
         return 0
     if args.cmd == "sensitivity":
         _run("sensitivity.py", "--docs", str(args.docs),

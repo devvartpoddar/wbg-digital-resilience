@@ -70,6 +70,7 @@ SOURCE = re.compile(r"\b(?:Report|Paper|Profile|Database|Portal|Note|Study|Brief
 VERB = re.compile(r"\b(?:will|shall|would|should|must|is|are|was|were|be|been|being|has|"
                   r"have|had|can|could|may|might|do|does|did)\b", re.I)
 FIRM = re.compile(r"\b(?:will|shall)\b", re.I)
+NUMBERED = re.compile(r"^(?:\d+(?:\.\d+)*\.?|\(?[ivxlc]+\)|\(?[a-z]\)|[A-Z]\.)\s")
 MINOR = {"and", "or", "of", "the", "for", "to", "in", "on", "a", "an", "with", "by", "at", "from"}
 MIN_WORDS = 4           # fewer words than this is a scrap
 TITLE_WORDS = 10        # a title is at most this many words, nearly all capitalised
@@ -98,8 +99,13 @@ def left_out(kind, text, has_lead_in):
         return ""
     if n < MIN_WORDS:
         return "fragment"
+    # A title: short, nearly every word capitalised, and numbered or
+    # unpunctuated ('14. Project Risk Assessment and Mitigation.'). A
+    # capitalised sentence ending in a full stop ('Upgrade the National and
+    # Disaster Recovery Data Centers.') is an activity in a list, not a title.
     content = [w for w in words if w.lower() not in MINOR]
-    if n <= TITLE_WORDS and content and \
+    titled = NUMBERED.match(text.strip()) or not text.strip().endswith((".", ";", ":"))
+    if n <= TITLE_WORDS and content and titled and \
             sum(w[0].isupper() for w in content) >= 0.8 * len(content):
         return "fragment"
     return ""

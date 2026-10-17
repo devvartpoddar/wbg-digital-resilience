@@ -77,6 +77,8 @@ def test_references_and_fragments_are_left_out_but_commitments_never():
                           "and have redundant power and cooling paths throughout.", False) == ""
     assert units.left_out("sentence", "14. Project Risk Assessment and Mitigation.", False) == "fragment"
     assert units.left_out("sentence", "(iii) governance.", False) == "fragment"
+    assert units.left_out("sentence", "Upgrade the National and Disaster Recovery Data Centers.",
+                          False) == ""
     # A list item is read with its lead-in, so it is never a fragment.
     assert units.left_out("sentence", "(b) towers;", True) == ""
     assert units.left_out("sentence", "Towers will be raised.", False) == ""

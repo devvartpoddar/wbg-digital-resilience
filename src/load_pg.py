@@ -11,7 +11,7 @@ Reads  data/projects/projects.csv, data/raw/documents.csv,
        evaluation alone, AGENTS.md rule 9)
 Writes Postgres: wbg.<table> for each, paragraph_projects (one row per
        paragraph and project, so a paragraph joins its project), the results
-       tables (search_best, search_paragraphs, classify_scores,
+       tables (search_best, search_paragraphs, classify_scores, candidates,
        sentence_vectors, taxonomy), releases and data_release, keys between
        them, the views and functions in sql/views/, and wbg.loads (one row
        per load, with the release it loaded); first it cuts a release
@@ -280,6 +280,27 @@ CLASSIFY_COLS = ["label_set", "run", "paragraph_id", "doc_id", "project_ids",
                  "component_number", "label_id", "grade", "expected", "confidence",
                  "p0", "p1", "p2", "p3", "p4", "model_served"]
 INTEGER.add("units_hit")
+CANDIDATE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
+                  "project_ids", "component_number", "subcomponent_number", "component_key",
+                  "copies", "route", "rank", "score", "patterns", "types", "p_commitment",
+                  "firmness"]
+NUMERIC.add("p_commitment")
+
+
+def candidate_rows(data):
+    """(source sha, rows) for wbg.candidates from each set's current
+    candidates (src/candidates.py), or (None, [])."""
+    import candidates
+    rows, runs = [], []
+    for name in labels.label_sets():
+        folder = candidates.current(name, data)
+        if not folder:
+            continue
+        runs.append(os.path.basename(folder))
+        with open(os.path.join(folder, "candidates.csv"), newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                rows.append(dict(r, label_set=name, run=os.path.basename(folder)))
+    return ("|".join(runs), rows) if rows else (None, [])
 
 
 def vector_kind(conn, dim):
@@ -345,6 +366,7 @@ PRIMARY = {"projects": ("project_id",), "documents": ("doc_id",),
            "paragraph_projects": ("paragraph_id", "project_id"),
            "search_paragraphs": ("label_set", "label_id", "paragraph_id"),
            "classify_scores": ("label_set", "label_id", "paragraph_id"),
+           "candidates": ("label_set", "label_id", "unit_id"),
            "taxonomy": ("label_set", "label_id"), "releases": ("release_id",)}
 FOREIGN = [("paragraphs", "doc_id", "documents"), ("sentences", "paragraph_id", "paragraphs"),
            ("sentences", "doc_id", "documents"), ("components", "doc_id", "documents"),
@@ -355,6 +377,7 @@ FOREIGN = [("paragraphs", "doc_id", "documents"), ("sentences", "paragraph_id", 
            ("paragraph_projects", "paragraph_id", "paragraphs"),
            ("paragraph_projects", "project_id", "projects"),
            ("classify_scores", "paragraph_id", "paragraphs"),
+           ("candidates", "paragraph_id", "paragraphs"),
            ("search_best", "paragraph_id", "paragraphs"),
            ("search_paragraphs", "paragraph_id", "paragraphs"),
            ("sentence_vectors", "paragraph_id", "paragraphs")]
@@ -526,6 +549,15 @@ def main():
         else:
             n, _ = load_rows(conn, "classify_scores", CLASSIFY_COLS, rows, sha, release_id)
             print(f"  {'classify_scores':<20} {n:>8} rows")
+
+        sha, rows = candidate_rows(args.data)
+        if sha is None:
+            print(f"  {'candidates':<20} skipped: no current run")
+        elif not args.force and _last_sha(conn, "candidates") == sha:
+            print(f"  {'candidates':<20} unchanged")
+        else:
+            n, _ = load_rows(conn, "candidates", CANDIDATE_COLS, rows, sha, release_id)
+            print(f"  {'candidates':<20} {n:>8} rows")
 
         tax = taxonomy_rows()
         tax_sha = hashlib.sha256(repr(tax).encode()).hexdigest()

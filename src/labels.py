@@ -6,6 +6,16 @@ A label set is two or three CSV files, kept by people and only read here:
                       (and any other columns: version, seed_ids, note)
   <set>_queries.csv   search phrases per label: <x>_id, query_id, query, active
   <set>_scale.csv     the grades the classifier asks for: grade, description
+  <set>_patterns.csv  word patterns per label (optional): <x>_id, pattern_id,
+                      pattern, active. A regular expression, matched without
+                      regard to case; write whole words with \b
+                      (r"\bunderground\b"), or "ducts?" also matches
+                      "conducted"; an acronym that must keep its case goes in
+                      (?-i:...), or "UPS" also matches "start-ups". The candidates stage takes every unit a
+                      pattern matches, whatever its embedding score.
+  <set>_types.csv     the types of a label (optional): <x>_id, type_id,
+                      type_name, pattern, active. A unit is of every type
+                      whose pattern it matches ("underground", "aerial").
 
 Two folders hold them, with one difference between them:
 
@@ -23,10 +33,11 @@ an error, not a precedence rule.
 import csv
 import glob
 import os
+import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LABEL_DIRS = (os.path.join(ROOT, "inputs", "taxonomy"), os.path.join(ROOT, "analysis", "labels"))
-_SUFFIXES = ("_queries", "_scale")
+_SUFFIXES = ("_queries", "_scale", "_patterns", "_types")
 
 
 def _is_set(path):
@@ -90,4 +101,52 @@ def load_set(name, dirs=LABEL_DIRS, taxonomy=None):
                     "folder": os.path.relpath(d, ROOT)})
     if not out:
         raise SystemExit(f"labels: {path} has no rows")
+    return out
+
+
+def _optional(name, suffix, dirs, taxonomy):
+    d = taxonomy or folder(name, dirs)
+    path = os.path.join(d, f"{name}{suffix}.csv")
+    return path, (rows(path) if os.path.exists(path) else [])
+
+
+def _id_col(r, path):
+    col = next((c for c in r if c.endswith("_id") and c not in ("pattern_id", "type_id")), None)
+    if not col:
+        raise SystemExit(f"labels: {path} needs the label's *_id column")
+    return col
+
+
+def load_patterns(name, dirs=LABEL_DIRS, taxonomy=None):
+    """Active word patterns: [{label_id, pattern_id, pattern, regex}]. A
+    pattern that does not compile is an error, not a silent skip."""
+    path, found = _optional(name, "_patterns", dirs, taxonomy)
+    out = []
+    for r in found:
+        if not is_active(r):
+            continue
+        try:
+            rx = re.compile(r["pattern"], re.I)
+        except re.error as e:
+            raise SystemExit(f"labels: {path}: pattern {r['pattern_id']!r} does not "
+                             f"compile: {e}")
+        out.append({"label_id": r[_id_col(r, path)].strip(), "pattern_id": r["pattern_id"].strip(),
+                    "pattern": r["pattern"], "regex": rx})
+    return out
+
+
+def load_types(name, dirs=LABEL_DIRS, taxonomy=None):
+    """Active types: [{label_id, type_id, type_name, pattern, regex}]."""
+    path, found = _optional(name, "_types", dirs, taxonomy)
+    out = []
+    for r in found:
+        if not is_active(r):
+            continue
+        try:
+            rx = re.compile(r["pattern"], re.I)
+        except re.error as e:
+            raise SystemExit(f"labels: {path}: type {r['type_id']!r} does not compile: {e}")
+        out.append({"label_id": r[_id_col(r, path)].strip(), "type_id": r["type_id"].strip(),
+                    "type_name": r.get("type_name", "").strip(), "pattern": r["pattern"],
+                    "regex": rx})
     return out
