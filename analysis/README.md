@@ -17,7 +17,7 @@ A label set's name is its file name without `.csv`, and the same name must not e
 ./wbg search measures          # score the sentences against analysis/labels/measures*.csv
 ./wbg classify measures        # grade the paragraphs against it
 ./wbg search hazards_v2        # a new set: add analysis/labels/hazards_v2.csv (+ _queries, _scale)
-./wbg candidates six_measures  # each label's pattern hits and embedding top 1,000, with p_commitment, firmness, types
+./wbg candidates six_measures  # each label's pattern hits and embedding top 1,000, with p_commitment, firmness, types, reading order
 ./wbg words six_measures ews   # the words that set a label's candidates apart: what types it has
 ```
 

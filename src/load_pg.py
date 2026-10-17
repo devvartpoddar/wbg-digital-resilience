@@ -283,8 +283,9 @@ INTEGER.add("units_hit")
 CANDIDATE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
                   "project_ids", "component_number", "subcomponent_number", "component_key",
                   "copies", "route", "rank", "score", "patterns", "types", "p_commitment",
-                  "firmness"]
-NUMERIC.add("p_commitment")
+                  "firmness", "priority", "read_order"]
+NUMERIC.update({"p_commitment", "priority"})
+INTEGER.add("read_order")
 
 
 def candidate_rows(data):

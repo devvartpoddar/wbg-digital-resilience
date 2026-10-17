@@ -12,8 +12,9 @@ A unit is a candidate for a label when either route finds it:
 
 Each candidate carries the commitment scorer's p_commitment and firmness
 (src/commitment.py), the types whose patterns it matches (<set>_types.csv),
-and the units that print the same text elsewhere (copies). Nothing is cut
-off here: a cut-off on p_commitment, firmness or score is chosen against
+the units that print the same text elsewhere (copies), and its place in the
+reading order (priority, read_order: see prioritise()). Nothing is cut off
+here: a cut-off on p_commitment, firmness or score is chosen against
 examples a person checked.
 
   data/candidates/<set>-<version>/candidates.csv
@@ -23,8 +24,9 @@ examples a person checked.
       p_commitment, firmness
   data/candidates/<set>-<version>/manifest.json
 
-<version> is a SHA-256 over the search run, the patterns, the types, `top`
-and the commitment scores: change any of them and it is a new version.
+<version> is a SHA-256 over this code, the search run, the patterns, the
+types, `top` and the commitment scores: change any of them and it is a new
+version.
 
 words() lists the words that set a label's strongest candidates apart from
 the other labels' candidates (or the corpus, for a set of one), the cheap way to see what types a measure has before writing
@@ -45,9 +47,11 @@ import labels  # noqa: E402
 import search  # noqa: E402
 
 TOP = 1000
+PATTERN_WEIGHT = 10   # a pattern hit outranks every unit found by embedding alone
+COMMIT_WEIGHT = 2     # then p_commitment counts twice the embedding percentile
 COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
         "component_number", "subcomponent_number", "component_key", "copies", "route",
-        "rank", "score", "patterns", "types", "p_commitment", "firmness"]
+        "rank", "score", "patterns", "types", "p_commitment", "firmness", "priority", "read_order"]
 STOP = set("""a an and are as at be been but by can could for from has have in into is it
 its of on or such than that the their these this those to was were which while who will
 with would also any all may more most other over per under up via within without""".split())
@@ -56,12 +60,40 @@ WORD = re.compile(r"[a-z][a-z\-]+")
 
 def version(run, patterns, types, top, commit_version):
     h = hashlib.sha256()
+    h.update(commitment._sha_file(os.path.abspath(__file__)).encode())   # this code
     h.update(f"{os.path.basename(run)}\ttop={top}\tcommitment={commit_version}\n".encode())
     for p in patterns:
         h.update(f"p\t{p['label_id']}\t{p['pattern_id']}\t{p['pattern']}\n".encode())
     for t in types:
         h.update(f"t\t{t['label_id']}\t{t['type_id']}\t{t['pattern']}\n".encode())
     return h.hexdigest()[:12]
+
+
+def prioritise(label_rows):
+    """One label's candidates in reading order, each with its priority: a
+    pattern hit first, then the commitment score and the embedding score
+    (its percentile among the label's candidates), weighted 2 to 1.
+
+    Chosen on the six-measure trial against 1,250 judged sentences: of the
+    top 30 per measure, 71 per cent were commitments of the measure, against
+    34 per cent for the embedding score alone. Dropping either the commitment
+    or the embedding score from the order cost 15 to 27 points; a relevance
+    classifier trained on pattern hits, and two cross-encoder re-rankers
+    (bge-reranker-base, bge-reranker-v2-m3), did no better."""
+    n = len(label_rows)
+    by_score = sorted(range(n), key=lambda i: (float(label_rows[i]["score"]), -i))
+    pct = [0.0] * n
+    for k, i in enumerate(by_score):
+        pct[i] = (k + 1) / n
+    for i, r in enumerate(label_rows):
+        p = float(r["p_commitment"] or 0)
+        r["priority"] = round(PATTERN_WEIGHT * (r["route"] != "embedding") +
+                              COMMIT_WEIGHT * p + pct[i], 6)
+    label_rows.sort(key=lambda r: (-r["priority"], r["rank"]))
+    for k, r in enumerate(label_rows, 1):
+        r["read_order"] = k
+        r["priority"] = f"{r['priority']:.4f}"
+    return label_rows
 
 
 def build(name, data, top=TOP, log=print):
@@ -93,6 +125,7 @@ def build(name, data, top=TOP, log=print):
         mine = [p for p in patterns if p["label_id"] == lid]
         kinds = [t for t in types if t["label_id"] == lid]
         n = {"pattern": 0, "embedding": 0, "both": 0}
+        label_rows = []
         for i in order.tolist():
             hit = [p["pattern_id"] for p in mine if p["regex"].search(text_list[i])]
             near = rank[i] <= top
@@ -102,13 +135,14 @@ def build(name, data, top=TOP, log=print):
             n[route] += 1
             r = index[i]
             p_commit, firm = commit.get(r["unit_id"], (None, ""))
-            rows.append({**{c: r.get(c, "") for c in search.CONTEXT}, "label_id": lid,
+            label_rows.append({**{c: r.get(c, "") for c in search.CONTEXT}, "label_id": lid,
                          "route": route, "rank": int(rank[i]), "score": f"{best[i]:.6f}",
                          "patterns": "|".join(hit),
                          "types": "|".join(t["type_id"] for t in kinds
                                            if t["regex"].search(text_list[i])),
                          "p_commitment": "" if p_commit is None else f"{p_commit:.4f}",
                          "firmness": firm})
+        rows.extend(prioritise(label_rows))
         counts[lid] = n
         log(f"  {lid:<24} {sum(n.values()):>6,} candidates (pattern only {n['pattern']:,}, "
             f"embedding only {n['embedding']:,}, both {n['both']:,})")

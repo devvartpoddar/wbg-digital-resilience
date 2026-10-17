@@ -83,9 +83,10 @@ def test_candidates_are_pattern_hits_or_the_embedding_top(tmp_path, monkeypatch)
         got = [(r["unit_id"], r["route"], r["rank"], r["types"], r["p_commitment"])
                for r in csv.DictReader(fh)]
     # b is the embedding's top 1; a and c only the pattern finds; d neither.
-    assert got == [("b", "embedding", "1", "", "0.1000"),
-                   ("a", "pattern", "3", "underground", "0.9000"),
-                   ("c", "pattern", "4", "underground", "0.1000")]
+    # Reading order: pattern hits first, the likelier commitment first.
+    assert got == [("a", "pattern", "3", "underground", "0.9000"),
+                   ("c", "pattern", "4", "underground", "0.1000"),
+                   ("b", "embedding", "1", "", "0.1000")]
     # The same inputs are the same version: not built again.
     assert candidates.build("m", data, top=1, log=lambda *_: None) == out
 
