@@ -379,12 +379,14 @@ def main():
     ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
     ap.add_argument("--gate", default="none", choices=measure.GATES)
     ap.add_argument("--asset-min", type=float, default=0.0)
+    ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     import embed
     key = "" if args.dry_run else embed.read_key("")
-    kw = dict(context=args.context, gate=args.gate, asset_min=args.asset_min)
+    kw = dict(context=args.context, gate=args.gate, asset_min=args.asset_min,
+              projects=classify.scope(args.projects))
     if args.assign:
         out = assign(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
                      read_at=args.read_at, **kw)

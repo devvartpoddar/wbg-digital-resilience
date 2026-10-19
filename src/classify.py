@@ -48,8 +48,8 @@ ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 # US$ per million input tokens (output is free), for the dry-run estimate only.
 PRICE_PER_MTOK = 0.042
 # Above about 32,000 bytes the endpoint switches to a long-context mode the
-# vendor describes as slower and less accurate; a request is refused before
-# that rather than truncated or degraded.
+# vendor describes as slower and less accurate; a request that would pass
+# that is split over several (answers.bodies_for), never truncated.
 MAX_REQUEST_CHARS = 30_000
 # Narrative and annex prose, every footnote given to the model, and every
 # table row the search reads as prose (units.table_units): the climate annex
@@ -318,15 +318,23 @@ def score_rows(p, response, labels, cosines=None, asked=None):
     return out
 
 
-def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_COSINE):
+def in_scope(row, projects):
+    """Whether a row's project_ids meet the scope (None or empty = every project)."""
+    return not projects or bool(set(row.get("project_ids", "").split("|")) & set(projects))
+
+
+def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_COSINE,
+         projects=None):
     """Everything a run would send, without sending it: (labels, scale,
     questions, [(paragraph, request body)], request SHA-256s, run folder,
     cosines). With min_cosine, a paragraph's request holds only the labels
     whose best unit cosine in it reaches the threshold; a paragraph with
-    none is not sent."""
+    none is not sent. `projects` limits the run to the paragraphs of those
+    projects (a cohort set, say); the run is keyed on the paragraphs it
+    covers, so a scope is its own run and a wider one later reads the store."""
     labels, scale = load_labels(name, taxonomy)
     qs = questions(labels, scale)
-    paras = paragraphs(data)
+    paras = [p for p in paragraphs(data) if in_scope(p["row"], projects)]
     if limit:
         paras = paras[:limit]
     cosines = best_cosines(name, data, taxonomy) if min_cosine else {}
@@ -339,10 +347,14 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
             lid: q for lid, q in qs.items()
             if cosines.get((lid, p["row"]["paragraph_id"]), 0.0) >= min_cosine}
         bodies.append((p, request_body(p["state"], ask, model)))
+    # A paragraph whose questions do not fit one request is asked in several
+    # (answers.bodies_for); only a paragraph too long for a single question
+    # is refused, never truncated.
     for p, body in bodies:
-        if len(json.dumps(body, ensure_ascii=False)) > MAX_REQUEST_CHARS:
+        one = request_body(p["state"], dict(list(body["questions"].items())[:1]), model)
+        if len(json.dumps(one, ensure_ascii=False)) > MAX_REQUEST_CHARS:
             raise SystemExit(f"classify: {p['row']['paragraph_id']} makes a request over "
-                             f"{MAX_REQUEST_CHARS:,} characters; not truncated")
+                             f"{MAX_REQUEST_CHARS:,} characters with one question; not truncated")
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
     h = hashlib.sha256(f"min_cosine={min_cosine}\n".encode())
@@ -352,19 +364,20 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     return labels, scale, qs, bodies, shas, out, cosines
 
 
-def current_run(name, data, taxonomy=TAXONOMY, min_cosine=MIN_COSINE):
+def current_run(name, data, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, projects=None):
     """The run folder for the label set and paragraphs as they stand now, or
     None if that run has not been written."""
-    out = plan(name, data, taxonomy=taxonomy, min_cosine=min_cosine)[5]
+    out = plan(name, data, taxonomy=taxonomy, min_cosine=min_cosine, projects=projects)[5]
     return out if os.path.exists(os.path.join(out, "manifest.json")) else None
 
 
 def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
-             dry_run=False, log=print, workers=WORKERS, min_cosine=MIN_COSINE):
+             dry_run=False, log=print, workers=WORKERS, min_cosine=MIN_COSINE, projects=None):
     """Classify the label set; returns the run folder (None on a dry run or
     when requests failed - run again to resume)."""
     labels, scale, qs, bodies, shas, out, cosines = plan(
-        name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine)
+        name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine,
+        projects=projects)
     n_q = sum(len(b["questions"]) for _, b in bodies)
     log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} paragraphs, "
         f"{n_q:,} questions"
@@ -448,6 +461,12 @@ def question_shas(qs):
             for k, v in qs.items()}
 
 
+def scope(projects):
+    """A --projects argument as a sorted list, or None for every project."""
+    ids = sorted({p.strip().upper() for p in (projects or "").split(",") if p.strip()})
+    return ids or None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("label_set", help="a label set in inputs/taxonomy/ or analysis/labels/: "
@@ -460,11 +479,14 @@ def main():
     ap.add_argument("--min-cosine", type=float, default=MIN_COSINE,
                     help="ask a label's question of a paragraph only when a unit of it "
                          "scores at least this against the label's phrases (0 = all)")
+    ap.add_argument("--projects", default="",
+                    help="comma-separated project ids: only their paragraphs (./wbg classify "
+                         "--set digital fills this from the cohort)")
     args = ap.parse_args()
     key = "" if args.dry_run else embed.read_key("")
     out = classify(args.label_set, args.data, model=args.model, api_key=key,
                    limit=args.limit, dry_run=args.dry_run, workers=args.workers,
-                   min_cosine=args.min_cosine)
+                   min_cosine=args.min_cosine, projects=scope(args.projects))
     return 0 if out or args.dry_run else 1
 
 

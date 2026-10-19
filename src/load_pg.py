@@ -317,14 +317,15 @@ def _run_rows(data, finder, file):
     return ("|".join(runs), rows) if rows else (None, [])
 
 
-def classify_rows(data):
+def classify_rows(data, projects=None):
     import classify
-    return _run_rows(data, lambda n, d: classify.current_run(n, d), "scores.csv")
+    return _run_rows(data, lambda n, d: classify.current_run(n, d, projects=projects),
+                     "scores.csv")
 
 
-def measure_rows(data):
+def measure_rows(data, projects=None):
     import measure
-    return _run_rows(data, lambda n, d: measure.current_run(n, d), "units.csv")
+    return _run_rows(data, lambda n, d: measure.current_run(n, d, projects=projects), "units.csv")
 
 
 def label_rows():
@@ -524,7 +525,17 @@ def main():
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--dsn", default=os.environ.get("WBG_PG", DEFAULT_DSN))
     ap.add_argument("--force", action="store_true", help="reload unchanged tables too")
+    ap.add_argument("--projects", default="",
+                    help="comma-separated project ids: load the model runs made over this "
+                         "scope (the cohort set they were run with)")
+    ap.add_argument("--set", action="append", dest="cohort_set",
+                    help="the cohort set the model runs were made over (digital, ...)")
     args = ap.parse_args()
+    import classify
+    projects = classify.scope(args.projects)
+    if args.cohort_set:
+        from wbg import select
+        projects = sorted(select(cohort_set=",".join(args.cohort_set), data=args.data).ids)
 
     import psycopg
     import release
@@ -564,9 +575,9 @@ def main():
         sha, rollup = search_tables(args.data)
         derived(conn, "search_paragraphs", sha, ROLLUP_COLS, rollup)
 
-        sha, rows = classify_rows(args.data)
+        sha, rows = classify_rows(args.data, projects)
         derived(conn, "paragraph_grades", sha, CLASSIFY_COLS, rows)
-        sha, rows = measure_rows(args.data)
+        sha, rows = measure_rows(args.data, projects)
         derived(conn, "measure_findings", sha, MEASURE_COLS, rows)
 
         lab = label_rows()
