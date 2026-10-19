@@ -59,6 +59,8 @@ RENAME = {
     "p0": "probability_grade_0", "p1": "probability_grade_1", "p2": "probability_grade_2",
     "p3": "probability_grade_3", "p4": "probability_grade_4",
     "p_committed_calibrated": "committed_probability_calibrated",
+    "types_yes": "type_ids_above_threshold", "best_type": "best_type_id",
+    "best_p": "best_type_probability",
     "patterns": "matched_patterns", "types": "matched_types",
     "p_commitment": "commitment_probability", "priority": "reading_priority",
     "read_order": "reading_order", "round": "feedback_round", "cost": "model_cost_usd",
@@ -98,7 +100,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "best_embedding_score", "best_embedding_percentile", "best_cosine", "expected_grade",
            "grade_confidence", "probability_grade_0", "probability_grade_1",
            "probability_grade_2", "probability_grade_3", "probability_grade_4",
-           "committed_probability_calibrated",
+           "committed_probability_calibrated", "best_type_probability",
            "commitment_probability", "reading_priority", "model_cost_usd",
            "paragraph_best_asset_probability", "component_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
@@ -111,9 +113,10 @@ BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_lat
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
          "matched_types", "asset_ids_above_threshold", "activity_kinds_above_threshold",
-         "actor_ids_above_threshold", "component_mentions"}
+         "actor_ids_above_threshold", "type_ids_above_threshold", "component_mentions"}
 INDEXED = {"document_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
-           "award_id", "unit_id", "borrower_reference_normalised", "label_id", "label_set"}
+           "award_id", "unit_id", "borrower_reference_normalised", "label_id", "label_set",
+           "type_id"}
 
 
 def col_type(name):
@@ -408,12 +411,22 @@ TABLES = {
             "best_actor_id": "The likeliest of them.",
             "best_actor_probability": "Its probability.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
+            "type_ids_above_threshold": "The measure's types (clusters) this unit is an instance of, at 0.5 or more, from analysis/labels/<set>_types.csv; several allowed; empty when no type claims it ('other') or no list exists yet.",
+            "best_type_id": "The likeliest type.",
+            "best_type_probability": "Its probability.",
             "committed_probability_calibrated": "probability_grade_3 after Platt scaling on a person's graded sheet (./wbg check --evaluate); NULL until a sheet has been graded.",
             "template_project_count": "As in search_units: other projects printing the same words.",
             "template_wording_share": "As in search_units: share of six-word runs shared with two or more other projects.",
             "copy_unit_ids": "Units in other documents that print the same text.",
             "text": "The unit's text with its list lead-in.",
         })),
+    "measure_types": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "type_id"), foreign=[],
+        comment="A measure's approved types (its clusters): proposed by a generative model "
+                "from the committed units, approved by a person in analysis/labels/"
+                "<set>_types.csv, assigned by the decision model one yes/no each.",
+        columns={"type_name": "The type's name.",
+                 "definition": "The definition the decision model was given."}),
     "sentence_vectors": dict(
         schema=INTERNAL, key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
         comment="Pipeline bookkeeping: one embedding per search unit (3,072 dimensions), used "

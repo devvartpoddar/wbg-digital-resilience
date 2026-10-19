@@ -1,0 +1,7 @@
+measure_id,type_id,type_name,definition,active,version
+ews,call_dispatch,Emergency call and dispatch platform,"An emergency call-taking, dispatch or case-handling platform or centre (a 911 or 112 service and its operators, caller geolocation and call routing).",true,v1
+ews,public_alerts,Public warning and alert dissemination,"Sending warnings and alerts to the public or to communities at risk: SMS, cell broadcast, sirens, radio and television, mobile applications, last-mile dissemination.",true,v1
+ews,monitoring_forecasting,Hazard monitoring and warning generation,"Hydrological, meteorological, seismic or health surveillance networks, sensors, data and forecasting systems that detect a hazard and generate the warning.",true,v1
+ews,protocols_coordination,Warning protocols and institutional arrangements,"Standard operating procedures, protocols, standards, agreements and agency coordination for issuing warnings and responding to them.",true,v1
+ews,comms_facilities,Emergency communications facilities and connectivity,"Emergency operations centres, dedicated emergency radio or data networks, and the connectivity and facilities that let warnings and responders communicate.",true,v1
+ews,training_awareness,Operator training and public awareness,"Training of operators and responders, and awareness campaigns so people know the service or the warnings and how to act on them.",true,v1

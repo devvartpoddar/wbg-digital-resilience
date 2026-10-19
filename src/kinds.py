@@ -267,11 +267,14 @@ def assign_questions(types):
         for t in types}
 
 
-def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=print,
-           workers=classify.WORKERS, read_at=0.5, **kw):
+def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
+    """(run folder, approved, rows [(label, unit, questions)], out folder): what
+    an assignment run asks and where it goes, without asking. The folder is
+    keyed on the measure run, the model and every request, so a changed
+    type list or a new measure run is a new folder."""
     run_folder, units = committed_units(name, data, **kw)
     approved = load_approved(name)
-    bodies, shas, rows = [], [], []
+    shas, rows = [], []
     for lid, us in sorted(units.items()):
         if lid not in approved:
             log(f"  {lid}: no approved types; skipped")
@@ -279,14 +282,28 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
         qs = assign_questions(approved[lid])
         for u in us:
             body = classify.request_body({"sentence": u["text"]}, qs, model)
-            bodies.append(body)
             shas.append(classify.request_sha(body))
             rows.append((lid, u, qs))
     h = hashlib.sha256()
     h.update(f"{os.path.basename(run_folder)}\t{model}\n".encode())
     for (lid, u, _), sha in zip(rows, shas):
         h.update(f"{u['unit_id']}:{sha}\n".encode())
-    out = where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
+    return run_folder, approved, rows, where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
+
+
+def current_assign(name, data, **kw):
+    """The assignments folder for the set as it stands now, or None: no
+    measure run, no approved list, or not yet assigned."""
+    try:
+        out = assign_plan(name, data, **kw)[3]
+    except SystemExit:
+        return None
+    return out if os.path.exists(os.path.join(out, "manifest.json")) else None
+
+
+def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=print,
+           workers=classify.WORKERS, read_at=0.5, **kw):
+    run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log, **kw)
     log(f"{name}: {len(rows):,} committed units x their approved types -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
