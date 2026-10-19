@@ -29,9 +29,11 @@ to re-join:
                        still the item: its id, offsets and hash are its own.
   left_out             why the unit is not searched, or blank: 'reference' (a
                        footnote that only cites a source or titles a table),
-                       'fragment' (a title or a scrap of a few words). A list
+                       'fragment' (a title or a scrap of a few words),
+                       'indicator' (a table row in a results-framework or
+                       indicator section: a target, not a commitment). A list
                        item with a lead-in, and anything saying 'will' or
-                       'shall', is always searched.
+                       'shall', is always searched, except an indicator row.
   copy_of              the first unit (in document and unit order) whose
                        embedded text, lead-in included, is the same word for
                        word, or blank. An additional financing or a
@@ -139,6 +141,13 @@ ROW_VERB = re.compile(r"\b(?:will|shall|would|should|must|is|are|was|were|be|bee
                       r"include[sd]?|support[sd]?|finance[sd]?|provide[sd]?|ensure[sd]?)\b", re.I)
 # Sections of standard text printed in every document.
 BOILERPLATE_SECTION = re.compile(r"grievance", re.I)
+# Results-framework and indicator tables: a row there is a target with a
+# baseline and a date ("campaign launched (Yes/No)"), not a commitment, and
+# the second measure run graded such rows committed. Their prose rows are
+# listed with left_out 'indicator' and not searched (about a quarter of the
+# prose table rows on the 70-project corpus).
+RESULTS_SECTION = re.compile(r"results? (?:framework|matrix|indicators?)\b|\bindicators?\b|"
+                             r"monitoring (?:and|&) evaluation", re.I)
 
 
 def prose_row(text):
@@ -276,11 +285,15 @@ def search_units(data):
                             char_start=p["char_start"], char_end=p["char_end"],
                             n_tokens=p["n_tokens"], text_sha256=p["text_sha256"],
                             lead_in_start="", lead_in_end=""))
+    indicator = set()
     for p in every:
         if p["block"] == "table" and not BOILERPLATE_SECTION.search(p.get("section_title", "")):
             text = _text(texts, data, p["doc_id"])
             if text is not None and prose_row(text[int(p["char_start"]):int(p["char_end"])]):
-                out.extend(dict(context(p), **u) for u in table_units(p, text))
+                rows = [dict(context(p), **u) for u in table_units(p, text)]
+                out.extend(rows)
+                if RESULTS_SECTION.search(p.get("section_title", "")):
+                    indicator.update(u["unit_id"] for u in rows)
     out.sort(key=lambda u: (u["doc_id"], u["unit_id"]))
     first = {}
     for u in out:
@@ -289,7 +302,8 @@ def search_units(data):
         lead = text[int(u["lead_in_start"]):int(u["lead_in_end"])] if u["lead_in_start"] else ""
         # A table sentence's caption is context, not a list lead-in: a scrap
         # of a cell ('(Adaptation)') is still left out.
-        u["left_out"] = left_out(u["kind"], body, bool(lead) and u["kind"] != "table")
+        u["left_out"] = "indicator" if u["unit_id"] in indicator else \
+            left_out(u["kind"], body, bool(lead) and u["kind"] != "table")
         u["copy_of"] = ""
         if not u["left_out"]:
             same = _same_text(lead + "\n" + body)
