@@ -90,6 +90,7 @@ TOP = candidates.TOP  # embedding depth of round 0 (the same run the load reads)
 BATCH = 500           # units per feedback round
 MIN_YIELD = 10        # a round yielding fewer committed units than this is the last
 MAX_ROUNDS = 6
+NEGATIVE_WEIGHT = 0.5  # Rocchio: how much of the rejected units' centroid is subtracted
 UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
              "component_number", "subcomponent_number", "component_key", "copies", "route",
              "round", "rank", "score", "patterns", "p_commitment", "firmness", "read_order",
@@ -214,7 +215,8 @@ class Run:
         self.name, self.data, self.log = name, data, log
         self.settings = {"model": model, "context": context, "gate": gate,
                          "asset_min": asset_min, "top": top, "batch": batch,
-                         "min_yield": min_yield, "max_rounds": max_rounds}
+                         "min_yield": min_yield, "max_rounds": max_rounds,
+                         "negative_weight": NEGATIVE_WEIGHT}
         # A reader (the load, the evaluation, the types stage) must not build
         # anything as a side effect: it asks for the run as it stands.
         self.cand = candidates.build(name, data, top=top, log=log) if build \
@@ -365,14 +367,23 @@ class Run:
     # ---- relevance feedback
 
     def feedback_rows(self, graded, rnd):
-        """The next batch: the unseen units nearest the centroid of the
-        committed units' vectors, in index order on ties."""
+        """The next batch: the unseen units nearest the Rocchio query, in
+        index order on ties. The query is the centroid of the committed
+        units' vectors minus NEGATIVE_WEIGHT times the centroid of the units
+        graded 0: the first run showed the raw centroid pulls in the
+        measure's neighbourhood ("resilient infrastructure" in general), and
+        the rejected units are exactly what that neighbourhood looks like."""
         top = len(self.scale) - 1
         pos = [self.row_of[r["unit_id"]] for r in graded
                if r["sent"] == "true" and int(r["grade"]) == top]
+        neg = [self.row_of[r["unit_id"]] for r in graded
+               if r["sent"] == "true" and int(r["grade"]) == 0]
         if not pos:
             return []
         centroid = numpy.asarray(self.matrix[sorted(pos)], dtype="float32").mean(axis=0)
+        if neg and NEGATIVE_WEIGHT:
+            centroid -= NEGATIVE_WEIGHT * numpy.asarray(self.matrix[sorted(neg)],
+                                                        dtype="float32").mean(axis=0)
         norm = numpy.linalg.norm(centroid)
         if not norm:
             return []
