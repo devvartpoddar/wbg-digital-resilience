@@ -126,11 +126,13 @@ def store(tmp_path, monkeypatch):
         hit = "hazard assessment" in body["state"]["sentence"]
         probs = {"0": 0.05, "1": 0.05, "2": 0.1, "3": 0.8} if hit else \
             {"0": 0.9, "1": 0.1, "2": 0.0, "3": 0.0}
-        return {"model": measure.MODEL, "usage": {"cost": 0.00001},
-                "answers": {"cra": {"type": "score", "confidence": 0.7, "probabilities": probs},
-                            "asset:towers": {"type": "noul",
-                                             "noul": 0.9 if "tower" in body["state"]["sentence"]
-                                             else 0.1}}}
+        answers = {"cra": {"type": "score", "confidence": 0.7, "probabilities": probs}}
+        for qid in body["questions"]:                     # every yes/no asked: assets, kinds
+            if qid != "cra":
+                yes = (qid == "asset:towers" and "tower" in body["state"]["sentence"]) or \
+                    (qid == "kind:build" and hit)
+                answers[qid] = {"type": "noul", "noul": 0.9 if yes else 0.1}
+        return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": answers}
     monkeypatch.setattr(classify, "decide", fake)
     return str(data), calls
 
@@ -152,6 +154,7 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert r["grade"] == "3" and r["asset_para"] == "towers" and r["asset_p_para"] == "0.9000"
     assert r["asset_comp"] == "towers" and r["sent"] == "true" and r["round"] == "0"
     assert r["asset_unit"] == "towers" and r["asset_p_unit"] == "0.900" and r["assets_yes"] == "towers"
+    assert r["kinds_yes"] == "build" and r["kind_best"] == "build"
     assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]

@@ -735,6 +735,14 @@ def main(argv=None):
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
     p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("check", help="draw a measure's units for a person to grade, or "
+                                     "--evaluate the grades: precision and recall with intervals")
+    p.add_argument("label_set")
+    p.add_argument("--evaluate", action="store_true")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
+    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
+    p.add_argument("--asset-min", type=float, default=0.0)
     p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
                                         "hand-labelled activities workbook")
     p.add_argument("label_set")
@@ -810,6 +818,11 @@ def main(argv=None):
              "--runs", str(args.runs), "--context", args.context, "--gate", args.gate,
              "--asset-min", str(args.asset_min), *(["--dry-run"] if args.dry_run else []),
              data=data)
+        return 0
+    if args.cmd == "check":
+        _run("check_units.py", args.label_set, *(["--evaluate"] if args.evaluate else []),
+             "--seed", str(args.seed), "--context", args.context, "--gate", args.gate,
+             "--asset-min", str(args.asset_min), data=data)
         return 0
     if args.cmd == "evaluate":
         _run("evaluate_activities.py", args.label_set, "--column", args.column,

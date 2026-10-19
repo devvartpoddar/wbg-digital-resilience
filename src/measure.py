@@ -83,6 +83,10 @@ import search  # noqa: E402
 # served it; a mismatch is reported.
 MODEL = "typesafe/jev-1.13-20260917"
 ASSET_SET = "assets"
+# How a commitment is delivered (govern, build, sustain, use): a hand-kept
+# list in inputs/config/, not a label set, so nothing searches or grades it
+# on its own; the measure stage asks it alongside the measure.
+KINDS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "activity_kinds.csv")
 CONTEXTS = ("sentence", "paragraph")
 GATES = ("none", "link", "unit", "paragraph", "component")
 LINK_MIN = 0.5        # an asset answer or map score at or above this makes a link
@@ -96,7 +100,7 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "round", "rank", "score", "patterns", "p_commitment", "firmness", "read_order",
              "asset_para", "asset_p_para", "asset_comp", "asset_p_comp",
              "asset_unit", "asset_p_unit", "assets_yes", "asset_link", "asset_link_level",
-             "asset_link_p", "sent",
+             "asset_link_p", "kinds_yes", "kind_best", "kind_p", "sent",
              "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
              "model_served", "cost", "text"]
 # Asset thresholds the report tabulates (nothing is chosen here).
@@ -104,9 +108,11 @@ REPORT_THRESHOLDS = (0.3, 0.5, 0.7, 0.9)
 ASSET_YES = 0.5       # an asset the unit answer puts at or above this is listed in assets_yes
 
 
-def questions(labels, scale, context, assets):
-    """The measure's graded question(s) and one yes/no question per asset,
-    all about the sentence; the paragraph is context when the design says so."""
+def questions(labels, scale, context, assets, kinds=()):
+    """The measure's graded question(s), one yes/no question per asset and
+    one per activity kind (how the commitment is delivered: governing,
+    building, sustaining, using), all about the sentence; the paragraph is
+    context when the design says so."""
     where_ = ("the 'sentence' field, read with the 'paragraph' it sits in,"
               if context == "paragraph" else "the 'sentence' field,")
     out = {}
@@ -126,6 +132,14 @@ def questions(labels, scale, context, assets):
             "criteria": {"true": f"The sentence is about {a['name']}, or about infrastructure "
                                  f"or systems of that kind, named or clearly implied.",
                          "false": f"The sentence does not concern {a['name']}."}}
+    for k in kinds:
+        out[f"kind:{k['id']}"] = {
+            "type": "noul",
+            "instructions": (f"Is what the sentence in {where_} commits the project to delivered "
+                             f"by {k['name'].lower()}? {k['name']} means: {k['definition']}"),
+            "criteria": {"true": f"Yes: the commitment is delivered by {k['name'].lower()}, "
+                                 f"as defined.",
+                         "false": f"No: it is not delivered by {k['name'].lower()}."}}
     return out
 
 
@@ -226,7 +240,11 @@ class Run:
                              f"./wbg measure {name}")
         self.labels, self.scale = classify.load_labels(name, None)
         self.assets = [a for a in labels_mod.load_set(ASSET_SET) if a["active"] == "true"]
-        self.qs = questions(self.labels, self.scale, context, self.assets)
+        self.kinds = [{"id": k["kind_id"].strip(), "name": k["kind_name"].strip(),
+                       "definition": " ".join(k["definition"].split())}
+                      for k in (labels_mod.rows(KINDS_FILE) if os.path.exists(KINDS_FILE) else [])
+                      if labels_mod.is_active(k)]
+        self.qs = questions(self.labels, self.scale, context, self.assets, self.kinds)
         self.para_assets, self.comp_assets, self.asset_run = asset_map(data)
         if gate in ("paragraph", "component") and not self.asset_run:
             raise SystemExit(f"measure: --gate {gate} needs the asset map: run ./wbg classify "
@@ -265,7 +283,8 @@ class Run:
                 "asset_comp": a_comp[0],
                 "asset_p_comp": "" if a_comp[1] == "" else f"{a_comp[1]:.4f}",
                 "asset_unit": "", "asset_p_unit": "", "assets_yes": "", "asset_link": "",
-                "asset_link_level": "", "asset_link_p": "", "sent": "false",
+                "asset_link_level": "", "asset_link_p": "", "kinds_yes": "", "kind_best": "",
+                "kind_p": "", "sent": "false",
                 "text": self.texts[r["unit_id"]], "_para": para}
 
     def candidate_rows(self):
@@ -318,6 +337,10 @@ class Run:
         row.update({"asset_unit": best, "asset_p_unit": f"{ps[best]:.3f}" if best else "",
                     "assets_yes": "|".join(x for x in ps if ps[x] >= ASSET_YES)})
         self.link_into(row)
+        ks = {k["id"]: float(response["answers"][f"kind:{k['id']}"]["noul"]) for k in self.kinds}
+        kb = max(ks, key=ks.get) if ks else ""
+        row.update({"kinds_yes": "|".join(k for k in ks if ks[k] >= ASSET_YES),
+                    "kind_best": kb, "kind_p": f"{ks[kb]:.3f}" if kb else ""})
 
     def link_into(self, row):
         """asset_link, asset_link_level, asset_link_p from the three levels."""
@@ -453,6 +476,12 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
             linked[r["asset_link"]] += 1
     lines.append("  committed units by linked asset: " + ", ".join(
         f"{a} {n}" for a, n in sorted(linked.items(), key=lambda x: -x[1])))
+    kinds = defaultdict(int)
+    for r in com:
+        for k in (r["kinds_yes"].split("|") if r["kinds_yes"] else ["none"]):
+            kinds[k] += 1
+    lines.append("  committed units by activity kind (yes at 0.5, several allowed): " + ", ".join(
+        f"{k} {n}" for k, n in sorted(kinds.items(), key=lambda x: -x[1])))
     assets = defaultdict(int)
     for r in com:
         for a in r["assets_yes"].split("|"):
