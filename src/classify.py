@@ -364,11 +364,37 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     return labels, scale, qs, bodies, shas, out, cosines
 
 
-def current_run(name, data, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, projects=None):
+def _marker(data, name, projects):
+    """The file naming the run last written for a set and scope: the stages
+    that read a map (the measure, the load) need not know which cosine gate
+    it was made with."""
+    scope = "all" if not projects else hashlib.sha256(
+        "\n".join(sorted(projects)).encode()).hexdigest()[:12]
+    return where(data, "classify", "current", f"{name}-{scope}.json")
+
+
+def current_run(name, data, taxonomy=TAXONOMY, min_cosine=None, projects=None):
     """The run folder for the label set and paragraphs as they stand now, or
-    None if that run has not been written."""
-    out = plan(name, data, taxonomy=taxonomy, min_cosine=min_cosine, projects=projects)[5]
-    return out if os.path.exists(os.path.join(out, "manifest.json")) else None
+    None if that run has not been written. With min_cosine None (the
+    default for readers), the gate is the one the last run for this set and
+    scope was made with (the marker it wrote); the run is still checked
+    against the paragraphs, questions and gate as they stand, so a stale
+    marker finds nothing rather than something old."""
+    gates = [min_cosine]
+    if min_cosine is None:
+        gates = [MIN_COSINE]
+        marker = _marker(data, name, projects)
+        if os.path.exists(marker):
+            with open(marker, encoding="utf-8") as fh:
+                gates.insert(0, float(json.load(fh).get("min_cosine", MIN_COSINE)))
+    for gate in gates:
+        try:
+            out = plan(name, data, taxonomy=taxonomy, min_cosine=gate, projects=projects)[5]
+        except SystemExit:          # a gated plan with no search run to gate on
+            continue
+        if os.path.exists(os.path.join(out, "manifest.json")):
+            return out
+    return None
 
 
 def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
@@ -436,6 +462,13 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=1, ensure_ascii=False)
     os.replace(part, out)
+    if not limit:
+        marker = _marker(data, name, projects)
+        os.makedirs(os.path.dirname(marker), exist_ok=True)
+        with open(marker + ".part", "w", encoding="utf-8") as fh:
+            json.dump({"run": os.path.basename(out), "min_cosine": min_cosine,
+                       "projects": sorted(projects) if projects else None}, fh, indent=1)
+        os.replace(marker + ".part", marker)
     prefix = "smoke_" if limit else ""
     report = where(data, "reports", f"{prefix}classify_{name}.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)
