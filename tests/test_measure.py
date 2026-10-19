@@ -87,6 +87,9 @@ def store(tmp_path, monkeypatch):
     _csv(str(lab / "cra_patterns.csv"), ["measure_id", "pattern_id", "pattern", "active"],
          [{"measure_id": "cra", "pattern_id": "hz", "pattern": r"\bhazard assessment\b",
            "active": "true"}])
+    _csv(str(lab / "assets.csv"), ["asset_id", "asset_name", "definition", "active"],
+         [{"asset_id": "towers", "asset_name": "Mobile networks", "definition": "masts",
+           "active": "true"}])
     import labels
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
     # A scored search run for the set: the pattern route is what matters here.
@@ -124,7 +127,10 @@ def store(tmp_path, monkeypatch):
         probs = {"0": 0.05, "1": 0.05, "2": 0.1, "3": 0.8} if hit else \
             {"0": 0.9, "1": 0.1, "2": 0.0, "3": 0.0}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001},
-                "answers": {"cra": {"type": "score", "confidence": 0.7, "probabilities": probs}}}
+                "answers": {"cra": {"type": "score", "confidence": 0.7, "probabilities": probs},
+                            "asset:towers": {"type": "noul",
+                                             "noul": 0.9 if "tower" in body["state"]["sentence"]
+                                             else 0.1}}}
     monkeypatch.setattr(classify, "decide", fake)
     return str(data), calls
 
@@ -134,45 +140,60 @@ def _rows(out):
         return list(csv.DictReader(fh))
 
 
-def test_every_candidate_is_graded_with_the_paragraph_and_asset_columns(store):
+RUN = dict(api_key="k", log=lambda *_: None, workers=1, top=1, max_rounds=0)
+
+
+def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     data, calls = store
-    out = measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1, top=1)
+    out = measure.measure("cra", data, **RUN)
     rows = _rows(out)
     assert [r["route"] for r in rows] == ["both"]           # pattern hit, embedding top 1
     r = rows[0]
     assert r["grade"] == "3" and r["asset_para"] == "towers" and r["asset_p_para"] == "0.9000"
-    assert r["asset_comp"] == "towers" and r["sent"] == "true"
-    assert calls[0]["state"]["paragraph"].startswith("A site-specific")
+    assert r["asset_comp"] == "towers" and r["sent"] == "true" and r["round"] == "0"
+    assert r["asset_unit"] == "towers" and r["asset_p_unit"] == "0.900" and r["assets_yes"] == "towers"
+    assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]
+    assert calls[0]["questions"]["asset:towers"]["type"] == "noul"
     assert calls[0]["model"] == measure.MODEL
+
+
+def test_feedback_rounds_read_the_nearest_unseen_units_until_the_yield_drops(store):
+    data, calls = store
+    out = measure.measure("cra", data, **dict(RUN, max_rounds=3, batch=2, min_yield=1))
+    rows = _rows(out)
+    # Round 0: the one candidate. Round 1: the two units nearest its vector,
+    # neither committed, so the loop stops there.
+    assert [(r["round"], r["route"]) for r in rows] == [("0", "both"), ("1", "feedback"),
+                                                        ("1", "feedback")]
+    assert [r["grade"] for r in rows] == ["3", "0", "0"]
+    assert len(calls) == 3
 
 
 def test_a_rerun_reads_the_store_and_asks_nothing(store):
     data, calls = store
-    first = measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    first = measure.measure("cra", data, **RUN)
     n = len(calls)
-    assert measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1) == first
+    assert measure.measure("cra", data, **RUN) == first
     assert len(calls) == n
 
 
-def test_the_sentence_design_is_another_version_without_the_paragraph(store):
+def test_the_paragraph_design_is_another_version_with_the_paragraph(store):
     data, calls = store
-    a = measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1)
-    b = measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1,
-                        context="sentence")
-    assert a != b and "paragraph" not in calls[-1]["state"]
+    a = measure.measure("cra", data, **RUN)
+    b = measure.measure("cra", data, **dict(RUN, context="paragraph"))
+    assert a != b and calls[-1]["state"]["paragraph"].startswith("A site-specific")
 
 
 def test_a_gate_leaves_the_unit_in_the_table_but_unsent(store):
     data, calls = store
-    out = measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1,
-                          gate="paragraph", asset_min=0.95)
+    out = measure.measure("cra", data, **dict(RUN, gate="paragraph", asset_min=0.95))
     rows = _rows(out)
     assert rows[0]["sent"] == "false" and rows[0]["grade"] == "" and calls == []
 
 
 def test_a_dry_run_asks_nothing(store):
     data, calls = store
-    assert measure.measure("cra", data, dry_run=True, log=lambda *_: None) is None
+    assert measure.measure("cra", data, dry_run=True, log=lambda *_: None, top=1) is None
     assert calls == []

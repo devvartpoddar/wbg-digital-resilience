@@ -41,8 +41,11 @@ def store(tmp_path, monkeypatch):
                      "component_number": "1" if i != 2 else "",
                      "text_sha256": hashlib.sha256(t.encode()).hexdigest()})
         at += len(t) + 2
-    rows.append({"paragraph_id": "D:p00004", "doc_id": "D", "block": "footnote",
-                 "for_model": "true", "char_start": 0, "char_end": 3})
+    # A footnote given to the model is graded too (the asset map covers them).
+    rows.append({"paragraph_id": "D:p00004", "doc_id": "D", "project_ids": "P1",
+                 "block": "footnote", "for_model": "true", "char_start": 0, "char_end": 3,
+                 "section_title": "Components",
+                 "text_sha256": hashlib.sha256(text[:3].encode()).hexdigest()})
     _csv(str(data / "appraisal" / "paragraphs.csv"), PARA_COLS, rows)
     _csv(str(data / "appraisal" / "components.csv"), ["doc_id", "source", "number", "name"],
          [{"doc_id": "D", "source": "datasheet", "number": "1", "name": "Connectivity"}])
@@ -85,11 +88,11 @@ def test_each_label_is_one_graded_question_naming_it():
 def test_every_narrative_paragraph_is_graded_and_a_repeat_asked_once(store):
     out = _run(store)
     _, _, calls = store
-    assert len(calls) == 2                                  # three paragraphs, one repeat
+    assert len(calls) == 3                     # three paragraphs (one repeat) and a footnote
     assert calls[0]["state"]["component"] == "1 Connectivity"
     rows = list(csv.DictReader(open(os.path.join(out, "scores.csv"))))
     assert [(r["paragraph_id"], r["grade"]) for r in rows] == [
-        ("D:p00001", "2"), ("D:p00002", "0"), ("D:p00003", "2")]
+        ("D:p00001", "2"), ("D:p00002", "0"), ("D:p00003", "2"), ("D:p00004", "0")]
 
 
 def test_a_rerun_reads_the_store_and_asks_nothing(store):
@@ -125,7 +128,7 @@ def test_a_graded_sheet_becomes_labels_and_a_measurement(store):
     data, tax, _ = store
     _run(store)
     path, n = check_sheet.build("assets", data, per=5, seed=1, taxonomy=tax)
-    assert n == 3                                 # two strata: grade 2 (two), grade 0 (one)
+    assert n == 4           # two strata: grade 2 (two), grade 0 (one, and the footnote)
     wb = load_workbook(path)
     ws = wb["grade these"]
     head = [c.value for c in ws[1]]
@@ -135,7 +138,7 @@ def test_a_graded_sheet_becomes_labels_and_a_measurement(store):
         row[head.index("grade")].value = 2 if "towers" in passage else 0
     wb.save(path)
     out, graded = evaluate.evaluate("assets", data, seed=1, taxonomy=tax)
-    assert graded == 3
+    assert graded == 4
     labels = list(csv.DictReader(open(os.path.join(data, "labels", "assets.csv"))))
     assert {r["grade"] for r in labels} == {"0", "2"}
     assert all(len(r["text_sha256"]) == 64 for r in labels)

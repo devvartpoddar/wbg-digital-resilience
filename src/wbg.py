@@ -716,9 +716,14 @@ def main(argv=None):
                                        "with the asset map as columns (after ./wbg search "
                                        "<set> and ./wbg classify assets)")
     p.add_argument("label_set", help="a set in analysis/labels/")
-    p.add_argument("--context", default="paragraph", choices=("paragraph", "sentence"))
-    p.add_argument("--gate", default="none", choices=("none", "paragraph", "component"))
+    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
+    p.add_argument("--gate", default="none", choices=("none", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
+    p.add_argument("--top", type=int, default=2000, help="embedding depth of round 0")
+    p.add_argument("--batch", type=int, default=500, help="units per feedback round")
+    p.add_argument("--min-yield", type=int, default=10,
+                   help="a round yielding fewer committed units than this is the last")
+    p.add_argument("--max-rounds", type=int, default=6)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("types", help="propose a measure's types from its committed units "
                                      "(generative model, stored), or --assign them with the "
@@ -726,8 +731,8 @@ def main(argv=None):
     p.add_argument("label_set")
     p.add_argument("--assign", action="store_true")
     p.add_argument("--runs", type=int, default=3)
-    p.add_argument("--context", default="paragraph", choices=("paragraph", "sentence"))
-    p.add_argument("--gate", default="none", choices=("none", "paragraph", "component"))
+    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
+    p.add_argument("--gate", default="none", choices=("none", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
@@ -735,8 +740,8 @@ def main(argv=None):
     p.add_argument("label_set")
     p.add_argument("--column", required=True)
     p.add_argument("--text-regex")
-    p.add_argument("--context", default="paragraph", choices=("paragraph", "sentence"))
-    p.add_argument("--gate", default="none", choices=("none", "paragraph", "component"))
+    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
+    p.add_argument("--gate", default="none", choices=("none", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
     p = sub.add_parser("words", help="the words that set a label's candidates apart from "
                                      "the corpus: what types it has")
@@ -794,8 +799,9 @@ def main(argv=None):
         return 0
     if args.cmd == "measure":
         _run("measure.py", args.label_set, "--context", args.context, "--gate", args.gate,
-             "--asset-min", str(args.asset_min), *(["--dry-run"] if args.dry_run else []),
-             data=data)
+             "--asset-min", str(args.asset_min), "--top", str(args.top), "--batch",
+             str(args.batch), "--min-yield", str(args.min_yield), "--max-rounds",
+             str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), data=data)
         if not args.dry_run:
             _run("release.py", data=data)
         return 0

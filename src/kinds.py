@@ -381,7 +381,7 @@ def main():
     ap.add_argument("--runs", type=int, default=RUNS)
     ap.add_argument("--max-types", type=int, default=8)
     ap.add_argument("--read-at", type=float, default=0.5)
-    ap.add_argument("--context", default="paragraph", choices=measure.CONTEXTS)
+    ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
     ap.add_argument("--gate", default="none", choices=measure.GATES)
     ap.add_argument("--asset-min", type=float, default=0.0)
     ap.add_argument("--data", default=data_root())

@@ -52,7 +52,12 @@ PRICE_PER_MTOK = 0.042
 # vendor describes as slower and less accurate; a request is refused before
 # that rather than truncated or degraded.
 MAX_REQUEST_CHARS = 30_000
-BLOCKS = ("narrative", "annex")
+# Narrative and annex prose, every footnote given to the model, and every
+# table row the search reads as prose (units.table_units): the climate annex
+# tables are where most commitments sit, and an asset map that skipped them
+# left those commitments with no asset score at all.
+BLOCKS = ("narrative", "annex", "footnote")
+TABLE_ROWS = True
 WORKERS = 6
 SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
               "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
@@ -111,16 +116,23 @@ def questions(labels, scale):
 
 # -------------------------------------------------------------- the paragraphs
 
-def paragraphs(data, blocks=BLOCKS):
+def paragraphs(data, blocks=BLOCKS, table_rows=TABLE_ROWS):
     """Model paragraphs with their text (checked against the recorded hash),
-    section and component."""
+    section and component: the blocks named, plus the table rows the search
+    reads as prose when table_rows is set."""
     names = {}
     path = where(data, "appraisal", "components.csv")
     if os.path.exists(path):
         for r in sorted(_rows(path), key=lambda r: r["source"] == "heading"):
             names.setdefault((r["doc_id"], r["number"]), r["name"])
+    prose_rows = set()
+    if table_rows:
+        import units
+        prose_rows = {u["paragraph_id"] for u in units.search_units(data)
+                      if u["kind"] == "table" and not u["left_out"]}
     rows = [r for r in _rows(where(data, "appraisal", "paragraphs.csv"))
-            if r.get("for_model") == "true" and r["block"] in blocks]
+            if (r.get("for_model") == "true" and r["block"] in blocks)
+            or r["paragraph_id"] in prose_rows]
     texts, out = {}, []
     for r in rows:
         did = r["doc_id"]

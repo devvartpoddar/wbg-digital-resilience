@@ -114,6 +114,8 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
         mine = [u for p in paras for u in units.get(p, [])]
         sent = [u for u in mine if u["sent"] == "true"]
         committed = [u for u in sent if int(u["grade"]) == top_grade]
+        gate_unit = {t: any(u["asset_p_unit"] and float(u["asset_p_unit"]) >= t for u in committed)
+                     for t in THRESHOLDS}
         gate_para = {t: any(u["asset_p_para"] and float(u["asset_p_para"]) >= t for u in committed)
                      for t in THRESHOLDS}
         gate_comp = {t: any(u["asset_p_comp"] and float(u["asset_p_comp"]) >= t for u in committed)
@@ -122,11 +124,12 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
                      "positive": positive, "negative": negative, "paragraphs": len(paras),
                      "candidates": len(mine), "graded": len(sent), "committed": len(committed),
                      "best_expected": max((float(u["expected"]) for u in sent), default=""),
+                     **{f"gate_unit_{t}": gate_unit[t] for t in THRESHOLDS},
                      **{f"gate_para_{t}": gate_para[t] for t in THRESHOLDS},
                      **{f"gate_comp_{t}": gate_comp[t] for t in THRESHOLDS},
                      "snippet": " ".join(a["text"].split())[:160]})
     slug = re.sub(r"[^a-z0-9]+", "_", column.lower()).strip("_")[:40]
-    base = where(data, "reports", f"evaluate_{name}_{slug}")
+    base = where(data, "reports", f"evaluate_{name}_{slug}_{kw.get('context', 'sentence')}")
     os.makedirs(os.path.dirname(base), exist_ok=True)
     with open(base + ".csv", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
@@ -153,14 +156,16 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
              f"    1 candidate (pattern or embedding top-N):     {share(pos_m, 'candidates')}",
              f"    2 graded by the decision model:               {share(pos_m, 'graded')}",
              f"    3 grade {top_grade} (committed):                      {share(pos_m, 'committed')}",
+             "    3 + asset gate on the unit answer, at threshold " + ", ".join(
+                 f"{t}: {share(pos_m, f'gate_unit_{t}')}" for t in THRESHOLDS),
              "    3 + asset gate on the paragraph, at threshold " + ", ".join(
                  f"{t}: {share(pos_m, f'gate_para_{t}')}" for t in THRESHOLDS),
              "    3 + asset gate on the component, at threshold " + ", ".join(
                  f"{t}: {share(pos_m, f'gate_comp_{t}')}" for t in THRESHOLDS),
              "",
              f"  false positives among matched negatives (grade {top_grade} somewhere in the activity):",
-             f"    {share(neg_m, 'committed')}; with paragraph gate "
-             + ", ".join(f"{t}: {share(neg_m, f'gate_para_{t}')}" for t in THRESHOLDS),
+             f"    {share(neg_m, 'committed')}; with unit gate "
+             + ", ".join(f"{t}: {share(neg_m, f'gate_unit_{t}')}" for t in THRESHOLDS),
              "",
              "  positives not found at level 3 (row, project, snippet):"]
     for r in pos_m:
@@ -181,7 +186,7 @@ def main():
     ap.add_argument("label_set")
     ap.add_argument("--column", required=True, help="the workbook's theme column")
     ap.add_argument("--text-regex", help="a positive must also match this in its text")
-    ap.add_argument("--context", default="paragraph", choices=measure.CONTEXTS)
+    ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
     ap.add_argument("--gate", default="none", choices=measure.GATES)
     ap.add_argument("--asset-min", type=float, default=0.0)
     ap.add_argument("--data", default=data_root())
