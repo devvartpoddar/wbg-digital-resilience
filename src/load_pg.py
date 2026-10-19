@@ -246,7 +246,10 @@ def search_unit_rows(data):
                    if u["lead_in_start"] else "",
                    "left_out_reason": u["left_out"], "copy_of_unit_id": u["copy_of"],
                    "text": t[int(u["char_start"]):int(u["char_end"])]}
-    return sha256_file(paras) + sha256_file(sents) + ":units", rows()
+    # The rows are computed (src/units.py), so its code and the column list
+    # are part of the source: a new column or rule reloads the table.
+    code = sha256_file(os.path.join(os.path.dirname(os.path.abspath(__file__)), "units.py"))
+    return sha256_file(paras) + sha256_file(sents) + code[:12] + ",".join(SEARCH_UNIT_COLS), rows()
 
 
 # ------------------------------------------------------------ results tables
