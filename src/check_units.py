@@ -339,7 +339,7 @@ def evaluate(name, data, seed=1, elusion=False, **kw):
     # score before and after; stored for the measure stage to apply.
     import json
     cal = {"label_set": name, "measure_dir": key[0]["measure_dir"], "graded_rows": len(rows),
-           "graded_on": today, "grades": {}}
+           "graded_on": today, "question_sha256": key[0]["question_sha256"], "grades": {}}
     lines += ["## Calibration (Platt scaling of P(grade >= k), Brier score before -> after)", ""]
     for k in (top, top - 1):
         ps = [sum(r["p"][k:]) for r in rows]

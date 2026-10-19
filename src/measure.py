@@ -301,8 +301,11 @@ class Run:
         cpath = where(data, "labels", f"{name}_calibration.json")
         if os.path.exists(cpath):
             with open(cpath, encoding="utf-8") as fh:
-                top = str(len(self.scale) - 1)
-                self.calibration = json.load(fh).get("grades", {}).get(top)
+                cal = json.load(fh)
+            # Grades are keyed on the exact question (AGENTS.md rule 9), and so
+            # is the scaling fitted to them: a revised definition starts without one.
+            if cal.get("question_sha256") == classify.question_shas(self.qs)[self.labels[0]["id"]]:
+                self.calibration = cal.get("grades", {}).get(str(len(self.scale) - 1))
         h = hashlib.sha256()
         h.update(f"{os.path.basename(self.cand)}\t{self.asset_run}\t"
                  f"{json.dumps(self.settings, sort_keys=True)}\n".encode())
