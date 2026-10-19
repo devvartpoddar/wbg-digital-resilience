@@ -93,6 +93,13 @@ KINDS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "activity_kinds.c
 # contractor; one yes/no each, several allowed).
 FACETS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "commitment_facets.csv")
 CONTEXTS = ("sentence", "paragraph")
+# The second pass (asset, kind, facet questions) reads the sentence with its
+# paragraph: a climate-annex sentence says "the sites" or "the infrastructure"
+# and the paragraph says which asset that is. The measure's own question
+# stays on the sentence alone (the paragraph doubled its false positives).
+# On the first graded sheet the sentence-alone asset answer agreed with the
+# grader on 13 of 28 committed units; the grader had read the paragraph.
+EXTRAS_CONTEXT = "paragraph"
 GATES = ("none", "link", "unit", "paragraph", "component")
 LINK_MIN = 0.5        # an asset answer or map score at or above this makes a link
 TOP = 0               # embedding depth of round 0 by count; 0 = off (the cosine gate is the pool)
@@ -124,10 +131,13 @@ def questions(labels, scale, context, assets, kinds=(), facets=()):
     """The measure's graded question(s), one yes/no question per asset, one
     per activity kind (how the commitment is delivered: governing, building,
     sustaining, using) and one per facet (is it conditional; who carries it
-    out), all about the sentence; the paragraph is context when the design
-    says so."""
+    out). The measure's question is about the sentence (the paragraph is
+    context when the design says so); the others read the sentence with its
+    paragraph (EXTRAS_CONTEXT)."""
     where_ = ("the 'sentence' field, read with the 'paragraph' it sits in,"
               if context == "paragraph" else "the 'sentence' field,")
+    where_x = ("the 'sentence' field, read with the 'paragraph' it sits in,"
+               if EXTRAS_CONTEXT == "paragraph" else "the 'sentence' field,")
     out = {}
     for lab in labels:
         out[lab["id"]] = {
@@ -140,7 +150,7 @@ def questions(labels, scale, context, assets, kinds=(), facets=()):
     for a in assets:
         out[f"asset:{a['id']}"] = {
             "type": "noul",
-            "instructions": (f"Does the sentence in {where_} concern {a['name']}? "
+            "instructions": (f"Does the sentence in {where_x} concern {a['name']}? "
                              f"{a['name']} means: {a['definition']}"),
             "criteria": {"true": f"The sentence is about {a['name']}, or about infrastructure "
                                  f"or systems of that kind, named or clearly implied.",
@@ -148,19 +158,19 @@ def questions(labels, scale, context, assets, kinds=(), facets=()):
     for k in kinds:
         out[f"kind:{k['id']}"] = {
             "type": "noul",
-            "instructions": (f"Is what the sentence in {where_} commits the project to delivered "
+            "instructions": (f"Is what the sentence in {where_x} commits the project to delivered "
                              f"by {k['name'].lower()}? {k['name']} means: {k['definition']}"),
             "criteria": {"true": f"Yes: the commitment is delivered by {k['name'].lower()}, "
                                  f"as defined.",
                          "false": f"No: it is not delivered by {k['name'].lower()}."}}
     for f in facets:
         if f["group"] == "condition":
-            text = (f"Is what the sentence in {where_} commits the project to "
+            text = (f"Is what the sentence in {where_x} commits the project to "
                     f"{f['name'].lower()}? {f['name']} means: {f['definition']}")
             crit = {"true": f"Yes: the commitment is {f['name'].lower()}, as defined.",
                     "false": f"No: the sentence states it as something that will be done."}
         else:
-            text = (f"Is {f['name']} who carries out what the sentence in {where_} commits "
+            text = (f"Is {f['name']} who carries out what the sentence in {where_x} commits "
                     f"the project to? {f['name']} means: {f['definition']}")
             crit = {"true": f"Yes: {f['name']} carries it out, named or clearly implied.",
                     "false": f"No: the sentence does not have {f['name']} carry it out."}
@@ -253,7 +263,8 @@ class Run:
                          "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
-                         "extras_min_grade": EXTRAS_MIN_GRADE}
+                         "extras_min_grade": EXTRAS_MIN_GRADE,
+                         "extras_context": EXTRAS_CONTEXT}
         # A reader (the load, the evaluation, the types stage) must not build
         # anything as a side effect: it asks for the run as it stands.
         self.cand = candidates.build(name, data, top=top, log=log, min_cosine=min_cosine) \
@@ -346,11 +357,12 @@ class Run:
              "component": row["asset_p_comp"]}[s["gate"]]
         return p != "" and float(p) >= s["asset_min"]
 
-    def state_of(self, row):
+    def state_of(self, row, context=None):
         para = row["_para"]
         doc = _text(self.doc_texts, self.data, row["doc_id"])
         para_text = doc[int(para["char_start"]):int(para["char_end"])]
-        return state_for(row, para, row["text"], para_text, self.names, self.settings["context"])
+        return state_for(row, para, row["text"], para_text, self.names,
+                         context or self.settings["context"])
 
     def grade_into(self, row, entries):
         """The measure's grade from the first pass's answer."""
@@ -443,7 +455,9 @@ class Run:
             self.grade_into(row, g)
         need = [r for r in sent if int(r["grade"]) >= EXTRAS_MIN_GRADE] if extras else []
         if need:
-            got2, st2 = answers.ask(model, [(r["_state"], extras) for r in need], self.data,
+            ctx = self.settings["extras_context"]
+            states = [self.state_of(r, ctx) for r in need]
+            got2, st2 = answers.ask(model, [(s, extras) for s in states], self.data,
                                     api_key=api_key, log=self.log, workers=workers,
                                     legacy_questions=(self.qs,))
             calls += st2["calls"]

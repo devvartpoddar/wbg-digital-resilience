@@ -160,10 +160,12 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]
-    # Two passes: the measure alone, then asset and kind questions for the
-    # units graded 2 or more (here the one unit), on the same state.
+    # Two passes: the measure alone on the sentence, then asset, kind and
+    # facet questions for the units graded 2 or more (here the one unit),
+    # with the paragraph added to the state.
     assert list(calls[0]["questions"]) == ["cra"]
-    assert calls[1]["state"] == calls[0]["state"]
+    assert calls[1]["state"]["sentence"] == calls[0]["state"]["sentence"]
+    assert "paragraph" in calls[1]["state"] and "ten towers" in calls[1]["state"]["paragraph"]
     assert calls[1]["questions"]["asset:towers"]["type"] == "noul"
     assert "cra" not in calls[1]["questions"]
     assert calls[0]["model"] == measure.MODEL
