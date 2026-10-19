@@ -1,0 +1,6 @@
+measure_id,query_id,query,active
+solar,q1,solar panels installed to power telecom towers and cell sites,true
+solar,q2,solar-powered equipment for schools and community digital centres,true
+solar,q3,off-grid photovoltaic systems with battery storage for connectivity sites,true
+solar,q4,data centres powered by renewable energy,true
+solar,q5,operators required to use renewable energy for network infrastructure,true

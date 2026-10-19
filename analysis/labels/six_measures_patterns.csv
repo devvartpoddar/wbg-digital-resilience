@@ -1,0 +1,10 @@
+measure_id,pattern_id,pattern,active
+cra,assess,"\b(?:climate|disaster|hazard)\w*\b[^.;]{0,40}?\b(?:risk|vulnerabilit\w*)?\b[^.;]{0,20}?\b(?:assessments?|screening|analys[ie]s|mapping|maps)\b",true
+cra,assess_climate,"\bassess\w*\b[^.;]{0,30}?\bclimate\b",true
+fibre_burial,laid,"\b(?:underground|buri(?:ed|al|ying)|aerial|overhead(?! costs?)|ducts?|conduits?)\b[^.;]{0,80}?\b(?:fib(?:er|re)s?|cables?|OFC|FOC)\b",true
+fibre_burial,laid_after,"\b(?:fib(?:er|re)s?|cables?|OFC|FOC)\b[^.;]{0,80}?\b(?:underground|buri(?:ed|al|ying)|aerial|overhead(?! costs?))\b",true
+id_targeting,id_shock,"(?:\bIDs?\b|\bidentif\w+|\bregistr(?:y|ies|ation)\b|\bcash transfers?\b|\bG2P\b)[^.;]{0,120}?\b(?:disasters?|shocks?|floods?|droughts?|climat\w*|emergenc\w+)\b",true
+id_targeting,shock_id,"\b(?:disasters?|shocks?|floods?|droughts?|emergenc\w+)\b[^.;]{0,120}?(?:\bIDs?\b|\bidentif\w+|\bregistr(?:y|ies|ation)\b|\bcash transfers?\b|\bG2P\b)",true
+ews,ews,\bearly[- ]warnings?\b|\balerts?\b|\balerting\b|\bcell broadcast\b|\bCommon Alerting Protocol\b|\bsirens?\b,true
+redundancy,redundancy,\bredundan\w+|\bring (?:topology|network|architecture)\b|\broute divers\w+|\bdiverse rout\w+|\balternative routes?\b|\bsingle points? of failure\b|\bdisaster recovery (?:site|centers?|centres?)\b|\bactive[- ]active\b|\bfailover\b|\bgeographically (?:redundant|distributed|dispersed)\b,true
+backup_power,power,\bback-?up (?:power|generat\w+|batter\w+|energy)\b|\bgenerators?\b|\bbatter(?:y|ies)\b|(?-i:\bUPS\b)|\buninterruptible\b|\bsolar[- ]powered\b|\bsolar (?:power|energy|panels?|systems?|PV)\b|\bpower (?:outages?|cuts?|supply)\b,true

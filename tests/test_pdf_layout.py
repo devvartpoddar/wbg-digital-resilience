@@ -191,3 +191,46 @@ def test_a_glued_footnote_number_goes_but_a_version_number_stays():
     assert P.strip_inline_marks("under IDA19 terms", defined, stats) == "under IDA19 terms"
     assert P.strip_inline_marks("in phase6 of", {3}, stats) == "in phase6 of"
     assert stats["inline_marks_removed"] == 1
+
+
+def _typed(size, text, top=0):
+    return {"size": size, "text": text, "top": top}
+
+
+def test_footnotes_are_the_small_numbered_type_at_the_foot_of_a_page():
+    page = [_typed(11, "Body text runs here."), _typed(11, "More body text."),
+            _typed(9, "12 World Bank. 2022. A report."), _typed(9, "a second line of it")]
+    assert PL._footnote_start(page, 11) == 2
+
+
+def test_an_annex_set_a_point_smaller_keeps_its_text_above_its_footnotes():
+    page = [_typed(10, "Annex text in smaller type.")] * 30 + \
+        [_typed(9, "72 Areas to be covered."), _typed(9, "the footnote goes on")]
+    assert PL._footnote_start(page, 11) == 30
+
+
+def test_a_page_set_small_with_no_footnote_is_not_a_footnote():
+    page = [_typed(10, "Annex text in smaller type.")] * 30
+    assert PL._footnote_start(page, 11) == 30
+
+
+def test_a_short_carried_footnote_below_body_text_is_a_footnote():
+    page = [_typed(11, "Body text.")] * 20 + [_typed(9, "continued from the page before.")]
+    assert PL._footnote_start(page, 11) == 20
+
+
+def test_footnotes_in_the_texts_own_small_type_start_after_the_gap():
+    page = [_typed(11, "ANNEX 2: GENDER ANALYSIS", 100)] + \
+        [_typed(9, "Benin: women used the internet less,63 such as", 150 + 11 * i) for i in range(30)] + \
+        [_typed(9, "63 World Bank. 2025. Benin gender data.", 500), _typed(9, "64 Afrobarometer. 2020.", 511)]
+    assert PL._footnote_start(page, 11) == 31
+
+
+def test_a_bulleted_line_hung_left_of_a_table_is_in_the_table():
+    box = (36, 90, 576, 709)
+    bullet = {"x0": 23, "x1": 560, "top": 179, "bottom": 189}
+    assert PL._in_box(bullet, box)
+    # A line beside the table, mostly outside it, is not.
+    assert not PL._in_box({"x0": 0, "x1": 60, "top": 179, "bottom": 189}, box)
+    # Nor one above it.
+    assert not PL._in_box({"x0": 40, "x1": 500, "top": 50, "bottom": 60}, box)

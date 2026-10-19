@@ -7,8 +7,8 @@ carries its paragraph and the paragraph's context, and nothing downstream has
 to re-join:
 
   unit_id              the sentence id ('D:p00042:s003'), or the paragraph id
-                       for a footnote
-  kind                 sentence | footnote
+                       for a footnote or a table row
+  kind                 sentence | footnote | table
   paragraph_id, doc_id, project_ids (the project of the document part it sits
                        in), block, section_path
   component_number, subcomponent_number
@@ -27,23 +27,145 @@ to re-join:
                        nothing about what the towers are for, so embed.py
                        embeds the item with its lead-in in front. The unit is
                        still the item: its id, offsets and hash are its own.
+  left_out             why the unit is not searched, or blank: 'reference' (a
+                       footnote that only cites a source or titles a table),
+                       'fragment' (a title or a scrap of a few words). A list
+                       item with a lead-in, and anything saying 'will' or
+                       'shall', is always searched.
+  copy_of              the first unit (in document and unit order) whose
+                       embedded text, lead-in included, is the same word for
+                       word, or blank. An additional financing or a
+                       restructuring paper repeats its appraisal document; a
+                       copy is not searched, and copies() maps each searched
+                       unit to the copies it stands for.
 
 The units are the sentences of the narrative and annex paragraphs given to
-the model, and each footnote given to the model, whole: footnotes are mostly
-references, which a sentence splitter would cut into nonsense (clean.py does
-not split them).
+the model, each footnote given to the model, whole (footnotes are mostly
+references, which a sentence splitter would cut into nonsense; clean.py does
+not split them), and each table row whose cells read as prose (prose_row),
+whole, with its caption and column names: about one in six activities an
+expert listed sits in a table.
+
+embed.py embeds and indexes every unit that is neither left out nor a copy.
+Nothing is deleted: search_units() still lists them all.
 """
 import csv
+import hashlib
 import os
+import re
 
 from keys import name_key
 from paths import where
 from sentences import ITEM_MARKER
+from sentences import split as split_sentences
 
 UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block",
              "section_path", "component_number", "subcomponent_number", "component_key",
              "char_start", "char_end", "n_tokens", "text_sha256", "lead_in_start",
-             "lead_in_end"]
+             "lead_in_end", "left_out", "copy_of"]
+
+WORD = re.compile(r"[^\W\d_]{2,}")
+CITATION = re.compile(r"\b(?:19|20)\d\d[a-z]?\b|\[link\]|\bhttps?:|www\.", re.I)
+SOURCE = re.compile(r"\b(?:Report|Paper|Profile|Database|Portal|Note|Study|Brief|Review|Survey|"
+                    r"Outlook|Index|Series|Washington|Retrieved|Available|accessed|et al|Journal|"
+                    r"Working|ITU|GSMA|OECD|World Bank|Bank)\b")
+VERB = re.compile(r"\b(?:will|shall|would|should|must|is|are|was|were|be|been|being|has|"
+                  r"have|had|can|could|may|might|do|does|did)\b", re.I)
+FIRM = re.compile(r"\b(?:will|shall)\b", re.I)
+NUMBERED = re.compile(r"^(?:\d+(?:\.\d+)*\.?|\(?[ivxlc]+\)|\(?[a-z]\)|[A-Z]\.)\s")
+MINOR = {"and", "or", "of", "the", "for", "to", "in", "on", "a", "an", "with", "by", "at", "from"}
+MIN_WORDS = 4           # fewer words than this is a scrap
+TITLE_WORDS = 10        # a title is at most this many words, nearly all capitalised
+UNVERBED_NOTE = 12      # a footnote this short with no verb is a citation or a caption
+CITATION_WORDS = 40     # a citation (a year or a link, and a source) is shorter than this
+
+
+def left_out(kind, text, has_lead_in):
+    """Why a unit is not searched ('reference' or 'fragment'), or ''. The
+    rules lean to keeping: a unit saying 'will' or 'shall' is searched,
+    and so is a list item with a lead-in ('(b) towers;' after
+    'Sub-component 1.1 will finance:')."""
+    words = WORD.findall(text)
+    n = len(words)
+    if kind == "footnote":
+        if n < MIN_WORDS:
+            return "reference"
+        if FIRM.search(text):
+            return ""
+        if n < UNVERBED_NOTE and not VERB.search(text):
+            return "reference"
+        if n < CITATION_WORDS and CITATION.search(text) and SOURCE.search(text):
+            return "reference"
+        return ""
+    if has_lead_in or FIRM.search(text):
+        return ""
+    if n < MIN_WORDS:
+        return "fragment"
+    # A title: short, nearly every word capitalised, and numbered or
+    # unpunctuated ('14. Project Risk Assessment and Mitigation.'). A
+    # capitalised sentence ending in a full stop ('Upgrade the National and
+    # Disaster Recovery Data Centers.') is an activity in a list, not a title.
+    content = [w for w in words if w.lower() not in MINOR]
+    titled = NUMBERED.match(text.strip()) or not text.strip().endswith((".", ";", ":"))
+    if n <= TITLE_WORDS and content and titled and \
+            sum(w[0].isupper() for w in content) >= 0.8 * len(content):
+        return "fragment"
+    return ""
+
+
+# A table row is searched when its cells read as prose: a box of text in an
+# annex ('Climate Action Supported by ...') holds commitments, a row of costs
+# or targets does not. The parser writes a row as 'caption — header: cells'.
+PROSE_WORDS = 15         # the cells hold at least this many words
+PROSE_MAX_NUMBERS = 0.2  # and numbers are under this share of their tokens
+NUMBER = re.compile(r"^[\d.,%$()\-–]+$")
+ROW_VERB = re.compile(r"\b(?:will|shall|would|should|must|is|are|was|were|be|been|has|have|"
+                      r"include[sd]?|support[sd]?|finance[sd]?|provide[sd]?|ensure[sd]?)\b", re.I)
+# Sections of standard text printed in every document.
+BOILERPLATE_SECTION = re.compile(r"grievance", re.I)
+
+
+def prose_row(text):
+    """Whether a table row's cells read as prose."""
+    cells = text.split(" — ", 1)[-1]
+    tokens = cells.split()
+    return (len(WORD.findall(cells)) >= PROSE_WORDS and bool(ROW_VERB.search(cells))
+            and sum(bool(NUMBER.match(t)) for t in tokens) < PROSE_MAX_NUMBERS * len(tokens))
+
+
+TABLE_SPLIT_WORDS = 60   # a prose row longer than this is searched sentence by sentence
+
+
+def table_units(p, text):
+    """A prose table row as search units: whole if short; else one unit per
+    sentence, each read with the row's caption in front (as a list item is
+    read with its lead-in). A row holding a column of bullets ('TA will be
+    provided to...', 'A mapping atlas...') states several commitments, and
+    one vector for all of them matches none of them well."""
+    a, z = int(p["char_start"]), int(p["char_end"])
+    row = text[a:z]
+    whole = {"unit_id": p["paragraph_id"], "kind": "table", "char_start": p["char_start"],
+             "char_end": p["char_end"], "n_tokens": p["n_tokens"],
+             "text_sha256": p["text_sha256"], "lead_in_start": "", "lead_in_end": ""}
+    if len(WORD.findall(row)) <= TABLE_SPLIT_WORDS:
+        return [whole]
+    cut = row.find(" — ")
+    caption = (a, a + cut) if cut > 0 else None
+    out = []
+    for n, (s, e) in enumerate(split_sentences(row), 1):
+        body = row[s:e]
+        lead = caption if caption and s > cut else None
+        out.append({"unit_id": f"{p['paragraph_id']}:t{n:03d}", "kind": "table",
+                    "char_start": a + s, "char_end": a + e,
+                    "n_tokens": len(body.split()),
+                    "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                    "lead_in_start": lead[0] if lead else "",
+                    "lead_in_end": lead[1] if lead else ""})
+    return out or [whole]
+
+
+def _same_text(text):
+    return " ".join(WORD.findall(text.lower()))
 
 
 def _read(path):
@@ -100,8 +222,8 @@ def lead_ins(para, sents, text):
 
 def search_units(data):
     """Every search unit, in document and paragraph order."""
-    paras = {p["paragraph_id"]: p for p in _read(where(data, "appraisal", "paragraphs.csv"))
-             if p.get("for_model") == "true"}
+    every = _read(where(data, "appraisal", "paragraphs.csv"))
+    paras = {p["paragraph_id"]: p for p in every if p.get("for_model") == "true"}
     keys = component_keys(data)
 
     def context(p):
@@ -138,5 +260,34 @@ def search_units(data):
                             char_start=p["char_start"], char_end=p["char_end"],
                             n_tokens=p["n_tokens"], text_sha256=p["text_sha256"],
                             lead_in_start="", lead_in_end=""))
+    for p in every:
+        if p["block"] == "table" and not BOILERPLATE_SECTION.search(p.get("section_title", "")):
+            text = _text(texts, data, p["doc_id"])
+            if text is not None and prose_row(text[int(p["char_start"]):int(p["char_end"])]):
+                out.extend(dict(context(p), **u) for u in table_units(p, text))
     out.sort(key=lambda u: (u["doc_id"], u["unit_id"]))
+    first = {}
+    for u in out:
+        text = _text(texts, data, u["doc_id"]) or ""
+        body = text[int(u["char_start"]):int(u["char_end"])]
+        lead = text[int(u["lead_in_start"]):int(u["lead_in_end"])] if u["lead_in_start"] else ""
+        # A table sentence's caption is context, not a list lead-in: a scrap
+        # of a cell ('(Adaptation)') is still left out.
+        u["left_out"] = left_out(u["kind"], body, bool(lead) and u["kind"] != "table")
+        u["copy_of"] = ""
+        if not u["left_out"]:
+            same = _same_text(lead + "\n" + body)
+            u["copy_of"] = first.setdefault(same, u["unit_id"])
+            if u["copy_of"] == u["unit_id"]:
+                u["copy_of"] = ""
+    return out
+
+
+def copies(units):
+    """{unit_id: [unit_id of each copy]} for the searched units that have
+    copies, so a hit can be reported in every document that prints it."""
+    out = {}
+    for u in units:
+        if u["copy_of"]:
+            out.setdefault(u["copy_of"], []).append(u["unit_id"])
     return out

@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,active
+solar,solar,\bsolar\b|\bphotovoltaic\w*|(?-i:\bPV\b)|\bpico-?PV\b,true
+solar,renewable,\brenewable(?:s| energy| power| sources?)\b|\bgreen energy\b|\boff-grid (?:power|energy|systems?)\b,true
