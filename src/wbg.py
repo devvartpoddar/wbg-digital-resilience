@@ -717,7 +717,7 @@ def main(argv=None):
                                        "<set> and ./wbg classify assets)")
     p.add_argument("label_set", help="a set in analysis/labels/")
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
-    p.add_argument("--gate", default="none", choices=("none", "unit", "paragraph", "component"))
+    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
     p.add_argument("--top", type=int, default=2000, help="embedding depth of round 0")
     p.add_argument("--batch", type=int, default=500, help="units per feedback round")
@@ -732,7 +732,7 @@ def main(argv=None):
     p.add_argument("--assign", action="store_true")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
-    p.add_argument("--gate", default="none", choices=("none", "unit", "paragraph", "component"))
+    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
@@ -741,7 +741,7 @@ def main(argv=None):
     p.add_argument("--column", required=True)
     p.add_argument("--text-regex")
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
-    p.add_argument("--gate", default="none", choices=("none", "unit", "paragraph", "component"))
+    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
     p = sub.add_parser("words", help="the words that set a label's candidates apart from "
                                      "the corpus: what types it has")

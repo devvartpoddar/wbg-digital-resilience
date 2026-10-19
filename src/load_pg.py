@@ -308,9 +308,10 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "project_ids", "component_number", "subcomponent_number", "component_key",
                 "copies", "route", "round", "rank", "score", "patterns", "p_commitment",
                 "firmness", "read_order", "asset_para", "asset_p_para", "asset_comp",
-                "asset_p_comp", "asset_unit", "asset_p_unit", "assets_yes", "sent", "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
+                "asset_p_comp", "asset_unit", "asset_p_unit", "assets_yes", "asset_link",
+                "asset_link_level", "asset_link_p", "sent", "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
                 "model_served", "cost", "text"]
-NUMERIC.update({"asset_p_para", "asset_p_comp", "asset_p_unit", "cost", "expected", "confidence",
+NUMERIC.update({"asset_p_para", "asset_p_comp", "asset_p_unit", "asset_link_p", "cost", "expected", "confidence",
                 "p0", "p1", "p2", "p3", "p4", "score"})
 INTEGER.update({"grade", "rank", "round"})
 BOOLEAN.add("sent")

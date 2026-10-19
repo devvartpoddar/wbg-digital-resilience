@@ -28,7 +28,16 @@ asset: the decision model reads literally, and a question about "climate
 risk assessment of digital infrastructure" scored a tower-siting assessment
 at 0.17 where the same question without the asset phrase scored it 0.97.
 
-Nothing is gated by default. --gate unit|paragraph|component with --asset-min
+  5. The asset link of a unit, the three levels combined (asset_link,
+     asset_link_level, asset_link_p): the unit answer when any asset is at
+     LINK_MIN or more (the sentence names it), else the paragraph map at
+     LINK_MIN (the sentence sits in a paragraph about the asset: "a
+     site-specific assessment for individual rooms" in a data-centre
+     paragraph), else the component map, else none. On the first run 95 of
+     130 committed units linked at the unit, 30 at the paragraph, 3 at the
+     component and 2 not at all.
+
+Nothing is gated by default. --gate link|unit|paragraph|component with --asset-min
 sends only the units the chosen asset link scores at least that high: the
 setting at scale, once the gate's cost has been measured
 (src/evaluate_activities.py). The unit gate can only apply from round 1 on
@@ -75,7 +84,8 @@ import search  # noqa: E402
 MODEL = "typesafe/jev-1.13-20260917"
 ASSET_SET = "assets"
 CONTEXTS = ("sentence", "paragraph")
-GATES = ("none", "unit", "paragraph", "component")
+GATES = ("none", "link", "unit", "paragraph", "component")
+LINK_MIN = 0.5        # an asset answer or map score at or above this makes a link
 TOP = 2000            # embedding depth of round 0
 BATCH = 500           # units per feedback round
 MIN_YIELD = 10        # a round yielding fewer committed units than this is the last
@@ -84,7 +94,8 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "component_number", "subcomponent_number", "component_key", "copies", "route",
              "round", "rank", "score", "patterns", "p_commitment", "firmness", "read_order",
              "asset_para", "asset_p_para", "asset_comp", "asset_p_comp",
-             "asset_unit", "asset_p_unit", "assets_yes", "sent",
+             "asset_unit", "asset_p_unit", "assets_yes", "asset_link", "asset_link_level",
+             "asset_link_p", "sent",
              "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
              "model_served", "cost", "text"]
 # Asset thresholds the report tabulates (nothing is chosen here).
@@ -245,7 +256,8 @@ class Run:
                 "asset_p_para": "" if a_para[1] == "" else f"{a_para[1]:.4f}",
                 "asset_comp": a_comp[0],
                 "asset_p_comp": "" if a_comp[1] == "" else f"{a_comp[1]:.4f}",
-                "asset_unit": "", "asset_p_unit": "", "assets_yes": "", "sent": "false",
+                "asset_unit": "", "asset_p_unit": "", "assets_yes": "", "asset_link": "",
+                "asset_link_level": "", "asset_link_p": "", "sent": "false",
                 "text": self.texts[r["unit_id"]], "_para": para}
 
     def candidate_rows(self):
@@ -260,8 +272,12 @@ class Run:
 
     def gated(self, row, rnd):
         s = self.settings
-        if s["gate"] == "none" or (s["gate"] == "unit" and rnd == 0):
+        if s["gate"] == "none" or (s["gate"] in ("unit", "link") and rnd == 0):
             return True
+        if s["gate"] == "link":
+            if row["asset_link_level"] == "":          # not graded yet: link from the maps alone
+                self.link_into(row)
+            return row["asset_link"] != "" and float(row["asset_link_p"]) >= s["asset_min"]
         p = {"unit": row["asset_p_unit"], "paragraph": row["asset_p_para"],
              "component": row["asset_p_comp"]}[s["gate"]]
         return p != "" and float(p) >= s["asset_min"]
@@ -293,6 +309,17 @@ class Run:
         best = max(ps, key=ps.get) if ps else ""
         row.update({"asset_unit": best, "asset_p_unit": f"{ps[best]:.3f}" if best else "",
                     "assets_yes": "|".join(x for x in ps if ps[x] >= ASSET_YES)})
+        self.link_into(row)
+
+    def link_into(self, row):
+        """asset_link, asset_link_level, asset_link_p from the three levels."""
+        for level, a, p in (("unit", row["asset_unit"], row["asset_p_unit"]),
+                            ("paragraph", row["asset_para"], row["asset_p_para"]),
+                            ("component", row["asset_comp"], row["asset_p_comp"])):
+            if p != "" and float(p) >= LINK_MIN:
+                row.update({"asset_link": a, "asset_link_level": level, "asset_link_p": p})
+                return
+        row.update({"asset_link": "", "asset_link_level": "none", "asset_link_p": ""})
 
     # ---- a batch to the model
 
@@ -397,6 +424,18 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
                                for t in REPORT_THRESHOLDS)
                      + f"; committed units with no paragraph score: "
                        f"{sum(1 for r in com if not r['asset_p_para'])}")
+    levels = defaultdict(int)
+    for r in com:
+        levels[r["asset_link_level"]] += 1
+    lines.append("  committed units by asset link level (unit answer, else paragraph map, else "
+                 f"component map, at {LINK_MIN}): " + ", ".join(
+                     f"{k} {v}" for k, v in sorted(levels.items(), key=lambda x: -x[1])))
+    linked = defaultdict(int)
+    for r in com:
+        if r["asset_link"]:
+            linked[r["asset_link"]] += 1
+    lines.append("  committed units by linked asset: " + ", ".join(
+        f"{a} {n}" for a, n in sorted(linked.items(), key=lambda x: -x[1])))
     assets = defaultdict(int)
     for r in com:
         for a in r["assets_yes"].split("|"):

@@ -114,6 +114,8 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
         mine = [u for p in paras for u in units.get(p, [])]
         sent = [u for u in mine if u["sent"] == "true"]
         committed = [u for u in sent if int(u["grade"]) == top_grade]
+        gate_link = {t: any(u["asset_link_p"] and float(u["asset_link_p"]) >= t for u in committed)
+                     for t in THRESHOLDS}
         gate_unit = {t: any(u["asset_p_unit"] and float(u["asset_p_unit"]) >= t for u in committed)
                      for t in THRESHOLDS}
         gate_para = {t: any(u["asset_p_para"] and float(u["asset_p_para"]) >= t for u in committed)
@@ -124,6 +126,7 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
                      "positive": positive, "negative": negative, "paragraphs": len(paras),
                      "candidates": len(mine), "graded": len(sent), "committed": len(committed),
                      "best_expected": max((float(u["expected"]) for u in sent), default=""),
+                     **{f"gate_link_{t}": gate_link[t] for t in THRESHOLDS},
                      **{f"gate_unit_{t}": gate_unit[t] for t in THRESHOLDS},
                      **{f"gate_para_{t}": gate_para[t] for t in THRESHOLDS},
                      **{f"gate_comp_{t}": gate_comp[t] for t in THRESHOLDS},
@@ -156,6 +159,8 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
              f"    1 candidate (pattern or embedding top-N):     {share(pos_m, 'candidates')}",
              f"    2 graded by the decision model:               {share(pos_m, 'graded')}",
              f"    3 grade {top_grade} (committed):                      {share(pos_m, 'committed')}",
+             "    3 + asset gate on the combined link, at threshold " + ", ".join(
+                 f"{t}: {share(pos_m, f'gate_link_{t}')}" for t in THRESHOLDS),
              "    3 + asset gate on the unit answer, at threshold " + ", ".join(
                  f"{t}: {share(pos_m, f'gate_unit_{t}')}" for t in THRESHOLDS),
              "    3 + asset gate on the paragraph, at threshold " + ", ".join(
@@ -164,8 +169,8 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
                  f"{t}: {share(pos_m, f'gate_comp_{t}')}" for t in THRESHOLDS),
              "",
              f"  false positives among matched negatives (grade {top_grade} somewhere in the activity):",
-             f"    {share(neg_m, 'committed')}; with unit gate "
-             + ", ".join(f"{t}: {share(neg_m, f'gate_unit_{t}')}" for t in THRESHOLDS),
+             f"    {share(neg_m, 'committed')}; with link gate "
+             + ", ".join(f"{t}: {share(neg_m, f'gate_link_{t}')}" for t in THRESHOLDS),
              "",
              "  positives not found at level 3 (row, project, snippet):"]
     for r in pos_m:
