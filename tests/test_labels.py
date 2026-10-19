@@ -33,7 +33,6 @@ def test_load_set_keeps_inactive_labels_and_names_the_folder(tmp_path):
     assert rows[0]["definition"] == "cables and ducts"
 
 
-def test_the_repository_sets_are_assets_and_measures_in_their_folders():
-    assert labels.label_sets()[:2] == ["assets", "measures"]
+def test_the_repository_set_is_assets_and_analysis_labels_starts_empty():
+    assert labels.label_sets() == ["assets"]
     assert labels.folder("assets").endswith(os.path.join("inputs", "taxonomy"))
-    assert labels.folder("measures").endswith(os.path.join("analysis", "labels"))
