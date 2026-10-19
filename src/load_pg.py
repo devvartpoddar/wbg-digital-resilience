@@ -318,10 +318,12 @@ def _run_rows(data, finder, file):
     return ("|".join(runs), rows) if rows else (None, [])
 
 
-def classify_rows(data, projects=None):
+def classify_rows(data, projects=None, min_cosine=None):
     import classify
-    return _run_rows(data, lambda n, d: classify.current_run(n, d, projects=projects),
-                     "scores.csv")
+    if min_cosine is None:
+        min_cosine = classify.MIN_COSINE
+    return _run_rows(data, lambda n, d: classify.current_run(
+        n, d, projects=projects, min_cosine=min_cosine), "scores.csv")
 
 
 def measure_rows(data, projects=None):
@@ -535,8 +537,10 @@ def prepare(conn):
     left behind (one-time): tables under other names in wbg, and the
     separate bookkeeping schema, whose load history is carried over."""
     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {PUBLIC}")
-    # A loads table of an earlier shape (no release_id) is started afresh.
-    if _exists(conn, "loads") and "release_id" not in _columns(conn, LOADS):
+    # A loads table of an earlier shape (row_count or release_id missing,
+    # e.g. the first layout's n_rows) is started afresh: the skip-hints are
+    # stale once the columns or types change.
+    if _exists(conn, "loads") and not {"row_count", "release_id"} <= _columns(conn, LOADS):
         conn.execute(f"DROP TABLE {LOADS} CASCADE")
     conn.execute(f"CREATE TABLE IF NOT EXISTS {LOADS} (table_name text, source_sha256 text, "
                  f"row_count integer, loaded_at timestamptz, release_id text)")
@@ -562,6 +566,9 @@ def main():
                          "scope (the cohort set they were run with)")
     ap.add_argument("--set", action="append", dest="cohort_set",
                     help="the cohort set the model runs were made over (digital, ...)")
+    ap.add_argument("--min-cosine", type=float, default=None,
+                    help="the asset map's cosine gate, to find the classify run made at "
+                         "that gate (default: the classify stage's default)")
     args = ap.parse_args()
     import classify
     projects = classify.scope(args.projects)
@@ -607,7 +614,7 @@ def main():
         sha, rollup = search_tables(args.data)
         derived(conn, "search_paragraphs", sha, ROLLUP_COLS, rollup)
 
-        sha, rows = classify_rows(args.data, projects)
+        sha, rows = classify_rows(args.data, projects, args.min_cosine)
         derived(conn, "paragraph_grades", sha, CLASSIFY_COLS, rows)
         sha, rows = measure_rows(args.data, projects)
         derived(conn, "measure_findings", sha, MEASURE_COLS, rows)
