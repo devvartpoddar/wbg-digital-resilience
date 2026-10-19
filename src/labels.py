@@ -45,8 +45,9 @@ def _is_set(path):
     return not name.endswith(_SUFFIXES)
 
 
-def label_sets(dirs=LABEL_DIRS):
+def label_sets(dirs=None):
     """Every label set's name, inputs first, then analysis, each sorted."""
+    dirs = dirs or LABEL_DIRS
     out, seen = [], {}
     for d in dirs:
         for path in sorted(glob.glob(os.path.join(d, "*.csv"))):
@@ -61,8 +62,10 @@ def label_sets(dirs=LABEL_DIRS):
     return out
 
 
-def folder(name, dirs=LABEL_DIRS):
-    """The folder holding label set `name`, or a clear error."""
+def folder(name, dirs=None):
+    """The folder holding label set `name`, or a clear error. The folders are
+    read at call time, so a test may point LABEL_DIRS elsewhere."""
+    dirs = dirs or LABEL_DIRS
     found = [d for d in dirs if os.path.exists(os.path.join(d, f"{name}.csv"))]
     if len(found) > 1:
         raise SystemExit(f"labels: {name!r} is in more than one folder: {', '.join(found)}")
@@ -81,7 +84,7 @@ def is_active(r):
     return (r.get("active") or "true").strip().lower() == "true"
 
 
-def load_set(name, dirs=LABEL_DIRS, taxonomy=None):
+def load_set(name, dirs=None, taxonomy=None):
     """Every label of a set, active or not: [{id, name, definition, active,
     version, folder}], in file order. `taxonomy` names the folder directly
     (tests)."""
@@ -117,7 +120,7 @@ def _id_col(r, path):
     return col
 
 
-def load_patterns(name, dirs=LABEL_DIRS, taxonomy=None):
+def load_patterns(name, dirs=None, taxonomy=None):
     """Active word patterns: [{label_id, pattern_id, pattern, regex}]. A
     pattern that does not compile is an error, not a silent skip."""
     path, found = _optional(name, "_patterns", dirs, taxonomy)
@@ -135,18 +138,25 @@ def load_patterns(name, dirs=LABEL_DIRS, taxonomy=None):
     return out
 
 
-def load_types(name, dirs=LABEL_DIRS, taxonomy=None):
-    """Active types: [{label_id, type_id, type_name, pattern, regex}]."""
+def load_types(name, dirs=None, taxonomy=None):
+    """Active types: [{label_id, type_id, type_name, definition, pattern,
+    regex}]. A type approved from the decision model's proposals
+    (src/kinds.py) has a definition and usually no pattern; its regex is
+    then None and the candidates stage does not tag by it."""
     path, found = _optional(name, "_types", dirs, taxonomy)
     out = []
     for r in found:
         if not is_active(r):
             continue
-        try:
-            rx = re.compile(r["pattern"], re.I)
-        except re.error as e:
-            raise SystemExit(f"labels: {path}: type {r['type_id']!r} does not compile: {e}")
+        pattern = (r.get("pattern") or "").strip()
+        rx = None
+        if pattern:
+            try:
+                rx = re.compile(pattern, re.I)
+            except re.error as e:
+                raise SystemExit(f"labels: {path}: type {r['type_id']!r} does not compile: {e}")
         out.append({"label_id": r[_id_col(r, path)].strip(), "type_id": r["type_id"].strip(),
-                    "type_name": r.get("type_name", "").strip(), "pattern": r["pattern"],
-                    "regex": rx})
+                    "type_name": r.get("type_name", "").strip(),
+                    "definition": " ".join((r.get("definition") or "").split()),
+                    "pattern": pattern, "regex": rx})
     return out

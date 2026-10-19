@@ -139,7 +139,7 @@ def build(name, data, top=TOP, log=print):
                          "route": route, "rank": int(rank[i]), "score": f"{best[i]:.6f}",
                          "patterns": "|".join(hit),
                          "types": "|".join(t["type_id"] for t in kinds
-                                           if t["regex"].search(text_list[i])),
+                                           if t["regex"] and t["regex"].search(text_list[i])),
                          "p_commitment": "" if p_commit is None else f"{p_commit:.4f}",
                          "firmness": firm})
         rows.extend(prioritise(label_rows))

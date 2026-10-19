@@ -48,9 +48,10 @@ MODEL = "typesafe/jev-1.13"
 ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 # US$ per million input tokens (output is free), for the dry-run estimate only.
 PRICE_PER_MTOK = 0.042
-# The endpoint takes 32,000 tokens per request; a request is refused well
-# before that rather than truncated.
-MAX_REQUEST_CHARS = 60_000
+# Above about 32,000 bytes the endpoint switches to a long-context mode the
+# vendor describes as slower and less accurate; a request is refused before
+# that rather than truncated or degraded.
+MAX_REQUEST_CHARS = 30_000
 BLOCKS = ("narrative", "annex")
 WORKERS = 6
 SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
@@ -220,14 +221,16 @@ def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
     raise last
 
 
-def fetch_missing(todo, root, qs, n_grades, *, api_key, log, workers=WORKERS):
+def fetch_missing(todo, root, qs, n_grades, *, api_key, log, workers=WORKERS, check_fn=None):
     """Ask for and store every request in todo [(sha, body)]. Returns
-    (stored, failures, cost)."""
+    (stored, failures, cost). check_fn(response, qs, n_grades) decides what
+    may be stored; the default is check() for graded questions."""
     stored, failures, cost = 0, [], 0.0
+    check_fn = check_fn or check
 
     def one(sha, body):
         response = decide(body, api_key=api_key)
-        check(response, qs, n_grades)
+        check_fn(response, qs, n_grades)
         write_cached(root, sha, response)
         return float((response.get("usage") or {}).get("cost") or 0)
 

@@ -712,6 +712,32 @@ def main(argv=None):
                                           "(after ./wbg search)")
     p.add_argument("label_set", help="any set in analysis/labels/ or inputs/taxonomy/")
     p.add_argument("--top", type=int, default=1000, help="embedding depth per label")
+    p = sub.add_parser("measure", help="grade a measure's candidates with the decision model, "
+                                       "with the asset map as columns (after ./wbg search "
+                                       "<set> and ./wbg classify assets)")
+    p.add_argument("label_set", help="a set in analysis/labels/")
+    p.add_argument("--context", default="paragraph", choices=("paragraph", "sentence"))
+    p.add_argument("--gate", default="none", choices=("none", "paragraph", "component"))
+    p.add_argument("--asset-min", type=float, default=0.0)
+    p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("types", help="propose a measure's types from its committed units "
+                                     "(generative model, stored), or --assign them with the "
+                                     "decision model once a person has approved the list")
+    p.add_argument("label_set")
+    p.add_argument("--assign", action="store_true")
+    p.add_argument("--runs", type=int, default=3)
+    p.add_argument("--context", default="paragraph", choices=("paragraph", "sentence"))
+    p.add_argument("--gate", default="none", choices=("none", "paragraph", "component"))
+    p.add_argument("--asset-min", type=float, default=0.0)
+    p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
+                                        "hand-labelled activities workbook")
+    p.add_argument("label_set")
+    p.add_argument("--column", required=True)
+    p.add_argument("--text-regex")
+    p.add_argument("--context", default="paragraph", choices=("paragraph", "sentence"))
+    p.add_argument("--gate", default="none", choices=("none", "paragraph", "component"))
+    p.add_argument("--asset-min", type=float, default=0.0)
     p = sub.add_parser("words", help="the words that set a label's candidates apart from "
                                      "the corpus: what types it has")
     p.add_argument("label_set")
@@ -765,6 +791,25 @@ def main(argv=None):
         return 0
     if args.cmd == "candidates":
         _run("candidates.py", args.label_set, "--top", str(args.top), data=data)
+        return 0
+    if args.cmd == "measure":
+        _run("measure.py", args.label_set, "--context", args.context, "--gate", args.gate,
+             "--asset-min", str(args.asset_min), *(["--dry-run"] if args.dry_run else []),
+             data=data)
+        if not args.dry_run:
+            _run("release.py", data=data)
+        return 0
+    if args.cmd == "types":
+        _run("kinds.py", args.label_set, *(["--assign"] if args.assign else []),
+             "--runs", str(args.runs), "--context", args.context, "--gate", args.gate,
+             "--asset-min", str(args.asset_min), *(["--dry-run"] if args.dry_run else []),
+             data=data)
+        return 0
+    if args.cmd == "evaluate":
+        _run("evaluate_activities.py", args.label_set, "--column", args.column,
+             *(["--text-regex", args.text_regex] if args.text_regex else []),
+             "--context", args.context, "--gate", args.gate, "--asset-min", str(args.asset_min),
+             data=data)
         return 0
     if args.cmd == "words":
         _run("candidates.py", args.label_set, args.label_id, "--words", "--top", str(args.top),

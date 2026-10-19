@@ -33,6 +33,9 @@ def test_load_set_keeps_inactive_labels_and_names_the_folder(tmp_path):
     assert rows[0]["definition"] == "cables and ducts"
 
 
-def test_the_repository_set_is_assets_and_analysis_labels_starts_empty():
-    assert labels.label_sets() == ["assets"]
+def test_the_repository_sets_are_the_assets_and_the_analysis_measures():
+    sets = labels.label_sets()
+    assert sets[0] == "assets"
     assert labels.folder("assets").endswith(os.path.join("inputs", "taxonomy"))
+    for name in sets[1:]:
+        assert labels.folder(name).endswith(os.path.join("analysis", "labels"))

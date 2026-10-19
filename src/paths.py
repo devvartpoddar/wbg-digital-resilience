@@ -44,6 +44,12 @@ written down once:
                      folder per version of the index (src/commitment.py)
   data/candidates/   each label's candidate units, one folder per label set
                      and version (src/candidates.py)
+  data/measures/     a measure's candidates graded by the decision model, with
+                     the asset map's columns, one folder per label set and
+                     version (src/measure.py)
+  data/types/        a measure's types: stored generative-model proposals and
+                     the decision model's assignments, one folder per label
+                     set and version (src/kinds.py)
 
 Order of precedence for the data root:
   1. $WBG_DATA, if set
@@ -97,6 +103,8 @@ LAYOUT = {
     "search": "search",
     "commitment": "commitment",
     "candidates": "candidates",
+    "measures": "measures",
+    "types": "types",
     "classify": "classify",
     "labels": "labels",
     "releases": "releases",
