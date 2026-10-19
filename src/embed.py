@@ -572,6 +572,10 @@ def main():
         os.replace(idx_path + ".part", idx_path)
 
     spend = stats["tokens"] / 1e6 * PRICE_PER_MTOK
+    if stats["requests"]:
+        import classify
+        classify.record_spend(args.data, "embed", args.unit, args.model, stats["requests"],
+                              spend, elapsed)
     manifest = {
         "model_requested": args.model,
         "model_served": stats["served_model"] or None,

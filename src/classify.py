@@ -64,6 +64,41 @@ SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "labe
               "model_served"]
 
 
+# What each run actually asked for is appended to data/reports/spend.csv, so
+# the day's total is a pipeline fact, not a memory.
+SPEND_COLS = ["at", "stage", "label_set", "model", "calls", "cost_usd", "seconds", "run"]
+
+
+def record_spend(data, stage, label_set, model, calls, cost, seconds, run=""):
+    """One line per run that asked anything, in data/reports/spend.csv."""
+    if not calls:
+        return
+    path = where(data, "reports", "spend.csv")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    new = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=SPEND_COLS, lineterminator="\n")
+        if new:
+            w.writeheader()
+        w.writerow({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stage": stage,
+                    "label_set": label_set, "model": model, "calls": calls,
+                    "cost_usd": f"{cost:.4f}", "seconds": f"{seconds:.0f}", "run": run})
+
+
+def spend_today(data):
+    """(calls, US$) recorded today, for the log line before a run."""
+    path = where(data, "reports", "spend.csv")
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    calls, cost = 0, 0.0
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                if r["at"].startswith(today):
+                    calls += int(r["calls"])
+                    cost += float(r["cost_usd"])
+    return calls, cost
+
+
 class TransportError(RuntimeError):
     """A request did not yield a usable answer; it is retried on a later run."""
 
@@ -341,13 +376,16 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     if dry_run:
         log("  --dry-run: no request made, nothing written")
         return None
-    failures = []
+    failures, calls, cost, t0 = [], 0, 0.0, time.time()
     if todo:
         if not api_key:
             raise SystemExit(f"classify: no credential: set ${embed.KEY_VAR} or put the "
                              f"key in {embed.KEY_FILE} in the main checkout")
-        _, failures, _ = fetch_missing(todo, root, qs, len(scale), api_key=api_key,
-                                       log=log, workers=workers)
+        log(f"  spent today before this run: US${spend_today(data)[1]:.2f}")
+        calls, failures, cost = fetch_missing(todo, root, qs, len(scale), api_key=api_key,
+                                              log=log, workers=workers)
+        record_spend(data, "classify", name, model, calls, cost, time.time() - t0,
+                     os.path.basename(out))
     if failures:
         log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
         for sha, err in failures[:5]:

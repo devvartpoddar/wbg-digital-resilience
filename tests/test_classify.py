@@ -174,3 +174,10 @@ def test_expected_grade_is_computed_from_the_probabilities(store):
     out = _run(store)
     rows = list(csv.DictReader(open(os.path.join(out, "scores.csv"))))
     assert rows[0]["expected"] == "1.700"          # 0*0.1 + 1*0.1 + 2*0.8
+
+
+def test_spend_is_recorded_per_run_and_summed_for_today(store):
+    data, _, _ = store
+    _run(store)
+    calls, cost = classify.spend_today(data)
+    assert calls == 3 and cost == 0.0        # the ledger keeps four decimals; US$0.00003 rounds away

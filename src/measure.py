@@ -538,6 +538,8 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
             break
         rows.extend(batch)
     seconds = time.time() - t0
+    classify.record_spend(data, "measure", name, run.settings["model"], calls, cost, seconds,
+                          os.path.basename(run.out))
     served = defaultdict(int)
     for r in rows:
         if r["sent"] == "true":
@@ -602,7 +604,8 @@ def main():
     import embed
     key = "" if args.dry_run else embed.read_key("")
     out = measure(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
-                  workers=args.workers, model=args.model, context=args.context,
+                  workers=args.workers, model=args.model,
+                  context=args.context,
                   gate=args.gate, asset_min=args.asset_min, top=args.top, batch=args.batch,
                   min_yield=args.min_yield, max_rounds=args.max_rounds)
     return 0 if out or args.dry_run else 1

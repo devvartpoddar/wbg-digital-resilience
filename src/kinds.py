@@ -184,6 +184,7 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
         return None
     if missing and not api_key:
         raise SystemExit("types: no credential: set $WBG_OPENROUTER_KEY")
+    t0 = time.time()
     for lid, k, chosen, body, sha in missing:
         try:
             response = generate(body, api_key=api_key)
@@ -226,6 +227,9 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=1, sort_keys=True)
     os.replace(part, out)
+    classify.record_spend(data, "types-propose", name, model, len(missing),
+                          sum(float((classify.read_cached(root, r[4]).get("usage") or {}).get("cost") or 0)
+                              for r in missing), time.time() - t0, os.path.basename(out))
     log(f"  {len(rows)} types proposed over {runs} run(s); US${manifest['cost_usd']:.4f}; "
         f"read {os.path.join(out, 'proposals.md')} and write the approved list to "
         f"analysis/labels/{name}_types.csv")
@@ -309,13 +313,17 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
         return None
     if n_todo and not api_key:
         raise SystemExit("types: no credential: set $WBG_OPENROUTER_KEY")
+    t0, asked, spent = time.time(), 0, 0.0
     for lid, items in sorted(todo.items()):
-        _, failures, _ = classify.fetch_missing(
+        n, failures, c = classify.fetch_missing(
             list(items.items()), root, assign_questions(approved[lid]), 0, api_key=api_key,
             log=log, workers=workers, check_fn=lambda r, qs, _n: check_noul(r, qs))
+        asked += n
+        spent += c
         if failures:
             log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
             return None
+    classify.record_spend(data, "types-assign", name, model, asked, spent, time.time() - t0, os.path.basename(out))
     out_rows, counts, served, cost = [], defaultdict(lambda: defaultdict(int)), set(), 0.0
     all_types = {lid: [t["type_id"] for t in ts] for lid, ts in approved.items()}
     for (lid, u, qs), sha in zip(rows, shas):
