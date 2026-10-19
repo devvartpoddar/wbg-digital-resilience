@@ -707,11 +707,14 @@ def main(argv=None):
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
     p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
+    p.add_argument("--min-cosine", type=float, default=0.0,
+                   help="ask a label of a paragraph only when a unit scores at least this")
     p = sub.add_parser("candidates", help="every unit a label's patterns or its embedding "
                                           "top N find, with p_commitment, firmness and types "
                                           "(after ./wbg search)")
     p.add_argument("label_set", help="any set in analysis/labels/ or inputs/taxonomy/")
     p.add_argument("--top", type=int, default=2000, help="embedding depth per label")
+    p.add_argument("--min-cosine", type=float, default=0.0, help="or every unit at or above this")
     p = sub.add_parser("measure", help="grade a measure's candidates with the decision model, "
                                        "with the asset map as columns (after ./wbg search "
                                        "<set> and ./wbg classify assets)")
@@ -719,7 +722,9 @@ def main(argv=None):
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
-    p.add_argument("--top", type=int, default=2000, help="embedding depth of round 0")
+    p.add_argument("--top", type=int, default=0, help="round 0 pool by count (0 = off)")
+    p.add_argument("--min-cosine", type=float, default=0.45,
+                   help="round 0 pool: units whose best cosine reaches this")
     p.add_argument("--batch", type=int, default=500, help="units per feedback round")
     p.add_argument("--min-yield", type=int, default=10,
                    help="a round yielding fewer committed units than this is the last")
@@ -797,17 +802,20 @@ def main(argv=None):
         return 0
     if args.cmd == "classify":
         extra = (["--dry-run"] if args.dry_run else []) + \
-            (["--limit", str(args.limit)] if args.limit else [])
+            (["--limit", str(args.limit)] if args.limit else []) + \
+            (["--min-cosine", str(args.min_cosine)] if args.min_cosine else [])
         _run("classify.py", args.label_set, *extra, data=data)
         if not extra:
             _run("release.py", data=data)
         return 0
     if args.cmd == "candidates":
-        _run("candidates.py", args.label_set, "--top", str(args.top), data=data)
+        _run("candidates.py", args.label_set, "--top", str(args.top), "--min-cosine",
+             str(args.min_cosine), data=data)
         return 0
     if args.cmd == "measure":
         _run("measure.py", args.label_set, "--context", args.context, "--gate", args.gate,
-             "--asset-min", str(args.asset_min), "--top", str(args.top), "--batch",
+             "--asset-min", str(args.asset_min), "--top", str(args.top),
+             "--min-cosine", str(args.min_cosine), "--batch",
              str(args.batch), "--min-yield", str(args.min_yield), "--max-rounds",
              str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), data=data)
         if not args.dry_run:

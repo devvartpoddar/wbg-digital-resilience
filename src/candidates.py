@@ -58,10 +58,14 @@ with would also any all may more most other over per under up via within without
 WORD = re.compile(r"[a-z][a-z\-]+")
 
 
-def version(run, patterns, types, top, commit_version):
+MIN_COSINE = 0.0      # 0 = off; else every unit at or above it is a candidate
+
+
+def version(run, patterns, types, top, commit_version, min_cosine=MIN_COSINE):
     h = hashlib.sha256()
     h.update(commitment._sha_file(os.path.abspath(__file__)).encode())   # this code
-    h.update(f"{os.path.basename(run)}\ttop={top}\tcommitment={commit_version}\n".encode())
+    h.update(f"{os.path.basename(run)}\ttop={top}\tmin_cosine={min_cosine}\t"
+             f"commitment={commit_version}\n".encode())
     for p in patterns:
         h.update(f"p\t{p['label_id']}\t{p['pattern_id']}\t{p['pattern']}\n".encode())
     for t in types:
@@ -96,8 +100,13 @@ def prioritise(label_rows):
     return label_rows
 
 
-def build(name, data, top=TOP, log=print):
-    """Write the candidates of every label in the set; returns the folder."""
+def build(name, data, top=TOP, log=print, min_cosine=MIN_COSINE):
+    """Write the candidates of every label in the set; returns the folder.
+    A unit is a candidate when a pattern matches it, when it is in the
+    label's embedding top `top` (0 = off), or when its best cosine over the
+    label's queries is at least `min_cosine` (0 = off). A cosine threshold
+    carries between measures where a count does not: a rare measure needs
+    a small pool and a common one a large one."""
     run, _ = search.run_folder(name, data)
     if not os.path.exists(os.path.join(run, "manifest.json")):
         raise SystemExit(f"candidates: {name} has no search run for the current index - "
@@ -105,7 +114,7 @@ def build(name, data, top=TOP, log=print):
     patterns, types = labels.load_patterns(name), labels.load_types(name)
     commit_folder = commitment.score(data, log=log)
     out = where(data, "candidates",
-                f"{name}-{version(run, patterns, types, top, os.path.basename(commit_folder))}")
+                f"{name}-{version(run, patterns, types, top, os.path.basename(commit_folder), min_cosine)}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log(f"candidates: {out} already built")
         return out
@@ -128,7 +137,7 @@ def build(name, data, top=TOP, log=print):
         label_rows = []
         for i in order.tolist():
             hit = [p["pattern_id"] for p in mine if p["regex"].search(text_list[i])]
-            near = rank[i] <= top
+            near = (top and rank[i] <= top) or (min_cosine and best[i] >= min_cosine)
             if not hit and not near:
                 continue
             route = "both" if hit and near else ("pattern" if hit else "embedding")
@@ -154,7 +163,7 @@ def build(name, data, top=TOP, log=print):
         w.writerows(rows)
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump({"label_set": name, "version": os.path.basename(out).rsplit("-", 1)[1],
-                   "search_run": os.path.basename(run), "top": top,
+                   "search_run": os.path.basename(run), "top": top, "min_cosine": min_cosine,
                    "commitment": os.path.basename(commit_folder),
                    "patterns": len(patterns), "types": len(types), "counts": counts,
                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
@@ -165,14 +174,14 @@ def build(name, data, top=TOP, log=print):
     return out
 
 
-def current(name, data, top=TOP):
+def current(name, data, top=TOP, min_cosine=MIN_COSINE):
     """The candidates folder for the set as it stands now, or None."""
     try:
         run, _ = search.run_folder(name, data)
     except SystemExit:
         return None
     patterns, types = labels.load_patterns(name), labels.load_types(name)
-    folder = where(data, "candidates", f"{name}-{version(run, patterns, types, top, commitment.version(data))}")
+    folder = where(data, "candidates", f"{name}-{version(run, patterns, types, top, commitment.version(data), min_cosine)}")
     return folder if os.path.exists(os.path.join(folder, "manifest.json")) else None
 
 
@@ -226,6 +235,7 @@ def main():
     ap.add_argument("label_set")
     ap.add_argument("label_id", nargs="?", help="with --words: the label to describe")
     ap.add_argument("--top", type=int, default=TOP)
+    ap.add_argument("--min-cosine", type=float, default=MIN_COSINE)
     ap.add_argument("--words", action="store_true", help="the label's distinctive words")
     ap.add_argument("--committed", action="store_true",
                     help="with --words: only candidates with p_commitment >= 0.5")
@@ -238,7 +248,7 @@ def main():
                                     args.committed):
             print(f"  {term:<32} {c:>5} candidates  x{ratio:,.1f} the background rate")
         return 0
-    build(args.label_set, args.data, args.top)
+    build(args.label_set, args.data, args.top, min_cosine=args.min_cosine)
     return 0
 
 

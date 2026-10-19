@@ -90,7 +90,10 @@ KINDS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "activity_kinds.c
 CONTEXTS = ("sentence", "paragraph")
 GATES = ("none", "link", "unit", "paragraph", "component")
 LINK_MIN = 0.5        # an asset answer or map score at or above this makes a link
-TOP = candidates.TOP  # embedding depth of round 0 (the same run the load reads)
+TOP = 0               # embedding depth of round 0 by count; 0 = off (the cosine gate is the pool)
+MIN_COSINE = 0.45     # round 0 pool: every unit whose best cosine over the measure's phrases
+                      # reaches this (on climate risk assessment, top 2,000 was 0.473 and
+                      # 0.45 kept 168 of 171 committed units from a pool of 3,070)
 BATCH = 500           # units per feedback round
 MIN_YIELD = 10        # a round yielding fewer committed units than this is the last
 MAX_ROUNDS = 6
@@ -156,6 +159,8 @@ def asset_map(data):
     para, comp = {}, {}
     with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
+            if r.get("asked") not in ("", None, "true"):
+                continue
             p = float(r["p2"] or 0) + float(r["p3"] or 0)
             pid = r["paragraph_id"]
             if p > para.get(pid, ("", -1.0))[1]:
@@ -207,20 +212,21 @@ class Run:
     """Everything one measure run needs, loaded once."""
 
     def __init__(self, name, data, *, model=MODEL, context="sentence", gate="none",
-                 asset_min=0.0, top=TOP, batch=BATCH, min_yield=MIN_YIELD,
-                 max_rounds=MAX_ROUNDS, build=True, log=print):
+                 asset_min=0.0, top=TOP, min_cosine=MIN_COSINE, batch=BATCH,
+                 min_yield=MIN_YIELD, max_rounds=MAX_ROUNDS, build=True, log=print):
         if context not in CONTEXTS or gate not in GATES:
             raise SystemExit(f"measure: --context is one of {CONTEXTS}, --gate one of {GATES}")
         self.name, self.data, self.log = name, data, log
         self.settings = {"model": model, "context": context, "gate": gate,
-                         "asset_min": asset_min, "top": top, "batch": batch,
+                         "asset_min": asset_min, "top": top, "min_cosine": min_cosine,
+                         "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
                          "extras_min_grade": EXTRAS_MIN_GRADE}
         # A reader (the load, the evaluation, the types stage) must not build
         # anything as a side effect: it asks for the run as it stands.
-        self.cand = candidates.build(name, data, top=top, log=log) if build \
-            else candidates.current(name, data, top=top)
+        self.cand = candidates.build(name, data, top=top, log=log, min_cosine=min_cosine) \
+            if build else candidates.current(name, data, top=top, min_cosine=min_cosine)
         if not self.cand:
             raise SystemExit(f"measure: no candidates for {name} at top {top}; run "
                              f"./wbg measure {name}")
@@ -441,7 +447,8 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
     lines = [f"{run.name}: {len(rows):,} units seen, {len(sent):,} graded by {s['model']} "
              f"(context {s['context']}, gate {s['gate']}"
              + (f" >= {s['asset_min']}" if s["gate"] != "none" else "")
-             + f", top {s['top']}, batch {s['batch']}, min yield {s['min_yield']})",
+             + f", pool: cosine >= {s['min_cosine']}" + (f" or top {s['top']}" if s["top"] else "")
+             + f", batch {s['batch']}, min yield {s['min_yield']})",
              f"  candidates {os.path.basename(run.cand)}; asset map {run.asset_run or 'none'}",
              f"  this run: {calls:,} calls, US${cost:.4f}, {seconds:.0f}s; models served: {served}",
              "  rounds (units graded / committed): " + ", ".join(
@@ -596,7 +603,9 @@ def main():
     ap.add_argument("--asset-min", type=float, default=0.0,
                     help="with --gate: the asset probability a unit, paragraph or component "
                          "needs for the unit to be sent")
-    ap.add_argument("--top", type=int, default=TOP, help="embedding depth of round 0")
+    ap.add_argument("--top", type=int, default=TOP, help="round 0 pool by count (0 = off)")
+    ap.add_argument("--min-cosine", type=float, default=MIN_COSINE,
+                    help="round 0 pool: units whose best cosine reaches this (0 = off)")
     ap.add_argument("--batch", type=int, default=BATCH, help="units per feedback round")
     ap.add_argument("--min-yield", type=int, default=MIN_YIELD,
                     help="a round yielding fewer committed units than this is the last")
@@ -609,7 +618,8 @@ def main():
     out = measure(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
                   workers=args.workers, model=args.model,
                   context=args.context,
-                  gate=args.gate, asset_min=args.asset_min, top=args.top, batch=args.batch,
+                  gate=args.gate, asset_min=args.asset_min, top=args.top,
+                  min_cosine=args.min_cosine, batch=args.batch,
                   min_yield=args.min_yield, max_rounds=args.max_rounds)
     return 0 if out or args.dry_run else 1
 
