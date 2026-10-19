@@ -318,10 +318,12 @@ def _run_rows(data, finder, file):
     return ("|".join(runs), rows) if rows else (None, [])
 
 
-def classify_rows(data, projects=None):
+def classify_rows(data, projects=None, min_cosine=None):
     import classify
-    return _run_rows(data, lambda n, d: classify.current_run(n, d, projects=projects),
-                     "scores.csv")
+    if min_cosine is None:
+        min_cosine = classify.MIN_COSINE
+    return _run_rows(data, lambda n, d: classify.current_run(
+        n, d, projects=projects, min_cosine=min_cosine), "scores.csv")
 
 
 def measure_rows(data, projects=None):
@@ -564,6 +566,9 @@ def main():
                          "scope (the cohort set they were run with)")
     ap.add_argument("--set", action="append", dest="cohort_set",
                     help="the cohort set the model runs were made over (digital, ...)")
+    ap.add_argument("--min-cosine", type=float, default=None,
+                    help="the asset map's cosine gate, to find the classify run made at "
+                         "that gate (default: the classify stage's default)")
     args = ap.parse_args()
     import classify
     projects = classify.scope(args.projects)
@@ -609,7 +614,7 @@ def main():
         sha, rollup = search_tables(args.data)
         derived(conn, "search_paragraphs", sha, ROLLUP_COLS, rollup)
 
-        sha, rows = classify_rows(args.data, projects)
+        sha, rows = classify_rows(args.data, projects, args.min_cosine)
         derived(conn, "paragraph_grades", sha, CLASSIFY_COLS, rows)
         sha, rows = measure_rows(args.data, projects)
         derived(conn, "measure_findings", sha, MEASURE_COLS, rows)
