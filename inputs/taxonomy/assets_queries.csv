@@ -98,3 +98,23 @@ digital_systems,app,mobile application for citizens or farmers,true
 digital_systems,software,software development for a government system,true
 digital_systems,land,land administration and cadastre information system,true
 digital_systems,agri,digital agriculture advisory and e-voucher platform,true
+satellite,ground_station,satellite ground station and teleport,true
+satellite,vsat,VSAT terminals for remote and island sites,true
+satellite,leo_capacity,satellite capacity from low earth orbit operators for backhaul,true
+satellite,sat_backbone,satellite links used as backbone or backhaul where fibre is absent,true
+satellite,landing_rights,satellite licensing and landing rights,true
+institutional_networks,govnet,government wide-area network connecting ministries and agencies,true
+institutional_networks,nren,national research and education network connecting universities,true
+institutional_networks,sector_network,health sector network linking hospitals and district offices,true
+institutional_networks,noc,network operations centre for the government network,true
+institutional_networks,lan,institutional local area networks and shared email and voice services,true
+operational_tech,scada,SCADA and control systems for power water and transport,true
+operational_tech,smart_meters,smart meters and advanced metering infrastructure,true
+operational_tech,its,intelligent transport systems for traffic management and tolling,true
+operational_tech,iot_sensors,sensor and Internet of Things networks for utilities and agriculture,true
+operational_tech,smart_grid,smart grid communications,true
+geospatial,sdi,spatial data infrastructure platform and geoportal,true
+geospatial,mapping_agency,systems and equipment of the national mapping agency,true
+geospatial,imagery,satellite imagery and earth observation services,true
+geospatial,survey,aerial and drone surveys and LiDAR,true
+geospatial,geodetic,geodetic network and continuously operating reference stations,true

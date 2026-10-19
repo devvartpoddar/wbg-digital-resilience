@@ -24,6 +24,8 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
                                       # model's grade, the asset and activity kind per unit, feedback rounds
 ./wbg evaluate cra --column "Adaptation" --text-regex "risk assessment"   # the funnel against the
                                       # hand-labelled activities workbook (data/labels/activities.xlsx)
+python3 src/cohort_build.py --from-fy 2020   # list the operations a cohort could hold (data/reports/);
+                                      # inputs/config/cohort.csv stays hand-kept
 ./wbg check cra                       # draw a measure's units for a person to grade; --evaluate reads
                                       # the grades back: precision, recall, calibration; --elusion
                                       # draws (and evaluates) what the pool never read

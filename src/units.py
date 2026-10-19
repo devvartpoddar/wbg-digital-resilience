@@ -303,27 +303,54 @@ def search_units(data):
 def template_scores(units, texts):
     """Fill template_projects and template_share on every unit (see the
     module docstring). Exact and shingle word-run frequencies across
-    projects, computed once over the corpus; deterministic."""
-    bodies, keys, shingles = {}, {}, {}
-    for u in units:
+    projects, computed once over the corpus with numpy so memory stays flat
+    at 500 projects (one 64-bit hash and one project index per shingle, not
+    a Python set per shingle); deterministic."""
+    import numpy
+    from array import array
+    project_index = {}
+    # three flat arrays, not a list of tuples: at 500 projects there are
+    # tens of millions of (unit, shingle, project) rows
+    row_unit, row_hash, row_proj = array("L"), array("Q"), array("L")
+    exact = {}                    # exact-words hash -> set of project indices
+    per_unit = []                 # (own project indices, shingle count)
+    for n, u in enumerate(units):
         text = texts(u["doc_id"])
         body = text[int(u["char_start"]):int(u["char_end"])]
         if u["lead_in_start"]:      # what was embedded and graded: the item with its lead-in
             body = text[int(u["lead_in_start"]):int(u["lead_in_end"])] + "\n" + body
         words = WORD.findall(body.lower())
-        projects = set(u["project_ids"].split("|")) - {""}
-        bodies[u["unit_id"]] = (words, projects)
-        keys.setdefault(" ".join(words), set()).update(projects)
-        for i in range(max(0, len(words) - TEMPLATE_SHINGLE + 1)):
-            shingles.setdefault(hash(tuple(words[i:i + TEMPLATE_SHINGLE])), set()).update(projects)
-    for u in units:
-        words, projects = bodies[u["unit_id"]]
-        u["template_projects"] = len(keys[" ".join(words)] - projects)
-        n = max(0, len(words) - TEMPLATE_SHINGLE + 1)
-        hit = sum(1 for i in range(n)
-                  if len(shingles[hash(tuple(words[i:i + TEMPLATE_SHINGLE]))] - projects)
-                  >= TEMPLATE_MIN_PROJECTS)
-        u["template_share"] = f"{hit / n:.2f}" if n else "0.00"
+        projects = [project_index.setdefault(p, len(project_index))
+                    for p in u["project_ids"].split("|") if p]
+        key = hashlib.sha256(" ".join(words).encode()).digest()
+        exact.setdefault(key, set()).update(projects)
+        per_unit.append((projects, key, max(0, len(words) - TEMPLATE_SHINGLE + 1)))
+        for i in range(per_unit[-1][2]):
+            h = int.from_bytes(hashlib.blake2b(" ".join(words[i:i + TEMPLATE_SHINGLE]).encode(),
+                                               digest_size=8).digest(), "big")
+            for p in projects:
+                row_unit.append(n)
+                row_hash.append(h)
+                row_proj.append(p)
+    unit_hashes, projects_of = {}, {}
+    if len(row_unit):
+        arr = numpy.column_stack([numpy.frombuffer(row_unit, dtype=numpy.uint64 if row_unit.itemsize == 8 else numpy.uint32).astype(numpy.uint64),
+                                  numpy.frombuffer(row_hash, dtype=numpy.uint64),
+                                  numpy.frombuffer(row_proj, dtype=numpy.uint64 if row_proj.itemsize == 8 else numpy.uint32).astype(numpy.uint64)])
+        # projects per shingle: distinct (hash, project) pairs, counted by hash
+        pairs = numpy.unique(arr[:, 1:], axis=0)
+        hashes, counts = numpy.unique(pairs[:, 0], return_counts=True)
+        projects_of = dict(zip(hashes.tolist(), counts.tolist()))
+        # per unit: its shingles' hashes (distinct per unit)
+        for n, h in numpy.unique(arr[:, :2], axis=0).tolist():
+            unit_hashes.setdefault(n, []).append(h)
+    for n, u in enumerate(units):
+        projects, key, count = per_unit[n]
+        u["template_projects"] = len(exact[key] - set(projects))
+        own = len(set(projects))
+        hit = sum(1 for h in unit_hashes.get(n, ())
+                  if projects_of[h] - own >= TEMPLATE_MIN_PROJECTS) if count else 0
+        u["template_share"] = f"{hit / count:.2f}" if count else "0.00"
 
 
 def copies(units):
