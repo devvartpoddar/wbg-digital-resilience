@@ -233,7 +233,7 @@ TABLES = {
             "block": "The paragraph's block.",
             "component_key": "Name key of the component the unit sits under: the same component across documents even when renumbered.",
             "lead_in": "The sentence that introduces the list the unit is an item of, embedded in front of it; blank otherwise.",
-            "left_out_reason": "Why the unit is not searched: reference (a citation or caption) or fragment (a scrap or title); blank when searched.",
+            "left_out_reason": "Why the unit is not searched: reference (a citation or caption), fragment (a scrap or title) or indicator (a results-framework table row); blank when searched.",
             "copy_of_unit_id": "The earlier unit that prints the same text (an additional financing repeats its appraisal document); only that one was embedded.",
             "template_project_count": "How many other projects print a unit with the same words (lead-in included): the Bank's standard text scores high, a project's own commitment 0.",
             "template_wording_share": "Share of the unit's six-word runs that appear in at least two other projects, 0 to 1: template wording with a name or figure filled in. A filter for a reader, not a cut.",
