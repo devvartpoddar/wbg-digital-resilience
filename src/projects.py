@@ -31,7 +31,7 @@ from paths import data_root, where  # noqa: E402
 from fetch import ROOT, read_cohort  # noqa: E402
 from dates import iso_date  # noqa: E402
 
-COLS = ["project_id", "in_projects_interface", "project_name", "status",
+COLS = ["project_id", "cohort_set", "in_projects_interface", "project_name", "status",
         "approval_date", "approval_fy", "closing_date", "region", "country_code",
         "country_name", "lending_instrument", "commitment_usd_m", "practice",
         "practice_code", "sectors", "managing_unit", "unit_code", "unit_doc_id",
@@ -90,7 +90,7 @@ def managing_unit(docs):
     return d["owner_unit"].strip(), d["doc_id"], d["disclosure_date"]
 
 
-def project_row(pid, rec, docs):
+def project_row(pid, rec, docs, cohort_set=""):
     """One projects.csv row from the interface record and the project's documents."""
     fetched, rec = rec is not None, rec or {}
     names, codes = practices(rec.get("project_gp_info"))
@@ -98,6 +98,7 @@ def project_row(pid, rec, docs):
     country = rec.get("countrycode") or []
     return {
         "project_id": pid,
+        "cohort_set": cohort_set,
         # true, false (the interface has no record), or blank (not fetched)
         # A record holding nothing but its own id is no record: the
         # interface lists the id of a dropped project and nothing else.
@@ -123,7 +124,9 @@ def project_row(pid, rec, docs):
     }
 
 
-def build(project_ids, data):
+def build(project_ids, data, sets=None):
+    """sets: {project_id: cohort_set} from the cohort file."""
+    sets = sets or {}
     docs = {}
     path = where(data, "documents")
     if os.path.exists(path):
@@ -138,7 +141,7 @@ def build(project_ids, data):
                 rec = json.load(fh)
         except FileNotFoundError:
             rec = None
-        rows.append(project_row(pid, rec, docs.get(pid, [])))
+        rows.append(project_row(pid, rec, docs.get(pid, []), sets.get(pid, "")))
     return rows
 
 
@@ -148,7 +151,9 @@ def main():
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
 
-    rows = build([r["project_id"] for r in read_cohort(args.cohort)], args.data)
+    cohort_rows = read_cohort(args.cohort)
+    rows = build([r["project_id"] for r in cohort_rows], args.data,
+                 {r["project_id"]: r.get("cohort_set", "") for r in cohort_rows})
     out = where(args.data, "projects")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out + ".part", "w", newline="", encoding="utf-8") as fh:

@@ -1,8 +1,8 @@
 -- Measure findings and candidates in the context a reader needs.
 DROP VIEW IF EXISTS wbg.measure_findings_in_context;
 CREATE VIEW wbg.measure_findings_in_context AS
-SELECT m.label_set, m.label_id, l.label_name AS measure_name, pp.project_id, pr.project_name,
-       pr.country_name, m.document_id, d.document_title, d.document_kind, m.component_number,
+SELECT m.label_set, m.label_id, l.label_name AS measure_name, pp.project_id, pr.cohort_set,
+       pr.project_name, pr.country_name, m.document_id, d.document_title, d.document_kind, m.component_number,
        pa.component_name, m.unit_id, m.unit_kind, m.feedback_round, m.route, m.reading_order,
        m.most_likely_grade, m.expected_grade, m.grade_confidence, m.probability_grade_3,
        m.committed_probability_calibrated,

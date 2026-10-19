@@ -162,6 +162,7 @@ TABLES = {
         comment="One row per cohort project: the projects interface record plus the managing "
                 "unit read from its most recent appraisal document.",
         columns={
+            "cohort_set": "Which hand-kept set of the cohort the project is in: digital (its object is a digital asset) or digital_contributor (a digital asset contributes to another sector's object). The filter every report should carry.",
             "in_projects_interface": "Whether the projects interface had a record for this id.",
             "commitment_usd_millions": "Current total commitment, US$ millions, from the projects interface.",
             "approval_fiscal_year": "World Bank fiscal year of Board approval.",

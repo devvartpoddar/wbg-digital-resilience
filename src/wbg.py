@@ -100,9 +100,12 @@ def _has(values, *fields):
 
 
 def select(project=None, country=None, region=None, fy=None, practice=None, unit=None,
-           path=COHORT, data=None):
+           cohort_set=None, path=COHORT, data=None):
     """Cohort projects matching every filter given; all of them when none is.
 
+    cohort_set  the cohort's own set ('digital': operations whose object is a
+                digital asset; 'digital_contributor': operations where a
+                digital asset contributes to another sector's object)
     project   project ids, a list or comma-separated ('P171528,P176932')
     country   country codes ('KE', '3W')
     region    region names, or part of one, without regard to case ('western')
@@ -123,7 +126,7 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
         for col in PROJECT_COLS:
             r[col] = p.get(col, "")
     given = {"project": project, "country": country, "region": region, "fy": fy,
-             "practice": practice, "unit": unit}
+             "practice": practice, "unit": unit, "set": cohort_set}
     blank = [k for k, v in given.items() if v is not None and not _as_list(v)]
     if blank:
         raise SystemExit(f"empty filter: --{', --'.join(blank)}")
@@ -133,6 +136,11 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
     years = [re.sub(r"(?i)^fy\s*", "", y) for y in _as_list(fy)]
     years = [f"20{y}" if len(y) == 2 and y.isdigit() else y for y in years]
     pracs, units = [x.lower() for x in _as_list(practice)], [x.lower() for x in _as_list(unit)]
+    sets = [x.lower() for x in _as_list(cohort_set)]
+    known_sets = {r.get("cohort_set", "").lower() for r in rows}
+    if sets and not set(sets) <= known_sets:
+        raise SystemExit(f"no such cohort set: {', '.join(sorted(set(sets) - known_sets))} "
+                         f"(the cohort has {', '.join(sorted(known_sets))})")
     if (pracs or units) and info is None:
         raise SystemExit("no projects table yet: run ./wbg prepare first")
     unknown = sorted(set(projects) - {r["project_id"] for r in rows})
@@ -143,6 +151,7 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
            and (not countries or any(c in countries for c in r["country_code"].upper().split("|")))
            and (not regions or _has(regions, r["region"]))
            and (not years or r["approval_fy"] in years)
+           and (not sets or r.get("cohort_set", "").lower() in sets)
            and (not pracs or _has(pracs, r["practice"], r["practice_code"]))
            and (not units or _has(units, r["managing_unit"], r["unit_code"]))]
     # Each value carries its filter's name, so '--practice digital' and
@@ -150,7 +159,8 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
     # the whole.
     parts = [*[f"project-{x}" for x in projects], *[f"country-{x}" for x in countries],
              *[f"region-{x}" for x in regions], *[f"fy{y}" for y in years],
-             *[f"practice-{x}" for x in pracs], *[f"unit-{x}" for x in units]]
+             *[f"practice-{x}" for x in pracs], *[f"unit-{x}" for x in units],
+             *[f"set-{x}" for x in sets]]
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", "-".join(parts)).strip("-").lower() or "all"
     if len(name) > 80:
         name = name[:71].rstrip("-") + "-" + hashlib.sha256(name.encode()).hexdigest()[:8]
@@ -657,6 +667,8 @@ def export(sel=None, name=None, data=None, include_tables=False, today=None):
 
 def _filters(ap):
     ap.add_argument("--project", action="append", help="project id (repeat or comma-separate)")
+    ap.add_argument("--set", action="append", dest="cohort_set",
+                    help="the cohort's set: digital or digital_contributor")
     ap.add_argument("--country", action="append", help="country code as in the cohort")
     ap.add_argument("--region", action="append", help="region name, or part of one")
     ap.add_argument("--fy", action="append", help="approval fiscal year")
@@ -671,6 +683,7 @@ def _sel(args):
                   country=args.country and ",".join(args.country),
                   region=args.region and ",".join(args.region),
                   fy=args.fy and ",".join(args.fy),
+                  cohort_set=args.cohort_set and ",".join(args.cohort_set),
                   practice=args.practice and ",".join(args.practice),
                   unit=args.unit and ",".join(args.unit))
 

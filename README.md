@@ -39,7 +39,7 @@ python -m pytest                      # tests (locally)
 
 `$PY` is the box's Python, `/opt/yggdrasil/venvs/work/bin/python` (`./wbg` finds it on its own). Review sheets already written are kept, since they may hold notes; `--seed` draws a fresh one.
 
-Selections filter the cohort (`inputs/config/cohort.csv`): `--project`, `--country`, `--region` (part of the name is enough), `--fy` (2024, FY24 or FY2024), `--practice` and `--unit`, each repeatable or comma-separated, combined with "and". The same functions are importable: `from wbg import select, prepare, summary, upcoming, open_notices, tables, export`.
+Selections filter the cohort (`inputs/config/cohort.csv`): `--set` (`digital` or `digital_contributor`, the cohort's two sets, carried into every findings view), `--project`, `--country`, `--region` (part of the name is enough), `--fy` (2024, FY24 or FY2024), `--practice` and `--unit`, each repeatable or comma-separated, combined with "and". The same functions are importable: `from wbg import select, prepare, summary, upcoming, open_notices, tables, export`.
 
 Data goes to the main checkout's `data/` folder (never committed), laid out as `src/paths.py` describes. The cleaned tables and the model runs also go to Postgres, schema `wbg`, named, typed, keyed and commented for Metabase (`src/schema.py` (`docs/methodology.md`, section 4). The review sheets for reading the cleaning by eye are in `data/review/`.
 

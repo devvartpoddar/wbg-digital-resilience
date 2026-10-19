@@ -24,22 +24,30 @@ each prints its estimate before asking anything (`--dry-run`).
    Investment Project Financing operations for FY2020 to FY2025, but only 75
    for FY2025: the interface lags on recent approvals, so FY2025 and FY2026
    need a second pass later.
-3. **Time and money at 1,400 projects**, scaled from the 70-project corpus
-   (`data/reports/spend.csv`), so roughly twenty times:
+   The cohort as committed on 2026-10-19 holds 251 included operations in
+   two sets, `digital` (72) and `digital_contributor` (179); `./wbg list
+   --set digital_contributor` shows one. 113 of them had no record in the
+   projects interface when added, so expect `./wbg prepare` to report
+   projects with no documents; those stay in the cohort and are tried again
+   on the next run.
+3. **Time and money at 250 projects**, scaled from the 70-project corpus
+   (`data/reports/spend.csv`), so roughly three and a half times (the
+   1,400-project column is what a whole-portfolio run would cost):
 
-   | Step | 70 projects | 1,400 projects |
+   | Step | 70 projects | 250 projects | 1,400 projects |
    |---|---|---|
-   | Fetch PDFs, plans, notices, awards, records | hours | a day or more (the interface is rate-limited; `./wbg prepare` resumes) |
-   | Read PDFs (0.3 s a page on a fast core; three workers) | minutes | about 15 hours on the N150 |
-   | Embed the units (US$0.30) | US$0.30 | about US$6 |
-   | Asset map, 13 assets, cosine gate 0.25 | about US$1.60 | about US$32 |
-   | Asset map without the gate | about US$2.70 | about US$55: over the key's cap |
-   | One measure (pool plus feedback, two passes) | US$0.13 | about US$2.60 |
+   |---|---|---|---|
+   | Fetch PDFs, plans, notices, awards, records | hours | overnight (the interface is rate-limited; `./wbg prepare` resumes) | a day or more |
+   | Read PDFs (0.3 s a page on a fast core; three workers) | minutes | about 3 hours on the N150 | about 15 hours |
+   | Embed the units | US$0.30 | about US$1 | about US$6 |
+   | Asset map, 13 assets, cosine gate 0.25 | about US$1.60 | about US$6 | about US$32 |
+   | Asset map without the gate | about US$2.70 | about US$10 | about US$55 |
+   | One measure (pool plus feedback, two passes) | US$0.13 | about US$0.50 | about US$2.60 |
 
-   So the gate is not optional at this size, and the key's cap of US$50
-   covers the map plus a handful of measures, not more. Raise the cap or run
-   the map in two halves by region (`./wbg classify` takes the whole cohort;
-   a half-cohort is a second `cohort.csv`).
+   At 250 projects the whole run fits well inside the key's cap of US$50
+   with or without the gate; the gate is still the setting to use, since
+   its loss was measured (section 5b) and the saving is real at every
+   later run.
 
 ## The run
 

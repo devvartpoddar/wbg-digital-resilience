@@ -23,8 +23,8 @@ lists AS (
   WHERE u.most_likely_grade = 3
   GROUP BY label_set, label_id, project_id
 )
-SELECT u.label_set, u.label_id, l.label_name AS measure_name, u.project_id, pr.project_name,
-       pr.country_name, pr.region, pr.approval_fiscal_year, pr.practice,
+SELECT u.label_set, u.label_id, l.label_name AS measure_name, u.project_id, pr.cohort_set,
+       pr.project_name, pr.country_name, pr.region, pr.approval_fiscal_year, pr.practice,
        pr.commitment_usd_millions,
        COUNT(*) FILTER (WHERE u.most_likely_grade = 3) AS committed_units,
        COUNT(*) FILTER (WHERE u.most_likely_grade = 3 AND u.document_kind = 'pad')
@@ -45,7 +45,7 @@ LEFT JOIN lists li ON li.label_set = u.label_set AND li.label_id = u.label_id
                   AND li.project_id = u.project_id
 LEFT JOIN wbg.projects pr ON pr.project_id = u.project_id
 LEFT JOIN wbg.labels l ON l.label_set = u.label_set AND l.label_id = u.label_id
-GROUP BY u.label_set, u.label_id, l.label_name, u.project_id, pr.project_name, pr.country_name,
+GROUP BY u.label_set, u.label_id, l.label_name, u.project_id, pr.cohort_set, pr.project_name, pr.country_name,
          pr.region, pr.approval_fiscal_year, pr.practice, pr.commitment_usd_millions;
 COMMENT ON VIEW wbg.measure_findings_by_project IS
   'One row per project and measure: committed and planned units by the decision model''s grade, the assets those commitments link to, how they are delivered and by whom. Count projects, not units: one project with a long restructuring paper can hold hundreds of units (committed_units_in_appraisal_document leaves restructuring and additional-financing papers out). The model''s grades, not a person''s, and coverage is below 100 per cent.';
