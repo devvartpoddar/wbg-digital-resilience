@@ -1,0 +1,9 @@
+measure_id,query_id,query,active
+drm,q1,early warning alerts sent to people by mobile phone and cell broadcast,true
+drm,q2,hazard monitoring and weather forecasting systems,true
+drm,q3,emergency communications network for disaster response,true
+drm,q4,disaster recovery site and data backup for government systems,true
+drm,q5,climate and disaster risk assessment of telecom sites and data centres,true
+drm,q6,digital social registry and payments to reach households after a disaster,true
+drm,q7,restoring connectivity after cyclones and floods,true
+drm,q8,disaster risk information platform and hazard data,true
