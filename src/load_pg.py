@@ -535,8 +535,10 @@ def prepare(conn):
     left behind (one-time): tables under other names in wbg, and the
     separate bookkeeping schema, whose load history is carried over."""
     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {PUBLIC}")
-    # A loads table of an earlier shape (no release_id) is started afresh.
-    if _exists(conn, "loads") and "release_id" not in _columns(conn, LOADS):
+    # A loads table of an earlier shape (row_count or release_id missing,
+    # e.g. the first layout's n_rows) is started afresh: the skip-hints are
+    # stale once the columns or types change.
+    if _exists(conn, "loads") and not {"row_count", "release_id"} <= _columns(conn, LOADS):
         conn.execute(f"DROP TABLE {LOADS} CASCADE")
     conn.execute(f"CREATE TABLE IF NOT EXISTS {LOADS} (table_name text, source_sha256 text, "
                  f"row_count integer, loaded_at timestamptz, release_id text)")
