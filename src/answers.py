@@ -111,6 +111,7 @@ def bodies_for(state, questions, model):
     in file order split over as many bodies as needed (the store is per
     question, so a split changes nothing downstream). A state too long for
     even one question is refused, never truncated."""
+    import classify
     if not questions:
         return []
     size = lambda qs: len(json.dumps(classify.request_body(state, qs, model), ensure_ascii=False))
