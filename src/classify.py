@@ -34,7 +34,6 @@ paragraphs; changing a definition, a grade or the text gives a new version.
   python3 src/classify.py assets
 """
 import argparse, csv, hashlib, json, os, sys, time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -228,19 +227,6 @@ def write_cached(root, sha, response):
 
 # --------------------------------------------------------------- the transport
 
-def check(response, qs, n_grades):
-    """A response is stored only if every question has a full set of grade
-    probabilities."""
-    if not isinstance(response, dict):
-        raise TransportError(f"response is not an object: {str(response)[:200]}")
-    answers = response.get("answers") or {}
-    for qid in qs:
-        a = answers.get(qid) or {}
-        probs = a.get("probabilities") or {}
-        if a.get("type") != "score" or sorted(probs) != [str(i) for i in range(n_grades)]:
-            raise TransportError(f"answer for {qid!r} is incomplete: {str(a)[:200]}")
-
-
 def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
     """One request to the decisions endpoint. THE transport seam."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
@@ -266,37 +252,6 @@ def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
         if attempt < tries - 1:
             time.sleep(2 ** attempt)
     raise last
-
-
-def fetch_missing(todo, root, qs, n_grades, *, api_key, log, workers=WORKERS, check_fn=None):
-    """Ask for and store every request in todo [(sha, body)]. Returns
-    (stored, failures, cost). check_fn(response, qs, n_grades) decides what
-    may be stored; the default is check() for graded questions."""
-    stored, failures, cost = 0, [], 0.0
-    check_fn = check_fn or check
-
-    def one(sha, body):
-        response = decide(body, api_key=api_key)
-        check_fn(response, qs, n_grades)
-        write_cached(root, sha, response)
-        return float((response.get("usage") or {}).get("cost") or 0)
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(one, sha, body): sha for sha, body in todo}
-        for n, f in enumerate(as_completed(futures), 1):
-            try:
-                cost += f.result()
-                stored += 1
-            except TransportError as exc:
-                failures.append((futures[f], str(exc)[:200]))
-            except Refused as exc:
-                pool.shutdown(wait=True, cancel_futures=True)
-                raise SystemExit(f"classify: refused, stopping ({stored:,} stored so far; "
-                                 f"run again to resume): {exc}")
-            if n % 500 == 0 or n == len(todo):
-                log(f"  {n:,}/{len(todo):,} asked, {stored:,} stored, "
-                    f"{len(failures)} failed, US${cost:.3f}")
-    return stored, failures, cost
 
 
 # ------------------------------------------------------------------- the run
@@ -367,35 +322,34 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     if os.path.exists(os.path.join(out, "manifest.json")):
         log(f"  already written: {out}")
         return out
-    root = cache_root(data, model)
-    missing = [(s, b) for s, (_, b) in zip(shas, bodies) if read_cached(root, s) is None]
-    todo = list({s: (s, b) for s, b in missing}.values())   # identical paragraphs ask once
-    chars = sum(len(json.dumps(b, ensure_ascii=False)) for _, b in todo)
-    log(f"  stored already: {len(bodies) - len(missing):,}; to ask: {len(todo):,} "
-        f"(about {chars / 4 / 1e6:.1f}M tokens, US${chars / 4 / 1e6 * PRICE_PER_MTOK:.2f})")
+    import answers
+    requests_ = [(p["state"], qs) for p, _ in bodies]
+    got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                          dry_run=True)
+    log(f"  answers stored already for {sum(1 for g in got if g):,} paragraphs; calls to make: "
+        f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
     if dry_run:
         log("  --dry-run: no request made, nothing written")
         return None
-    failures, calls, cost, t0 = [], 0, 0.0, time.time()
-    if todo:
+    if st["to_ask"]:
         if not api_key:
             raise SystemExit(f"classify: no credential: set ${embed.KEY_VAR} or put the "
                              f"key in {embed.KEY_FILE} in the main checkout")
         log(f"  spent today before this run: US${spend_today(data)[1]:.2f}")
-        calls, failures, cost = fetch_missing(todo, root, qs, len(scale), api_key=api_key,
-                                              log=log, workers=workers)
-        record_spend(data, "classify", name, model, calls, cost, time.time() - t0,
+        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers)
+        record_spend(data, "classify", name, model, st["calls"], st["cost_usd"], st["seconds"],
                      os.path.basename(out))
-    if failures:
-        log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
-        for sha, err in failures[:5]:
+    if st["failures"] or not all(got):
+        log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
+        for sha, err in st["failures"][:5]:
             log(f"    {sha[:12]}: {err}")
         return None
 
     rows, served = [], {}
-    for (p, _), sha in zip(bodies, shas):
-        response = read_cached(root, sha)
-        served[response.get("model", "")] = served.get(response.get("model", ""), 0) + 1
+    for (p, _), g in zip(bodies, got):
+        response = {"answers": {qid: e["answer"] for qid, e in g.items()},
+                    "model": "|".join(sorted({e["model"] for e in g.values()}))}
+        served[response["model"]] = served.get(response["model"], 0) + 1
         rows += score_rows(p, response, labels)
     part = out + ".part"
     os.makedirs(part, exist_ok=True)

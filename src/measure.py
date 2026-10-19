@@ -95,6 +95,7 @@ BATCH = 500           # units per feedback round
 MIN_YIELD = 10        # a round yielding fewer committed units than this is the last
 MAX_ROUNDS = 6
 NEGATIVE_WEIGHT = 0.5  # Rocchio: how much of the rejected units' centroid is subtracted
+EXTRAS_MIN_GRADE = 2   # asset and kind questions are asked of units graded at least this
 UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
              "component_number", "subcomponent_number", "component_key", "copies", "route",
              "round", "rank", "score", "patterns", "p_commitment", "firmness", "read_order",
@@ -141,22 +142,6 @@ def questions(labels, scale, context, assets, kinds=()):
                                  f"as defined.",
                          "false": f"No: it is not delivered by {k['name'].lower()}."}}
     return out
-
-
-def check(response, qs, n_grades):
-    """Stored only if the graded question has every grade and every yes/no
-    question has its probability."""
-    if not isinstance(response, dict):
-        raise classify.TransportError(f"response is not an object: {str(response)[:200]}")
-    answers = response.get("answers") or {}
-    for qid, q in qs.items():
-        a = answers.get(qid) or {}
-        if q["type"] == "score":
-            probs = a.get("probabilities") or {}
-            if a.get("type") != "score" or sorted(probs) != [str(i) for i in range(n_grades)]:
-                raise classify.TransportError(f"answer for {qid!r} is incomplete: {str(a)[:200]}")
-        elif a.get("type") != "noul" or not isinstance(a.get("noul"), (int, float)):
-            raise classify.TransportError(f"answer for {qid!r} is incomplete: {str(a)[:200]}")
 
 
 # ------------------------------------------------------------------ the inputs
@@ -230,7 +215,8 @@ class Run:
         self.settings = {"model": model, "context": context, "gate": gate,
                          "asset_min": asset_min, "top": top, "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
-                         "negative_weight": NEGATIVE_WEIGHT}
+                         "negative_weight": NEGATIVE_WEIGHT,
+                         "extras_min_grade": EXTRAS_MIN_GRADE}
         # A reader (the load, the evaluation, the types stage) must not build
         # anything as a side effect: it asks for the run as it stands.
         self.cand = candidates.build(name, data, top=top, log=log) if build \
@@ -263,7 +249,6 @@ class Run:
                  f"{json.dumps(self.settings, sort_keys=True)}\n".encode())
         h.update(json.dumps(self.qs, sort_keys=True).encode())
         self.out = where(data, "measures", f"{name}-{h.hexdigest()[:12]}")
-        self.root = classify.cache_root(data, model)
 
     # ---- units
 
@@ -309,38 +294,38 @@ class Run:
              "component": row["asset_p_comp"]}[s["gate"]]
         return p != "" and float(p) >= s["asset_min"]
 
-    def body_for(self, row):
-        r = row
+    def state_of(self, row):
         para = row["_para"]
-        doc = _text(self.doc_texts, self.data, r["doc_id"])
+        doc = _text(self.doc_texts, self.data, row["doc_id"])
         para_text = doc[int(para["char_start"]):int(para["char_end"])]
-        state = state_for(r, para, row["text"], para_text, self.names, self.settings["context"])
-        body = classify.request_body(state, self.qs, self.settings["model"])
-        if len(json.dumps(body, ensure_ascii=False)) > classify.MAX_REQUEST_CHARS:
-            raise SystemExit(f"measure: {r['unit_id']} makes a request over "
-                             f"{classify.MAX_REQUEST_CHARS:,} characters")
-        return body
+        return state_for(row, para, row["text"], para_text, self.names, self.settings["context"])
 
-    def answers_into(self, row, response):
+    def grade_into(self, row, entries):
+        """The measure's grade from the first pass's answer."""
         lab = self.labels[0]["id"]
-        a = response["answers"][lab]
+        a = entries[lab]["answer"]
         probs = [float(a["probabilities"][k]) for k in sorted(a["probabilities"], key=int)]
         total = sum(probs) or 1.0
         row.update({"grade": max(range(len(probs)), key=lambda i: probs[i]),
                     "expected": f"{sum(i * q for i, q in enumerate(probs)) / total:.3f}",
                     "confidence": f"{float(a.get('confidence', 0)):.3f}",
                     **{f"p{i}": (f"{probs[i]:.4f}" if i < len(probs) else "") for i in range(5)},
-                    "model_served": response.get("model", ""),
-                    "cost": f"{float((response.get('usage') or {}).get('cost') or 0):.6f}"})
-        ps = {x["id"]: float(response["answers"][f"asset:{x['id']}"]["noul"]) for x in self.assets}
+                    "model_served": entries[lab]["model"],
+                    "cost": f"{sum(float(e.get('cost_usd') or 0) for e in entries.values()):.6f}"})
+        self.link_into(row)
+
+    def extras_into(self, row, entries):
+        """The asset and activity-kind answers from the second pass."""
+        ps = {x["id"]: float(entries[f"asset:{x['id']}"]["answer"]["noul"]) for x in self.assets}
         best = max(ps, key=ps.get) if ps else ""
         row.update({"asset_unit": best, "asset_p_unit": f"{ps[best]:.3f}" if best else "",
                     "assets_yes": "|".join(x for x in ps if ps[x] >= ASSET_YES)})
         self.link_into(row)
-        ks = {k["id"]: float(response["answers"][f"kind:{k['id']}"]["noul"]) for k in self.kinds}
+        ks = {k["id"]: float(entries[f"kind:{k['id']}"]["answer"]["noul"]) for k in self.kinds}
         kb = max(ks, key=ks.get) if ks else ""
         row.update({"kinds_yes": "|".join(k for k in ks if ks[k] >= ASSET_YES),
-                    "kind_best": kb, "kind_p": f"{ks[kb]:.3f}" if kb else ""})
+                    "kind_best": kb, "kind_p": f"{ks[kb]:.3f}" if kb else "",
+                    "cost": f"{float(row['cost']) + sum(float(e.get('cost_usd') or 0) for e in entries.values()):.6f}"})
 
     def link_into(self, row):
         """asset_link, asset_link_level, asset_link_p from the three levels."""
@@ -355,36 +340,54 @@ class Run:
     # ---- a batch to the model
 
     def grade(self, rows, rnd, api_key, dry_run, workers):
-        """Send the rows that pass the gate; fill their answers from the
-        store. Returns (calls, cost, failures)."""
-        todo = {}
+        """Two passes through the answer store for the rows that pass the
+        gate: the measure's question for all of them, then the asset and
+        activity-kind questions only for those graded EXTRAS_MIN_GRADE or
+        more. The questions are most of a request's tokens, so asking them
+        of the 8 per cent that matter cuts a measure's cost by about four
+        fifths. Returns (calls, cost, failures)."""
+        import answers
+        model = self.settings["model"]
+        sent = []
         for row in rows:
-            if not self.gated(row, rnd):
-                continue
-            row["sent"] = "true"
-            body = self.body_for(row)
-            sha = classify.request_sha(body)
-            row["_sha"] = sha
-            if classify.read_cached(self.root, sha) is None:
-                todo[sha] = body
-        sent = [r for r in rows if r["sent"] == "true"]
-        chars = sum(len(json.dumps(b, ensure_ascii=False)) for b in todo.values())
-        self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} pass the gate, "
-                 f"{len(sent) - len(todo):,} stored, {len(todo):,} to ask "
-                 f"(about US${chars / 4 / 1e6 * classify.PRICE_PER_MTOK:.3f})")
+            if self.gated(row, rnd):
+                row["sent"] = "true"
+                row["_state"] = self.state_of(row)
+                sent.append(row)
+        first = {k: v for k, v in self.qs.items() if ":" not in k}
+        extras = {k: v for k, v in self.qs.items() if ":" in k}
+        got, st = answers.ask(model, [(r["_state"], first) for r in sent], self.data,
+                              api_key=api_key, log=self.log, workers=workers, dry_run=True,
+                              legacy_questions=(self.qs,))
+        self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} pass the gate; measure "
+                 f"question: {st['to_ask']:,} to ask (about US${st['estimate_usd']:.3f})")
         if dry_run:
             return 0, 0.0, []
-        calls, cost, failures = 0, 0.0, []
-        if todo:
+        calls, cost = 0, 0.0
+        if st["to_ask"]:
             if not api_key:
                 raise SystemExit("measure: no credential: set $WBG_OPENROUTER_KEY")
-            calls, failures, cost = classify.fetch_missing(
-                list(todo.items()), self.root, self.qs, len(self.scale), api_key=api_key,
-                log=self.log, workers=workers, check_fn=check)
-            if failures:
-                return calls, cost, failures
-        for row in sent:
-            self.answers_into(row, classify.read_cached(self.root, row["_sha"]))
+            got, st = answers.ask(model, [(r["_state"], first) for r in sent], self.data,
+                                  api_key=api_key, log=self.log, workers=workers,
+                                  legacy_questions=(self.qs,))
+            calls, cost = st["calls"], st["cost_usd"]
+            if st["failures"] or not all(got):
+                return calls, cost, st["failures"] or [("", "an answer is missing")]
+        for row, g in zip(sent, got):
+            self.grade_into(row, g)
+        need = [r for r in sent if int(r["grade"]) >= EXTRAS_MIN_GRADE] if extras else []
+        if need:
+            got2, st2 = answers.ask(model, [(r["_state"], extras) for r in need], self.data,
+                                    api_key=api_key, log=self.log, workers=workers,
+                                    legacy_questions=(self.qs,))
+            calls += st2["calls"]
+            cost += st2["cost_usd"]
+            self.log(f"    asset and kind questions for {len(need):,} units graded >= "
+                     f"{EXTRAS_MIN_GRADE}: {st2['calls']:,} asked, US${st2['cost_usd']:.3f}")
+            if st2["failures"] or not all(got2):
+                return calls, cost, st2["failures"] or [("", "an answer is missing")]
+            for row, g in zip(need, got2):
+                self.extras_into(row, g)
         return calls, cost, []
 
     # ---- relevance feedback

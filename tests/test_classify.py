@@ -106,7 +106,8 @@ def test_an_incomplete_answer_is_not_stored(store, monkeypatch):
     monkeypatch.setattr(classify, "decide", lambda body, **kw: {"answers": {}})
     assert _run(store) is None
     data, _, _ = store
-    assert not os.path.exists(classify.cache_root(data, classify.MODEL))
+    import answers
+    assert not os.path.exists(answers.root(data, classify.MODEL))
 
 
 def test_the_grades_must_be_given(store):
@@ -158,7 +159,8 @@ def test_a_refusal_stops_the_run_and_stores_nothing(store, monkeypatch):
     with pytest.raises(SystemExit):
         _run(store)
     data, _, _ = store
-    assert not os.path.exists(classify.cache_root(data, classify.MODEL))
+    import answers
+    assert not os.path.exists(answers.root(data, classify.MODEL))
 
 
 def test_a_change_in_what_is_sent_is_a_new_version(store):

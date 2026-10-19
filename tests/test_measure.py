@@ -158,7 +158,12 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]
-    assert calls[0]["questions"]["asset:towers"]["type"] == "noul"
+    # Two passes: the measure alone, then asset and kind questions for the
+    # units graded 2 or more (here the one unit), on the same state.
+    assert list(calls[0]["questions"]) == ["cra"]
+    assert calls[1]["state"] == calls[0]["state"]
+    assert calls[1]["questions"]["asset:towers"]["type"] == "noul"
+    assert "cra" not in calls[1]["questions"]
     assert calls[0]["model"] == measure.MODEL
 
 
@@ -171,7 +176,7 @@ def test_feedback_rounds_read_the_nearest_unseen_units_until_the_yield_drops(sto
     assert [(r["round"], r["route"]) for r in rows] == [("0", "both"), ("1", "feedback"),
                                                         ("1", "feedback")]
     assert [r["grade"] for r in rows] == ["3", "0", "0"]
-    assert len(calls) == 3
+    assert len(calls) == 4            # round 0: measure + extras; round 1: two units, measure only
 
 
 def test_a_rerun_reads_the_store_and_asks_nothing(store):

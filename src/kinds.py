@@ -267,16 +267,6 @@ def assign_questions(types):
         for t in types}
 
 
-def check_noul(response, qs):
-    if not isinstance(response, dict):
-        raise classify.TransportError(f"response is not an object: {str(response)[:200]}")
-    answers = response.get("answers") or {}
-    for qid in qs:
-        a = answers.get(qid) or {}
-        if a.get("type") != "noul" or not isinstance(a.get("noul"), (int, float)):
-            raise classify.TransportError(f"answer for {qid!r} is incomplete: {str(a)[:200]}")
-
-
 def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=print,
            workers=classify.WORKERS, read_at=0.5, **kw):
     run_folder, units = committed_units(name, data, **kw)
@@ -301,33 +291,30 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
         return out
-    root = classify.cache_root(data, model)
-    todo = defaultdict(dict)          # label -> {sha: body}: each label has its own questions
-    for (lid, _, _), sha, body in zip(rows, shas, bodies):
-        if classify.read_cached(root, sha) is None:
-            todo[lid][sha] = body
-    n_todo = sum(len(t) for t in todo.values())
-    log(f"  stored already: {len(rows) - n_todo:,}; to ask: {n_todo:,}")
+    import answers
+    requests_ = [({"sentence": u["text"]}, qs) for (lid, u, qs) in rows]
+    got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                          dry_run=True)
+    log(f"  stored already: {sum(1 for g in got if g):,}; to ask: {st['to_ask']:,} "
+        f"(about US${st['estimate_usd']:.3f})")
     if dry_run:
         log("  --dry-run: nothing asked, nothing written")
         return None
-    if n_todo and not api_key:
-        raise SystemExit("types: no credential: set $WBG_OPENROUTER_KEY")
-    t0, asked, spent = time.time(), 0, 0.0
-    for lid, items in sorted(todo.items()):
-        n, failures, c = classify.fetch_missing(
-            list(items.items()), root, assign_questions(approved[lid]), 0, api_key=api_key,
-            log=log, workers=workers, check_fn=lambda r, qs, _n: check_noul(r, qs))
-        asked += n
-        spent += c
-        if failures:
-            log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
+    if st["to_ask"]:
+        if not api_key:
+            raise SystemExit("types: no credential: set $WBG_OPENROUTER_KEY")
+        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers)
+        classify.record_spend(data, "types-assign", name, model, st["calls"], st["cost_usd"],
+                              st["seconds"], os.path.basename(out))
+        if st["failures"] or not all(got):
+            log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
-    classify.record_spend(data, "types-assign", name, model, asked, spent, time.time() - t0, os.path.basename(out))
     out_rows, counts, served, cost = [], defaultdict(lambda: defaultdict(int)), set(), 0.0
     all_types = {lid: [t["type_id"] for t in ts] for lid, ts in approved.items()}
-    for (lid, u, qs), sha in zip(rows, shas):
-        response = classify.read_cached(root, sha)
+    for (lid, u, qs), g in zip(rows, got):
+        response = {"answers": {t: e["answer"] for t, e in g.items()},
+                    "model": "|".join(sorted({e["model"] for e in g.values()})),
+                    "usage": {"cost": sum(float(e.get("cost_usd") or 0) for e in g.values())}}
         probs = {t: float(response["answers"][t]["noul"]) for t in qs}
         yes = [t for t in all_types[lid] if probs[t] >= read_at]
         best = max(probs, key=probs.get)
