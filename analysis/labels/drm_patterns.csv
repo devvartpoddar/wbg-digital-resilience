@@ -1,4 +1,0 @@
-measure_id,pattern_id,pattern,active
-drm,disaster,"\bdisasters?\b|\bemergenc(?:y|ies)\b(?! response component)|\bhazards?\b|\bearly[- ]warnings?\b|\balert(?:s|ing)?\b|\bcell broadcast\b",true
-drm,shock,"\bfloods?\b|\bflooding\b|\bcyclones?\b|\bhurricanes?\b|\bearthquakes?\b|\bdroughts?\b|\btsunamis?\b|\blandslides?\b|\bextreme (?:weather|climate|events?)\b",true
-drm,continuity,"\bbusiness continuity\b|\bdisaster recovery\b|\bclimate[- ]risk\b|\brisk assessments?\b|\bvulnerability assessments?\b",true

@@ -1,5 +1,0 @@
-grade,description
-0,The passage does not describe {name}.
-1,"{name} is mentioned only as background, a risk, a lesson, a general aim or another party's work, not as something this project does."
-2,"This project intends or plans {name}, or makes it conditional, subject to a later study or a recommendation."
-3,"This project commits to {name}: it finances it, or requires it in design, siting, contracts, safeguards instruments or as a condition."
