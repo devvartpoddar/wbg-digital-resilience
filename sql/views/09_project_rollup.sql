@@ -6,9 +6,10 @@
 DROP VIEW IF EXISTS wbg.measure_findings_by_project;
 CREATE VIEW wbg.measure_findings_by_project AS
 WITH u AS (
-  SELECT m.*, pp.project_id
+  SELECT m.*, pp.project_id, d.document_kind
   FROM wbg.measure_findings m
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = m.paragraph_id
+  LEFT JOIN wbg.documents d ON d.document_id = m.document_id
 ),
 lists AS (
   SELECT label_set, label_id, project_id,
@@ -26,6 +27,10 @@ SELECT u.label_set, u.label_id, l.label_name AS measure_name, u.project_id, pr.p
        pr.country_name, pr.region, pr.approval_fiscal_year, pr.practice,
        pr.commitment_usd_millions,
        COUNT(*) FILTER (WHERE u.most_likely_grade = 3) AS committed_units,
+       COUNT(*) FILTER (WHERE u.most_likely_grade = 3 AND u.document_kind = 'pad')
+         AS committed_units_in_appraisal_document,
+       COUNT(DISTINCT u.document_id) FILTER (WHERE u.most_likely_grade = 3)
+         AS documents_with_commitment,
        COUNT(*) FILTER (WHERE u.most_likely_grade = 2) AS planned_units,
        COUNT(*) FILTER (WHERE u.was_sent_to_model) AS units_read,
        MAX(u.committed_probability_calibrated) FILTER (WHERE u.most_likely_grade = 3)
@@ -43,4 +48,4 @@ LEFT JOIN wbg.labels l ON l.label_set = u.label_set AND l.label_id = u.label_id
 GROUP BY u.label_set, u.label_id, l.label_name, u.project_id, pr.project_name, pr.country_name,
          pr.region, pr.approval_fiscal_year, pr.practice, pr.commitment_usd_millions;
 COMMENT ON VIEW wbg.measure_findings_by_project IS
-  'One row per project and measure: committed and planned units by the decision model''s grade, the assets those commitments link to, how they are delivered and by whom. A dashboard''s project list; the model''s grades, not a person''s, and coverage is below 100 per cent.';
+  'One row per project and measure: committed and planned units by the decision model''s grade, the assets those commitments link to, how they are delivered and by whom. Count projects, not units: one project with a long restructuring paper can hold hundreds of units (committed_units_in_appraisal_document leaves restructuring and additional-financing papers out). The model''s grades, not a person''s, and coverage is below 100 per cent.';
