@@ -183,3 +183,14 @@ def test_spend_is_recorded_per_run_and_summed_for_today(store):
     _run(store)
     calls, cost = classify.spend_today(data)
     assert calls == 3 and cost == 0.0        # the ledger keeps four decimals; US$0.00003 rounds away
+
+
+def test_readers_find_the_run_whatever_gate_it_was_made_with(store):
+    """The measure and the load ask for the current map without naming a
+    gate: the marker the run wrote says which one to look under."""
+    data, tax, _ = store
+    first = _run(store)
+    assert classify.current_run("assets", data, taxonomy=tax) == first           # gate None
+    assert classify.current_run("assets", data, taxonomy=tax, min_cosine=0.0) == first
+    marker = classify._marker(data, "assets", None)
+    assert os.path.exists(marker)
