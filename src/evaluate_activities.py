@@ -30,7 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import measure  # noqa: E402
 
-WORKBOOK = os.path.join("labels", "activities.xlsx")
+WORKBOOK = "activities.xlsx"           # under data/labels/
 SHINGLE = 8           # words per shingle
 MIN_SHINGLES = 3      # a paragraph matches an activity when it shares at least this many
 NEGATIVE_COLUMN = "Adaptation"
@@ -95,7 +95,7 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
     if not folder:
         raise SystemExit(f"evaluate: no measure run for {name} as it stands; run ./wbg measure "
                          f"{name} first")
-    header, activities = read_workbook(where(data, WORKBOOK))
+    header, activities = read_workbook(where(data, "labels", WORKBOOK))
     if column not in header:
         raise SystemExit(f"evaluate: no column {column!r}; columns: {header}")
     rx = re.compile(text_regex, re.I) if text_regex else None
@@ -140,7 +140,7 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
     def share(rs, key):
         return f"{sum(1 for r in rs if r[key]) / len(rs):.0%} ({sum(1 for r in rs if r[key])}/{len(rs)})" \
             if rs else "n/a"
-    lines = [f"{name} against {os.path.basename(WORKBOOK)} column {column!r}"
+    lines = [f"{name} against {WORKBOOK} column {column!r}"
              + (f" and text /{text_regex}/" if text_regex else ""),
              f"  measure run {os.path.basename(folder)}",
              f"  activities: {len(rows)}; matched to a current paragraph: "

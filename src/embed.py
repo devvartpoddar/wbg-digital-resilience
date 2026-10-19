@@ -594,9 +594,15 @@ def main():
         "host": socket.gethostname(),
     }
     man_path = where(args.data, "embeddings", f"{prefix}{man_name}")
-    with open(man_path, "w", encoding="utf-8") as fh:
-        json.dump(manifest, fh, indent=2, sort_keys=True)
-        fh.write("\n")
+    # A run that embedded nothing keeps the manifest of the run that did:
+    # the provenance of the vectors is what was paid for and served, not the
+    # cache hit that read them back.
+    if stats["requests"] or not os.path.exists(man_path):
+        with open(man_path, "w", encoding="utf-8") as fh:
+            json.dump(manifest, fh, indent=2, sort_keys=True)
+            fh.write("\n")
+    else:
+        log(f"  {os.path.basename(man_path)} kept (nothing embedded this run)")
 
     out = [
         f"{args.unit + ' read:':<28}{len(rows):,}",
