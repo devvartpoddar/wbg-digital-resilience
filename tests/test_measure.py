@@ -118,7 +118,7 @@ def store(tmp_path, monkeypatch):
         {"paragraph_id": "D:p00002", "doc_id": "D", "project_ids": "P1", "component_number": "1",
          "label_id": "towers", "grade": 0, "p0": 0.9, "p1": 0.1, "p2": 0.0, "p3": 0.0}])
     (amap / "manifest.json").write_text("{}")
-    monkeypatch.setattr(classify, "current_run", lambda name, d, taxonomy=None: str(amap))
+    monkeypatch.setattr(classify, "current_run", lambda name, d, taxonomy=None, projects=None: str(amap))
     calls = []
 
     def fake(body, **kw):

@@ -105,6 +105,31 @@ def split(response, questions, call_sha):
     return out
 
 
+def bodies_for(state, questions, model):
+    """The request bodies that ask `questions` of `state`, each under
+    classify.MAX_REQUEST_CHARS: one body when they fit, else the questions
+    in file order split over as many bodies as needed (the store is per
+    question, so a split changes nothing downstream). A state too long for
+    even one question is refused, never truncated."""
+    import classify
+    if not questions:
+        return []
+    size = lambda qs: len(json.dumps(classify.request_body(state, qs, model), ensure_ascii=False))
+    if size(questions) <= classify.MAX_REQUEST_CHARS:
+        return [classify.request_body(state, questions, model)]
+    out, batch = [], {}
+    for qid, q in questions.items():
+        if batch and size({**batch, qid: q}) > classify.MAX_REQUEST_CHARS:
+            out.append(classify.request_body(state, batch, model))
+            batch = {}
+        batch[qid] = q
+        if size(batch) > classify.MAX_REQUEST_CHARS:
+            raise SystemExit(f"answers: a state with one question is over "
+                             f"{classify.MAX_REQUEST_CHARS:,} characters; not truncated")
+    out.append(classify.request_body(state, batch, model))
+    return out
+
+
 def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False,
         legacy_questions=()):
     """Answers for every request, asking only what is not stored.
@@ -138,15 +163,9 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                 missing = {qid: q for qid, q in qs.items() if read(root_, ks[qid]) is None}
                 if not missing:
                     break
-        if missing:
-            body = classify.request_body(state, missing, model)
-            sha = classify.request_sha(body)
-            todo.setdefault(sha, body)             # the same state and questions ask once
+        for body in bodies_for(state, missing, model):
+            todo.setdefault(classify.request_sha(body), body)   # the same request asks once
     chars = sum(len(json.dumps(b, ensure_ascii=False)) for b in todo.values())
-    for body in todo.values():
-        if len(json.dumps(body, ensure_ascii=False)) > classify.MAX_REQUEST_CHARS:
-            raise SystemExit(f"answers: a request is over {classify.MAX_REQUEST_CHARS:,} "
-                             f"characters; not truncated")
     stats = {"to_ask": len(todo), "chars": chars, "calls": 0, "cost_usd": 0.0, "failures": [],
              "seconds": 0.0,
              "estimate_usd": chars / 4 / 1e6 * classify.PRICE_PER_MTOK}

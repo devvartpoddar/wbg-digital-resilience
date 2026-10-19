@@ -678,6 +678,14 @@ def _filters(ap):
                     help="managing unit or its code, or part of one ('IDD04')")
 
 
+def _scope(args):
+    """['--projects', 'P1,P2'] when a selection filter was given, else []."""
+    if not any(getattr(args, k, None) for k in
+               ("project", "cohort_set", "country", "region", "fy", "practice", "unit")):
+        return []
+    return ["--projects", ",".join(_sel(args).ids)]
+
+
 def _sel(args):
     return select(project=args.project and ",".join(args.project),
                   country=args.country and ",".join(args.country),
@@ -725,6 +733,7 @@ def main(argv=None):
     p = sub.add_parser("classify", help="grade every model paragraph against a label set "
                                         "with the decision model (only what is not stored)")
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
+    _filters(p)
     p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
     p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
     p.add_argument("--min-cosine", type=float, default=_classify.MIN_COSINE,
@@ -740,6 +749,7 @@ def main(argv=None):
                                        "with the asset map as columns (after ./wbg search "
                                        "<set> and ./wbg classify assets)")
     p.add_argument("label_set", help="a set in analysis/labels/")
+    _filters(p)
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
@@ -755,6 +765,7 @@ def main(argv=None):
                                      "(generative model, stored), or --assign them with the "
                                      "decision model once a person has approved the list")
     p.add_argument("label_set")
+    _filters(p)
     p.add_argument("--assign", action="store_true")
     p.add_argument("--runs", type=int, default=3)
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
@@ -764,6 +775,7 @@ def main(argv=None):
     p = sub.add_parser("check", help="draw a measure's units for a person to grade, or "
                                      "--evaluate the grades: precision and recall with intervals")
     p.add_argument("label_set")
+    _filters(p)
     p.add_argument("--evaluate", action="store_true")
     p.add_argument("--elusion", action="store_true",
                    help="draw (or evaluate) units the funnel never read, below the pool")
@@ -774,6 +786,7 @@ def main(argv=None):
     p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
                                         "hand-labelled activities workbook")
     p.add_argument("label_set")
+    _filters(p)
     p.add_argument("--column", required=True)
     p.add_argument("--text-regex")
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
@@ -829,7 +842,7 @@ def main(argv=None):
         extra = (["--dry-run"] if args.dry_run else []) + \
             (["--limit", str(args.limit)] if args.limit else []) + \
             (["--min-cosine", str(args.min_cosine)] if args.min_cosine else [])
-        _run("classify.py", args.label_set, *extra, data=data)
+        _run("classify.py", args.label_set, *extra, *_scope(args), data=data)
         if not (args.dry_run or args.limit):
             _run("release.py", data=data)
         return 0
@@ -842,7 +855,8 @@ def main(argv=None):
              "--asset-min", str(args.asset_min), "--top", str(args.top),
              "--min-cosine", str(args.min_cosine), "--batch",
              str(args.batch), "--min-yield", str(args.min_yield), "--max-rounds",
-             str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), data=data)
+             str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), *_scope(args),
+             data=data)
         if not args.dry_run:
             _run("release.py", data=data)
         return 0
@@ -850,7 +864,7 @@ def main(argv=None):
         _run("kinds.py", args.label_set, *(["--assign"] if args.assign else []),
              "--runs", str(args.runs), "--context", args.context, "--gate", args.gate,
              "--asset-min", str(args.asset_min), *(["--dry-run"] if args.dry_run else []),
-             data=data)
+             *_scope(args), data=data)
         return 0
     if args.cmd == "check":
         _run("check_units.py", args.label_set, *(["--evaluate"] if args.evaluate else []),
@@ -861,7 +875,7 @@ def main(argv=None):
         _run("evaluate_activities.py", args.label_set, "--column", args.column,
              *(["--text-regex", args.text_regex] if args.text_regex else []),
              "--context", args.context, "--gate", args.gate, "--asset-min", str(args.asset_min),
-             data=data)
+             *_scope(args), data=data)
         return 0
     if args.cmd == "words":
         _run("candidates.py", args.label_set, args.label_id, "--words", "--top", str(args.top),

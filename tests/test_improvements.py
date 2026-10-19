@@ -80,3 +80,18 @@ def test_section_prefix_uses_the_paragraphs_own_context():
     assert embed.context_prefix({"paragraph_id": "D:p1"}, paras) == \
         "Section: Project Components. Component: Backbone."
     assert embed.context_prefix({"paragraph_id": "D:p9"}, paras) == ""
+
+
+def test_a_long_state_is_asked_in_several_requests_never_truncated(monkeypatch):
+    import answers
+    import classify
+    monkeypatch.setattr(classify, "MAX_REQUEST_CHARS", 900)
+    state = {"section": "x", "sentence": "w " * 150}
+    qs = {f"q{i}": {"type": "noul", "instructions": "a" * 120, "criteria": {"true": "t", "false": "f"}}
+          for i in range(6)}
+    bodies = answers.bodies_for(state, qs, "m")
+    assert len(bodies) > 1
+    asked = [q for b in bodies for q in b["questions"]]
+    assert asked == list(qs)                              # every question once, in order
+    assert all(len(__import__("json").dumps(b)) <= 900 for b in bodies)
+    assert answers.bodies_for(state, dict(list(qs.items())[:1]), "m")[0]["questions"].keys() == {"q0"}

@@ -190,11 +190,11 @@ def load_facets(path=FACETS_FILE):
 
 # ------------------------------------------------------------------ the inputs
 
-def asset_map(data):
+def asset_map(data, projects=None):
     """({paragraph_id: (label, p_at_least_2)}, {(doc_id, component_number):
-    (label, p)}, run name) from the current assets classification. Empty
-    without a run."""
-    folder = classify.current_run(ASSET_SET, data)
+    (label, p)}, run name) from the current assets classification over the
+    same scope. Empty without a run."""
+    folder = classify.current_run(ASSET_SET, data, projects=projects)
     if not folder:
         return {}, {}, ""
     para, comp = {}, {}
@@ -254,7 +254,8 @@ class Run:
 
     def __init__(self, name, data, *, model=MODEL, context="sentence", gate="none",
                  asset_min=0.0, top=TOP, min_cosine=MIN_COSINE, batch=BATCH,
-                 min_yield=MIN_YIELD, max_rounds=MAX_ROUNDS, build=True, log=print):
+                 min_yield=MIN_YIELD, max_rounds=MAX_ROUNDS, build=True, log=print,
+                 projects=None):
         if context not in CONTEXTS or gate not in GATES:
             raise SystemExit(f"measure: --context is one of {CONTEXTS}, --gate one of {GATES}")
         self.name, self.data, self.log = name, data, log
@@ -264,7 +265,9 @@ class Run:
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
                          "extras_min_grade": EXTRAS_MIN_GRADE,
-                         "extras_context": EXTRAS_CONTEXT}
+                         "extras_context": EXTRAS_CONTEXT,
+                         "projects": sorted(projects) if projects else None}
+        self.projects = sorted(projects) if projects else None
         # A reader (the load, the evaluation, the types stage) must not build
         # anything as a side effect: it asks for the run as it stands.
         self.cand = candidates.build(name, data, top=top, log=log, min_cosine=min_cosine) \
@@ -281,7 +284,7 @@ class Run:
         self.facets = load_facets()
         self.qs = questions(self.labels, self.scale, context, self.assets, self.kinds,
                             self.facets)
-        self.para_assets, self.comp_assets, self.asset_run = asset_map(data)
+        self.para_assets, self.comp_assets, self.asset_run = asset_map(data, self.projects)
         if gate in ("paragraph", "component") and not self.asset_run:
             raise SystemExit(f"measure: --gate {gate} needs the asset map: run ./wbg classify "
                              f"{ASSET_SET} first")
@@ -343,6 +346,8 @@ class Run:
         with open(os.path.join(self.cand, "candidates.csv"), newline="", encoding="utf-8") as fh:
             for c in csv.DictReader(fh):
                 r = self.index[self.row_of[c["unit_id"]]]
+                if not classify.in_scope(r, self.projects):
+                    continue
                 row = self.base_row(r, c["route"], 0, c["rank"], c["score"], c["patterns"])
                 row["read_order"] = c.get("read_order", "")
                 rows.append(row)
@@ -507,7 +512,7 @@ class Run:
         rows = []
         for i in order.tolist():
             uid = self.index[i]["unit_id"]
-            if uid in seen:
+            if uid in seen or not classify.in_scope(self.index[i], self.projects):
                 continue
             rows.append(self.base_row(self.index[i], "feedback", rnd, len(rows) + 1,
                                       f"{float(sims[i]):.6f}"))
@@ -696,6 +701,9 @@ def main():
                     help="a round yielding fewer committed units than this is the last")
     ap.add_argument("--max-rounds", type=int, default=MAX_ROUNDS)
     ap.add_argument("--workers", type=int, default=classify.WORKERS)
+    ap.add_argument("--projects", default="",
+                    help="comma-separated project ids: only their units, with the asset map "
+                         "over the same scope (./wbg measure --set digital fills this)")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args()
     import embed
@@ -705,7 +713,8 @@ def main():
                   context=args.context,
                   gate=args.gate, asset_min=args.asset_min, top=args.top,
                   min_cosine=args.min_cosine, batch=args.batch,
-                  min_yield=args.min_yield, max_rounds=args.max_rounds)
+                  min_yield=args.min_yield, max_rounds=args.max_rounds,
+                  projects=classify.scope(args.projects))
     return 0 if out or args.dry_run else 1
 
 

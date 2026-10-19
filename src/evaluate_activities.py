@@ -194,9 +194,12 @@ def main():
     ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
     ap.add_argument("--gate", default="none", choices=measure.GATES)
     ap.add_argument("--asset-min", type=float, default=0.0)
+    ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
+    import classify
     evaluate(args.label_set, args.data, args.column, args.text_regex, context=args.context,
+             projects=classify.scope(args.projects),
              gate=args.gate, asset_min=args.asset_min)
     return 0
 
