@@ -126,7 +126,8 @@ def manifest(data):
                            for p in sorted(glob.glob(os.path.join(d, "*.csv")))},
               "libraries": _library()}
     code = code_state()
-    runs = {"search": _runs(data, "search"), "classify": _runs(data, "classify")}
+    runs = {"search": _runs(data, "search"), "classify": _runs(data, "classify"),
+            "measures": _runs(data, "measures")}
     # The data's identity: the same tables from the same inputs are the same
     # release whatever commit is checked out now, and whatever library
     # version is installed now (that is recorded, not identifying); the commit
@@ -221,7 +222,8 @@ def status(data):
     for kind, f in m["fetched"].items():
         lines.append(f"fetched:  {kind:<12} {f['projects']} projects, latest {f['latest']}")
     lines.append(f"runs:     search {', '.join(m['runs']['search']) or 'none'}; "
-                 f"classify {', '.join(m['runs']['classify']) or 'none'}")
+                 f"classify {', '.join(m['runs']['classify']) or 'none'}; "
+                 f"measures {', '.join(m['runs'].get('measures', [])) or 'none'}")
     return lines
 
 

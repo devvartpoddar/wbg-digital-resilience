@@ -1,0 +1,4 @@
+measure_id,pattern_id,pattern,active
+ews,early_warning,"\bearly[- ]warning\b",true
+ews,alerting,"\b(?:cell broadcast|sirens?|public (?:warning|alert)s?|alert(?:ing)? (?:system|platform|service)s?|emergency (?:call|dispatch|operations?) (?:centre|center|platform|service)s?)\b",true
+ews,forecast_warning,"\b(?:forecast\w*|nowcast\w*|hydromet\w*|meteorolog\w*|hydrolog\w*)\b[^.;]{0,60}?\b(?:warn\w*|alert\w*)\b",true

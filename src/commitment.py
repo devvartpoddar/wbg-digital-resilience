@@ -27,7 +27,7 @@ for planned works, so "would" is not read as a hedge.
 <version> is a SHA-256 over the sentence index, the matrix, the training
 rules and this file's settings: the same index gives the same scores.
 
-  ./wbg commitment          (or python src/commitment.py)
+  python src/commitment.py   (./wbg candidates and ./wbg measure run it when needed)
 """
 import argparse, csv, hashlib, json, os, re, sys, time
 

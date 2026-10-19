@@ -29,15 +29,31 @@ to re-join:
                        still the item: its id, offsets and hash are its own.
   left_out             why the unit is not searched, or blank: 'reference' (a
                        footnote that only cites a source or titles a table),
-                       'fragment' (a title or a scrap of a few words). A list
+                       'fragment' (a title or a scrap of a few words),
+                       'indicator' (a table row in a results-framework or
+                       indicator section: a target, not a commitment). A list
                        item with a lead-in, and anything saying 'will' or
-                       'shall', is always searched.
+                       'shall', is always searched, except an indicator row.
   copy_of              the first unit (in document and unit order) whose
                        embedded text, lead-in included, is the same word for
                        word, or blank. An additional financing or a
                        restructuring paper repeats its appraisal document; a
                        copy is not searched, and copies() maps each searched
                        unit to the copies it stands for.
+  template_projects    in how many OTHER projects a unit with the same words
+                       (lead-in included; case and punctuation aside)
+                       appears: the Bank's standard text, printed in every
+                       document, scores high; a project's own commitment
+                       scores 0.
+  template_share       the share of the unit's TEMPLATE_SHINGLE-word
+                       shingles that appear in units of at least
+                       TEMPLATE_MIN_PROJECTS other projects, 0 to 1: the
+                       same measure for a template with a name or a figure
+                       filled in. Both are columns a reader filters on, never
+                       a cut (a template sentence's firmness still differs
+                       by document); the accounting literature on disclosure
+                       boilerplate defines it this way, as word runs shared
+                       across many filings.
 
 The units are the sentences of the narrative and annex paragraphs given to
 the model, each footnote given to the model, whole (footnotes are mostly
@@ -62,7 +78,9 @@ from sentences import split as split_sentences
 UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block",
              "section_path", "component_number", "subcomponent_number", "component_key",
              "char_start", "char_end", "n_tokens", "text_sha256", "lead_in_start",
-             "lead_in_end", "left_out", "copy_of"]
+             "lead_in_end", "left_out", "copy_of", "template_projects", "template_share"]
+TEMPLATE_SHINGLE = 6        # words per shingle for template_share
+TEMPLATE_MIN_PROJECTS = 2   # a shingle is template wording when this many other projects print it
 
 WORD = re.compile(r"[^\W\d_]{2,}")
 CITATION = re.compile(r"\b(?:19|20)\d\d[a-z]?\b|\[link\]|\bhttps?:|www\.", re.I)
@@ -123,6 +141,13 @@ ROW_VERB = re.compile(r"\b(?:will|shall|would|should|must|is|are|was|were|be|bee
                       r"include[sd]?|support[sd]?|finance[sd]?|provide[sd]?|ensure[sd]?)\b", re.I)
 # Sections of standard text printed in every document.
 BOILERPLATE_SECTION = re.compile(r"grievance", re.I)
+# Results-framework and indicator tables: a row there is a target with a
+# baseline and a date ("campaign launched (Yes/No)"), not a commitment, and
+# the second measure run graded such rows committed. Their prose rows are
+# listed with left_out 'indicator' and not searched (about a quarter of the
+# prose table rows on the 70-project corpus).
+RESULTS_SECTION = re.compile(r"results? (?:framework|matrix|indicators?)\b|\bindicators?\b|"
+                             r"monitoring (?:and|&) evaluation", re.I)
 
 
 def prose_row(text):
@@ -260,11 +285,15 @@ def search_units(data):
                             char_start=p["char_start"], char_end=p["char_end"],
                             n_tokens=p["n_tokens"], text_sha256=p["text_sha256"],
                             lead_in_start="", lead_in_end=""))
+    indicator = set()
     for p in every:
         if p["block"] == "table" and not BOILERPLATE_SECTION.search(p.get("section_title", "")):
             text = _text(texts, data, p["doc_id"])
             if text is not None and prose_row(text[int(p["char_start"]):int(p["char_end"])]):
-                out.extend(dict(context(p), **u) for u in table_units(p, text))
+                rows = [dict(context(p), **u) for u in table_units(p, text)]
+                out.extend(rows)
+                if RESULTS_SECTION.search(p.get("section_title", "")):
+                    indicator.update(u["unit_id"] for u in rows)
     out.sort(key=lambda u: (u["doc_id"], u["unit_id"]))
     first = {}
     for u in out:
@@ -273,14 +302,69 @@ def search_units(data):
         lead = text[int(u["lead_in_start"]):int(u["lead_in_end"])] if u["lead_in_start"] else ""
         # A table sentence's caption is context, not a list lead-in: a scrap
         # of a cell ('(Adaptation)') is still left out.
-        u["left_out"] = left_out(u["kind"], body, bool(lead) and u["kind"] != "table")
+        u["left_out"] = "indicator" if u["unit_id"] in indicator else \
+            left_out(u["kind"], body, bool(lead) and u["kind"] != "table")
         u["copy_of"] = ""
         if not u["left_out"]:
             same = _same_text(lead + "\n" + body)
             u["copy_of"] = first.setdefault(same, u["unit_id"])
             if u["copy_of"] == u["unit_id"]:
                 u["copy_of"] = ""
+    template_scores(out, lambda d: _text(texts, data, d) or "")
     return out
+
+
+def template_scores(units, texts):
+    """Fill template_projects and template_share on every unit (see the
+    module docstring). Exact and shingle word-run frequencies across
+    projects, computed once over the corpus with numpy so memory stays flat
+    at 500 projects (one 64-bit hash and one project index per shingle, not
+    a Python set per shingle); deterministic."""
+    import numpy
+    from array import array
+    project_index = {}
+    # three flat arrays, not a list of tuples: at 500 projects there are
+    # tens of millions of (unit, shingle, project) rows
+    row_unit, row_hash, row_proj = array("L"), array("Q"), array("L")
+    exact = {}                    # exact-words hash -> set of project indices
+    per_unit = []                 # (own project indices, shingle count)
+    for n, u in enumerate(units):
+        text = texts(u["doc_id"])
+        body = text[int(u["char_start"]):int(u["char_end"])]
+        if u["lead_in_start"]:      # what was embedded and graded: the item with its lead-in
+            body = text[int(u["lead_in_start"]):int(u["lead_in_end"])] + "\n" + body
+        words = WORD.findall(body.lower())
+        projects = [project_index.setdefault(p, len(project_index))
+                    for p in u["project_ids"].split("|") if p]
+        key = hashlib.sha256(" ".join(words).encode()).digest()
+        exact.setdefault(key, set()).update(projects)
+        per_unit.append((projects, key, max(0, len(words) - TEMPLATE_SHINGLE + 1)))
+        for i in range(per_unit[-1][2]):
+            h = int.from_bytes(hashlib.blake2b(" ".join(words[i:i + TEMPLATE_SHINGLE]).encode(),
+                                               digest_size=8).digest(), "big")
+            for p in projects:
+                row_unit.append(n)
+                row_hash.append(h)
+                row_proj.append(p)
+    unit_hashes, projects_of = {}, {}
+    if len(row_unit):
+        arr = numpy.column_stack([numpy.frombuffer(row_unit, dtype=numpy.uint64 if row_unit.itemsize == 8 else numpy.uint32).astype(numpy.uint64),
+                                  numpy.frombuffer(row_hash, dtype=numpy.uint64),
+                                  numpy.frombuffer(row_proj, dtype=numpy.uint64 if row_proj.itemsize == 8 else numpy.uint32).astype(numpy.uint64)])
+        # projects per shingle: distinct (hash, project) pairs, counted by hash
+        pairs = numpy.unique(arr[:, 1:], axis=0)
+        hashes, counts = numpy.unique(pairs[:, 0], return_counts=True)
+        projects_of = dict(zip(hashes.tolist(), counts.tolist()))
+        # per unit: its shingles' hashes (distinct per unit)
+        for n, h in numpy.unique(arr[:, :2], axis=0).tolist():
+            unit_hashes.setdefault(n, []).append(h)
+    for n, u in enumerate(units):
+        projects, key, count = per_unit[n]
+        u["template_projects"] = len(exact[key] - set(projects))
+        own = len(set(projects))
+        hit = sum(1 for h in unit_hashes.get(n, ())
+                  if projects_of[h] - own >= TEMPLATE_MIN_PROJECTS) if count else 0
+        u["template_share"] = f"{hit / count:.2f}" if count else "0.00"
 
 
 def copies(units):

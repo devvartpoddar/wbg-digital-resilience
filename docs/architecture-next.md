@@ -1,6 +1,6 @@
-# Next architecture: assets once, measures on top (proposal, not built)
+# Next architecture: assets once, measures on top
 
-Status: agreed in outline, not built. `docs/methodology.md` describes what the code does today; this note describes what is to be built next and why. Three decisions are still open (end of note).
+Status (2026-10-19): built in a different shape than proposed, and `docs/methodology.md` sections 5a to 5d describe what the code does now. What became of each stage: A (enriched units) is not built, pending a placebo test; B (the asset map) exists as `./wbg classify assets` at paragraph level over prose, footnotes and table rows, with a per-asset cosine gate for scale; C exists as `./wbg measure`, a funnel with relevance-feedback rounds and a yield rule, not a learned classifier with a stopping guarantee, and the asset is answered for the sentence itself in the same stage; D exists as `./wbg types` (one yes/no per approved type, not a choice question); E (procurement) is not built. Of the open decisions, 1 is answered by the combined link (unit, else paragraph, else component), 2 by the sentence as the unit, 3 by a 95-unit graded sheet per measure. The rest of this note is the proposal as written, kept as the record of why.
 
 ## Why change
 

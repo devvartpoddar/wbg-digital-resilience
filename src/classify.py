@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Classify every model paragraph against a label set with a decision model.
+"""The asset map: grade every model paragraph, footnote and prose table row
+against each asset with a decision model.
 
-Search finds candidate sentences; this stage reads the paragraph, where the
-work is done. For each narrative and annex paragraph given to the model, one
-request asks, for every active label in the set, a graded question: how does
-this passage relate to the label? The grades are the label set's scale
-(inputs/taxonomy/<set>_scale.csv), from "not about it" to the firmest level,
-so for measures the grade is also how firm the commitment is.
-
-The model is a decision model: it returns a probability for each grade, not
-text. Default: TypeSafe's Jev, pinned to one version, through OpenRouter's
-decisions endpoint with the project's own key (embed.read_key).
+For each paragraph, one request asks, for every active label in the set, a
+graded question: how does this passage relate to the label? The grades are
+the label set's scale (inputs/taxonomy/<set>_scale.csv). The model is a
+decision model: it returns a probability for each grade, not text. Default:
+TypeSafe's Jev, pinned to a dated snapshot, through OpenRouter's decisions
+endpoint with the project's own key (embed.read_key). Every answer is stored
+per question (src/answers.py), so a changed definition re-asks one question.
+With --min-cosine, a label's question goes only to the paragraphs where the
+search sees the label.
 
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
        inputs/taxonomy/<set>.csv, <set>_scale.csv
-Writes data/classify/cache/<model>/<aa>/<sha>.json   one stored response per request
+Writes data/classify/answers/<model>/<aa>/<sha>.json one stored answer per question
        data/classify/<set>-<version>/scores.csv      paragraph x label: the
                                                      probability of each grade,
                                                      the expected grade, the
@@ -34,7 +34,6 @@ paragraphs; changing a definition, a grade or the text gives a new version.
   python3 src/classify.py assets
 """
 import argparse, csv, hashlib, json, os, sys, time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
@@ -48,14 +47,62 @@ MODEL = "typesafe/jev-1.13"
 ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 # US$ per million input tokens (output is free), for the dry-run estimate only.
 PRICE_PER_MTOK = 0.042
-# The endpoint takes 32,000 tokens per request; a request is refused well
-# before that rather than truncated.
-MAX_REQUEST_CHARS = 60_000
-BLOCKS = ("narrative", "annex")
+# Above about 32,000 bytes the endpoint switches to a long-context mode the
+# vendor describes as slower and less accurate; a request is refused before
+# that rather than truncated or degraded.
+MAX_REQUEST_CHARS = 30_000
+# Narrative and annex prose, every footnote given to the model, and every
+# table row the search reads as prose (units.table_units): the climate annex
+# tables are where most commitments sit, and an asset map that skipped them
+# left those commitments with no asset score at all.
+BLOCKS = ("narrative", "annex", "footnote")
+TABLE_ROWS = True
+# A label's question is put to a paragraph only when a unit of the paragraph
+# scores at least this against the label's phrases (0 = ask every label of
+# every paragraph). Measured against the full asset map on the 70-project
+# corpus: 0.25 asks 58 per cent of the questions and loses 5.8 per cent of
+# the links at 0.5 (4.0 per cent at 0.9); 0.30 asks 39 per cent and loses
+# 9.0 (5.4). The questions are most of the cost, so this is the dial.
+MIN_COSINE = 0.0
 WORKERS = 6
 SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
-              "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
-              "model_served"]
+              "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
+              "p3", "p4", "model_served"]
+
+
+# What each run actually asked for is appended to data/reports/spend.csv, so
+# the day's total is a pipeline fact, not a memory.
+SPEND_COLS = ["at", "stage", "label_set", "model", "calls", "cost_usd", "seconds", "run"]
+
+
+def record_spend(data, stage, label_set, model, calls, cost, seconds, run=""):
+    """One line per run that asked anything, in data/reports/spend.csv."""
+    if not calls:
+        return
+    path = where(data, "reports", "spend.csv")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    new = not os.path.exists(path)
+    with open(path, "a", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=SPEND_COLS, lineterminator="\n")
+        if new:
+            w.writeheader()
+        w.writerow({"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stage": stage,
+                    "label_set": label_set, "model": model, "calls": calls,
+                    "cost_usd": f"{cost:.4f}", "seconds": f"{seconds:.0f}", "run": run})
+
+
+def spend_today(data):
+    """(calls, US$) recorded today, for the log line before a run."""
+    path = where(data, "reports", "spend.csv")
+    today = time.strftime("%Y-%m-%d", time.gmtime())
+    calls, cost = 0, 0.0
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                if r["at"].startswith(today):
+                    calls += int(r["calls"])
+                    cost += float(r["cost_usd"])
+    return calls, cost
 
 
 class TransportError(RuntimeError):
@@ -110,16 +157,23 @@ def questions(labels, scale):
 
 # -------------------------------------------------------------- the paragraphs
 
-def paragraphs(data, blocks=BLOCKS):
+def paragraphs(data, blocks=BLOCKS, table_rows=TABLE_ROWS):
     """Model paragraphs with their text (checked against the recorded hash),
-    section and component."""
+    section and component: the blocks named, plus the table rows the search
+    reads as prose when table_rows is set."""
     names = {}
     path = where(data, "appraisal", "components.csv")
     if os.path.exists(path):
         for r in sorted(_rows(path), key=lambda r: r["source"] == "heading"):
             names.setdefault((r["doc_id"], r["number"]), r["name"])
+    prose_rows = set()
+    if table_rows:
+        import units
+        prose_rows = {u["paragraph_id"] for u in units.search_units(data)
+                      if u["kind"] == "table" and not u["left_out"]}
     rows = [r for r in _rows(where(data, "appraisal", "paragraphs.csv"))
-            if r.get("for_model") == "true" and r["block"] in blocks]
+            if (r.get("for_model") == "true" and r["block"] in blocks)
+            or r["paragraph_id"] in prose_rows]
     texts, out = {}, []
     for r in rows:
         did = r["doc_id"]
@@ -180,19 +234,6 @@ def write_cached(root, sha, response):
 
 # --------------------------------------------------------------- the transport
 
-def check(response, qs, n_grades):
-    """A response is stored only if every question has a full set of grade
-    probabilities."""
-    if not isinstance(response, dict):
-        raise TransportError(f"response is not an object: {str(response)[:200]}")
-    answers = response.get("answers") or {}
-    for qid in qs:
-        a = answers.get(qid) or {}
-        probs = a.get("probabilities") or {}
-        if a.get("type") != "score" or sorted(probs) != [str(i) for i in range(n_grades)]:
-            raise TransportError(f"answer for {qid!r} is incomplete: {str(a)[:200]}")
-
-
 def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
     """One request to the decisions endpoint. THE transport seam."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
@@ -220,50 +261,45 @@ def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
     raise last
 
 
-def fetch_missing(todo, root, qs, n_grades, *, api_key, log, workers=WORKERS):
-    """Ask for and store every request in todo [(sha, body)]. Returns
-    (stored, failures, cost)."""
-    stored, failures, cost = 0, [], 0.0
-
-    def one(sha, body):
-        response = decide(body, api_key=api_key)
-        check(response, qs, n_grades)
-        write_cached(root, sha, response)
-        return float((response.get("usage") or {}).get("cost") or 0)
-
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(one, sha, body): sha for sha, body in todo}
-        for n, f in enumerate(as_completed(futures), 1):
-            try:
-                cost += f.result()
-                stored += 1
-            except TransportError as exc:
-                failures.append((futures[f], str(exc)[:200]))
-            except Refused as exc:
-                pool.shutdown(wait=True, cancel_futures=True)
-                raise SystemExit(f"classify: refused, stopping ({stored:,} stored so far; "
-                                 f"run again to resume): {exc}")
-            if n % 500 == 0 or n == len(todo):
-                log(f"  {n:,}/{len(todo):,} asked, {stored:,} stored, "
-                    f"{len(failures)} failed, US${cost:.3f}")
-    return stored, failures, cost
-
-
 # ------------------------------------------------------------------- the run
 
-def version(paras, shas):
-    """Over every paragraph id and the SHA-256 of the exact request sent for
-    it (model, state and questions), so anything that changes what is asked
-    gives a new version."""
-    h = hashlib.sha256()
-    for p, sha in zip(paras, shas):
-        h.update(f"{p['row']['paragraph_id']}:{sha}\n".encode())
-    return h.hexdigest()[:12]
+def best_cosines(name, data, taxonomy=TAXONOMY):
+    """{(label_id, paragraph_id): best unit cosine over the label's queries}
+    from the set's current search run, or {} if there is none."""
+    import search
+    try:
+        folder, _ = search.run_folder(name, data, taxonomy=taxonomy)
+    except SystemExit:
+        return {}
+    if not os.path.exists(os.path.join(folder, "manifest.json")):
+        return {}
+    import numpy
+    queries, scores, index = search.load_run(folder, data)
+    cols = {}
+    for j, q in enumerate(queries):
+        cols.setdefault(q["label_id"], []).append(j)
+    out = {}
+    for lab, js in cols.items():
+        best = numpy.asarray(scores[:, js]).max(axis=1)
+        for r, b in zip(index, best):
+            k = (lab, r["paragraph_id"])
+            if b > out.get(k, -2.0):
+                out[k] = float(b)
+    return out
 
 
-def score_rows(p, response, labels):
+def score_rows(p, response, labels, cosines=None, asked=None):
     out = []
     for lab in labels:
+        r = p["row"]
+        cos = (cosines or {}).get((lab["id"], r["paragraph_id"]))
+        if asked is not None and lab["id"] not in asked:
+            out.append({"paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
+                        "project_ids": r["project_ids"],
+                        "component_number": r.get("component_number", ""),
+                        "label_id": lab["id"], "asked": "false",
+                        "best_cosine": "" if cos is None else f"{cos:.4f}"})
+            continue
         a = response["answers"][lab["id"]]
         probs = [float(a["probabilities"][k]) for k in sorted(a["probabilities"], key=int)]
         total = sum(probs) or 1.0
@@ -271,7 +307,8 @@ def score_rows(p, response, labels):
         out.append({"paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
                     "project_ids": r["project_ids"],
                     "component_number": r.get("component_number", ""),
-                    "label_id": lab["id"],
+                    "label_id": lab["id"], "asked": "true",
+                    "best_cosine": "" if cos is None else f"{cos:.4f}",
                     "grade": max(range(len(probs)), key=lambda i: probs[i]),
                     "expected": f"{sum(i * q for i, q in enumerate(probs)) / total:.3f}",
                     "confidence": f"{float(a.get('confidence', 0)):.3f}",
@@ -281,69 +318,97 @@ def score_rows(p, response, labels):
     return out
 
 
-def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0):
+def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_COSINE):
     """Everything a run would send, without sending it: (labels, scale,
-    questions, [(paragraph, request body)], request SHA-256s, run folder)."""
+    questions, [(paragraph, request body)], request SHA-256s, run folder,
+    cosines). With min_cosine, a paragraph's request holds only the labels
+    whose best unit cosine in it reaches the threshold; a paragraph with
+    none is not sent."""
     labels, scale = load_labels(name, taxonomy)
     qs = questions(labels, scale)
     paras = paragraphs(data)
     if limit:
         paras = paras[:limit]
-    bodies = [(p, request_body(p["state"], qs, model)) for p in paras]
+    cosines = best_cosines(name, data, taxonomy) if min_cosine else {}
+    if min_cosine and not cosines:
+        raise SystemExit(f"classify: --min-cosine needs a search run for {name}; run "
+                         f"./wbg search {name} first")
+    bodies = []
+    for p in paras:
+        ask = qs if not min_cosine else {
+            lid: q for lid, q in qs.items()
+            if cosines.get((lid, p["row"]["paragraph_id"]), 0.0) >= min_cosine}
+        bodies.append((p, request_body(p["state"], ask, model)))
     for p, body in bodies:
         if len(json.dumps(body, ensure_ascii=False)) > MAX_REQUEST_CHARS:
             raise SystemExit(f"classify: {p['row']['paragraph_id']} makes a request over "
                              f"{MAX_REQUEST_CHARS:,} characters; not truncated")
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
-    out = where(data, "classify", f"{prefix}{name}-{version(paras, shas)}")
-    return labels, scale, qs, bodies, shas, out
+    h = hashlib.sha256(f"min_cosine={min_cosine}\n".encode())
+    for p, sha in zip(paras, shas):
+        h.update(f"{p['row']['paragraph_id']}:{sha}\n".encode())
+    out = where(data, "classify", f"{prefix}{name}-{h.hexdigest()[:12]}")
+    return labels, scale, qs, bodies, shas, out, cosines
 
 
-def current_run(name, data, taxonomy=TAXONOMY):
+def current_run(name, data, taxonomy=TAXONOMY, min_cosine=MIN_COSINE):
     """The run folder for the label set and paragraphs as they stand now, or
     None if that run has not been written."""
-    out = plan(name, data, taxonomy=taxonomy)[-1]
+    out = plan(name, data, taxonomy=taxonomy, min_cosine=min_cosine)[5]
     return out if os.path.exists(os.path.join(out, "manifest.json")) else None
 
 
 def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
-             dry_run=False, log=print, workers=WORKERS):
+             dry_run=False, log=print, workers=WORKERS, min_cosine=MIN_COSINE):
     """Classify the label set; returns the run folder (None on a dry run or
     when requests failed - run again to resume)."""
-    labels, scale, qs, bodies, shas, out = plan(name, data, model=model, taxonomy=taxonomy,
-                                                limit=limit)
-    log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} paragraphs")
+    labels, scale, qs, bodies, shas, out, cosines = plan(
+        name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine)
+    n_q = sum(len(b["questions"]) for _, b in bodies)
+    log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} paragraphs, "
+        f"{n_q:,} questions"
+        + (f" (cosine gate {min_cosine}: {n_q / (len(bodies) * len(labels)):.0%} of all)"
+           if min_cosine else ""))
     if os.path.exists(os.path.join(out, "manifest.json")):
         log(f"  already written: {out}")
         return out
-    root = cache_root(data, model)
-    missing = [(s, b) for s, (_, b) in zip(shas, bodies) if read_cached(root, s) is None]
-    todo = list({s: (s, b) for s, b in missing}.values())   # identical paragraphs ask once
-    chars = sum(len(json.dumps(b, ensure_ascii=False)) for _, b in todo)
-    log(f"  stored already: {len(bodies) - len(missing):,}; to ask: {len(todo):,} "
-        f"(about {chars / 4 / 1e6:.1f}M tokens, US${chars / 4 / 1e6 * PRICE_PER_MTOK:.2f})")
+    import answers
+    requests_ = [(p["state"], b["questions"]) for p, b in bodies if b["questions"]]
+    got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                          dry_run=True, legacy_questions=(qs,))
+    log(f"  answers stored already for {sum(1 for g in got if g):,} paragraphs; calls to make: "
+        f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
     if dry_run:
         log("  --dry-run: no request made, nothing written")
         return None
-    failures = []
-    if todo:
+    if st["to_ask"]:
         if not api_key:
             raise SystemExit(f"classify: no credential: set ${embed.KEY_VAR} or put the "
                              f"key in {embed.KEY_FILE} in the main checkout")
-        _, failures, _ = fetch_missing(todo, root, qs, len(scale), api_key=api_key,
-                                       log=log, workers=workers)
-    if failures:
-        log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
-        for sha, err in failures[:5]:
+        log(f"  spent today before this run: US${spend_today(data)[1]:.2f}")
+        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                              legacy_questions=(qs,))
+        record_spend(data, "classify", name, model, st["calls"], st["cost_usd"], st["seconds"],
+                     os.path.basename(out))
+    if st["failures"] or not all(got):
+        log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
+        for sha, err in st["failures"][:5]:
             log(f"    {sha[:12]}: {err}")
         return None
 
     rows, served = [], {}
-    for (p, _), sha in zip(bodies, shas):
-        response = read_cached(root, sha)
-        served[response.get("model", "")] = served.get(response.get("model", ""), 0) + 1
-        rows += score_rows(p, response, labels)
+    it = iter(got)
+    for p, b in bodies:
+        if not b["questions"]:
+            rows += score_rows(p, {"answers": {}}, labels, cosines, asked=set())
+            continue
+        g = next(it)
+        response = {"answers": {qid: e["answer"] for qid, e in g.items()},
+                    "model": "|".join(sorted({e["model"] for e in g.values()}))}
+        served[response["model"]] = served.get(response["model"], 0) + 1
+        rows += score_rows(p, response, labels, cosines,
+                           asked=set(b["questions"]) if min_cosine else None)
     part = out + ".part"
     os.makedirs(part, exist_ok=True)
     with open(os.path.join(part, "scores.csv"), "w", newline="", encoding="utf-8") as fh:
@@ -351,6 +416,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         w.writeheader()
         w.writerows(rows)
     manifest = {"label_set": name, "model_requested": model, "models_served": served,
+                "min_cosine": min_cosine, "questions_asked": n_q,
                 "endpoint": ENDPOINT, "labels": [lab["id"] for lab in labels],
                 "scale": scale, "paragraphs": len(bodies), "questions": qs,
                 "question_sha256": question_shas(qs)}
@@ -364,9 +430,11 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         fh.write(f"{name}: {len(bodies):,} paragraphs x {len(labels)} labels -> {out}\n"
                  f"models served: {served}\n")
         for lab in labels:
-            grades = [r["grade"] for r in rows if r["label_id"] == lab["id"]]
+            grades = [r["grade"] for r in rows if r["label_id"] == lab["id"] and r["asked"] == "true"]
             counts = [grades.count(g) for g in range(len(scale))]
-            fh.write(f"  {lab['id']:<26} paragraphs by most likely grade: {counts}\n")
+            skipped = sum(1 for r in rows if r["label_id"] == lab["id"] and r["asked"] != "true")
+            fh.write(f"  {lab['id']:<26} paragraphs by most likely grade: {counts}"
+                     + (f"; not asked (cosine gate): {skipped:,}" if skipped else "") + "\n")
     if len(served) > 1:
         log(f"  warning: more than one model snapshot served: {served}")
     log(f"  wrote {out}")
@@ -389,10 +457,14 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
     ap.add_argument("--workers", type=int, default=WORKERS)
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--min-cosine", type=float, default=MIN_COSINE,
+                    help="ask a label's question of a paragraph only when a unit of it "
+                         "scores at least this against the label's phrases (0 = all)")
     args = ap.parse_args()
     key = "" if args.dry_run else embed.read_key("")
     out = classify(args.label_set, args.data, model=args.model, api_key=key,
-                   limit=args.limit, dry_run=args.dry_run, workers=args.workers)
+                   limit=args.limit, dry_run=args.dry_run, workers=args.workers,
+                   min_cosine=args.min_cosine)
     return 0 if out or args.dry_run else 1
 
 

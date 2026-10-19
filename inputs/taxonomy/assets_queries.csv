@@ -62,27 +62,59 @@ dpi,enterprise_arch,government enterprise architecture and shared platforms,fals
 dpi,unique_id,unique identification number for residents,true
 dpi,data_protection,personal data protection and data governance,true
 dpi,data_protection_law,data protection law and data protection authority,true
-drm_ews,dr_site,disaster recovery site and backup data centre,true
+drm_ews,dr_site,disaster recovery site and backup data centre,false
 drm_ews,ews,early warning system,true
 drm_ews,hydromet,hydro-meteorological monitoring stations,true
 drm_ews,radar,weather radar and forecasting systems,true
 drm_ews,alerting,emergency alerts broadcast to mobile phones,true
 drm_ews,responders,emergency communications network for first responders,true
-drm_ews,risk_platform,disaster risk information platform,true
+drm_ews,risk_platform,disaster risk information platform,false
 drm_ews,emergency_line,911 emergency response platform,true
 drm_ews,floods,flood and cyclone warning,true
-drm_ews,hazard_maps,geospatial hazard and risk mapping,true
-drm_ews,continuity,business continuity and disaster recovery of government systems,true
+drm_ews,hazard_maps,geospatial hazard and risk mapping,false
+drm_ews,continuity,business continuity and disaster recovery of government systems,false
 drm_ews,eoc,emergency operations centre,true
-access_connectivity,usf,universal service fund,true
-access_connectivity,affordability,affordable internet access,true
-access_connectivity,subsidies,subsidies for devices and connectivity,true
+access_connectivity,usf,universal service fund,false
+access_connectivity,affordability,affordable internet access,false
+access_connectivity,subsidies,subsidies for devices and connectivity,false
 access_connectivity,public_wifi,public Wi-Fi access points,true
 access_connectivity,community,community networks,true
 access_connectivity,schools_health,connecting schools and health facilities to the internet,true
 access_connectivity,literacy,digital literacy training,false
-access_connectivity,coverage_gap,closing the mobile coverage gap in rural areas,true
+access_connectivity,coverage_gap,closing the mobile coverage gap in rural areas,false
 access_connectivity,smartphones,access to smartphones and devices,true
 access_connectivity,public_buildings,connecting government offices and public buildings in rural areas with fibre,true
 access_connectivity,last_mile_institutions,last-mile fibre to schools and health facilities,true
-access_connectivity,universal_access,universal access to broadband for underserved communities,true
+access_connectivity,universal_access,universal access to broadband for underserved communities,false
+data_hosting,dr_site,disaster recovery site and backup data centre for government systems,true
+data_hosting,continuity,business continuity and disaster recovery of government digital systems,true
+digital_systems,hmis,health management information system,true
+digital_systems,emis,education management information system,true
+digital_systems,ifmis,integrated financial management information system,true
+digital_systems,eservices,online government services and e-services portal,true
+digital_systems,platform,digital platform for service delivery,true
+digital_systems,case_mgmt,case management and document management system,true
+digital_systems,app,mobile application for citizens or farmers,true
+digital_systems,software,software development for a government system,true
+digital_systems,land,land administration and cadastre information system,true
+digital_systems,agri,digital agriculture advisory and e-voucher platform,true
+satellite,ground_station,satellite ground station and teleport,true
+satellite,vsat,VSAT terminals for remote and island sites,true
+satellite,leo_capacity,satellite capacity from low earth orbit operators for backhaul,true
+satellite,sat_backbone,satellite links used as backbone or backhaul where fibre is absent,true
+satellite,landing_rights,satellite licensing and landing rights,true
+institutional_networks,govnet,government wide-area network connecting ministries and agencies,true
+institutional_networks,nren,national research and education network connecting universities,true
+institutional_networks,sector_network,health sector network linking hospitals and district offices,true
+institutional_networks,noc,network operations centre for the government network,true
+institutional_networks,lan,institutional local area networks and shared email and voice services,true
+operational_tech,scada,SCADA and control systems for power water and transport,true
+operational_tech,smart_meters,smart meters and advanced metering infrastructure,true
+operational_tech,its,intelligent transport systems for traffic management and tolling,true
+operational_tech,iot_sensors,sensor and Internet of Things networks for utilities and agriculture,true
+operational_tech,smart_grid,smart grid communications,true
+geospatial,sdi,spatial data infrastructure platform and geoportal,true
+geospatial,mapping_agency,systems and equipment of the national mapping agency,true
+geospatial,imagery,satellite imagery and earth observation services,true
+geospatial,survey,aerial and drone surveys and LiDAR,true
+geospatial,geodetic,geodetic network and continuously operating reference stations,true

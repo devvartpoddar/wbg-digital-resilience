@@ -1,0 +1,8 @@
+measure_id,query_id,query,active
+cra,site_specific,a site-specific climate risk assessment will be conducted for the infrastructure before construction,true
+cra,design_siting,climate and disaster risk assessment to inform the design and siting of the works,true
+cra,existing_infra,assessment of the climate vulnerability and resilience of existing infrastructure,true
+cra,operator,climate risk assessments to be carried out by the operator or contractor and included in the tender,true
+cra,hazard_mapping,hazard mapping to identify sites exposed to floods storms and landslides,true
+cra,national,national or sector-wide climate vulnerability assessment,true
+cra,screening,climate and disaster risk screening of project activities,true

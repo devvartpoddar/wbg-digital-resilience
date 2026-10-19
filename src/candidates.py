@@ -6,9 +6,9 @@ A unit is a candidate for a label when either route finds it:
 
   pattern     one of the label's word patterns (<set>_patterns.csv) matches
               its text: the route that finds most commitments;
-  embedding   it ranks in the label's best `top` (default 1,000) by its best
-              cosine over the label's queries: the route that finds what
-              the words miss.
+  embedding   its best cosine over the label's queries reaches `min_cosine`,
+              or it ranks in the label's best `top` (either may be off): the
+              route that finds what the words miss.
 
 Each candidate carries the commitment scorer's p_commitment and firmness
 (src/commitment.py), the types whose patterns it matches (<set>_types.csv),
@@ -24,16 +24,16 @@ examples a person checked.
       p_commitment, firmness
   data/candidates/<set>-<version>/manifest.json
 
-<version> is a SHA-256 over this code, the search run, the patterns, the
-types, `top` and the commitment scores: change any of them and it is a new
-version.
+<version> is a SHA-256 over CANDIDATES_VERSION, the search run, the patterns,
+the types, the pool settings and the commitment scores: change any of them
+and it is a new version.
 
 words() lists the words that set a label's strongest candidates apart from
 the other labels' candidates (or the corpus, for a set of one), the cheap way to see what types a measure has before writing
 <set>_types.csv: a person reads 30 words, not 300 sentences.
 
-  ./wbg candidates measures [--top 1000]
-  ./wbg words measures fibre_burial [--committed]
+  ./wbg candidates cra [--top 2000] [--min-cosine 0.45]
+  ./wbg words cra cra [--committed]
 """
 import argparse, csv, hashlib, json, math, os, re, sys, time
 from collections import Counter
@@ -46,7 +46,8 @@ import commitment  # noqa: E402
 import labels  # noqa: E402
 import search  # noqa: E402
 
-TOP = 1000
+TOP = 2000           # pool by count, for ./wbg candidates alone; the measure stage uses its own
+                     # pool (src/measure.py TOP and MIN_COSINE) and the load follows the measure
 PATTERN_WEIGHT = 10   # a pattern hit outranks every unit found by embedding alone
 COMMIT_WEIGHT = 2     # then p_commitment counts twice the embedding percentile
 COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
@@ -58,10 +59,18 @@ with would also any all may more most other over per under up via within without
 WORD = re.compile(r"[a-z][a-z\-]+")
 
 
-def version(run, patterns, types, top, commit_version):
+MIN_COSINE = 0.0      # 0 = off; else every unit at or above it is a candidate
+# Bump when the way candidates are chosen or ordered changes (not for a
+# comment): a run is keyed on it, as the cleaners are on theirs, rather than
+# on a hash of this file, which made every docstring edit a new version.
+CANDIDATES_VERSION = "cand-2"
+
+
+def version(run, patterns, types, top, commit_version, min_cosine=MIN_COSINE):
     h = hashlib.sha256()
-    h.update(commitment._sha_file(os.path.abspath(__file__)).encode())   # this code
-    h.update(f"{os.path.basename(run)}\ttop={top}\tcommitment={commit_version}\n".encode())
+    h.update(f"{CANDIDATES_VERSION}\n".encode())
+    h.update(f"{os.path.basename(run)}\ttop={top}\tmin_cosine={min_cosine}\t"
+             f"commitment={commit_version}\n".encode())
     for p in patterns:
         h.update(f"p\t{p['label_id']}\t{p['pattern_id']}\t{p['pattern']}\n".encode())
     for t in types:
@@ -96,8 +105,13 @@ def prioritise(label_rows):
     return label_rows
 
 
-def build(name, data, top=TOP, log=print):
-    """Write the candidates of every label in the set; returns the folder."""
+def build(name, data, top=TOP, log=print, min_cosine=MIN_COSINE):
+    """Write the candidates of every label in the set; returns the folder.
+    A unit is a candidate when a pattern matches it, when it is in the
+    label's embedding top `top` (0 = off), or when its best cosine over the
+    label's queries is at least `min_cosine` (0 = off). A cosine threshold
+    carries between measures where a count does not: a rare measure needs
+    a small pool and a common one a large one."""
     run, _ = search.run_folder(name, data)
     if not os.path.exists(os.path.join(run, "manifest.json")):
         raise SystemExit(f"candidates: {name} has no search run for the current index - "
@@ -105,7 +119,7 @@ def build(name, data, top=TOP, log=print):
     patterns, types = labels.load_patterns(name), labels.load_types(name)
     commit_folder = commitment.score(data, log=log)
     out = where(data, "candidates",
-                f"{name}-{version(run, patterns, types, top, os.path.basename(commit_folder))}")
+                f"{name}-{version(run, patterns, types, top, os.path.basename(commit_folder), min_cosine)}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log(f"candidates: {out} already built")
         return out
@@ -128,7 +142,7 @@ def build(name, data, top=TOP, log=print):
         label_rows = []
         for i in order.tolist():
             hit = [p["pattern_id"] for p in mine if p["regex"].search(text_list[i])]
-            near = rank[i] <= top
+            near = (top and rank[i] <= top) or (min_cosine and best[i] >= min_cosine)
             if not hit and not near:
                 continue
             route = "both" if hit and near else ("pattern" if hit else "embedding")
@@ -139,7 +153,7 @@ def build(name, data, top=TOP, log=print):
                          "route": route, "rank": int(rank[i]), "score": f"{best[i]:.6f}",
                          "patterns": "|".join(hit),
                          "types": "|".join(t["type_id"] for t in kinds
-                                           if t["regex"].search(text_list[i])),
+                                           if t["regex"] and t["regex"].search(text_list[i])),
                          "p_commitment": "" if p_commit is None else f"{p_commit:.4f}",
                          "firmness": firm})
         rows.extend(prioritise(label_rows))
@@ -154,7 +168,7 @@ def build(name, data, top=TOP, log=print):
         w.writerows(rows)
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump({"label_set": name, "version": os.path.basename(out).rsplit("-", 1)[1],
-                   "search_run": os.path.basename(run), "top": top,
+                   "search_run": os.path.basename(run), "top": top, "min_cosine": min_cosine,
                    "commitment": os.path.basename(commit_folder),
                    "patterns": len(patterns), "types": len(types), "counts": counts,
                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
@@ -165,14 +179,14 @@ def build(name, data, top=TOP, log=print):
     return out
 
 
-def current(name, data, top=TOP):
+def current(name, data, top=TOP, min_cosine=MIN_COSINE):
     """The candidates folder for the set as it stands now, or None."""
     try:
         run, _ = search.run_folder(name, data)
     except SystemExit:
         return None
     patterns, types = labels.load_patterns(name), labels.load_types(name)
-    folder = where(data, "candidates", f"{name}-{version(run, patterns, types, top, commitment.version(data))}")
+    folder = where(data, "candidates", f"{name}-{version(run, patterns, types, top, commitment.version(data), min_cosine)}")
     return folder if os.path.exists(os.path.join(folder, "manifest.json")) else None
 
 
@@ -181,7 +195,7 @@ def _terms(text):
     return words + [f"{a} {b}" for a, b in zip(words, words[1:])]
 
 
-def words(name, label_id, data, top=TOP, committed=False, n=30, near=150):
+def words(name, label_id, data, top=TOP, committed=False, n=30, near=150, min_cosine=MIN_COSINE):
     """[(term, count among the label's candidates, ratio to the background)]:
     the terms most over-represented among the label's strongest candidates
     (a pattern hit, or within the embedding's best `near`; with p_commitment
@@ -189,9 +203,10 @@ def words(name, label_id, data, top=TOP, committed=False, n=30, near=150):
     is the other labels' candidates in the same set, so words every measure
     shares ('climate', 'resilience') drop out; a set of one label is
     compared with the whole index."""
-    folder = current(name, data, top)
+    folder = current(name, data, top, min_cosine)
     if not folder:
-        raise SystemExit(f"words: no candidates for {name} - run ./wbg candidates {name}")
+        raise SystemExit(f"words: no candidates for {name} at top {top}, cosine {min_cosine} - "
+                         f"run ./wbg measure {name} (or ./wbg candidates {name}) first")
     with open(os.path.join(folder, "candidates.csv"), newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
 
@@ -226,6 +241,7 @@ def main():
     ap.add_argument("label_set")
     ap.add_argument("label_id", nargs="?", help="with --words: the label to describe")
     ap.add_argument("--top", type=int, default=TOP)
+    ap.add_argument("--min-cosine", type=float, default=MIN_COSINE)
     ap.add_argument("--words", action="store_true", help="the label's distinctive words")
     ap.add_argument("--committed", action="store_true",
                     help="with --words: only candidates with p_commitment >= 0.5")
@@ -235,10 +251,10 @@ def main():
         if not args.label_id:
             raise SystemExit("candidates --words needs a label id")
         for term, c, ratio in words(args.label_set, args.label_id, args.data, args.top,
-                                    args.committed):
+                                    args.committed, min_cosine=args.min_cosine):
             print(f"  {term:<32} {c:>5} candidates  x{ratio:,.1f} the background rate")
         return 0
-    build(args.label_set, args.data, args.top)
+    build(args.label_set, args.data, args.top, min_cosine=args.min_cosine)
     return 0
 
 

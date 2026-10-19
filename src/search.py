@@ -2,8 +2,8 @@
 """Score every search unit against every query of a label set, then filter.
 Sentences are where we search, paragraphs where we work.
 
-A label set is two files in inputs/taxonomy/, kept by people and only read
-here:
+A label set is two files in inputs/taxonomy/ or analysis/labels/ (src/labels.py),
+kept by people and only read here:
 
   <set>.csv           one row per label: <x>_id, <x>_name, definition, active
   <set>_queries.csv   any number of search phrases per label: <x>_id,

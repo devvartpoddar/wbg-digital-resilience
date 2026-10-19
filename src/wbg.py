@@ -33,6 +33,9 @@ from collections import Counter, defaultdict
 SRC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SRC)
 sys.path.insert(0, SRC)
+import candidates as _candidates  # noqa: E402  (defaults for the command line)
+import classify as _classify  # noqa: E402
+import measure as _measure  # noqa: E402
 from paths import data_root, where  # noqa: E402
 
 COHORT = os.path.join(ROOT, "inputs", "config", "cohort.csv")
@@ -97,9 +100,12 @@ def _has(values, *fields):
 
 
 def select(project=None, country=None, region=None, fy=None, practice=None, unit=None,
-           path=COHORT, data=None):
+           cohort_set=None, path=COHORT, data=None):
     """Cohort projects matching every filter given; all of them when none is.
 
+    cohort_set  the cohort's own set ('digital': operations whose object is a
+                digital asset; 'digital_contributor': operations where a
+                digital asset contributes to another sector's object)
     project   project ids, a list or comma-separated ('P171528,P176932')
     country   country codes ('KE', '3W')
     region    region names, or part of one, without regard to case ('western')
@@ -120,7 +126,7 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
         for col in PROJECT_COLS:
             r[col] = p.get(col, "")
     given = {"project": project, "country": country, "region": region, "fy": fy,
-             "practice": practice, "unit": unit}
+             "practice": practice, "unit": unit, "set": cohort_set}
     blank = [k for k, v in given.items() if v is not None and not _as_list(v)]
     if blank:
         raise SystemExit(f"empty filter: --{', --'.join(blank)}")
@@ -130,6 +136,11 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
     years = [re.sub(r"(?i)^fy\s*", "", y) for y in _as_list(fy)]
     years = [f"20{y}" if len(y) == 2 and y.isdigit() else y for y in years]
     pracs, units = [x.lower() for x in _as_list(practice)], [x.lower() for x in _as_list(unit)]
+    sets = [x.lower() for x in _as_list(cohort_set)]
+    known_sets = {r.get("cohort_set", "").lower() for r in rows}
+    if sets and not set(sets) <= known_sets:
+        raise SystemExit(f"no such cohort set: {', '.join(sorted(set(sets) - known_sets))} "
+                         f"(the cohort has {', '.join(sorted(known_sets))})")
     if (pracs or units) and info is None:
         raise SystemExit("no projects table yet: run ./wbg prepare first")
     unknown = sorted(set(projects) - {r["project_id"] for r in rows})
@@ -140,6 +151,7 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
            and (not countries or any(c in countries for c in r["country_code"].upper().split("|")))
            and (not regions or _has(regions, r["region"]))
            and (not years or r["approval_fy"] in years)
+           and (not sets or r.get("cohort_set", "").lower() in sets)
            and (not pracs or _has(pracs, r["practice"], r["practice_code"]))
            and (not units or _has(units, r["managing_unit"], r["unit_code"]))]
     # Each value carries its filter's name, so '--practice digital' and
@@ -147,7 +159,8 @@ def select(project=None, country=None, region=None, fy=None, practice=None, unit
     # the whole.
     parts = [*[f"project-{x}" for x in projects], *[f"country-{x}" for x in countries],
              *[f"region-{x}" for x in regions], *[f"fy{y}" for y in years],
-             *[f"practice-{x}" for x in pracs], *[f"unit-{x}" for x in units]]
+             *[f"practice-{x}" for x in pracs], *[f"unit-{x}" for x in units],
+             *[f"set-{x}" for x in sets]]
     name = re.sub(r"[^A-Za-z0-9._-]+", "-", "-".join(parts)).strip("-").lower() or "all"
     if len(name) > 80:
         name = name[:71].rstrip("-") + "-" + hashlib.sha256(name.encode()).hexdigest()[:8]
@@ -654,6 +667,8 @@ def export(sel=None, name=None, data=None, include_tables=False, today=None):
 
 def _filters(ap):
     ap.add_argument("--project", action="append", help="project id (repeat or comma-separate)")
+    ap.add_argument("--set", action="append", dest="cohort_set",
+                    help="the cohort's set: digital or digital_contributor")
     ap.add_argument("--country", action="append", help="country code as in the cohort")
     ap.add_argument("--region", action="append", help="region name, or part of one")
     ap.add_argument("--fy", action="append", help="approval fiscal year")
@@ -668,6 +683,7 @@ def _sel(args):
                   country=args.country and ",".join(args.country),
                   region=args.region and ",".join(args.region),
                   fy=args.fy and ",".join(args.fy),
+                  cohort_set=args.cohort_set and ",".join(args.cohort_set),
                   practice=args.practice and ",".join(args.practice),
                   unit=args.unit and ",".join(args.unit))
 
@@ -702,21 +718,74 @@ def main(argv=None):
                                       "analysis/labels/)")
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     p.add_argument("--dry-run", action="store_true", help="what it would embed, and cost")
+    p.add_argument("--embed-context", choices=("none", "section"), default="none",
+                   help="embed each sentence with its section title and component heading in "
+                        "front (a re-embedding; the index, the search and every run keyed on "
+                        "them are new)")
     p = sub.add_parser("classify", help="grade every model paragraph against a label set "
                                         "with the decision model (only what is not stored)")
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
     p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
+    p.add_argument("--min-cosine", type=float, default=_classify.MIN_COSINE,
+                   help="ask a label of a paragraph only when a unit scores at least this")
     p = sub.add_parser("candidates", help="every unit a label's patterns or its embedding "
                                           "top N find, with p_commitment, firmness and types "
                                           "(after ./wbg search)")
     p.add_argument("label_set", help="any set in analysis/labels/ or inputs/taxonomy/")
-    p.add_argument("--top", type=int, default=1000, help="embedding depth per label")
+    p.add_argument("--top", type=int, default=_measure.TOP, help="pool by count (0 = off)")
+    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
+                   help="pool: every unit whose best cosine reaches this (0 = off)")
+    p = sub.add_parser("measure", help="grade a measure's candidates with the decision model, "
+                                       "with the asset map as columns (after ./wbg search "
+                                       "<set> and ./wbg classify assets)")
+    p.add_argument("label_set", help="a set in analysis/labels/")
+    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
+    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
+    p.add_argument("--asset-min", type=float, default=0.0)
+    p.add_argument("--top", type=int, default=_measure.TOP, help="round 0 pool by count (0 = off)")
+    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
+                   help="round 0 pool: units whose best cosine reaches this")
+    p.add_argument("--batch", type=int, default=_measure.BATCH, help="units per feedback round")
+    p.add_argument("--min-yield", type=int, default=_measure.MIN_YIELD,
+                   help="a round yielding fewer committed units than this is the last")
+    p.add_argument("--max-rounds", type=int, default=_measure.MAX_ROUNDS)
+    p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("types", help="propose a measure's types from its committed units "
+                                     "(generative model, stored), or --assign them with the "
+                                     "decision model once a person has approved the list")
+    p.add_argument("label_set")
+    p.add_argument("--assign", action="store_true")
+    p.add_argument("--runs", type=int, default=3)
+    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
+    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
+    p.add_argument("--asset-min", type=float, default=0.0)
+    p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("check", help="draw a measure's units for a person to grade, or "
+                                     "--evaluate the grades: precision and recall with intervals")
+    p.add_argument("label_set")
+    p.add_argument("--evaluate", action="store_true")
+    p.add_argument("--elusion", action="store_true",
+                   help="draw (or evaluate) units the funnel never read, below the pool")
+    p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
+    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
+    p.add_argument("--asset-min", type=float, default=0.0)
+    p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
+                                        "hand-labelled activities workbook")
+    p.add_argument("label_set")
+    p.add_argument("--column", required=True)
+    p.add_argument("--text-regex")
+    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
+    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
+    p.add_argument("--asset-min", type=float, default=0.0)
     p = sub.add_parser("words", help="the words that set a label's candidates apart from "
                                      "the corpus: what types it has")
     p.add_argument("label_set")
     p.add_argument("label_id")
-    p.add_argument("--top", type=int, default=1000)
+    p.add_argument("--top", type=int, default=_measure.TOP, help="the measure's pool by count")
+    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
+                   help="the measure's pool by cosine")
     p.add_argument("--committed", action="store_true",
                    help="only candidates with p_commitment >= 0.5")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
@@ -751,23 +820,52 @@ def main(argv=None):
         return 0
     if args.cmd == "search":
         dry = ["--dry-run"] if args.dry_run else []
-        _run("embed.py", *dry, data=data)
+        _run("embed.py", *dry, "--context", args.embed_context, data=data)
         _run("search.py", args.label_set, *dry, data=data)
         if not dry:
             _run("release.py", data=data)
         return 0
     if args.cmd == "classify":
         extra = (["--dry-run"] if args.dry_run else []) + \
-            (["--limit", str(args.limit)] if args.limit else [])
+            (["--limit", str(args.limit)] if args.limit else []) + \
+            (["--min-cosine", str(args.min_cosine)] if args.min_cosine else [])
         _run("classify.py", args.label_set, *extra, data=data)
-        if not extra:
+        if not (args.dry_run or args.limit):
             _run("release.py", data=data)
         return 0
     if args.cmd == "candidates":
-        _run("candidates.py", args.label_set, "--top", str(args.top), data=data)
+        _run("candidates.py", args.label_set, "--top", str(args.top), "--min-cosine",
+             str(args.min_cosine), data=data)
+        return 0
+    if args.cmd == "measure":
+        _run("measure.py", args.label_set, "--context", args.context, "--gate", args.gate,
+             "--asset-min", str(args.asset_min), "--top", str(args.top),
+             "--min-cosine", str(args.min_cosine), "--batch",
+             str(args.batch), "--min-yield", str(args.min_yield), "--max-rounds",
+             str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), data=data)
+        if not args.dry_run:
+            _run("release.py", data=data)
+        return 0
+    if args.cmd == "types":
+        _run("kinds.py", args.label_set, *(["--assign"] if args.assign else []),
+             "--runs", str(args.runs), "--context", args.context, "--gate", args.gate,
+             "--asset-min", str(args.asset_min), *(["--dry-run"] if args.dry_run else []),
+             data=data)
+        return 0
+    if args.cmd == "check":
+        _run("check_units.py", args.label_set, *(["--evaluate"] if args.evaluate else []),
+             *(["--elusion"] if args.elusion else []), "--seed", str(args.seed), "--context", args.context, "--gate", args.gate,
+             "--asset-min", str(args.asset_min), data=data)
+        return 0
+    if args.cmd == "evaluate":
+        _run("evaluate_activities.py", args.label_set, "--column", args.column,
+             *(["--text-regex", args.text_regex] if args.text_regex else []),
+             "--context", args.context, "--gate", args.gate, "--asset-min", str(args.asset_min),
+             data=data)
         return 0
     if args.cmd == "words":
         _run("candidates.py", args.label_set, args.label_id, "--words", "--top", str(args.top),
+             "--min-cosine", str(args.min_cosine),
              *(["--committed"] if args.committed else []), data=data)
         return 0
     if args.cmd == "sensitivity":

@@ -133,9 +133,14 @@ def test_load_is_idempotent(tmp_path, monkeypatch, capsys):
                                                        encoding="utf-8")
     with open(data / "raw" / "documents.csv", "w", newline="") as fh:
         fh.write("doc_id,title\nD1,Test\n")
+    from clean import PARA_COLS
     with open(data / "appraisal" / "paragraphs.csv", "w", newline="") as fh:
-        fh.write("paragraph_id,doc_id,char_start,char_end,n_tokens\n"
-                 "D1:p00001,D1,0,17,3\nD1:p00002,D1,18,32,2\n")
+        w = csv.DictWriter(fh, fieldnames=PARA_COLS)
+        w.writeheader()
+        for i, (a, z, n) in enumerate([(0, 17, 3), (18, 32, 2)], 1):
+            w.writerow({"paragraph_id": f"D1:p{i:05d}", "doc_id": "D1", "project_ids": "P1",
+                        "ordinal": i, "block": "narrative", "for_model": "true",
+                        "char_start": a, "char_end": z, "n_tokens": n, "section_title": "x"})
     argv = ["load_pg.py", "--data", str(data), "--dsn", os.environ["WBG_PG_TEST"]]
     monkeypatch.setattr(sys, "argv", argv)
     L.main()
