@@ -70,7 +70,17 @@ INDEX_COLS = ["row", "paragraph_id", "text_sha256"]
 # print the same text in other documents (units.copies), pipe-separated.
 SENTENCE_INDEX_COLS = ["row"] + [c for c in units.UNIT_COLS
                                  if c not in ("char_start", "char_end", "n_tokens",
-                                              "left_out", "copy_of")] + ["copies"]
+                                              "left_out", "copy_of")] + ["copies",
+                                                                         "embedded_sha256"]
+# What is put in front of a unit's text before embedding (--context). "none":
+# the list lead-in alone (units.lead_ins). "section": also the section title
+# and the component heading the unit sits under, as a fixed prefix ("Section:
+# ... Component: ...") so a sentence that says "the facility" or "these
+# sites" embeds with what it is about. No model writes the prefix: it is the
+# paragraph's own context, so it is deterministic and costs nothing but the
+# one re-embedding. The embedded text's hash is in the index (embedded_sha256),
+# so a changed design is a new index and every run keyed on it is new.
+CONTEXTS = ("none", "section")
 
 # What each unit writes: (matrix, index, manifest, report).
 OUTPUTS = {
@@ -296,7 +306,20 @@ def pack(vec, dim):
 
 # ------------------------------------------------------------------ the corpus
 
-def resolve(data_dir, rows, id_field="paragraph_id"):
+def context_prefix(row, paras):
+    """The 'section' design's prefix for a unit, from its paragraph's row."""
+    p = paras.get(row.get("paragraph_id", row.get("unit_id")), {})
+    parts = []
+    if p.get("section_title"):
+        parts.append(f"Section: {p['section_title'].strip()}.")
+    name = (p.get("subcomponent_name") if row.get("subcomponent_number") else "") or \
+        p.get("component_name") or ""
+    if name:
+        parts.append(f"Component: {name.strip()}.")
+    return " ".join(parts)
+
+
+def resolve(data_dir, rows, id_field="paragraph_id", context="none", paras=None):
     """Paragraph text pulled back out of the clean files by offset, with the
     hash recorded at cleaning time re-checked against it.
 
@@ -334,7 +357,11 @@ def resolve(data_dir, rows, id_field="paragraph_id"):
         if row.get("lead_in_start"):
             lead = cache[did][int(row["lead_in_start"]):int(row["lead_in_end"])]
             body = lead + "\n" + body
-            sha = hashlib.sha256(body.encode("utf-8")).hexdigest()
+        if context == "section":
+            prefix = context_prefix(row, paras or {})
+            if prefix:
+                body = prefix + "\n" + body
+        sha = hashlib.sha256(body.encode("utf-8")).hexdigest()   # of the text embedded
         if len(body) > MAX_TEXT_CHARS:
             raise SystemExit(
                 f"embed: {row[id_field]} is {len(body):,} characters, over "
@@ -467,6 +494,9 @@ def main():
                     help="first N units; artifacts go to data/embeddings/smoke_*")
     ap.add_argument("--unit", choices=sorted(OUTPUTS), default="sentences",
                     help="what one vector stands for (default: sentences)")
+    ap.add_argument("--context", choices=CONTEXTS, default="none",
+                    help="what is embedded in front of a sentence: its list lead-in alone "
+                         "(none) or also its section title and component heading (section)")
     args = ap.parse_args()
 
     def log(msg):
@@ -491,7 +521,12 @@ def main():
     if args.limit:
         rows = rows[:args.limit]
 
-    order, unique, empty = resolve(args.data, rows, id_field)
+    paras = {}
+    if args.context != "none":
+        with open(where(args.data, "appraisal", "paragraphs.csv"), newline="",
+                  encoding="utf-8") as fh:
+            paras = {r["paragraph_id"]: r for r in csv.DictReader(fh)}
+    order, unique, empty = resolve(args.data, rows, id_field, args.context, paras)
     root = cache_root(args.data, args.model, args.dim)
 
     have = {sha for sha in unique if read_cached(root, sha, args.dim) is not None}
@@ -554,7 +589,7 @@ def main():
             by_id = {r["unit_id"]: r for r in rows}
             w.writerow(SENTENCE_INDEX_COLS)
             for i, (uid, sha) in enumerate(index):
-                r = by_id[uid]
+                r = dict(by_id[uid], embedded_sha256=sha)
                 w.writerow([i] + [r[c] for c in SENTENCE_INDEX_COLS[1:]])
         else:
             w.writerow(INDEX_COLS)
@@ -585,6 +620,7 @@ def main():
         "provider_pin": {"order": ["openai"], "allow_fallbacks": False},
         "cache_dir": os.path.relpath(root, ROOT),
         "unit": args.unit,
+        "context": args.context,
         args.unit: len(rows),
         "unique_texts": len(unique),
         "rows_embedded": len(index),

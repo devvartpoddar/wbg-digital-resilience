@@ -2,19 +2,21 @@
 """Load the cleaned tables and the model runs into Postgres for Metabase.
 
 Reads  data/projects/projects.csv, data/raw/documents.csv,
-       data/appraisal/{paragraphs,sentences,rejected,document_parts,
-       components}.csv (+ data/appraisal/text/ for their text),
-       data/procurement/{packages,superseded_packages,notices,awards}.csv,
-       the current search, asset-map, candidates and measure runs,
-       data/embeddings/, every label set (src/labels.py), data/releases/,
-       sql/views/ (the *_raw tables and a person's grades are not loaded)
-Writes schema wbg: what people browse (projects, documents, document_parts,
-       paragraphs, sentences, search_units, components, packages, notices,
-       awards, labels, search_paragraphs, paragraph_grades, candidates,
-       measure_findings), with keys, comments and the views in sql/views/;
-       schema wbg_internal: the pipeline's bookkeeping (loads, releases,
-       data_release, rejected, superseded_packages, paragraph_projects,
-       search_best, sentence_vectors). First it cuts a release (release.py).
+       data/appraisal/{paragraphs,sentences,components}.csv (+ data/appraisal/
+       text/ for their text), data/procurement/{packages,notices,awards}.csv,
+       the current search, asset-map and measure runs, data/embeddings/,
+       every label set (src/labels.py), data/releases/, sql/views/ (the
+       *_raw tables and a person's grades are not loaded)
+Writes one schema, wbg: projects, documents, paragraphs, search_units,
+       components, packages, notices, awards, labels, search_paragraphs,
+       paragraph_grades, measure_findings, sentence_vectors, and the
+       bookkeeping tables paragraph_projects, data_release and loads, with
+       keys, comments and the views in sql/views/. First it cuts a release
+       (release.py). A table nothing in sql/ reads (sentences, the rejected
+       units, document parts, superseded package versions, the per-unit
+       search scores, the candidates, the release index) is not loaded: the
+       CSV under data/ is its record, and measure_findings holds every
+       candidate the measure stage read.
 
 The CSV files stay the source and keep their names; src/schema.py says what
 each column is called and typed in Postgres and what its comment says, and
@@ -51,19 +53,16 @@ TABLES = [
     ("projects", "projects/projects.csv"),
     ("documents", "raw/documents.csv"),
     ("paragraphs", "appraisal/paragraphs.csv"),
-    ("sentences", "appraisal/sentences.csv"),
-    ("rejected", "appraisal/rejected.csv"),
-    ("document_parts", "appraisal/document_parts.csv"),
     ("components", "appraisal/components.csv"),
     ("packages", "procurement/packages.csv"),
-    ("superseded_packages", "procurement/superseded_packages.csv"),
     ("notices", "procurement/notices.csv"),
     ("awards", "procurement/awards.csv"),
 ]
-# Names the earlier layout used in wbg; dropped once so nothing stale lingers.
-OLD_NAMES = ["taxonomy", "classify_scores", "measures", "loads", "releases", "data_release",
-             "rejected", "superseded_packages", "paragraph_projects", "search_best",
-             "sentence_vectors"]
+# Names earlier layouts used in wbg, and tables no longer loaded; dropped
+# once so nothing stale lingers. The earlier wbg_internal schema is folded
+# into wbg by prepare().
+OLD_NAMES = ["taxonomy", "classify_scores", "measures", "releases", "rejected",
+             "superseded_packages", "search_best", "sentences", "document_parts", "candidates"]
 OLD_VIEWS = ["v_packages", "v_paragraphs", "v_notices", "v_awards", "v_classified_paragraphs",
              "v_search_paragraphs"]
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -115,7 +114,7 @@ def convert(name, value, bad, kind=None):
     return value
 
 
-TEXT_TABLES = {"paragraphs", "sentences"}
+TEXT_TABLES = {"paragraphs"}
 
 
 def rows_with_text(data, rows):
@@ -221,7 +220,8 @@ def paragraph_projects(data):
 SEARCH_UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block",
                     "section_path", "component_number", "subcomponent_number", "component_key",
                     "char_start", "char_end", "n_tokens", "text_sha256", "lead_in",
-                    "left_out_reason", "copy_of_unit_id", "text"]
+                    "left_out_reason", "copy_of_unit_id", "template_projects", "template_share",
+                    "text"]
 
 
 def search_unit_rows(data):
@@ -256,9 +256,9 @@ def search_unit_rows(data):
 # table each across label sets, so a reader filters by label_set.
 
 def search_tables(data):
-    """(source sha, best rows, rollup rows): per label and unit the best
-    cosine (search_best, internal) and per label and paragraph its best unit
-    (search_paragraphs). None without any current run."""
+    """(source sha, rollup rows): per label and paragraph its best unit
+    (search_paragraphs). None without any current run. The per-unit scores
+    stay in the run folder; measure_findings carries each candidate's."""
     import search
     folders = []
     for name in labels.label_sets():
@@ -269,43 +269,33 @@ def search_tables(data):
         if os.path.exists(os.path.join(folder, "manifest.json")):
             folders.append((name, folder))
     if not folders:
-        return None, None, None
+        return None, None
     rollup = []
-
-    def best():
-        for name, folder in folders:
-            run = os.path.basename(folder)
-            for lid in search.run_labels(folder):
-                rows = search.hits(folder, data, labels=[lid])
-                for h in rows:
-                    yield dict(h, label_set=name, run=run)
-                rollup.extend(dict(r, label_set=name, run=run)
-                              for r in search.paragraph_rollup(rows))
-    return "|".join(os.path.basename(f) for _, f in folders), best(), rollup
+    for name, folder in folders:
+        run = os.path.basename(folder)
+        for lid in search.run_labels(folder):
+            rows = search.hits(folder, data, labels=[lid])
+            rollup.extend(dict(r, label_set=name, run=run)
+                          for r in search.paragraph_rollup(rows))
+    return "|".join(os.path.basename(f) for _, f in folders), rollup
 
 
-SEARCH_COLS = ["label_set", "run", "label_id", "rank", "unit_id", "kind", "paragraph_id",
-               "doc_id", "project_ids", "component_number", "subcomponent_number",
-               "component_key", "copies", "score", "percentile", "best_query_id",
-               "best_query", "queries_agreeing", "queries"]
 ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "component_key", "best_score", "best_percentile",
                "best_unit_id", "best_query_id", "units_hit"]
 CLASSIFY_COLS = ["label_set", "run", "paragraph_id", "doc_id", "project_ids",
                  "component_number", "label_id", "asked", "best_cosine", "grade", "expected",
                  "confidence", "p0", "p1", "p2", "p3", "p4", "model_served"]
-CANDIDATE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
-                  "project_ids", "component_number", "subcomponent_number", "component_key",
-                  "copies", "route", "rank", "score", "patterns", "types", "p_commitment",
-                  "firmness", "priority", "read_order"]
 MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
                 "project_ids", "component_number", "subcomponent_number", "component_key",
                 "copies", "route", "round", "rank", "score", "patterns", "p_commitment",
                 "firmness", "read_order", "asset_para", "asset_p_para", "asset_comp",
                 "asset_p_comp", "asset_unit", "asset_p_unit", "assets_yes", "asset_link",
-                "asset_link_level", "asset_link_p", "kinds_yes", "kind_best", "kind_p", "sent",
+                "asset_link_level", "asset_link_p", "kinds_yes", "kind_best", "kind_p",
+                "conditional_p", "actors_yes", "actor_best", "actor_p",
+                "template_projects", "template_share", "sent",
                 "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
-                "model_served", "cost", "text"]
+                "p_committed_calibrated", "model_served", "cost", "text"]
 
 
 def _run_rows(data, finder, file):
@@ -327,16 +317,6 @@ def _run_rows(data, finder, file):
 def classify_rows(data):
     import classify
     return _run_rows(data, lambda n, d: classify.current_run(n, d), "scores.csv")
-
-
-def candidate_rows(data):
-    """The candidates the measure stage reads (its pool, not ./wbg candidates'
-    default), so measure_findings and candidates describe the same units."""
-    import candidates
-    import measure
-    return _run_rows(data, lambda n, d: candidates.current(n, d, top=measure.TOP,
-                                                           min_cosine=measure.MIN_COSINE),
-                     "candidates.csv")
 
 
 def measure_rows(data):
@@ -368,7 +348,7 @@ def vector_kind(conn, dim):
 
 
 def load_vectors(conn, data, release_id, force):
-    """wbg_internal.sentence_vectors: one row per search unit with its
+    """wbg.sentence_vectors: one row per search unit with its
     embedding (pgvector). The index is built inside the load's transaction."""
     npy = where(data, "embeddings", "sentence_emb.npy")
     idx = where(data, "embeddings", "sentence_index.csv")
@@ -495,13 +475,9 @@ def finish(conn, log=print):
 
 
 def load_release(conn, data, release_id):
-    """wbg_internal.releases: every release cut, and data_release: the one
-    this load is, with when each kind of record was last fetched."""
+    """wbg.data_release: the one release this load is, with when each kind
+    of record was last fetched (data/releases/index.csv lists them all)."""
     import release
-    rows = release.releases(data)
-    if rows:
-        load_rows(conn, "releases", release.INDEX_COLS, rows,
-                  sha256_file(where(data, "releases", "index.csv")), release_id)
     m = release.manifest(data)
     fetched = {k: v.get("latest", "") for k, v in m["fetched"].items()}
     load_rows(conn, "data_release",
@@ -515,14 +491,25 @@ def load_release(conn, data, release_id):
               release_id, release_id)
 
 
+OLD_SCHEMA = "wbg_internal"   # an earlier layout's bookkeeping schema, folded into wbg
+
+
 def prepare(conn):
-    """Schemas, the loads table, and the removal of what an earlier layout
-    left in wbg under other names (one-time)."""
+    """The schema, the loads table, and the removal of what earlier layouts
+    left behind (one-time): tables under other names in wbg, and the
+    separate bookkeeping schema, whose load history is carried over."""
     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {PUBLIC}")
-    conn.execute(f"CREATE SCHEMA IF NOT EXISTS {INTERNAL}")
+    # A loads table of an earlier shape (no release_id) is started afresh.
+    if _exists(conn, "loads") and "release_id" not in _columns(conn, LOADS):
+        conn.execute(f"DROP TABLE {LOADS} CASCADE")
     conn.execute(f"CREATE TABLE IF NOT EXISTS {LOADS} (table_name text, source_sha256 text, "
                  f"row_count integer, loaded_at timestamptz, release_id text)")
     conn.execute(f"COMMENT ON TABLE {LOADS} IS {_lit(S.TABLES['loads']['comment'])}")
+    if conn.execute("SELECT 1 FROM pg_namespace WHERE nspname = %s", (OLD_SCHEMA,)).fetchone():
+        if conn.execute("SELECT to_regclass(%s)", (f"{OLD_SCHEMA}.loads",)).fetchone()[0]:
+            conn.execute(f"INSERT INTO {LOADS} SELECT table_name, source_sha256, row_count, "
+                         f"loaded_at, release_id FROM {OLD_SCHEMA}.loads")
+        conn.execute(f"DROP SCHEMA {OLD_SCHEMA} CASCADE")
     for v in OLD_VIEWS:
         conn.execute(f"DROP VIEW IF EXISTS {PUBLIC}.{v} CASCADE")
     for t in OLD_NAMES:
@@ -571,24 +558,11 @@ def main():
         sha, rows = search_unit_rows(args.data)
         derived(conn, "search_units", sha, SEARCH_UNIT_COLS, rows)
 
-        sha, best, rollup = search_tables(args.data)
-        if sha is None:
-            print(f"  {'search_best':<20} skipped: no current run")
-        elif not args.force and _last_sha(conn, "search_best") == sha \
-                and _last_sha(conn, "search_paragraphs") == sha:
-            print(f"  {'search_best':<20} unchanged")
-        else:
-            n, _ = load_rows(conn, "search_best", SEARCH_COLS, best, sha, release_id,
-                             after=[f"CREATE INDEX ON {INTERNAL}.search_best "
-                                    f"(label_set, label_id, paragraph_id, embedding_score DESC)"])
-            print(f"  {'search_best':<20} {n:>8} rows")
-            n, _ = load_rows(conn, "search_paragraphs", ROLLUP_COLS, rollup, sha, release_id)
-            print(f"  {'search_paragraphs':<20} {n:>8} rows")
+        sha, rollup = search_tables(args.data)
+        derived(conn, "search_paragraphs", sha, ROLLUP_COLS, rollup)
 
         sha, rows = classify_rows(args.data)
         derived(conn, "paragraph_grades", sha, CLASSIFY_COLS, rows)
-        sha, rows = candidate_rows(args.data)
-        derived(conn, "candidates", sha, CANDIDATE_COLS, rows)
         sha, rows = measure_rows(args.data)
         derived(conn, "measure_findings", sha, MEASURE_COLS, rows)
 

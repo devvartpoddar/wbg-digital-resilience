@@ -1,0 +1,82 @@
+"""The accuracy additions: the template (boilerplate) score on search units,
+the Platt calibration, the commitment facets and the embedding context
+prefix. Invented text throughout."""
+import os
+import sys
+
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, os.path.join(ROOT, "src"))
+
+import check_units  # noqa: E402
+import embed  # noqa: E402
+import measure  # noqa: E402
+import units  # noqa: E402
+
+
+def _unit(uid, projects, text, texts):
+    texts[uid] = text
+    return {"unit_id": uid, "doc_id": uid, "project_ids": projects, "char_start": "0",
+            "char_end": str(len(text)), "lead_in_start": "", "lead_in_end": ""}
+
+
+def test_template_score_counts_other_projects_printing_the_same_words():
+    texts = {}
+    standard = "The project has been screened for climate and disaster risks."
+    us = [_unit("a", "P1", standard, texts), _unit("b", "P2", standard.upper(), texts),
+          _unit("c", "P3", standard + " ", texts),
+          _unit("d", "P1|P9", "A site-specific climate risk assessment of the data centre "
+                               "will be financed under component two of this operation.", texts),
+          _unit("e", "P4", "The project has been screened for climate and disaster risks, "
+                           "and measures follow.", texts)]
+    units.template_scores(us, lambda d: texts[d])
+    by = {u["unit_id"]: u for u in us}
+    assert by["a"]["template_projects"] == 2 and by["b"]["template_projects"] == 2
+    assert by["d"]["template_projects"] == 0 and by["d"]["template_share"] == "0.00"
+    # e shares the standard sentence's word runs with three other projects
+    assert float(by["e"]["template_share"]) > 0.5 and by["e"]["template_projects"] == 0
+
+
+def test_template_score_reads_a_list_item_with_its_lead_in():
+    lead = "Under the first component the project will finance:\n"
+    texts = {"x": lead + "(a) towers;", "y": lead + "(b) cables;", "z": lead + "(c) masts;"}
+    us = [{"unit_id": u, "doc_id": u, "project_ids": f"P{i}", "char_start": str(len(lead)),
+           "char_end": str(len(lead) + 11), "lead_in_start": "0", "lead_in_end": str(len(lead) - 1)}
+          for i, u in enumerate("xyz")]
+    units.template_scores(us, lambda d: texts[d])
+    # the items differ, so neither is a copy of the other; the shared lead-in
+    # gives a share below one
+    assert us[0]["template_projects"] == 0 and 0 < float(us[0]["template_share"]) < 1
+
+
+def test_platt_scaling_fits_and_stays_a_probability():
+    p = [0.05, 0.1, 0.2, 0.3, 0.4, 0.6, 0.7, 0.8, 0.9, 0.95]
+    y = [0, 0, 0, 0, 1, 0, 1, 1, 1, 1]
+    ab = check_units.platt(p, y)
+    assert ab is not None and ab[0] > 0
+    cal = [check_units.calibrated(x, ab) for x in p]
+    assert all(0 < c < 1 for c in cal) and cal == sorted(cal)
+    # a perfectly separated sample does not overflow
+    ab2 = check_units.platt([0.01, 0.02, 0.98, 0.99], [0, 0, 1, 1])
+    assert ab2 is not None and 0 < check_units.calibrated(0.5, ab2) < 1
+    assert check_units.platt([0.1, 0.9], [0, 1]) is None
+
+
+def test_facets_are_read_from_the_config_and_asked_as_yes_no():
+    facets = measure.load_facets()
+    assert {f["id"] for f in facets} >= {"conditional", "borrower", "contractor"}
+    assert {f["group"] for f in facets} == {"condition", "actor"}
+    qs = measure.questions([{"id": "m", "name": "M", "definition": "d"}], ["0", "1"],
+                           "sentence", [], [], facets)
+    assert qs["facet:conditional"]["type"] == "noul"
+    assert "conditional" in qs["facet:conditional"]["instructions"].lower()
+    assert "carries out" in qs["facet:borrower"]["instructions"]
+
+
+def test_section_prefix_uses_the_paragraphs_own_context():
+    paras = {"D:p1": {"section_title": "Project Components", "component_name": "Backbone",
+                      "subcomponent_name": "Last mile"}}
+    row = {"paragraph_id": "D:p1", "subcomponent_number": "1.2"}
+    assert embed.context_prefix(row, paras) == "Section: Project Components. Component: Last mile."
+    assert embed.context_prefix({"paragraph_id": "D:p1"}, paras) == \
+        "Section: Project Components. Component: Backbone."
+    assert embed.context_prefix({"paragraph_id": "D:p9"}, paras) == ""

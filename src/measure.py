@@ -87,6 +87,11 @@ ASSET_SET = "assets"
 # list in inputs/config/, not a label set, so nothing searches or grades it
 # on its own; the measure stage asks it alongside the measure.
 KINDS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "activity_kinds.csv")
+# Two more things a TTL conversation turns on, asked of the same units as
+# the kinds: whether the commitment is conditional (group "condition") and
+# who carries it out (group "actor": the Bank, the borrower, an operator, a
+# contractor; one yes/no each, several allowed).
+FACETS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "commitment_facets.csv")
 CONTEXTS = ("sentence", "paragraph")
 GATES = ("none", "link", "unit", "paragraph", "component")
 LINK_MIN = 0.5        # an asset answer or map score at or above this makes a link
@@ -104,19 +109,23 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "round", "rank", "score", "patterns", "p_commitment", "firmness", "read_order",
              "asset_para", "asset_p_para", "asset_comp", "asset_p_comp",
              "asset_unit", "asset_p_unit", "assets_yes", "asset_link", "asset_link_level",
-             "asset_link_p", "kinds_yes", "kind_best", "kind_p", "sent",
+             "asset_link_p", "kinds_yes", "kind_best", "kind_p", "conditional_p",
+             "actors_yes", "actor_best", "actor_p", "template_projects", "template_share",
+             "sent",
              "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
+             "p_committed_calibrated",
              "model_served", "cost", "text"]
 # Asset thresholds the report tabulates (nothing is chosen here).
 REPORT_THRESHOLDS = (0.3, 0.5, 0.7, 0.9)
 ASSET_YES = 0.5       # an asset the unit answer puts at or above this is listed in assets_yes
 
 
-def questions(labels, scale, context, assets, kinds=()):
-    """The measure's graded question(s), one yes/no question per asset and
-    one per activity kind (how the commitment is delivered: governing,
-    building, sustaining, using), all about the sentence; the paragraph is
-    context when the design says so."""
+def questions(labels, scale, context, assets, kinds=(), facets=()):
+    """The measure's graded question(s), one yes/no question per asset, one
+    per activity kind (how the commitment is delivered: governing, building,
+    sustaining, using) and one per facet (is it conditional; who carries it
+    out), all about the sentence; the paragraph is context when the design
+    says so."""
     where_ = ("the 'sentence' field, read with the 'paragraph' it sits in,"
               if context == "paragraph" else "the 'sentence' field,")
     out = {}
@@ -144,7 +153,29 @@ def questions(labels, scale, context, assets, kinds=()):
             "criteria": {"true": f"Yes: the commitment is delivered by {k['name'].lower()}, "
                                  f"as defined.",
                          "false": f"No: it is not delivered by {k['name'].lower()}."}}
+    for f in facets:
+        if f["group"] == "condition":
+            text = (f"Is what the sentence in {where_} commits the project to "
+                    f"{f['name'].lower()}? {f['name']} means: {f['definition']}")
+            crit = {"true": f"Yes: the commitment is {f['name'].lower()}, as defined.",
+                    "false": f"No: the sentence states it as something that will be done."}
+        else:
+            text = (f"Is {f['name']} who carries out what the sentence in {where_} commits "
+                    f"the project to? {f['name']} means: {f['definition']}")
+            crit = {"true": f"Yes: {f['name']} carries it out, named or clearly implied.",
+                    "false": f"No: the sentence does not have {f['name']} carry it out."}
+        out[f"facet:{f['id']}"] = {"type": "noul", "instructions": text, "criteria": crit}
     return out
+
+
+def load_facets(path=FACETS_FILE):
+    """The active facets of inputs/config/commitment_facets.csv:
+    [{id, group, name, definition}]."""
+    if not os.path.exists(path):
+        return []
+    return [{"id": f["facet_id"].strip(), "group": f["group"].strip(),
+             "name": f["facet_name"].strip(), "definition": " ".join(f["definition"].split())}
+            for f in labels_mod.rows(path) if labels_mod.is_active(f)]
 
 
 # ------------------------------------------------------------------ the inputs
@@ -236,7 +267,9 @@ class Run:
                        "definition": " ".join(k["definition"].split())}
                       for k in (labels_mod.rows(KINDS_FILE) if os.path.exists(KINDS_FILE) else [])
                       if labels_mod.is_active(k)]
-        self.qs = questions(self.labels, self.scale, context, self.assets, self.kinds)
+        self.facets = load_facets()
+        self.qs = questions(self.labels, self.scale, context, self.assets, self.kinds,
+                            self.facets)
         self.para_assets, self.comp_assets, self.asset_run = asset_map(data)
         if gate in ("paragraph", "component") and not self.asset_run:
             raise SystemExit(f"measure: --gate {gate} needs the asset map: run ./wbg classify "
@@ -250,10 +283,20 @@ class Run:
         self.texts = commitment.unit_texts(data, self.index)
         self.commit = commitment.current_scores(data)
         self.doc_texts = {}
+        # Platt scaling from a graded sheet (./wbg check <set> --evaluate), when
+        # one exists: applied to P(committed) as p_committed_calibrated. Part
+        # of the version, so new grades give a new run (from the store, free).
+        self.calibration = None
+        cpath = where(data, "labels", f"{name}_calibration.json")
+        if os.path.exists(cpath):
+            with open(cpath, encoding="utf-8") as fh:
+                top = str(len(self.scale) - 1)
+                self.calibration = json.load(fh).get("grades", {}).get(top)
         h = hashlib.sha256()
         h.update(f"{os.path.basename(self.cand)}\t{self.asset_run}\t"
                  f"{json.dumps(self.settings, sort_keys=True)}\n".encode())
         h.update(json.dumps(self.qs, sort_keys=True).encode())
+        h.update(json.dumps(self.calibration, sort_keys=True).encode())
         self.out = where(data, "measures", f"{name}-{h.hexdigest()[:12]}")
 
     # ---- units
@@ -275,7 +318,10 @@ class Run:
                 "asset_p_comp": "" if a_comp[1] == "" else f"{a_comp[1]:.4f}",
                 "asset_unit": "", "asset_p_unit": "", "assets_yes": "", "asset_link": "",
                 "asset_link_level": "", "asset_link_p": "", "kinds_yes": "", "kind_best": "",
-                "kind_p": "", "sent": "false",
+                "kind_p": "", "conditional_p": "", "actors_yes": "", "actor_best": "",
+                "actor_p": "", "template_projects": r.get("template_projects", ""),
+                "template_share": r.get("template_share", ""), "p_committed_calibrated": "",
+                "sent": "false",
                 "text": self.texts[r["unit_id"]], "_para": para}
 
     def candidate_rows(self):
@@ -318,6 +364,12 @@ class Run:
                     **{f"p{i}": (f"{probs[i]:.4f}" if i < len(probs) else "") for i in range(5)},
                     "model_served": entries[lab]["model"],
                     "cost": f"{sum(float(e.get('cost_usd') or 0) for e in entries.values()):.6f}"})
+        if self.calibration:
+            import math
+            p = min(max(probs[-1] / total, 1e-4), 1 - 1e-4)
+            z = self.calibration["a"] * math.log(p / (1 - p)) + self.calibration["b"]
+            z = max(-30.0, min(30.0, z))
+            row["p_committed_calibrated"] = f"{1 / (1 + math.exp(-z)):.4f}"
         self.link_into(row)
 
     def extras_into(self, row, entries):
@@ -332,6 +384,14 @@ class Run:
         row.update({"kinds_yes": "|".join(k for k in ks if ks[k] >= ASSET_YES),
                     "kind_best": kb, "kind_p": f"{ks[kb]:.3f}" if kb else "",
                     "cost": f"{float(row['cost']) + sum(float(e.get('cost_usd') or 0) for e in entries.values()):.6f}"})
+        fs = {f["id"]: (f["group"], float(entries[f"facet:{f['id']}"]["answer"]["noul"]))
+              for f in self.facets}
+        cond = [p for g, p in fs.values() if g == "condition"]
+        actors = {k: p for k, (g, p) in fs.items() if g == "actor"}
+        ab = max(actors, key=actors.get) if actors else ""
+        row.update({"conditional_p": f"{max(cond):.3f}" if cond else "",
+                    "actors_yes": "|".join(k for k in actors if actors[k] >= ASSET_YES),
+                    "actor_best": ab, "actor_p": f"{actors[ab]:.3f}" if ab else ""})
 
     def link_into(self, row):
         """asset_link, asset_link_level, asset_link_p from the three levels."""
@@ -492,6 +552,14 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
             kinds[k] += 1
     lines.append("  committed units by activity kind (yes at 0.5, several allowed): " + ", ".join(
         f"{k} {n}" for k, n in sorted(kinds.items(), key=lambda x: -x[1])))
+    actors = defaultdict(int)
+    for r in com:
+        for k in (r["actors_yes"].split("|") if r["actors_yes"] else ["none"]):
+            actors[k] += 1
+    lines.append("  committed units by who carries it out (yes at 0.5, several allowed): "
+                 + ", ".join(f"{k} {n}" for k, n in sorted(actors.items(), key=lambda x: -x[1]))
+                 + f"; conditional at 0.5: "
+                   f"{sum(1 for r in com if r['conditional_p'] and float(r['conditional_p']) >= ASSET_YES)}")
     assets = defaultdict(int)
     for r in com:
         for a in r["assets_yes"].split("|"):
@@ -565,7 +633,7 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         w.writerows(rows)
     lines = report_lines(run, rows, rounds, calls, cost, seconds, dict(served))
     manifest = dict(run.settings, label_set=name, candidates=os.path.basename(run.cand),
-                    asset_map=run.asset_run, version=os.path.basename(run.out).rsplit("-", 1)[1],
+                    asset_map=run.asset_run, calibration=run.calibration, version=os.path.basename(run.out).rsplit("-", 1)[1],
                     units_seen=len(rows), graded=sum(1 for r in rows if r["sent"] == "true"),
                     rounds=rounds, questions=run.qs, question_sha256=classify.question_shas(run.qs),
                     scale=run.scale, models_served=dict(served), calls_this_run=calls,

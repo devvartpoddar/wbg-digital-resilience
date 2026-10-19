@@ -705,6 +705,10 @@ def main(argv=None):
                                       "analysis/labels/)")
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     p.add_argument("--dry-run", action="store_true", help="what it would embed, and cost")
+    p.add_argument("--embed-context", choices=("none", "section"), default="none",
+                   help="embed each sentence with its section title and component heading in "
+                        "front (a re-embedding; the index, the search and every run keyed on "
+                        "them are new)")
     p = sub.add_parser("classify", help="grade every model paragraph against a label set "
                                         "with the decision model (only what is not stored)")
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
@@ -748,6 +752,8 @@ def main(argv=None):
                                      "--evaluate the grades: precision and recall with intervals")
     p.add_argument("label_set")
     p.add_argument("--evaluate", action="store_true")
+    p.add_argument("--elusion", action="store_true",
+                   help="draw (or evaluate) units the funnel never read, below the pool")
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
@@ -801,7 +807,7 @@ def main(argv=None):
         return 0
     if args.cmd == "search":
         dry = ["--dry-run"] if args.dry_run else []
-        _run("embed.py", *dry, data=data)
+        _run("embed.py", *dry, "--context", args.embed_context, data=data)
         _run("search.py", args.label_set, *dry, data=data)
         if not dry:
             _run("release.py", data=data)
@@ -835,7 +841,7 @@ def main(argv=None):
         return 0
     if args.cmd == "check":
         _run("check_units.py", args.label_set, *(["--evaluate"] if args.evaluate else []),
-             "--seed", str(args.seed), "--context", args.context, "--gate", args.gate,
+             *(["--elusion"] if args.elusion else []), "--seed", str(args.seed), "--context", args.context, "--gate", args.gate,
              "--asset-min", str(args.asset_min), data=data)
         return 0
     if args.cmd == "evaluate":

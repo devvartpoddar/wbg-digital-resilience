@@ -13,16 +13,18 @@ rules, from the person who runs Metabase:
   - a PRIMARY KEY on every table and a FOREIGN KEY on every join column
     (declared NOT VALID: an orphan row is reported by the audits, not fatal);
   - COMMENT ON every table and every column a reader could misread;
-  - what people browse lives in schema wbg; the pipeline's bookkeeping
-    (loads, releases, the rejected units, superseded package versions, the
-    paragraph-project bridge, the per-unit search scores and the vectors) in
-    wbg_internal, out of the way but there.
+  - everything lives in one schema, wbg, so a question joins without a
+    schema prefix; the three bookkeeping tables (loads, data_release and
+    paragraph_projects) say so in their comment and can be hidden in
+    Metabase's table settings. Tables nothing in sql/views/ or analysis/sql/
+    reads are not loaded at all: the CSV under data/ stays the record.
 
 Every table is recreated on each load, so nothing here survives unless the
 loader applies it.
 """
 
-PUBLIC, INTERNAL = "wbg", "wbg_internal"
+PUBLIC = "wbg"
+INTERNAL = PUBLIC   # one schema; the name stays for the loader's bookkeeping tables
 
 # Column renames applied to every table (csv name -> column name).
 RENAME = {
@@ -56,6 +58,7 @@ RENAME = {
     "grade": "most_likely_grade", "expected": "expected_grade", "confidence": "grade_confidence",
     "p0": "probability_grade_0", "p1": "probability_grade_1", "p2": "probability_grade_2",
     "p3": "probability_grade_3", "p4": "probability_grade_4",
+    "p_committed_calibrated": "committed_probability_calibrated",
     "patterns": "matched_patterns", "types": "matched_types",
     "p_commitment": "commitment_probability", "priority": "reading_priority",
     "read_order": "reading_order", "round": "feedback_round", "cost": "model_cost_usd",
@@ -67,6 +70,9 @@ RENAME = {
     "asset_link_p": "linked_asset_probability",
     "kinds_yes": "activity_kinds_above_threshold", "kind_best": "best_activity_kind",
     "kind_p": "best_activity_kind_probability",
+    "template_projects": "template_project_count", "template_share": "template_wording_share",
+    "conditional_p": "conditional_probability", "actors_yes": "actor_ids_above_threshold",
+    "actor_best": "best_actor_id", "actor_p": "best_actor_probability",
 }
 # Renames that apply in one table only (csv name -> column name).
 RENAME_IN = {
@@ -84,17 +90,20 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "page_to", "page_number", "part_number", "approval_fiscal_year", "pdf_size_bytes",
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "reading_order", "feedback_round",
-           "paragraphs", "packages", "notices", "awards", "sentences_embedded"}
+           "paragraphs", "packages", "notices", "awards", "sentences_embedded",
+           "template_project_count"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "embedding_score", "embedding_percentile",
            "best_embedding_score", "best_embedding_percentile", "best_cosine", "expected_grade",
            "grade_confidence", "probability_grade_0", "probability_grade_1",
            "probability_grade_2", "probability_grade_3", "probability_grade_4",
+           "committed_probability_calibrated",
            "commitment_probability", "reading_priority", "model_cost_usd",
            "paragraph_best_asset_probability", "component_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
-           "best_activity_kind_probability"}
+           "best_activity_kind_probability", "conditional_probability", "template_wording_share",
+           "best_actor_probability"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
            "was_sent_to_model", "was_asked"}
@@ -102,7 +111,7 @@ BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_lat
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
          "matched_types", "asset_ids_above_threshold", "activity_kinds_above_threshold",
-         "component_mentions"}
+         "actor_ids_above_threshold", "component_mentions"}
 INDEXED = {"document_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
            "award_id", "unit_id", "borrower_reference_normalised", "label_id", "label_set"}
 
@@ -179,20 +188,6 @@ TABLES = {
             "owner_unit": "The unit the interface records as the document's owner, as printed.",
             "fetched_at": "When the PDF was downloaded.",
         }),
-    "document_parts": dict(
-        schema=PUBLIC, key=("document_id", "part_number"),
-        foreign=[("document_id", "documents", "document_id")],
-        comment="One stretch of a document assigned to one or more projects: a combined "
-                "programme document is split into a regional part, one part per country "
-                "annex and a programme-wide part.",
-        columns={
-            "part_number": "Order of the part within the document, from 1.",
-            "text_start_offset": "Start of the part in the cleaned text file, characters.",
-            "text_end_offset": "End of the part in the cleaned text file, characters.",
-            "project_ids": "The project(s) this part belongs to.",
-            "assigned_by": "How the projects were decided: listed, datasheet_operation_id or programme_wide.",
-            "listed_project_ids": "What the interface listed for the whole document.",
-        }),
     "paragraphs": dict(
         schema=PUBLIC, key=("paragraph_id",),
         foreign=[("document_id", "documents", "document_id")],
@@ -224,19 +219,6 @@ TABLES = {
             "component_mentions": "Components named in the text itself, not where the paragraph sits.",
             "text": "The cleaned text (resolved from the offsets at load time).",
         }),
-    "sentences": dict(
-        schema=PUBLIC, key=("sentence_id",),
-        foreign=[("paragraph_id", "paragraphs", "paragraph_id"),
-                 ("document_id", "documents", "document_id")],
-        comment="One sentence of a narrative or annex paragraph given to the model, with its text.",
-        columns={
-            "sentence_id": "The paragraph id and the sentence's ordinal.",
-            "ordinal": "Position within the paragraph.",
-            "text_start_offset": "Start of the sentence in the cleaned text file, characters.",
-            "text_end_offset": "End of the sentence in the cleaned text file, characters.",
-            "word_count": "Words in the sentence.",
-            "text_sha256": "SHA-256 of the sentence text.",
-        }),
     "search_units": dict(
         schema=PUBLIC, key=("unit_id",),
         foreign=[("paragraph_id", "paragraphs", "paragraph_id"),
@@ -253,6 +235,8 @@ TABLES = {
             "lead_in": "The sentence that introduces the list the unit is an item of, embedded in front of it; blank otherwise.",
             "left_out_reason": "Why the unit is not searched: reference (a citation or caption) or fragment (a scrap or title); blank when searched.",
             "copy_of_unit_id": "The earlier unit that prints the same text (an additional financing repeats its appraisal document); only that one was embedded.",
+            "template_project_count": "How many other projects print a unit with the same words (lead-in included): the Bank's standard text scores high, a project's own commitment 0.",
+            "template_wording_share": "Share of the unit's six-word runs that appear in at least two other projects, 0 to 1: template wording with a name or figure filled in. A filter for a reader, not a cut.",
             "text": "The unit's text, without the lead-in.",
         }),
     "components": dict(
@@ -315,12 +299,6 @@ TABLES = {
             "plan_disclosure_date": "That plan's disclosure date.",
             "in_latest_plan": "False when the package is not in the project's most recently disclosed plan: dropped, or the plan was published in parts.",
         }),
-    "superseded_packages": dict(
-        schema=INTERNAL, key=("package_id", "plan_document_id"),
-        foreign=[("package_id", "packages", "package_id")],
-        comment="Pipeline bookkeeping: one older plan version of a package, pointing at the "
-                "version that replaced it.",
-        columns={"superseded_by_document_id": "The plan version whose row replaced this one."}),
     "notices": dict(
         schema=PUBLIC, key=("notice_id",),
         foreign=[("project_id", "projects", "project_id"),
@@ -358,11 +336,6 @@ TABLES = {
         comment="Pipeline bookkeeping: one row per paragraph and project, unpacked from "
                 "paragraphs.project_ids so a paragraph joins its project by key.",
         columns={}),
-    "rejected": dict(
-        schema=INTERNAL, key=("unit_id",), foreign=[("document_id", "documents", "document_id")],
-        comment="Pipeline bookkeeping: one unit dropped at cleaning and why.",
-        columns={"reason": "Why it was dropped (too short, no letters, ...).",
-                 "character_count": "Characters in the dropped unit."}),
     "labels": dict(
         schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
         comment="One label of one label set: the assets (inputs/taxonomy) and each measure "
@@ -374,21 +347,6 @@ TABLES = {
             "is_active": "Whether the label is searched and graded.",
             "version": "The hand-kept version of the row.",
             "folder": "Where the set lives in git.",
-        }),
-    "search_best": dict(
-        schema=INTERNAL, key=("label_set", "label_id", "unit_id"),
-        foreign=[("unit_id", "search_units", "unit_id"),
-                 ("paragraph_id", "paragraphs", "paragraph_id")],
-        comment="Pipeline bookkeeping: every search unit per label with its best cosine over "
-                "the label's queries; search_paragraphs is the rollup people read.",
-        columns={
-            "embedding_rank": "Rank of the unit for the label by best cosine.",
-            "embedding_score": "Best cosine over the label's queries, -1 to 1.",
-            "embedding_percentile": "That score's percentile within its query; comparable across queries, raw cosine is not.",
-            "best_query_id": "The query that gave the best score.",
-            "best_query": "That query's text.",
-            "queries_agreeing_count": "How many of the label's queries rank the unit at or above the percentile asked for.",
-            "query_count": "How many queries the label has.",
         }),
     "search_paragraphs": dict(
         schema=PUBLIC, key=("label_set", "label_id", "paragraph_id"),
@@ -414,25 +372,6 @@ TABLES = {
             "was_asked": "False when a cosine gate kept the question from being asked of this paragraph; the grades are then NULL.",
             "best_cosine": "The paragraph's best unit cosine against the label's phrases, when a cosine gate was used.",
         })),
-    "candidates": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
-        foreign=[("unit_id", "search_units", "unit_id"),
-                 ("paragraph_id", "paragraphs", "paragraph_id")],
-        comment="One unit a measure's word patterns or embedding scores put forward, in "
-                "reading order; no model has read it here.",
-        columns={
-            "route": "pattern (a word pattern matched), embedding (within the pool by cosine or rank), or both.",
-            "embedding_rank": "Rank for the label by best cosine.",
-            "embedding_score": "Best cosine over the label's queries.",
-            "matched_patterns": "Pattern ids from the set's patterns file.",
-            "matched_types": "Type ids whose pattern matched, from the set's types file.",
-            "commitment_probability": "Probability that the unit states something the project does, from the section-title classifier; no reader.",
-            "firmness": "activity, outcome or none, from wording lists: a filter, not a decision.",
-            "reading_priority": "Pattern hit first, then commitment probability, then embedding percentile.",
-            "reading_order": "Rank by reading priority within the label.",
-            "copy_unit_ids": "Units in other documents that print the same text.",
-            "run_id": "The candidates run.",
-        }),
     "measure_findings": dict(
         schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
         foreign=[("unit_id", "search_units", "unit_id"),
@@ -463,7 +402,14 @@ TABLES = {
             "activity_kinds_above_threshold": "How the commitment is delivered (govern, build, sustain, use) at 0.5 or more.",
             "best_activity_kind": "The likeliest of them.",
             "best_activity_kind_probability": "Its probability.",
+            "conditional_probability": "Probability that the commitment depends on a later study, decision or financing, or is stated as an option (inputs/config/commitment_facets.csv).",
+            "actor_ids_above_threshold": "Who carries it out, at 0.5 or more: bank, borrower, operator, contractor (several allowed).",
+            "best_actor_id": "The likeliest of them.",
+            "best_actor_probability": "Its probability.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
+            "committed_probability_calibrated": "probability_grade_3 after Platt scaling on a person's graded sheet (./wbg check --evaluate); NULL until a sheet has been graded.",
+            "template_project_count": "As in search_units: other projects printing the same words.",
+            "template_wording_share": "As in search_units: share of six-word runs shared with two or more other projects.",
             "copy_unit_ids": "Units in other documents that print the same text.",
             "text": "The unit's text with its list lead-in.",
         })),
@@ -472,10 +418,6 @@ TABLES = {
         comment="Pipeline bookkeeping: one embedding per search unit (3,072 dimensions), used "
                 "by wbg.similar_units() and wbg.search_phrase().",
         columns={}),
-    "releases": dict(
-        schema=INTERNAL, key=("release_id",), foreign=[],
-        comment="Pipeline bookkeeping: one data release, a hash of the tables and inputs.",
-        columns={"has_uncommitted_code": "The code had uncommitted changes when the release was cut."}),
     "data_release": dict(
         schema=INTERNAL, key=("release_id",), foreign=[],
         comment="Pipeline bookkeeping: the single release this database holds, and when each "

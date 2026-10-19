@@ -8,7 +8,7 @@ The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement
 
 **Two parts.** `src/` is the pipeline: fetch, clean, embed, score, classify, load. It takes any label set by name and holds no measure's definition; the few settings it does hold (the pool threshold, the link threshold, the activity kinds) are constants named in `docs/methodology.md`. `inputs/taxonomy/` holds the assets (changed rarely), `analysis/labels/` the measures and any set being tried (changed freely), `analysis/sql/` questions over the Postgres schema. Keep analysis assumptions out of `src/`; keep pipeline mechanics out of `analysis/`.
 
-**Current focus: tuning on one measure (climate risk assessment) at 70 projects, then the graded sample.** The asset map and the first measure have run; the asset taxonomy was tightened once; a sheet of 95 units awaits grading, and no cut-off is chosen until it is graded. Keep model spend small: the per-question answer store makes a definition edit cheap, and `data/reports/spend.csv` says what each run cost.
+**Current focus: tuning on one measure (climate risk assessment) at 70 projects against the graded sample.** The asset map and the first measure have run; the asset taxonomy was tightened once; the first sheet of 95 units is graded (precision 0.77, recall 0.75 within the pool; the asset link agreed on 14 of 32), the elusion sheet awaits grading, and no cut-off is chosen yet. The definitions (the word "screening"; the breadth of `digital_systems`) are the next decisions, and they are a person's. Keep model spend small: the per-question answer store makes a definition edit cheap, and `data/reports/spend.csv` says what each run cost.
 
 ## Where it runs
 

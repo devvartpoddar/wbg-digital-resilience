@@ -130,7 +130,7 @@ def store(tmp_path, monkeypatch):
         for qid in body["questions"]:                     # every yes/no asked: assets, kinds
             if qid != "cra":
                 yes = (qid == "asset:towers" and "tower" in body["state"]["sentence"]) or \
-                    (qid == "kind:build" and hit)
+                    (qid in ("kind:build", "facet:borrower") and hit)
                 answers[qid] = {"type": "noul", "noul": 0.9 if yes else 0.1}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": answers}
     monkeypatch.setattr(classify, "decide", fake)
@@ -155,6 +155,8 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert r["asset_comp"] == "towers" and r["sent"] == "true" and r["round"] == "0"
     assert r["asset_unit"] == "towers" and r["asset_p_unit"] == "0.900" and r["assets_yes"] == "towers"
     assert r["kinds_yes"] == "build" and r["kind_best"] == "build"
+    assert r["actors_yes"] == "borrower" and r["actor_best"] == "borrower"
+    assert float(r["conditional_p"]) < 0.5
     assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]

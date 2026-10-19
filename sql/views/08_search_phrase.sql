@@ -24,7 +24,7 @@ LANGUAGE sql VOLATILE AS $$
   SELECT v.unit_id, u.unit_kind, v.paragraph_id, v.document_id, v.project_ids,
          1 - (v.embedding <=> (SELECT q.v FROM q)) AS score,
          u.text
-  FROM wbg_internal.sentence_vectors v
+  FROM wbg.sentence_vectors v
   LEFT JOIN wbg.search_units u ON u.unit_id = v.unit_id
   ORDER BY v.embedding <=> (SELECT q.v FROM q)
   LIMIT k

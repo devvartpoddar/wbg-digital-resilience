@@ -25,7 +25,8 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
 ./wbg evaluate cra --column "Adaptation" --text-regex "risk assessment"   # the funnel against the
                                       # hand-labelled activities workbook (data/labels/activities.xlsx)
 ./wbg check cra                       # draw a measure's units for a person to grade; --evaluate reads
-                                      # the grades back: precision and recall with intervals
+                                      # the grades back: precision, recall, calibration; --elusion
+                                      # draws (and evaluates) what the pool never read
 ./wbg types cra                       # propose the measure's types from its committed units; --assign
                                       # puts every committed unit to the approved list
 ./wbg words cra cra                   # the words that set the measure's candidates apart
@@ -38,7 +39,7 @@ python -m pytest                      # tests (locally)
 
 Selections filter the cohort (`inputs/config/cohort.csv`): `--project`, `--country`, `--region` (part of the name is enough), `--fy` (2024, FY24 or FY2024), `--practice` and `--unit`, each repeatable or comma-separated, combined with "and". The same functions are importable: `from wbg import select, prepare, summary, upcoming, open_notices, tables, export`.
 
-Data goes to the main checkout's `data/` folder (never committed), laid out as `src/paths.py` describes. The cleaned tables and the model runs also go to Postgres, schemas `wbg` and `wbg_internal`, named, typed, keyed and commented for Metabase (`src/schema.py` (`docs/methodology.md`, section 4). The review sheets for reading the cleaning by eye are in `data/review/`.
+Data goes to the main checkout's `data/` folder (never committed), laid out as `src/paths.py` describes. The cleaned tables and the model runs also go to Postgres, schema `wbg`, named, typed, keyed and commented for Metabase (`src/schema.py` (`docs/methodology.md`, section 4). The review sheets for reading the cleaning by eye are in `data/review/`.
 
 The repository is two things. `src/` is the pipeline: fetch, clean, embed, score, grade, load; it takes any label set by name and holds no measure's definition. `inputs/` and `analysis/` are what is searched for: `inputs/taxonomy/` the assets (changed rarely), `analysis/labels/` the measures and any set being tried (changed freely), `analysis/sql/` questions for Metabase. `analysis/README.md` says what goes where.
 

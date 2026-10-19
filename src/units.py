@@ -38,6 +38,20 @@ to re-join:
                        restructuring paper repeats its appraisal document; a
                        copy is not searched, and copies() maps each searched
                        unit to the copies it stands for.
+  template_projects    in how many OTHER projects a unit with the same words
+                       (lead-in included; case and punctuation aside)
+                       appears: the Bank's standard text, printed in every
+                       document, scores high; a project's own commitment
+                       scores 0.
+  template_share       the share of the unit's TEMPLATE_SHINGLE-word
+                       shingles that appear in units of at least
+                       TEMPLATE_MIN_PROJECTS other projects, 0 to 1: the
+                       same measure for a template with a name or a figure
+                       filled in. Both are columns a reader filters on, never
+                       a cut (a template sentence's firmness still differs
+                       by document); the accounting literature on disclosure
+                       boilerplate defines it this way, as word runs shared
+                       across many filings.
 
 The units are the sentences of the narrative and annex paragraphs given to
 the model, each footnote given to the model, whole (footnotes are mostly
@@ -62,7 +76,9 @@ from sentences import split as split_sentences
 UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block",
              "section_path", "component_number", "subcomponent_number", "component_key",
              "char_start", "char_end", "n_tokens", "text_sha256", "lead_in_start",
-             "lead_in_end", "left_out", "copy_of"]
+             "lead_in_end", "left_out", "copy_of", "template_projects", "template_share"]
+TEMPLATE_SHINGLE = 6        # words per shingle for template_share
+TEMPLATE_MIN_PROJECTS = 2   # a shingle is template wording when this many other projects print it
 
 WORD = re.compile(r"[^\W\d_]{2,}")
 CITATION = re.compile(r"\b(?:19|20)\d\d[a-z]?\b|\[link\]|\bhttps?:|www\.", re.I)
@@ -280,7 +296,34 @@ def search_units(data):
             u["copy_of"] = first.setdefault(same, u["unit_id"])
             if u["copy_of"] == u["unit_id"]:
                 u["copy_of"] = ""
+    template_scores(out, lambda d: _text(texts, data, d) or "")
     return out
+
+
+def template_scores(units, texts):
+    """Fill template_projects and template_share on every unit (see the
+    module docstring). Exact and shingle word-run frequencies across
+    projects, computed once over the corpus; deterministic."""
+    bodies, keys, shingles = {}, {}, {}
+    for u in units:
+        text = texts(u["doc_id"])
+        body = text[int(u["char_start"]):int(u["char_end"])]
+        if u["lead_in_start"]:      # what was embedded and graded: the item with its lead-in
+            body = text[int(u["lead_in_start"]):int(u["lead_in_end"])] + "\n" + body
+        words = WORD.findall(body.lower())
+        projects = set(u["project_ids"].split("|")) - {""}
+        bodies[u["unit_id"]] = (words, projects)
+        keys.setdefault(" ".join(words), set()).update(projects)
+        for i in range(max(0, len(words) - TEMPLATE_SHINGLE + 1)):
+            shingles.setdefault(hash(tuple(words[i:i + TEMPLATE_SHINGLE])), set()).update(projects)
+    for u in units:
+        words, projects = bodies[u["unit_id"]]
+        u["template_projects"] = len(keys[" ".join(words)] - projects)
+        n = max(0, len(words) - TEMPLATE_SHINGLE + 1)
+        hit = sum(1 for i in range(n)
+                  if len(shingles[hash(tuple(words[i:i + TEMPLATE_SHINGLE]))] - projects)
+                  >= TEMPLATE_MIN_PROJECTS)
+        u["template_share"] = f"{hit / n:.2f}" if n else "0.00"
 
 
 def copies(units):

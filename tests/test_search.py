@@ -53,7 +53,8 @@ def store(tmp_path, monkeypatch):
                "paragraph_id": p, "doc_id": "D", "project_ids": proj, "block": "narrative",
                "section_path": "II", "component_number": "1", "subcomponent_number": "",
                "component_key": "masts", "text_sha256": f"{i:064d}",
-               "lead_in_start": "", "lead_in_end": "", "copies": ""}
+               "lead_in_start": "", "lead_in_end": "", "copies": "", "template_projects": 0,
+               "template_share": "0.00", "embedded_sha256": f"{i:064d}"}
         rows.append([row[c] for c in embed.SENTENCE_INDEX_COLS])
     _csv(data / "embeddings" / "sentence_index.csv", embed.SENTENCE_INDEX_COLS, rows)
     tax = tmp_path / "taxonomy"
