@@ -33,6 +33,9 @@ from collections import Counter, defaultdict
 SRC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SRC)
 sys.path.insert(0, SRC)
+import candidates as _candidates  # noqa: E402  (defaults for the command line)
+import classify as _classify  # noqa: E402
+import measure as _measure  # noqa: E402
 from paths import data_root, where  # noqa: E402
 
 COHORT = os.path.join(ROOT, "inputs", "config", "cohort.csv")
@@ -707,14 +710,15 @@ def main(argv=None):
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
     p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
-    p.add_argument("--min-cosine", type=float, default=0.0,
+    p.add_argument("--min-cosine", type=float, default=_classify.MIN_COSINE,
                    help="ask a label of a paragraph only when a unit scores at least this")
     p = sub.add_parser("candidates", help="every unit a label's patterns or its embedding "
                                           "top N find, with p_commitment, firmness and types "
                                           "(after ./wbg search)")
     p.add_argument("label_set", help="any set in analysis/labels/ or inputs/taxonomy/")
-    p.add_argument("--top", type=int, default=2000, help="embedding depth per label")
-    p.add_argument("--min-cosine", type=float, default=0.0, help="or every unit at or above this")
+    p.add_argument("--top", type=int, default=_measure.TOP, help="pool by count (0 = off)")
+    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
+                   help="pool: every unit whose best cosine reaches this (0 = off)")
     p = sub.add_parser("measure", help="grade a measure's candidates with the decision model, "
                                        "with the asset map as columns (after ./wbg search "
                                        "<set> and ./wbg classify assets)")
@@ -722,13 +726,13 @@ def main(argv=None):
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
-    p.add_argument("--top", type=int, default=0, help="round 0 pool by count (0 = off)")
-    p.add_argument("--min-cosine", type=float, default=0.45,
+    p.add_argument("--top", type=int, default=_measure.TOP, help="round 0 pool by count (0 = off)")
+    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
                    help="round 0 pool: units whose best cosine reaches this")
-    p.add_argument("--batch", type=int, default=500, help="units per feedback round")
-    p.add_argument("--min-yield", type=int, default=10,
+    p.add_argument("--batch", type=int, default=_measure.BATCH, help="units per feedback round")
+    p.add_argument("--min-yield", type=int, default=_measure.MIN_YIELD,
                    help="a round yielding fewer committed units than this is the last")
-    p.add_argument("--max-rounds", type=int, default=6)
+    p.add_argument("--max-rounds", type=int, default=_measure.MAX_ROUNDS)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("types", help="propose a measure's types from its committed units "
                                      "(generative model, stored), or --assign them with the "
@@ -760,7 +764,9 @@ def main(argv=None):
                                      "the corpus: what types it has")
     p.add_argument("label_set")
     p.add_argument("label_id")
-    p.add_argument("--top", type=int, default=1000)
+    p.add_argument("--top", type=int, default=_measure.TOP, help="the measure's pool by count")
+    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
+                   help="the measure's pool by cosine")
     p.add_argument("--committed", action="store_true",
                    help="only candidates with p_commitment >= 0.5")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
@@ -805,7 +811,7 @@ def main(argv=None):
             (["--limit", str(args.limit)] if args.limit else []) + \
             (["--min-cosine", str(args.min_cosine)] if args.min_cosine else [])
         _run("classify.py", args.label_set, *extra, data=data)
-        if not extra:
+        if not (args.dry_run or args.limit):
             _run("release.py", data=data)
         return 0
     if args.cmd == "candidates":
@@ -840,6 +846,7 @@ def main(argv=None):
         return 0
     if args.cmd == "words":
         _run("candidates.py", args.label_set, args.label_id, "--words", "--top", str(args.top),
+             "--min-cosine", str(args.min_cosine),
              *(["--committed"] if args.committed else []), data=data)
         return 0
     if args.cmd == "sensitivity":

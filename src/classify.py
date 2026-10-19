@@ -1,20 +1,20 @@
 #!/usr/bin/env python3
-"""Classify every model paragraph against a label set with a decision model.
+"""The asset map: grade every model paragraph, footnote and prose table row
+against each asset with a decision model.
 
-Search finds candidate sentences; this stage reads the paragraph, where the
-work is done. For each narrative and annex paragraph given to the model, one
-request asks, for every active label in the set, a graded question: how does
-this passage relate to the label? The grades are the label set's scale
-(inputs/taxonomy/<set>_scale.csv), from "not about it" to the firmest level,
-so for measures the grade is also how firm the commitment is.
-
-The model is a decision model: it returns a probability for each grade, not
-text. Default: TypeSafe's Jev, pinned to one version, through OpenRouter's
-decisions endpoint with the project's own key (embed.read_key).
+For each paragraph, one request asks, for every active label in the set, a
+graded question: how does this passage relate to the label? The grades are
+the label set's scale (inputs/taxonomy/<set>_scale.csv). The model is a
+decision model: it returns a probability for each grade, not text. Default:
+TypeSafe's Jev, pinned to a dated snapshot, through OpenRouter's decisions
+endpoint with the project's own key (embed.read_key). Every answer is stored
+per question (src/answers.py), so a changed definition re-asks one question.
+With --min-cosine, a label's question goes only to the paragraphs where the
+search sees the label.
 
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
        inputs/taxonomy/<set>.csv, <set>_scale.csv
-Writes data/classify/cache/<model>/<aa>/<sha>.json   one stored response per request
+Writes data/classify/answers/<model>/<aa>/<sha>.json one stored answer per question
        data/classify/<set>-<version>/scores.csv      paragraph x label: the
                                                      probability of each grade,
                                                      the expected grade, the

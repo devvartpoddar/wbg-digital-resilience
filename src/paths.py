@@ -29,9 +29,10 @@ written down once:
   data/procurement/  packages, notices, awards: raw and cleaned tables
   data/projects/     projects.csv: one row per project (src/projects.py)
   data/embeddings/   the vector cache, sentence_emb.npy, sentence_index.csv
-  data/classify/     stored decision-model responses and one folder per label
-                     set and version (src/classify.py)
-  data/labels/       grades a person gave, one file per label set (src/evaluate.py)
+  data/classify/     every decision-model answer (answers/) and one folder per
+                     label set and version of the asset map (src/classify.py)
+  data/labels/       grades a person gave (src/evaluate.py, src/check_units.py) and
+                     the hand-labelled activities workbook (src/evaluate_activities.py)
   data/releases/     one folder per data release, and index.csv (src/release.py)
   data/reports/      every stage's report, the run notes for the vault, and
                      fetch_status/ (what each fetcher fully read)

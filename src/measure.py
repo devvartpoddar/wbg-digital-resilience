@@ -8,12 +8,12 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      match, plus its embedding top N (default 2,000). No model reads anything.
   2. The asset map (src/classify.py on the assets set), as columns on every
      unit: the best asset in its paragraph and in its component.
-  3. The decision model reads each unit once. One request carries the
-     measure's graded question AND one yes/no question per digital asset
-     ("does this sentence concern fiber networks?"), so the asset link is
-     answered for the sentence itself, in the same call, at no extra call.
-     The paragraph map stays as coarse context; the unit answer is what the
-     gate and the reports use.
+  3. The decision model reads each unit in two passes: the measure's graded
+     question for every unit, then, for the units graded 2 or more, one
+     yes/no question per digital asset ("does this sentence concern fiber
+     networks?") and one per activity kind (govern, build, sustain, use), so
+     the asset is answered for the sentence itself and the question tokens,
+     which are most of the cost, are spent only where they matter.
   4. Relevance feedback: the vectors of the units the model graded committed
      are averaged into a centroid; the corpus is re-ranked by cosine to it;
      the next --batch unseen units are graded in one parallel batch; and this
