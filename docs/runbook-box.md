@@ -35,7 +35,6 @@ each prints its estimate before asking anything (`--dry-run`).
    1,400-project column is what a whole-portfolio run would cost):
 
    | Step | 70 projects | 250 projects | 1,400 projects |
-   |---|---|---|
    |---|---|---|---|
    | Fetch PDFs, plans, notices, awards, records | hours | overnight (the interface is rate-limited; `./wbg prepare` resumes) | a day or more |
    | Read PDFs (0.3 s a page on a fast core; three workers) | minutes | about 3 hours on the N150 | about 15 hours |
