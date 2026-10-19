@@ -35,12 +35,14 @@ Any model that meets all three may be used, including an external one. For an ex
 | Link notices and awards to their plan package | Built |
 | Record a data release; load into Postgres (tables, results, vectors, keys, views for Metabase); write review sheets and the run report | Built |
 | Embed the search units (sentences, whole footnotes and prose table rows; references, fragments and copies left out) | Built; runs as part of `./wbg search <set>` |
-| Search sentences for each asset and measure; roll up to paragraphs | Built for any label set in `inputs/taxonomy/` or `analysis/labels/` (`./wbg search assets`, `./wbg search measures`); the measures list is a first draft from the seed, awaiting review |
-| Score every searched unit for how likely it states a commitment (section-title classifier, no grading) and its firmness wording | Built (`src/commitment.py`, run by `./wbg candidates`); checked on 312 hand-graded sentences |
-| Collect each label's candidates: its word patterns plus its embedding top 1,000, with commitment score, firmness and types | Built (`./wbg candidates <set>`, `./wbg words <set> <label>`); tried on six measures (`analysis/labels/six_measures*`) |
-| Grade every narrative and annex model paragraph against each asset and measure with a decision model | Built (`./wbg classify <set>`); not yet run: needs the key |
+| Search sentences for each asset and measure; roll up to paragraphs | Built for any label set in `inputs/taxonomy/` or `analysis/labels/` (`./wbg search assets`, `./wbg search cra`) |
+| Score every searched unit for how likely it states a commitment (section-title classifier, no grading) and its firmness wording | Built (`src/commitment.py`, run by `./wbg candidates`); checked on 312 hand-graded sentences in an earlier trial |
+| Collect each label's candidates: its word patterns plus its embedding top 1,000, with commitment score, firmness and types | Built (`./wbg candidates <set>`, `./wbg words <set> <label>`) |
+| Grade every narrative and annex model paragraph against each asset with a decision model: the asset map | Built (`./wbg classify assets`); run on the 70-project corpus (section 5a) |
+| A measure through the funnel: candidates, the asset map's columns, the decision model's grade (section 5c) | Built (`./wbg measure <set>`); first measure: climate risk assessment (`analysis/labels/cra*`) |
+| The funnel measured against a hand-labelled workbook of activities (section 5c) | Built (`./wbg evaluate <set> --column ...`) |
+| A measure's types: proposed by a generative model, approved by a person, assigned by the decision model (section 5d) | Built (`./wbg types <set>`, `--assign`) |
 | A check sheet for a person to grade; measure search and classifier against it | Built (`src/check_sheet.py`, `src/evaluate.py`); cut-offs are chosen from its report |
-| Link a measure to an asset (same paragraph, same asset, same component) | Next, once paragraphs are graded |
 | Labels for measuring it | Drawn by `src/check_sheet.py`; keyed by the SHA-256 of the paragraph text, the label set, the label and the scale; nothing but evaluation reads them |
 
 ## 0. Running it
@@ -445,7 +447,26 @@ The state sent with each paragraph is its section title, its sub-component (or c
 
 **Checking (`src/check_sheet.py`, `src/evaluate.py`).** For each label the check sheet draws paragraphs from every grade the classifier gave, and from those the search ranks in its top 5 per cent that the classifier put at grade 0, so the rare high grades and the disagreements are seen. The person sees the passage, its section and component, and the label with its definition, never the model's answer, and enters a grade. The sheet is drawn from the classification and search runs for the labels and text as they stand now, and a search run is refused if it was scored against another sentence index. `evaluate.py` stores each grade in `data/labels/<set>.csv`, keyed by the paragraph text's SHA-256, the label and the SHA-256 of the exact question graded under (name, definition and grades, recorded when the sheet was drawn), so a grade never carries over to a changed definition, and reports precision and recall at a range of cut-offs for the classifier (probability of at least grade k) and for the search (best cosine score), each graded row weighted by its stratum's size so the figures estimate the whole corpus, with the number of graded rows behind each. The report shows the trade-off; a person picks the cut-off.
 
-**Linking a measure to an asset (next).** Three layers, strongest first: the measure and the asset in the same paragraph; the same asset; the same component (by `component_key` across documents). What "the same asset" means is still to be defined.
+**The asset map.** The assets classification is run once per corpus and read by every measure (section 5c): for each paragraph, the asset with the highest probability of grade 2 or more (supported or financed), and for each component the best of its paragraphs. It is the digital-asset link a measure's question deliberately leaves out.
+
+## 5c. A measure through the funnel (`src/measure.py`, `./wbg measure <set>`)
+
+At 70 projects the decision model could read every sentence for every measure (about US$0.80 a measure); at the 500 projects the study is heading for, it could not for every measure. So a measure is read through a funnel, each level cheaper than the next and each one's loss measurable:
+
+1. **Candidates** (section 5b): the units a measure's word patterns match, plus its embedding top 1,000. No model reads anything here.
+2. **The asset map** (section 5a), as two columns on every candidate: the best asset in its paragraph with its probability of grade 2 or more (`asset_para`, `asset_p_para`), and the best in its component (`asset_comp`, `asset_p_comp`). By default nothing is gated: every candidate goes to the decision model and the report tabulates how many committed units a gate at 0.3, 0.5, 0.7 or 0.9 on either column would keep, so the gate's cost in missed commitments is measured before a threshold is chosen. `--gate paragraph` or `--gate component` with `--asset-min` is the setting at scale, once chosen.
+3. **The decision model** reads each remaining unit once, with its section title, its component number and name, the unit's text (a list item with its lead-in) and, in the default design, the paragraph it sits in (`--context sentence` sends the unit alone, for comparison). The question is the measure's name and definition with the set's grade scale, and **it never names the asset**: the model reads literally, and on a tower-siting sentence the same question scored 0.17 for "a climate risk assessment of its digital infrastructure" and 0.97 for "a climate risk assessment". The asset link is the map's, not the question's. The model is pinned to the dated snapshot (`typesafe/jev-1.13-20260917`), which the endpoint accepts; the alias `jev-1.13` moves when the vendor ships a release. Responses are stored as in section 5a, so a re-run asks nothing.
+
+Output: `data/measures/<set>-<version>/units.csv`, one row per candidate (sent or not) with the search, commitment, asset and grade columns and the unit's text; a manifest with the exact questions, the models served, calls, time and cost; and `data/reports/measure_<set>.txt` with grades by route, committed units by project, prevalence in the pool and the gate table. The version is a SHA-256 over the candidates version, the asset map's version, the questions, the model, the context design and the gate, so a change to any of them is a new run and an unchanged one reads the store. Loaded to Postgres as `wbg.measures`.
+
+**Measuring the funnel (`src/evaluate_activities.py`, `./wbg evaluate <set> --column <theme>`).** A workbook of activities a person labelled by hand (`data/labels/activities.xlsx`, never in git: it holds document text; one row per activity with a project id, a pasted stretch of appraisal text and a flag per theme column) is matched to the current paragraphs by shared eight-word shingles (three or more), and for the activities flagged under a theme the report gives recall at each level: a candidate anywhere in the activity's paragraphs; graded; committed (the top grade); committed and kept by an asset gate at each threshold. The rows flagged "Adaptation: No" give the false-positive rate. Labels are per activity, not per sentence, and carry no firmness, so this measures whether the funnel finds a commitment somewhere in the activity, not which sentence or how firm; the match rate is reported first, since an unmatched activity cannot be measured. A disagreement with the workbook is a definitional question for a person, not automatically an error.
+
+## 5d. A measure's types (`src/kinds.py`, `./wbg types <set>`)
+
+Clustering the committed units did not recover hand-made types in the earlier trial (adjusted Rand index 0.04 to 0.20), so types are proposed by a generative model and approved by a person:
+
+1. **Propose.** The committed units of the current measure run go to the cheapest capable generative model on the project's route (`anthropic/claude-haiku-5.5`) in one call, which returns named types with one-line definitions and example units, as JSON. The call is made three times with the units in a different seeded order each time (a single call over-splits or merges by chance), every response is stored under the SHA-256 of its request, and the proposals are written side by side (`data/types/<set>-<version>/proposals.md`). A person merges and approves them into `analysis/labels/<set>_types.csv` (`measure_id, type_id, type_name, definition, active`; a `pattern` column is optional and used only by the candidates stage). Nothing writes that file but a person.
+2. **Assign** (`--assign`). Each committed unit goes to the decision model with one yes/no question per approved type, never a multiple choice: the model shows a first-option bias, and a unit may be of several types. A unit no type claims at the reading threshold (0.5, a parameter) is "other"; the share of "other" is reported as the signal that the list needs a new version. Output: `data/types/<set>-assign-<version>/assignments.csv` with each type's probability per unit, and `data/reports/types_<set>.txt` with counts by type and projects by type.
 
 ## 6. Storage
 
@@ -456,6 +477,8 @@ The state sent with each paragraph is its section title, its sub-component (or c
   - `projects/`: `projects.csv`;
   - `embeddings/`: the vector cache, `sentence_emb.npy` and `sentence_index.csv`;
   - `search/`: one folder per label set and version (section 5);
+  - `measures/`: a measure's graded candidates with the asset map's columns, one folder per label set and version (section 5c);
+  - `types/`: stored generative-model proposals and the decision model's type assignments, one folder per label set and version (section 5d);
   - `classify/`: stored decision-model responses (`cache/`) and one folder per label set and version (section 5a);
   - `labels/`: grades a person gave, one file per label set (section 5a);
   - `archive/`: tables an earlier version wrote and nothing reads (`document_projects.csv`, `package_changes.csv`), moved there by `src/paths.py`, never deleted;
