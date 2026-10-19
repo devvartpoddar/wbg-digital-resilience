@@ -46,7 +46,7 @@ import commitment  # noqa: E402
 import labels  # noqa: E402
 import search  # noqa: E402
 
-TOP = 1000
+TOP = 2000           # embedding depth; src/measure.py reads the same constant
 PATTERN_WEIGHT = 10   # a pattern hit outranks every unit found by embedding alone
 COMMIT_WEIGHT = 2     # then p_commitment counts twice the embedding percentile
 COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",

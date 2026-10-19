@@ -711,7 +711,7 @@ def main(argv=None):
                                           "top N find, with p_commitment, firmness and types "
                                           "(after ./wbg search)")
     p.add_argument("label_set", help="any set in analysis/labels/ or inputs/taxonomy/")
-    p.add_argument("--top", type=int, default=1000, help="embedding depth per label")
+    p.add_argument("--top", type=int, default=2000, help="embedding depth per label")
     p = sub.add_parser("measure", help="grade a measure's candidates with the decision model, "
                                        "with the asset map as columns (after ./wbg search "
                                        "<set> and ./wbg classify assets)")

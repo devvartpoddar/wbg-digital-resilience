@@ -86,7 +86,7 @@ ASSET_SET = "assets"
 CONTEXTS = ("sentence", "paragraph")
 GATES = ("none", "link", "unit", "paragraph", "component")
 LINK_MIN = 0.5        # an asset answer or map score at or above this makes a link
-TOP = 2000            # embedding depth of round 0
+TOP = candidates.TOP  # embedding depth of round 0 (the same run the load reads)
 BATCH = 500           # units per feedback round
 MIN_YIELD = 10        # a round yielding fewer committed units than this is the last
 MAX_ROUNDS = 6
@@ -208,14 +208,20 @@ class Run:
 
     def __init__(self, name, data, *, model=MODEL, context="sentence", gate="none",
                  asset_min=0.0, top=TOP, batch=BATCH, min_yield=MIN_YIELD,
-                 max_rounds=MAX_ROUNDS, log=print):
+                 max_rounds=MAX_ROUNDS, build=True, log=print):
         if context not in CONTEXTS or gate not in GATES:
             raise SystemExit(f"measure: --context is one of {CONTEXTS}, --gate one of {GATES}")
         self.name, self.data, self.log = name, data, log
         self.settings = {"model": model, "context": context, "gate": gate,
                          "asset_min": asset_min, "top": top, "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds}
-        self.cand = candidates.build(name, data, top=top, log=log)
+        # A reader (the load, the evaluation, the types stage) must not build
+        # anything as a side effect: it asks for the run as it stands.
+        self.cand = candidates.build(name, data, top=top, log=log) if build \
+            else candidates.current(name, data, top=top)
+        if not self.cand:
+            raise SystemExit(f"measure: no candidates for {name} at top {top}; run "
+                             f"./wbg measure {name}")
         self.labels, self.scale = classify.load_labels(name, None)
         self.assets = [a for a in labels_mod.load_set(ASSET_SET) if a["active"] == "true"]
         self.qs = questions(self.labels, self.scale, context, self.assets)
@@ -531,7 +537,7 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
 
 def current_run(name, data, **kw):
     """The run folder for the set as it stands now, or None."""
-    out = Run(name, data, log=lambda *_: None, **kw).out
+    out = Run(name, data, log=lambda *_: None, build=False, **kw).out
     return out if os.path.exists(os.path.join(out, "manifest.json")) else None
 
 
