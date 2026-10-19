@@ -56,8 +56,9 @@ each prints its estimate before asking anything (`--dry-run`).
 ./wbg classify assets --min-cosine 0.25          # the asset map (reads the store first; stops on a refusal)
 ./wbg search cra && ./wbg measure cra            # each measure: search, then the funnel
 ./wbg search ews && ./wbg measure ews
-./wbg types cra                                  # proposals to read and approve into analysis/labels/cra_types.csv
-python3 src/load_pg.py                           # Postgres: tables, keys, comments, views
+./wbg types cra --assign --set digital           # the approved types (analysis/labels/cra_types.csv) on the committed units
+./wbg types ews --assign --set digital
+python3 src/load_pg.py --set digital             # Postgres: tables, keys, comments, views; the digital set's runs
 python3 src/run_report.py                        # the run note for the vault
 ```
 
@@ -73,8 +74,10 @@ Schema `wbg` only. Start cards from the views, not the tables:
 - `measure_findings_by_project`: one row per project and measure, with the
   assets linked, how delivered, by whom (the project list and map);
 - `measure_findings_in_context`: every unit a measure read, with its grade,
-  calibrated probability, asset, kind, actor, conditionality and the text
-  around it (filter `most_likely_grade = 3`);
+  calibrated probability, asset, kind, actor, conditionality, type (the
+  measure's cluster) and the text around it (filter `most_likely_grade = 3`);
+- `measure_finding_lists`: one row per unit and asset, kind, actor or type,
+  for dashboard filters on what the array columns hold;
 - `asset_map`, `search_paragraphs_with_text`, `paragraphs_with_document`,
   `packages_with_project`, `upcoming_packages`, `notices_with_package`,
   `awards_with_package`, `data_as_of`.

@@ -1,0 +1,5 @@
+measure_id,type_id,type_name,definition,active,version
+cra,site_specific,Site-specific assessment of financed works,"A climate or disaster risk assessment of particular sites, facilities, buildings, cable routes or tower locations the project finances, used to decide the adaptation measures in their design or construction.",true,v1
+cra,contractor_required,Assessment required of contractors or operators,"A requirement that contractors, bidders, operators or consultants carry out a climate or disaster risk assessment, written into tender documents, terms of reference, specifications or service agreements.",true,v1
+cra,sector_wide,Vulnerability assessment of existing infrastructure,"A sector-wide, network-wide or national assessment of the climate vulnerability of infrastructure that already exists, to set priorities for strengthening it.",true,v1
+cra,hazard_mapping_siting,Hazard mapping and screening to choose sites,"Hazard, exposure or risk mapping, or a climate screening of candidate locations, used to decide where infrastructure goes or which areas the project targets.",true,v1

@@ -16,10 +16,12 @@ lists AS (
          ARRAY_AGG(DISTINCT linked_asset_id ORDER BY linked_asset_id)
            FILTER (WHERE linked_asset_id IS NOT NULL) AS linked_asset_ids,
          ARRAY_AGG(DISTINCT k ORDER BY k) FILTER (WHERE k IS NOT NULL) AS activity_kinds,
-         ARRAY_AGG(DISTINCT a ORDER BY a) FILTER (WHERE a IS NOT NULL) AS actors
+         ARRAY_AGG(DISTINCT a ORDER BY a) FILTER (WHERE a IS NOT NULL) AS actors,
+         ARRAY_AGG(DISTINCT t ORDER BY t) FILTER (WHERE t IS NOT NULL) AS type_ids
   FROM u
   LEFT JOIN LATERAL UNNEST(u.activity_kinds_above_threshold) k ON true
   LEFT JOIN LATERAL UNNEST(u.actor_ids_above_threshold) a ON true
+  LEFT JOIN LATERAL UNNEST(u.type_ids_above_threshold) t ON true
   WHERE u.most_likely_grade = 3
   GROUP BY label_set, label_id, project_id
 )
@@ -38,6 +40,7 @@ SELECT u.label_set, u.label_id, l.label_name AS measure_name, u.project_id, pr.c
        MAX(li.linked_asset_ids) AS linked_asset_ids,
        MAX(li.activity_kinds) AS activity_kinds,
        MAX(li.actors) AS actors,
+       MAX(li.type_ids) AS type_ids,
        COUNT(*) FILTER (WHERE u.most_likely_grade = 3 AND u.conditional_probability >= 0.5)
          AS conditional_committed_units
 FROM u

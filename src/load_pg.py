@@ -298,7 +298,8 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "conditional_p", "actors_yes", "actor_best", "actor_p",
                 "template_projects", "template_share", "sent",
                 "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
-                "p_committed_calibrated", "model_served", "cost", "text"]
+                "p_committed_calibrated", "types_yes", "best_type", "best_p", "model_served",
+                "cost", "text"]
 
 
 def _run_rows(data, finder, file):
@@ -324,8 +325,39 @@ def classify_rows(data, projects=None):
 
 
 def measure_rows(data, projects=None):
+    """The current measure run per set, with the current type assignments
+    (src/kinds.py) joined on as types_yes, best_type and best_p where a set
+    has an approved list and an assignment run; blank otherwise."""
+    import kinds
     import measure
-    return _run_rows(data, lambda n, d: measure.current_run(n, d, projects=projects), "units.csv")
+    sha, rows = _run_rows(data, lambda n, d: measure.current_run(n, d, projects=projects),
+                          "units.csv")
+    if sha is None:
+        return sha, rows
+    assigned, runs = {}, []
+    for name in labels.label_sets():
+        folder = kinds.current_assign(name, data, projects=projects)
+        if not folder:
+            continue
+        runs.append(os.path.basename(folder))
+        with open(os.path.join(folder, "assignments.csv"), newline="", encoding="utf-8") as fh:
+            for a in csv.DictReader(fh):
+                assigned[(name, a["label_id"], a["unit_id"])] = a
+    for r in rows:
+        a = assigned.get((r["label_set"], r["label_id"], r["unit_id"]), {})
+        r.update({"types_yes": a.get("types_yes", ""), "best_type": a.get("best_type", ""),
+                  "best_p": a.get("best_p", "")})
+    return sha + "|" + "|".join(runs), rows
+
+
+def type_rows():
+    """Every approved type of every set with a list (analysis/labels/<set>_types.csv)."""
+    rows = []
+    for name in labels.label_sets():
+        for t in labels.load_types(name):
+            rows.append({"label_set": name, "label_id": t["label_id"], "type_id": t["type_id"],
+                         "type_name": t["type_name"], "definition": t["definition"]})
+    return rows
 
 
 def label_rows():
@@ -584,6 +616,9 @@ def main():
         derived(conn, "labels", hashlib.sha256(repr(lab).encode()).hexdigest(),
                 ["label_set", "label_id", "name", "definition", "active", "version", "folder"],
                 lab)
+        typ = type_rows()
+        derived(conn, "measure_types", hashlib.sha256(repr(typ).encode()).hexdigest(),
+                ["label_set", "label_id", "type_id", "type_name", "definition"], typ)
         print(f"  {'sentence_vectors':<20} {load_vectors(conn, args.data, release_id, args.force)}")
         load_release(conn, args.data, release_id)
         finish(conn)
