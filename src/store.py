@@ -62,7 +62,10 @@ def _publish(conn, data, sets, projects, links, log, written):
             ("measure_types", ["label_set", "label_id", "type_id", "type_name", "definition",
                                "merged_from"], load_pg.type_rows()),
             ("label_groups", ["label_set", "label_id", "group_id", "group_name"],
-             load_pg.group_rows())):
+             load_pg.group_rows()),
+            *zip(("label_queries", "label_patterns", "label_scale"),
+                 (load_pg.QUERY_COLS, load_pg.PATTERN_COLS, load_pg.SCALE_COLS),
+                 load_pg.definition_rows())):
         n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", None,
                                              f"publish:{_now()}")
         written[table] = n

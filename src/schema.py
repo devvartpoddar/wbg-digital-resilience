@@ -82,6 +82,7 @@ RENAME_IN = {
                    "action": "restructuring_action"},
     "packages": {"component": "component_name"},
     "labels": {"name": "label_name"},
+    "label_scale": {"grade": "grade"},
 }
 
 # Types by column name (after renaming). Anything not here is text, except
@@ -92,7 +93,7 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
-           "template_project_count", "cosine_rank", "graded_units", "measure_rank"}
+           "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "embedding_score", "embedding_percentile",
@@ -453,6 +454,33 @@ TABLES = {
                 "person): a presentation layer the views add beside the label; the labels "
                 "keep their ids and answers. The assets are grouped into about six.",
         columns={"group_id": "The group's id.", "group_name": "The group's name."}),
+    "label_queries": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "query_id"), foreign=[],
+        comment="A copy of each set's search phrases (<set>_queries.csv, kept by a person): "
+                "the sentences the search ranks units against. Inactive rows are kept.",
+        columns={"query_id": "The phrase's id.", "query": "The phrase.",
+                 "is_active": "Whether the search uses it.",
+                 "version": "The label's version (its set file's version column).",
+                 "file_sha256": "SHA-256 of the file the row was copied from."}),
+    "label_patterns": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "pattern_id"), foreign=[],
+        comment="A copy of each set's word patterns (<set>_patterns.csv, kept by a person): "
+                "regular expressions that add units to a measure's pool. Inactive rows are "
+                "kept. label_pattern_hits counts the units each matched in the current run.",
+        columns={"pattern_id": "The pattern's id.",
+                 "pattern": "The regular expression, matched without regard to case.",
+                 "is_active": "Whether the search uses it.",
+                 "version": "The label's version (its set file's version column).",
+                 "file_sha256": "SHA-256 of the file the row was copied from."}),
+    "label_scale": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "grade"), foreign=[],
+        comment="A copy of each set's grade scale (<set>_scale.csv, kept by a person), one row "
+                "per label and grade with the label's name filled in: the grades the decision "
+                "model chooses among.",
+        columns={"grade": "The grade, 0 the lowest.",
+                 "description": "What the grade means, as the model is shown it.",
+                 "version": "The label's version (its set file's version column).",
+                 "file_sha256": "SHA-256 of the file the row was copied from."}),
     "package_assets": dict(
         schema=PUBLIC, key=("package_id", "label_id"),
         foreign=[("package_id", "packages", "package_id"),

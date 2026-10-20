@@ -181,3 +181,19 @@ LANGUAGE sql STABLE AS $$
 $$;
 COMMENT ON FUNCTION wbg.commitments_under IS
   'The commitments of a measure under the dashboard filters (type, region, country, months to the next date); every argument but the measure may be NULL. Rows as wbg.commitments.';
+
+-- The "How it's defined" tab: each pattern with the units it matched in the
+-- measure's current run (measure_findings holds the run's pool, and each
+-- unit's matched_patterns). The phrases and the grade scale are read from
+-- label_queries and label_scale as they are.
+DROP VIEW IF EXISTS wbg.label_pattern_hits CASCADE;
+CREATE VIEW wbg.label_pattern_hits AS
+SELECT p.label_set, p.label_id, p.pattern_id, p.pattern, p.is_active, p.version, p.file_sha256,
+       count(f.unit_id) AS units_matched,
+       count(f.unit_id) FILTER (WHERE f.most_likely_grade = 3) AS units_matched_committed
+FROM wbg.label_patterns p
+LEFT JOIN wbg.measure_findings f
+  ON f.label_set = p.label_set AND f.label_id = p.label_id AND p.pattern_id = ANY(f.matched_patterns)
+GROUP BY p.label_set, p.label_id, p.pattern_id, p.pattern, p.is_active, p.version, p.file_sha256;
+COMMENT ON VIEW wbg.label_pattern_hits IS
+  'Each word pattern of each set (label_patterns) with how many units of the measure''s current run it matched, and how many of those the decision model graded committed. A pattern only adds units to the pool; the model still grades every one.';
