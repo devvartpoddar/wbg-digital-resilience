@@ -1,5 +1,5 @@
 -- One row per finding and list member, for dashboard filters: Metabase
--- cannot filter inside a text[] column, so the assets, kinds, actors and
+-- cannot filter inside a text[] column, so the assets, their groups, kinds, actors and
 -- types a committed unit carries are unnested here. Join back on unit_id.
 DROP VIEW IF EXISTS wbg.measure_finding_lists;
 CREATE VIEW wbg.measure_finding_lists AS
@@ -13,7 +13,10 @@ CROSS JOIN LATERAL (
   UNION ALL SELECT 'actor', c FROM UNNEST(m.actor_ids_above_threshold) c
   UNION ALL SELECT 'type', t FROM UNNEST(m.type_ids_above_threshold) t
   UNION ALL SELECT 'linked_asset', m.linked_asset_id WHERE m.linked_asset_id IS NOT NULL
+  UNION ALL SELECT DISTINCT 'asset_group', ag.group_id FROM wbg.label_groups ag
+            WHERE ag.label_set = 'assets'
+              AND (ag.label_id = m.linked_asset_id OR ag.label_id = ANY(m.asset_ids_above_threshold))
 ) x
 WHERE m.was_sent_to_model;
 COMMENT ON VIEW wbg.measure_finding_lists IS
-  'One row per graded unit and list member (kind: asset, linked_asset, activity_kind, actor, type), so a dashboard filter can select on what a text[] column holds. Join measure_findings on unit_id.';
+  'One row per graded unit and list member (kind: asset, linked_asset, asset_group, activity_kind, actor, type), so a dashboard filter can select on what a text[] column holds. Join measure_findings on unit_id.';

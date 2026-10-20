@@ -87,6 +87,60 @@ settings; they are bookkeeping. Every count in the findings is the decision
 model's grade, not a person's: the graded sheet's precision and recall
 (`data/reports/evaluate_units_<set>.md`) is the number to quote beside it.
 
+## Changing what the dashboards show, without a model call
+
+A person decides the clusters and the grouping; the files carry the
+decision and a reload applies it. None of these asks the model anything.
+
+- **Merge two types**: in `analysis/labels/<set>_types.csv` set
+  `merge_into` on the type to fold (to the id of the type it joins). Its
+  yes answers count as the target's from the next load.
+- **Rename a type**: set `display_name`. `type_name` stays as the model was
+  asked, which is what keeps the stored answers valid.
+- **Regroup the assets**: edit `inputs/taxonomy/assets_groups.csv`
+  (`asset_id, group_id, group_name`). The views show the group beside the
+  asset; the asset ids underneath do not move.
+- Then `python3 src/load_pg.py --set digital --set digital_contributor`
+  (or the sets the runs were made over). The load is keyed on the file, so
+  it reloads `measure_findings`, `measure_types` and `label_groups` and
+  nothing else.
+
+What does cost a call: a new type or a changed definition (`./wbg types
+<set> --assign`, about US$0.02 per measure on the 70-project runs); a
+changed asset definition (the asset map, about US$0.35 per asset);
+a new measure (below).
+
+## Adding a measure from the board
+
+A measure is four small files and three stages, and the only part a person
+must write is the definition. A board card for Hephaestus carries it:
+
+```
+Goal: the measure <id> ("<name>") is run over the digital set and loaded,
+      with its types proposed for approval.
+Why:  <the definition, three to six sentences: what counts, what does
+      not; name the measure, never the digital asset, the asset map
+      supplies that link>
+      <six to ten search phrases, each a sentence a document might write>
+      <optional: one or two whole-word patterns>
+Done when: analysis/labels/<id>.csv, <id>_queries.csv, <id>_scale.csv
+      (copied from cra_scale.csv with the name substituted) and, if given,
+      <id>_patterns.csv exist following ews's shape; ./wbg search <id>,
+      ./wbg measure <id> --set digital and ./wbg types <id> --set digital
+      complete with 0 failed requests; src/load_pg.py --set digital
+      completes; the summary quotes the measure report's "committed units"
+      line, the spend, and the path of the proposals
+      (data/types/<id>-<version>/proposals.md).
+Stop and ask if: the measure stage's estimate is above US$1; the search
+      finds under 20 candidates.
+```
+
+Cost on the digital set: the search is embeddings only (cents); the
+measure about US$0.15; the proposals about US$0.05. The types are then
+approved by a person into `analysis/labels/<id>_types.csv` and assigned
+with a second card (`./wbg types <id> --assign --set digital`, about
+US$0.02), after which the measure appears in every dashboard filter.
+
 ## After the run
 
 - Grade one check sheet per measure (`./wbg check <set>`, then
