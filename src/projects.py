@@ -33,7 +33,7 @@ from dates import iso_date  # noqa: E402
 
 COLS = ["project_id", "cohort_set", "in_projects_interface", "project_name", "status",
         "approval_date", "approval_fy", "closing_date", "region", "country_code",
-        "country_name", "lending_instrument", "commitment_usd_m", "practice",
+        "country_name", "lending_instrument", "commitment_usd_m", "record_source", "practice",
         "practice_code", "sectors", "managing_unit", "unit_code", "unit_doc_id",
         "unit_as_of"]
 
@@ -90,6 +90,16 @@ def managing_unit(docs):
     return d["owner_unit"].strip(), d["doc_id"], d["disclosure_date"]
 
 
+def fiscal_year(approval):
+    """The World Bank fiscal year (1 July to 30 June, named by the year it
+    ends) of an approval date, for a record that gives no approvalfy."""
+    iso = _iso(approval)
+    if not iso:
+        return ""
+    year, month = int(iso[:4]), int(iso[5:7])
+    return str(year + 1 if month >= 7 else year)
+
+
 def project_row(pid, rec, docs, cohort_set=""):
     """One projects.csv row from the interface record and the project's documents."""
     fetched, rec = rec is not None, rec or {}
@@ -107,13 +117,14 @@ def project_row(pid, rec, docs, cohort_set=""):
         "project_name": " ".join((rec.get("project_name") or "").split()),
         "status": rec.get("status") or "",
         "approval_date": _iso(rec.get("boardapprovaldate")),
-        "approval_fy": rec.get("approvalfy") or "",
+        "approval_fy": rec.get("approvalfy") or fiscal_year(rec.get("boardapprovaldate")),
         "closing_date": _iso(rec.get("closingdate")),
         "region": rec.get("regionname") or "",
         "country_code": "|".join(country) if isinstance(country, list) else country,
         "country_name": rec.get("countryshortname") or "",
         "lending_instrument": rec.get("lendinginstr") or "",
         "commitment_usd_m": rec.get("curr_total_commitment") or "",
+        "record_source": rec.get("record_source") or ("v2" if set(rec) - {"id"} else ""),
         "practice": "|".join(names),
         "practice_code": "|".join(codes),
         "sectors": sectors(rec),

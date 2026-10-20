@@ -167,7 +167,8 @@ TABLES = {
         columns={
             "cohort_set": "Which hand-kept set of the cohort the project is in: digital (its object is a digital asset) or digital_contributor (a digital asset contributes to another sector's object). The filter every report should carry.",
             "in_projects_interface": "Whether the projects interface had a record for this id.",
-            "commitment_usd_millions": "Current total commitment, US$ millions, from the projects interface.",
+            "commitment_usd_millions": "Current total commitment, US$ millions, from the projects interface (its v3 form where it gives one: the figure after cancellations).",
+            "record_source": "Which form of the projects interface gave the record: v2, v3 or v2+v3. v3 is preferred for name, status, dates, place and commitment (the more current); v2 alone gives the fiscal year, lending instrument, Global Practice and sectors, so a v3-only record has those blank (the fiscal year is then computed from the approval date).",
             "approval_fiscal_year": "World Bank fiscal year of Board approval.",
             "sectors": "Top three sectors with their shares, as the interface prints them.",
             "practice": "The Global Practice(s) leading the project.",
