@@ -350,16 +350,54 @@ def measure_rows(data, projects=None):
         a = assigned.get((r["label_set"], r["label_id"], r["unit_id"]), {})
         r.update({"types_yes": a.get("types_yes", ""), "best_type": a.get("best_type", ""),
                   "best_p": a.get("best_p", "")})
-    return sha + "|" + "|".join(runs), rows
+    mapping = {name: labels.type_resolution(name)[0] for name in labels.label_sets()}
+    apply_type_resolution(rows, mapping)
+    merges = hashlib.sha256(repr(sorted((n, sorted(m.items())) for n, m in mapping.items()))
+                            .encode()).hexdigest()[:12]
+    return sha + "|" + "|".join(runs) + "|" + merges, rows
+
+
+def apply_type_resolution(rows, mapping):
+    """Show each unit's types as the label file says now: a type merged into
+    another is replaced by it (duplicates dropped, order kept) in types_yes
+    and best_type. mapping: {label_set: {(label_id, type_id): shown id}}."""
+    for r in rows:
+        m = mapping.get(r["label_set"]) or {}
+        if not m:
+            continue
+        lid = r["label_id"]
+        shown = []
+        for t in (r.get("types_yes") or "").split("|"):
+            if not t:
+                continue
+            t = m.get((lid, t), t)
+            if t not in shown:
+                shown.append(t)
+        r["types_yes"] = "|".join(shown)
+        if r.get("best_type"):
+            r["best_type"] = m.get((lid, r["best_type"]), r["best_type"])
+    return rows
 
 
 def type_rows():
-    """Every approved type of every set with a list (analysis/labels/<set>_types.csv)."""
+    """Every type shown for every set with a list (analysis/labels/<set>_types.csv):
+    a merged type is folded into its target, a display_name is the name."""
+    out = []
+    for name in labels.label_sets():
+        for key, t in labels.type_resolution(name)[1].items():
+            out.append({"label_set": name, "label_id": key[0], "type_id": t["type_id"],
+                        "type_name": t["type_name"], "definition": t["definition"],
+                        "merged_from": "|".join(t["merged_from"])})
+    return out
+
+
+def group_rows():
+    """Every label's reading group, for every set with a <set>_groups.csv."""
     rows = []
     for name in labels.label_sets():
-        for t in labels.load_types(name):
-            rows.append({"label_set": name, "label_id": t["label_id"], "type_id": t["type_id"],
-                         "type_name": t["type_name"], "definition": t["definition"]})
+        for g in labels.load_groups(name):
+            rows.append({"label_set": name, "label_id": g["label_id"], "group_id": g["group_id"],
+                         "group_name": g["group_name"]})
     return rows
 
 
@@ -626,7 +664,11 @@ def main():
                 lab)
         typ = type_rows()
         derived(conn, "measure_types", hashlib.sha256(repr(typ).encode()).hexdigest(),
-                ["label_set", "label_id", "type_id", "type_name", "definition"], typ)
+                ["label_set", "label_id", "type_id", "type_name", "definition", "merged_from"],
+                typ)
+        grp = group_rows()
+        derived(conn, "label_groups", hashlib.sha256(repr(grp).encode()).hexdigest(),
+                ["label_set", "label_id", "group_id", "group_name"], grp)
         print(f"  {'sentence_vectors':<20} {load_vectors(conn, args.data, release_id, args.force)}")
         load_release(conn, args.data, release_id)
         finish(conn)

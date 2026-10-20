@@ -14,8 +14,19 @@ A label set is two or three CSV files, kept by people and only read here:
                       (?-i:...), or "UPS" also matches "start-ups". The candidates stage takes every unit a
                       pattern matches, whatever its embedding score.
   <set>_types.csv     the types of a label (optional): <x>_id, type_id,
-                      type_name, pattern, active. A unit is of every type
-                      whose pattern it matches ("underground", "aerial").
+                      type_name, definition, pattern, active, and two
+                      presentation columns a person may add at any time:
+                      merge_into (another type_id of the same label: this
+                      type's yes answers count as that type's, and nothing
+                      is asked again) and display_name (shown instead of
+                      type_name, which stays the wording the model was asked
+                      with). A unit is of every type whose pattern it matches
+                      ("underground", "aerial").
+  <set>_groups.csv    how the set's labels are grouped for reading (optional):
+                      <x>_id, group_id, group_name, active. A presentation
+                      layer only: the labels keep their ids and answers, the
+                      views add the group beside them. A label in two active
+                      groups is an error; a label in none has no group.
 
 Two folders hold them, with one difference between them:
 
@@ -37,7 +48,7 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LABEL_DIRS = (os.path.join(ROOT, "inputs", "taxonomy"), os.path.join(ROOT, "analysis", "labels"))
-_SUFFIXES = ("_queries", "_scale", "_patterns", "_types")
+_SUFFIXES = ("_queries", "_scale", "_patterns", "_types", "_groups")
 
 
 def _is_set(path):
@@ -158,5 +169,62 @@ def load_types(name, dirs=None, taxonomy=None):
         out.append({"label_id": r[_id_col(r, path)].strip(), "type_id": r["type_id"].strip(),
                     "type_name": r.get("type_name", "").strip(),
                     "definition": " ".join((r.get("definition") or "").split()),
-                    "pattern": pattern, "regex": rx})
+                    "pattern": pattern, "regex": rx,
+                    "merge_into": (r.get("merge_into") or "").strip(),
+                    "display_name": " ".join((r.get("display_name") or "").split())})
+    return out
+
+
+def type_resolution(name, dirs=None, taxonomy=None):
+    """How a set's types are shown: ({(label_id, type_id): shown type_id},
+    {(label_id, shown type_id): {type_id, type_name, definition,
+    merged_from}}). A type with merge_into is shown as the type it names:
+    its yes answers count as that type's and no question is asked again. A
+    type's display_name, when given, is the name shown; type_name stays the
+    wording the model was asked with, so renaming costs nothing either. A
+    merge target must be an active type of the same label that is not
+    itself merged away."""
+    types = load_types(name, dirs, taxonomy)
+    by_key = {(t["label_id"], t["type_id"]): t for t in types}
+    mapping, shown = {}, {}
+    for t in types:
+        target = t["merge_into"] or t["type_id"]
+        tkey = (t["label_id"], target)
+        if tkey not in by_key:
+            raise SystemExit(f"labels: {name}_types.csv: {t['type_id']!r} merges into "
+                             f"{target!r}, which is not an active type of {t['label_id']!r}")
+        if by_key[tkey]["merge_into"]:
+            raise SystemExit(f"labels: {name}_types.csv: {t['type_id']!r} merges into "
+                             f"{target!r}, which is itself merged into "
+                             f"{by_key[tkey]['merge_into']!r}; name the final type")
+        mapping[(t["label_id"], t["type_id"])] = target
+    for t in types:
+        if t["merge_into"]:
+            continue
+        shown[(t["label_id"], t["type_id"])] = {
+            "type_id": t["type_id"], "type_name": t["display_name"] or t["type_name"],
+            "definition": t["definition"],
+            "merged_from": [s["type_id"] for s in types
+                            if s["label_id"] == t["label_id"] and s["merge_into"] == t["type_id"]]}
+    return mapping, shown
+
+
+def load_groups(name, dirs=None, taxonomy=None):
+    """The set's reading groups (<set>_groups.csv), active rows only:
+    [{label_id, group_id, group_name}]. A label in two groups is an error."""
+    path, found = _optional(name, "_groups", dirs, taxonomy)
+    out, seen = [], {}
+    for r in found:
+        if not is_active(r):
+            continue
+        lid = r[_id_col(r, path)].strip()
+        gid = (r.get("group_id") or "").strip()
+        if not gid:
+            raise SystemExit(f"labels: {path}: {lid!r} has no group_id")
+        if lid in seen and seen[lid] != gid:
+            raise SystemExit(f"labels: {path}: {lid!r} is in two groups, {seen[lid]!r} and "
+                             f"{gid!r}")
+        seen[lid] = gid
+        out.append({"label_id": lid, "group_id": gid,
+                    "group_name": " ".join((r.get("group_name") or gid).split())})
     return out

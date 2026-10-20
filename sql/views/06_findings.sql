@@ -7,7 +7,8 @@ SELECT m.label_set, m.label_id, l.label_name AS measure_name, pp.project_id, pr.
        m.most_likely_grade, m.expected_grade, m.grade_confidence, m.probability_grade_3,
        m.committed_probability_calibrated,
        m.commitment_probability, m.firmness, m.linked_asset_id, m.linked_asset_level,
-       m.linked_asset_probability, m.asset_ids_above_threshold,
+       m.linked_asset_probability, ag.group_id AS linked_asset_group_id,
+       ag.group_name AS linked_asset_group_name, m.asset_ids_above_threshold,
        m.activity_kinds_above_threshold, m.best_activity_kind, m.conditional_probability,
        m.actor_ids_above_threshold, m.best_actor_id, m.type_ids_above_threshold,
        m.best_type_id, t.type_name AS best_type_name, m.best_type_probability,
@@ -17,13 +18,14 @@ FROM wbg.measure_findings m
 LEFT JOIN wbg.labels l ON l.label_set = m.label_set AND l.label_id = m.label_id
 LEFT JOIN wbg.measure_types t ON t.label_set = m.label_set AND t.label_id = m.label_id
                              AND t.type_id = m.best_type_id
+LEFT JOIN wbg.label_groups ag ON ag.label_set = 'assets' AND ag.label_id = m.linked_asset_id
 LEFT JOIN wbg.paragraphs pa USING (paragraph_id)
 LEFT JOIN wbg.paragraphs_with_document d ON d.paragraph_id = m.paragraph_id
 LEFT JOIN wbg.paragraph_projects pp ON pp.paragraph_id = m.paragraph_id
 LEFT JOIN wbg.projects pr ON pr.project_id = pp.project_id
 WHERE m.was_sent_to_model;
 COMMENT ON VIEW wbg.measure_findings_in_context IS
-  'Every unit a measure run graded, with the measure''s name, its project (a paragraph in two projects gives two rows), document, component, the grade, the linked asset, how the commitment is delivered and by whom, its type (the measure''s cluster), the unit''s text and its paragraph. Filter most_likely_grade = 3 for commitments.';
+  'Every unit a measure run graded, with the measure''s name, its project (a paragraph in two projects gives two rows), document, component, the grade, the linked asset and its reading group, how the commitment is delivered and by whom, its type (the measure''s cluster), the unit''s text and its paragraph. Filter most_likely_grade = 3 for commitments.';
 
 DROP VIEW IF EXISTS wbg.candidates_in_reading_order;
 CREATE VIEW wbg.candidates_in_reading_order AS

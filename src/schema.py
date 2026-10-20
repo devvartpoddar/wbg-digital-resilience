@@ -425,8 +425,17 @@ TABLES = {
         comment="A measure's approved types (its clusters): proposed by a generative model "
                 "from the committed units, approved by a person in analysis/labels/"
                 "<set>_types.csv, assigned by the decision model one yes/no each.",
-        columns={"type_name": "The type's name.",
-                 "definition": "The definition the decision model was given."}),
+        columns={"type_name": "The name shown (display_name in the file when given, else "
+                              "the name the model was asked with).",
+                 "definition": "The definition the decision model was given.",
+                 "merged_from": "Type ids the file merges into this one (merge_into), "
+                                "pipe-separated; their yes answers count as this type's."}),
+    "label_groups": dict(
+        schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
+        comment="How a set's labels are grouped for reading (<set>_groups.csv, kept by a "
+                "person): a presentation layer the views add beside the label; the labels "
+                "keep their ids and answers. The assets are grouped into about six.",
+        columns={"group_id": "The group's id.", "group_name": "The group's name."}),
     "sentence_vectors": dict(
         schema=INTERNAL, key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
         comment="Pipeline bookkeeping: one embedding per search unit (3,072 dimensions), used "
