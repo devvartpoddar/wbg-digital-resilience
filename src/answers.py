@@ -127,6 +127,24 @@ def bodies_for(state, questions, model):
     return out
 
 
+# A hard cap on what this process may spend on the decision model, in US$,
+# from $WBG_SPEND_CAP_USD (unset: no cap). Set by the dashboard's measure
+# runner (src/measure_requests.py); a run that would pass it stops before
+# asking, or as soon as it is reached, and resumes from the store later.
+_spent_here = [0.0]
+
+
+def spend_cap():
+    try:
+        return float(os.environ["WBG_SPEND_CAP_USD"])
+    except (KeyError, ValueError):
+        return None
+
+
+class CapReached(SystemExit):
+    """The process's spend cap would be or was passed."""
+
+
 def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False):
     """Answers for every request, asking only what is not stored.
     Returns (answers, stats): answers = [{qid: entry}] per request (None for
@@ -145,6 +163,12 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     stats = {"to_ask": len(todo), "chars": chars, "calls": 0, "cost_usd": 0.0, "failures": [],
              "seconds": 0.0,
              "estimate_usd": chars / 4 / 1e6 * classify.PRICE_PER_MTOK}
+    cap = spend_cap()
+    if todo and not dry_run and cap is not None and \
+            _spent_here[0] + stats["estimate_usd"] > cap:
+        raise CapReached(f"answers: spend cap US${cap:.2f} would be passed (spent "
+                         f"US${_spent_here[0]:.3f}, this step about "
+                         f"US${stats['estimate_usd']:.3f}); nothing asked")
     if todo and not dry_run:
         if not api_key:
             raise SystemExit("answers: no credential: set $WBG_OPENROUTER_KEY")
@@ -161,8 +185,15 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
             futures = {pool.submit(one, sha, body): sha for sha, body in todo.items()}
             for n, f in enumerate(as_completed(futures), 1):
                 try:
-                    stats["cost_usd"] += f.result()
+                    paid = f.result()
+                    stats["cost_usd"] += paid
                     stats["calls"] += 1
+                    _spent_here[0] += paid
+                    if cap is not None and _spent_here[0] > cap:
+                        pool.shutdown(wait=True, cancel_futures=True)
+                        raise CapReached(f"answers: spend cap US${cap:.2f} reached after "
+                                         f"{stats['calls']:,} calls; the answers so far are "
+                                         f"stored")
                 except classify.TransportError as exc:
                     stats["failures"].append((futures[f], str(exc)[:200]))
                 except classify.Refused as exc:

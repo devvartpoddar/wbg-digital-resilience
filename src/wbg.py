@@ -934,6 +934,11 @@ def main(argv=None):
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
+    p = sub.add_parser("requests", help="run the measures asked for from the dashboard "
+                                        "(wbg_requests.measure_requests), one at a time, "
+                                        "US$1 cap each")
+    p.add_argument("--once", action="store_true", help="one request, then stop")
+    p.add_argument("--schema", action="store_true", help="create the request table only")
     sub.add_parser("audit", help="the parse and procurement audits (reports in data/reports/)")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
                                            "paragraph, component-tag and sentence settings")
@@ -1013,6 +1018,10 @@ def main(argv=None):
              *(["--text-regex", args.text_regex] if args.text_regex else []),
              "--context", args.context, "--gate", args.gate, "--asset-min", str(args.asset_min),
              *_scope(args), data=data)
+        return 0
+    if args.cmd == "requests":
+        _run("measure_requests.py", *(["--once"] if args.once else []),
+             *(["--schema"] if args.schema else []), data=data)
         return 0
     if args.cmd == "audit":
         _run("audit.py", data=data, tail=2)

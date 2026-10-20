@@ -38,7 +38,13 @@ Two folders hold them, with one difference between them:
                       set's exact wording, so trying a new set costs only the
                       phrases it adds and never disturbs another set's results.
 
-A set's name is its file name without .csv. The same name in both folders is
+A third folder, data/requested_labels/ under the data root, holds the
+measures someone asked for from the dashboard (src/measure_requests.py
+writes them; nothing else does). It is read after the two above, sits outside
+git, and a set graduates from it when a person copies its files into
+analysis/labels/ and deletes them here.
+
+A set's name is its file name without .csv. The same name in two folders is
 an error, not a precedence rule.
 """
 import csv
@@ -51,14 +57,31 @@ LABEL_DIRS = (os.path.join(ROOT, "inputs", "taxonomy"), os.path.join(ROOT, "anal
 _SUFFIXES = ("_queries", "_scale", "_patterns", "_types", "_groups")
 
 
+def requested_dir():
+    """data/requested_labels/ under the data root: measures asked for from
+    the dashboard (src/measure_requests.py)."""
+    from paths import data_root, where
+    return where(data_root(), "requested_labels")
+
+
+def _dirs(dirs):
+    """The folders to read: those given, else the two kept by people and,
+    when it exists, the requested folder."""
+    if dirs:
+        return dirs
+    req = requested_dir()
+    return tuple(LABEL_DIRS) + ((req,) if os.path.isdir(req) else ())
+
+
 def _is_set(path):
     name = os.path.basename(path)[:-4]
     return not name.endswith(_SUFFIXES)
 
 
 def label_sets(dirs=None):
-    """Every label set's name, inputs first, then analysis, each sorted."""
-    dirs = dirs or LABEL_DIRS
+    """Every label set's name, inputs first, then analysis, then requested,
+    each sorted."""
+    dirs = _dirs(dirs)
     out, seen = [], {}
     for d in dirs:
         for path in sorted(glob.glob(os.path.join(d, "*.csv"))):
@@ -76,7 +99,7 @@ def label_sets(dirs=None):
 def folder(name, dirs=None):
     """The folder holding label set `name`, or a clear error. The folders are
     read at call time, so a test may point LABEL_DIRS elsewhere."""
-    dirs = dirs or LABEL_DIRS
+    dirs = _dirs(dirs)
     found = [d for d in dirs if os.path.exists(os.path.join(d, f"{name}.csv"))]
     if len(found) > 1:
         raise SystemExit(f"labels: {name!r} is in more than one folder: {', '.join(found)}")

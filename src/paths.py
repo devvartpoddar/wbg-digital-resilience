@@ -106,6 +106,7 @@ LAYOUT = {
     "links": "links",
     "classify": "classify",
     "labels": "labels",
+    "requested_labels": "requested_labels",
     "releases": "releases",
     "fetch_status": "reports/fetch_status",
     "archive": "archive",
