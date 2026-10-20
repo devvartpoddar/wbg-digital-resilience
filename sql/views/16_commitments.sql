@@ -1,8 +1,8 @@
 -- Commitments: the grain of every dashboard. A commitment is one project,
 -- one digital asset, one measure and one type (Dev's definition), held up by
 -- the committed sentences the decision model found. Which sentences count is
--- set in wbg.dashboard_settings (13_dashboard_settings.sql). The ids are a
--- hash of the four parts, so they are the same on every load.
+-- set in wbg.dashboard_settings (13_dashboard_settings.sql). The id is the MD5
+-- of the four parts, so it is the same on every load.
 --
 -- Package status precedence for a commitment with several packages
 -- (DECIDE): the first in this order, which puts what needs a conversation
@@ -36,12 +36,11 @@ WITH u AS (
     AND f.probability_grade_3 >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
 )
-SELECT left(encode(sha256(convert_to(project_id || '|' || label_set || '|' || asset_id || '|'
-                                     || type_id, 'UTF8')), 'hex'), 16) AS commitment_id,
+SELECT md5(project_id || '|' || label_set || '|' || asset_id || '|' || type_id) AS commitment_id,
        u.*
 FROM u;
 COMMENT ON VIEW wbg.commitment_units IS
-  'Every committed unit that counts towards a commitment (grade 3, the probability floor and link levels of dashboard_settings), per project, with its commitment_id: the first 16 hex characters of SHA-256 of project_id|label_set|asset_id|type_id. A unit with no linked asset has asset_id ''(no asset)'', one with no type above 0.5 type_id ''(no type)''.';
+  'Every committed unit that counts towards a commitment (grade 3, the probability floor and link levels of dashboard_settings), per project, with its commitment_id: the MD5 of project_id|label_set|asset_id|type_id, the id the dashboards'' links pass. A unit with no linked asset has asset_id ''(no asset)'', one with no type above 0.5 type_id ''(no type)''.';
 
 -- Each commitment's linked packages with where they stand.
 DROP VIEW IF EXISTS wbg.commitment_package_status CASCADE;
@@ -80,9 +79,8 @@ WITH c AS (
   FROM wbg.commitment_units u
   CROSS JOIN wbg.dashboard_settings ds
   LEFT JOIN wbg.documents d ON d.document_id = u.document_id
-  LEFT JOIN wbg.documents_distinct dd
-         ON dd.project_id = u.project_id
-        AND (dd.document_id = u.document_id OR u.document_id = ANY (dd.duplicate_document_ids))
+  LEFT JOIN wbg.project_documents dd
+         ON dd.project_id = u.project_id AND dd.document_id = u.document_id
   GROUP BY u.commitment_id, u.project_id, u.label_set, u.asset_id, u.type_id
 ),
 p AS (
@@ -127,7 +125,9 @@ CREATE VIEW wbg.commitment_sentences AS
 SELECT DISTINCT ON (u.commitment_id, u.wording)
        u.commitment_id, u.unit_id, u.text, u.probability_grade_3, u.conditional_probability,
        u.firmness, pa.section_title, d.document_kind, d.disclosure_date AS document_date,
-       u.document_id,
+       u.document_id, u.paragraph_id, pa.page_from AS page_number,
+       d.pdf_url || CASE WHEN pa.page_from IS NOT NULL THEN '#page=' || pa.page_from ELSE '' END
+         AS pdf_url,
        (SELECT count(DISTINCT split_part(x, ':', 1)) FROM unnest(u.copy_unit_ids) x
          WHERE split_part(x, ':', 1) <> u.document_id) AS also_in_documents
 FROM wbg.commitment_units u

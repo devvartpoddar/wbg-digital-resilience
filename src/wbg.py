@@ -479,7 +479,12 @@ def prepare(sel=None, update=False, data=None, fetch=True):
         for kind, script in (("appraisal", "fetch.py"), ("procurement", "fetch_procurement.py"),
                              ("projects", "fetch_projects.py")):
             done = state.setdefault("fetched", {}).setdefault(kind, {})
-            todo = [p for p in sel.ids if update or p not in done]
+            # Project records (status, closing date, commitment) change under a
+            # restructuring or an extension and cost two small requests each:
+            # they are fetched again once a day. Documents and procurement are
+            # fetched once, and again with --update.
+            todo = [p for p in sel.ids if update or p not in done
+                    or (kind == "projects" and done[p] != today)]
             if not todo:
                 continue
             args = ["--projects", ",".join(todo)]
