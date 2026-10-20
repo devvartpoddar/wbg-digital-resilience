@@ -309,8 +309,13 @@ def run(args, data):
         elif stage == "embed":
             _run("embed.py", *dry, "--context", "none", data=data)
         elif stage == "search":
+            # --no-publish: the search stage writes nothing itself. A publish
+            # rebuilds every view, so one per set was 13 rebuilds a run, and
+            # each waited on the dashboards' locks. The measure stage and the
+            # publish stage write every set's rows (search_paragraphs among
+            # them).
             failed = _parallel(args.jobs, ["assets", *sets],
-                               lambda n: [["search.py", n, *dry]], data)
+                               lambda n: [["search.py", n, *dry, "--no-publish"]], data)
         elif stage == "classify":
             _run("classify.py", "assets", *dry, *scope, data=data)
         elif stage == "measure":

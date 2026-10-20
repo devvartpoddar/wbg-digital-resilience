@@ -35,7 +35,7 @@ peer authentication over the local socket - no password anywhere).
   python3 src/load_pg.py
   python3 src/load_pg.py --force
 """
-import argparse, time, csv, glob, hashlib, os, re, sys
+import argparse, contextlib, time, csv, glob, hashlib, os, re, sys
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -47,6 +47,70 @@ import schema as S  # noqa: E402
 DEFAULT_DSN = "postgresql:///work"
 PUBLIC, INTERNAL = S.PUBLIC, S.INTERNAL
 LOADS = f"{INTERNAL}.loads"
+
+# A load replaces tables and rebuilds every view, which needs locks the
+# dashboards hold while a card is being read. Without a limit a load waits
+# forever and looks like a crash; with one it says who is in the way.
+# src/store.py uses the same value for a publish.
+LOCK_TIMEOUT = "2min"
+
+
+def lock_timeout(conn):
+    """Refuse to wait longer than LOCK_TIMEOUT for a lock in this
+    transaction: a wait that long is a stuck reader, not a slow one."""
+    conn.execute(f"SET LOCAL lock_timeout = '{LOCK_TIMEOUT}'")
+
+
+def blocking_sessions(conn):
+    """[(pid, who, state, how long, query)] of the sessions in the way when a
+    lock timed out: the ones pg_blocking_pids names for this backend (empty
+    once the wait itself has ended) and, failing that, every other session on
+    the database with an open transaction, oldest first. A role that cannot
+    see another role's query reads '<insufficient privilege>' there, which is
+    the answer: the block is outside this role (Metabase reads as
+    metabase_reader)."""
+    return conn.execute(
+        "SELECT a.pid, a.usename, coalesce(a.state, 'n/a'), "
+        "       coalesce(now() - a.xact_start, now() - a.query_start), "
+        "       left(a.query, 200) "
+        "FROM pg_stat_activity a "
+        "WHERE a.datname = current_database() AND a.pid <> pg_backend_pid() "
+        "  AND (a.pid = ANY (pg_blocking_pids(pg_backend_pid())) "
+        "       OR a.xact_start IS NOT NULL) "
+        "ORDER BY a.xact_start NULLS LAST, a.pid").fetchall()
+
+
+def report_lock_wait(conn, log=print):
+    """Say who held the database when a load's or a publish's lock timed out.
+    Called after the failed transaction has rolled back, so the wait itself is
+    over and the sessions are listed by their open transaction."""
+    rows = blocking_sessions(conn)
+    if not rows:
+        log("  no other session holds an open transaction")
+        return
+    for pid, who, state, age, query in rows:
+        log(f"  pid {pid} ({who}, {state}, open {age}): "
+            + " ".join((query or "").split()))
+
+
+@contextlib.contextmanager
+def load_transaction(dsn):
+    """The load's one transaction, with LOCK_TIMEOUT set on it. A lock that
+    times out rolls the whole load back (nothing is written), prints who held
+    it and exits non-zero: a load behind a reader must never hang silently."""
+    import psycopg
+    import psycopg.errors as pg_errors
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        try:
+            with conn.transaction():
+                lock_timeout(conn)
+                yield conn
+        except pg_errors.LockNotAvailable:
+            print(f"load: no lock within {LOCK_TIMEOUT}; nothing was written. "
+                  f"Who holds one:")
+            report_lock_wait(conn)
+            raise SystemExit(1)
+
 
 # (table, path under data/)
 TABLES = [
@@ -780,7 +844,6 @@ def main():
         from wbg import select
         projects = sorted(select(cohort_set=",".join(args.cohort_set), data=args.data).ids)
 
-    import psycopg
     import release
     release_id = release.cut(args.data)
 
@@ -806,8 +869,9 @@ def main():
     # One transaction for the whole load, views included: a reader (a
     # Metabase card) sees the database as it was or as it is now, never a
     # table replaced and its views not yet put back. Readers of a replaced
-    # table wait for the commit instead.
-    with psycopg.connect(args.dsn, autocommit=True) as conn, conn.transaction():
+    # table wait for the commit instead - and this load waits no longer than
+    # LOCK_TIMEOUT for them (load_transaction).
+    with load_transaction(args.dsn) as conn:
         prepare(conn)
         for table, rel in TABLES:
             path = os.path.join(args.data, rel)
