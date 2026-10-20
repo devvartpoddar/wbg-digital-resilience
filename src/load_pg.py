@@ -192,6 +192,48 @@ def load_rows(conn, table, cols, rows, source_sha, release_id="", types=None, af
     return n, bad
 
 
+def replace_rows(conn, table, cols, rows, key_col, key_values, source_sha, release_id="",
+                 types=None):
+    """Replace the rows of <schema>.<table> whose key_col is in key_values
+    (every row when key_values is None) with rows, keeping the table and
+    the views on it: the way a stage writes its own set into Postgres
+    without a full load. The table is created when missing, and
+    recreated when its columns no longer match (that drops its views;
+    finish() puts them back). Returns (rows written, unparseable)."""
+    types = types or {}
+    bad = {}
+    names = [S.rename(table, c) for c in cols]
+    kinds = [types.get(c) or S.col_type(n) for c, n in zip(cols, names)]
+    ident = S.qualified(table) if table in S.TABLES else f"{PUBLIC}.{table}"
+    created = False
+    with conn.transaction(), conn.cursor() as cur:
+        if not _exists(conn, table) or _columns(conn, ident) != set(names):
+            cur.execute(f"DROP TABLE IF EXISTS {ident} CASCADE")
+            cur.execute(f"CREATE TABLE {ident} ("
+                        + ", ".join(f'"{n}" {k}' for n, k in zip(names, kinds)) + ")")
+            for nm in names:
+                if nm in S.INDEXED:
+                    cur.execute(f'CREATE INDEX ON {ident} ("{nm}")')
+            created = True
+        if key_values is None:
+            cur.execute(f"DELETE FROM {ident}")
+        else:
+            cur.execute(f'DELETE FROM {ident} WHERE "{S.rename(table, key_col)}" = ANY(%s)',
+                        (list(key_values),))
+        n = 0
+        col_list = ", ".join(f'"{c}"' for c in names)
+        with cur.copy(f"COPY {ident} ({col_list}) FROM STDIN") as cp:
+            for r in rows:
+                cp.write_row([r.get(c) if c in types else convert(c, r.get(c), bad, k)
+                              for c, nm, k in zip(cols, names, kinds)])
+                n += 1
+        label = table if key_values is None else f"{table}:{','.join(sorted(key_values))}"
+        cur.execute(f"INSERT INTO {LOADS} (table_name, source_sha256, row_count, loaded_at, "
+                    f"release_id) VALUES (%s, %s, %s, %s, %s)",
+                    (label, source_sha, n, _now(), release_id))
+    return n, bad, created
+
+
 def _now():
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -256,13 +298,15 @@ def search_unit_rows(data):
 # runs; Postgres holds the run for each label set as it stands now, one
 # table each across label sets, so a reader filters by label_set.
 
-def search_tables(data):
+def search_tables(data, sets=None):
     """(source sha, rollup rows): per label and paragraph its best unit
     (search_paragraphs). None without any current run. The per-unit scores
     stay in the run folder; measure_findings carries each candidate's."""
     import search
     folders = []
     for name in labels.label_sets():
+        if sets and name not in sets:
+            continue
         try:
             folder, _ = search.run_folder(name, data)
         except SystemExit:
@@ -322,9 +366,11 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "cost", "text"]
 
 
-def _run_rows(data, finder, file):
+def _run_rows(data, finder, file, sets=None):
     rows, runs = [], []
     for name in labels.label_sets():
+        if sets and name not in sets:
+            continue
         try:
             folder = finder(name, data)
         except SystemExit:
@@ -338,27 +384,30 @@ def _run_rows(data, finder, file):
     return ("|".join(runs), rows) if rows else (None, [])
 
 
-def classify_rows(data, projects=None, min_cosine=None):
+def classify_rows(data, projects=None, min_cosine=None, sets=None):
     """The current asset map for the scope. With min_cosine None, the gate
     is the one the last run was made with (classify's marker); the flag
     still names one explicitly."""
     import classify
     return _run_rows(data, lambda n, d: classify.current_run(
-        n, d, projects=projects, min_cosine=min_cosine), "scores.csv")
+        n, d, projects=projects, min_cosine=min_cosine), "scores.csv", sets)
 
 
-def measure_rows(data, projects=None):
-    """The current measure run per set, with the current type assignments
-    (src/kinds.py) joined on as types_yes, best_type and best_p where a set
-    has an approved list and an assignment run; blank otherwise."""
+def measure_rows(data, projects=None, sets=None):
+    """The current measure run per set (or the sets named), with the
+    current type assignments (src/kinds.py) joined on as types_yes,
+    best_type and best_p where a set has an approved list and an
+    assignment run; blank otherwise."""
     import kinds
     import measure
     sha, rows = _run_rows(data, lambda n, d: measure.current_run(n, d, projects=projects),
-                          "units.csv")
+                          "units.csv", sets)
     if sha is None:
         return sha, rows
     assigned, runs = {}, []
     for name in labels.label_sets():
+        if sets and name not in sets:
+            continue
         folder = kinds.current_assign(name, data, projects=projects)
         if not folder:
             continue

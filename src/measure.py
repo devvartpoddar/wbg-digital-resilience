@@ -330,6 +330,7 @@ class Run:
         self.texts = commitment.unit_texts(data, self.index)
         self.commit = commitment.current_scores(data)
         self.doc_texts = {}
+        self.pool, self.pending = None, []
         self._loaded = True
 
     # ---- units
@@ -481,6 +482,16 @@ class Run:
         if need:
             ctx = self.settings["extras_context"]
             states = [self.state_of(r, ctx) for r in need]
+            if self.pool is not None:
+                # The asset, kind and facet answers are not read by the next
+                # round (the centroid uses grades alone), so they are asked
+                # in the background while the next round's measure
+                # questions go out; collect_extras() gathers them.
+                self.pending.append((need, self.pool.submit(
+                    answers.ask, model, [(s, extras) for s in states], self.data,
+                    api_key=api_key, log=self.log, workers=workers,
+                    legacy_questions=(self.qs,))))
+                return calls, cost, []
             got2, st2 = answers.ask(model, [(s, extras) for s in states], self.data,
                                     api_key=api_key, log=self.log, workers=workers,
                                     legacy_questions=(self.qs,))
@@ -493,6 +504,22 @@ class Run:
             for row, g in zip(need, got2):
                 self.extras_into(row, g)
         return calls, cost, []
+
+    def collect_extras(self):
+        """Wait for the background asset, kind and facet answers and write
+        them into their rows. Returns (calls, cost, failures)."""
+        calls, cost, failures = 0, 0.0, []
+        for need, future in self.pending:
+            got2, st2 = future.result()
+            calls += st2["calls"]
+            cost += st2["cost_usd"]
+            if st2["failures"] or not all(got2):
+                failures.extend(st2["failures"] or [("", "an answer is missing")])
+                continue
+            for row, g in zip(need, got2):
+                self.extras_into(row, g)
+        self.pending = []
+        return calls, cost, failures
 
     # ---- relevance feedback
 
@@ -614,11 +641,19 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
     return lines
 
 
-def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS, **kw):
+def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS,
+            publish=False, **kw):
+    """One measure through the funnel; with publish=True its rows go to
+    Postgres as the last step (src/store.py)."""
     run = Run(name, data, log=log, **kw)
     if os.path.exists(os.path.join(run.out, "manifest.json")):
         log(f"{name}: already written: {run.out}")
+        if publish:
+            import store
+            store.try_publish(data, sets=[name], projects=run.projects, log=log)
         return run.out
+    from concurrent.futures import ThreadPoolExecutor
+    run.pool = ThreadPoolExecutor(max_workers=2)
     log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades + {len(run.assets)} asset "
         f"questions per unit; context {run.settings['context']}, gate {run.settings['gate']} "
         f"-> {run.out}")
@@ -632,11 +667,13 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         calls += c
         cost += k
         if failures:
+            run.pool.shutdown(wait=True)
             log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
             for sha, err in failures[:5]:
                 log(f"    {sha[:12]}: {err}")
             return None
         if dry_run:
+            run.pool.shutdown(wait=True)
             log("  --dry-run: round 0 only; no request made, nothing written")
             return None
         this = rows if rnd == 0 else batch
@@ -653,6 +690,15 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         if not batch:
             break
         rows.extend(batch)
+    c, k, failures = run.collect_extras()
+    run.pool.shutdown(wait=True)
+    calls += c
+    cost += k
+    if failures:
+        log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
+        for sha, err in failures[:5]:
+            log(f"    {sha[:12]}: {err}")
+        return None
     seconds = time.time() - t0
     classify.record_spend(data, "measure", name, run.settings["model"], calls, cost, seconds,
                           os.path.basename(run.out))
@@ -690,6 +736,9 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
     if any(m != run.settings["model"] for m in served):
         log(f"  warning: a snapshot other than the one requested served some units: {dict(served)}")
     log(f"  wrote {run.out}")
+    if publish:
+        import store
+        store.try_publish(data, sets=[name], projects=run.projects, log=log)
     return run.out
 
 
@@ -721,11 +770,14 @@ def main():
                     help="comma-separated project ids: only their units, with the asset map "
                          "over the same scope (./wbg measure --set digital fills this)")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--no-publish", action="store_true",
+                    help="leave Postgres alone (the run folder is written either way)")
     args = ap.parse_args()
     import embed
     key = "" if args.dry_run else embed.read_key("")
     out = measure(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
                   workers=args.workers, model=args.model,
+                  publish=not (args.dry_run or args.no_publish),
                   context=args.context,
                   gate=args.gate, asset_min=args.asset_min, top=args.top,
                   min_cosine=args.min_cosine, batch=args.batch,

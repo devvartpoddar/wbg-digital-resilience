@@ -436,6 +436,9 @@ def main():
     out = link(args.data, api_key=api_key, dry_run=args.dry_run, workers=args.workers,
                model=args.model, asset_top=args.asset_top,
                projects=classify.scope(args.projects), sets=args.sets)
+    if out and not args.dry_run:
+        import store
+        store.try_publish(args.data, projects=classify.scope(args.projects), links=True)
     return 0 if out or args.dry_run else 1
 
 

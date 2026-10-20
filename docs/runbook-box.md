@@ -54,15 +54,16 @@ each prints its estimate before asking anything (`--dry-run`).
 ./wbg prepare                                    # fetch what is missing; read, clean, components, procurement
 ./wbg classify assets --min-cosine 0.25 --dry-run
 ./wbg classify assets --min-cosine 0.25          # the asset map (reads the store first; stops on a refusal)
-./wbg search cra && ./wbg measure cra            # each measure: search, then the funnel
-./wbg search ews && ./wbg measure ews
-./wbg types cra --assign --set digital           # the approved types (analysis/labels/cra_types.csv) on the committed units
-./wbg types ews --assign --set digital
-./wbg add <set> --set digital --set digital_contributor   # a new measure, end to end, in one command (minutes)
-./wbg link --set digital                         # which asset each package buys, which commitments it carries out (after every measure)
-python3 src/load_pg.py --set digital             # Postgres: tables, keys, comments, views; the digital set's runs
-python3 src/run_report.py                        # the run note for the vault
+./wbg add cra ews backup_power ...               # each measure end to end, several side by side: search, funnel, types, Postgres
+./wbg link                                       # which asset each package buys, which commitments it carries out (after the measures)
+./wbg publish                                    # only if a stage could not reach Postgres: write every current run
+python3 src/run_report.py                        # the run note for the vault, when one is wanted
 ```
+
+Every stage writes Postgres itself as it finishes; `./wbg prepare` loads the
+corpus tables and cuts the release when the corpus changed. The whole
+included cohort is the default scope; give `--set` only for a deliberate
+subset, and then to every stage alike.
 
 `./wbg prepare` is the long step and can be left overnight; it writes
 `data/reports/fetch_status/` so a project that failed is tried again next
@@ -106,7 +107,7 @@ decision and a reload applies it. None of these asks the model anything.
 - **Regroup the assets**: edit `inputs/taxonomy/assets_groups.csv`
   (`asset_id, group_id, group_name`). The views show the group beside the
   asset; the asset ids underneath do not move.
-- Then `python3 src/load_pg.py --set digital --set digital_contributor`
+- Then `./wbg publish` (the stages write Postgres themselves; this is the catch-up)
   (or the sets the runs were made over). The load is keyed on the file, so
   it reloads `measure_findings`, `measure_types` and `label_groups` and
   nothing else.
@@ -132,10 +133,10 @@ Why:  <the definition, three to six sentences: what counts, what does
 Done when: analysis/labels/<id>.csv, <id>_queries.csv, <id>_scale.csv
       (copied from cra_scale.csv with the name substituted) and, if given,
       <id>_patterns.csv exist following ews's shape; one command,
-      ./wbg add <id> --set digital --set digital_contributor, completes
-      with 0 failed requests (it runs the search, the funnel, the type
-      proposals, one load and one release, and prints the time per set and
-      overall); the summary quotes the measure report's "committed units"
+      ./wbg add <id>, completes with 0 failed requests (it runs the
+      search, the funnel and the type proposals, each writing Postgres as
+      it finishes, and prints the time per set and overall); the summary
+      quotes the measure report's "committed units"
       line, the spend, the path of the proposals
       (data/types/<id>-<version>/proposals.md) and the "everything ...s"
       line. Several measures go in one command: ./wbg add a b c.

@@ -407,6 +407,9 @@ def main():
     if args.assign:
         out = assign(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
                      read_at=args.read_at, **kw)
+        if out and not args.dry_run:
+            import store
+            store.try_publish(args.data, sets=[args.label_set], projects=kw["projects"])
     else:
         out = propose(args.label_set, args.data, api_key=key, runs=args.runs,
                       max_types=args.max_types, dry_run=args.dry_run, **kw)

@@ -354,9 +354,13 @@ def main():
                                       "(the file name without .csv): assets, measures")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--no-publish", action="store_true")
     args = ap.parse_args()
     key = "" if args.dry_run else embed.read_key("")
-    search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
+    out = search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
+    if out and not args.no_publish:
+        import store
+        store.try_publish(args.data, sets=[args.label_set])
     return 0
 
 

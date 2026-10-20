@@ -222,10 +222,11 @@ ADD_WORKERS = 10   # parallel decision-model requests per set under ./wbg add
 def add(args, data):
     """A measure (or several) from its label files to Postgres in one
     command, timed. Per set, in its own process: search, the funnel, type
-    proposals (and --assign). Sets run side by side, up to --jobs at once:
-    the matrix is memory-mapped, so they share one copy in the page cache
-    and each takes one core. Then one load and one release for all of
-    them, not one per stage. The time is printed per set and overall; the
+    proposals, and the assignment when an approved list exists. Each stage
+    writes its own rows to Postgres as it finishes (src/store.py), so there
+    is no load step. Sets run side by side, up to --jobs at once: the
+    matrix is memory-mapped, so they share one copy in the page cache and
+    each takes one core. The time is printed per set and overall; the
     target is a measure visible in Metabase within five minutes of its
     files landing."""
     import time
@@ -240,11 +241,12 @@ def add(args, data):
     def one(name):
         t0 = time.time()
         log = []
+        approved = os.path.exists(os.path.join(ROOT, "analysis", "labels", f"{name}_types.csv"))
         for script, extra in (("search.py", [name, *dry]),
                               ("measure.py", [name, "--workers", str(args.workers), *dry, *scope]),
                               ("kinds.py", [name, *dry, *scope]),
                               *((("kinds.py", [name, "--assign", *dry, *scope]),)
-                                if args.assign else ())):
+                                if approved or args.assign else ())):
             cmd = [_python(), os.path.join(SRC, script), *extra]
             done = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
             log.append(f"== {script} {' '.join(extra)}\n{done.stdout.rstrip()}")
@@ -267,20 +269,9 @@ def add(args, data):
     if args.dry_run:
         print(f"add: --dry-run, nothing loaded ({time.time() - t_all:.0f}s)")
         return 0
-    t0 = time.time()
-    _run("load_pg.py", *scope_sets(args), data=data)
-    _run("release.py", data=data)
-    print(f"add: {', '.join(args.label_set)} in Postgres; load and release {time.time() - t0:.0f}s, "
-          f"everything {time.time() - t_all:.0f}s", flush=True)
+    print(f"add: {', '.join(args.label_set)} in Postgres; everything {time.time() - t_all:.0f}s",
+          flush=True)
     return 0
-
-
-def scope_sets(args):
-    """The load's scope flags: the cohort set(s) given, else --projects as
-    the stages got it."""
-    if getattr(args, "cohort_set", None):
-        return [x for st in args.cohort_set for x in ("--set", st)]
-    return _scope(args)
 
 
 def _python():
@@ -467,6 +458,10 @@ def prepare(sel=None, update=False, data=None, fetch=True):
         ran.append(name)
     if not ran:
         print("nothing to do: every stage is up to date", flush=True)
+        return ran
+    # The corpus changed: record it and put it where it is read, in one go.
+    _run("release.py", data=data)
+    _run("load_pg.py", data=data)
     return ran
 
 
@@ -839,8 +834,14 @@ def main(argv=None):
     p.add_argument("--workers", type=int, default=ADD_WORKERS,
                    help="parallel requests to the decision model per set")
     p.add_argument("--assign", action="store_true",
-                   help="also assign approved types (<set>_types.csv) after the funnel")
+                   help="assign types even without <set>_types.csv (done automatically with one)")
     p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("publish", help="write the current runs of the sets named (or every "
+                                       "set) into Postgres; the stages do this themselves, "
+                                       "this catches up after a database was unreachable")
+    p.add_argument("label_set", nargs="*")
+    _filters(p)
+    p.add_argument("--links", action="store_true", help="also the package-link tables")
     p = sub.add_parser("link", help="which asset each procurement package buys and which "
                                     "commitments it would carry out (decision model, stored; "
                                     "after ./wbg measure)")
@@ -908,10 +909,6 @@ def main(argv=None):
     data = data_root()
     if args.cmd == "pipeline":
         prepare(select(), update=args.update, data=data)
-        _run("release.py", data=data)
-        _run("load_pg.py", data=data)
-        _run("review_sheets.py", data=data)
-        _run("run_report.py", "--topic", "Pipeline run", data=data)
         return 0
     if args.cmd == "status":
         import release
@@ -924,16 +921,12 @@ def main(argv=None):
         dry = ["--dry-run"] if args.dry_run else []
         _run("embed.py", *dry, "--context", args.embed_context, data=data)
         _run("search.py", args.label_set, *dry, data=data)
-        if not dry:
-            _run("release.py", data=data)
         return 0
     if args.cmd == "classify":
         extra = (["--dry-run"] if args.dry_run else []) + \
             (["--limit", str(args.limit)] if args.limit else []) + \
             (["--min-cosine", str(args.min_cosine)] if args.min_cosine else [])
         _run("classify.py", args.label_set, *extra, *_scope(args), data=data)
-        if not (args.dry_run or args.limit):
-            _run("release.py", data=data)
         return 0
     if args.cmd == "candidates":
         _run("candidates.py", args.label_set, "--top", str(args.top), "--min-cosine",
@@ -946,8 +939,6 @@ def main(argv=None):
              str(args.batch), "--min-yield", str(args.min_yield), "--max-rounds",
              str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), *_scope(args),
              data=data)
-        if not args.dry_run:
-            _run("release.py", data=data)
         return 0
     if args.cmd == "add":
         return add(args, data)
@@ -955,8 +946,10 @@ def main(argv=None):
         _run("link_packages.py", "--asset-top", str(args.asset_top),
              *[x for st in (args.sets or []) for x in ("--label-set", st)],
              *(["--dry-run"] if args.dry_run else []), *_scope(args), data=data)
-        if not args.dry_run:
-            _run("release.py", data=data)
+        return 0
+    if args.cmd == "publish":
+        _run("store.py", *args.label_set, *(["--links"] if args.links else []),
+             *_scope(args), data=data)
         return 0
     if args.cmd == "types":
         _run("kinds.py", args.label_set, *(["--assign"] if args.assign else []),
