@@ -134,8 +134,9 @@ Done when: analysis/labels/<id>.csv, <id>_queries.csv, <id>_scale.csv
       (copied from cra_scale.csv with the name substituted) and, if given,
       <id>_patterns.csv exist following ews's shape; one command,
       ./wbg add <id>, completes with 0 failed requests (it runs the
-      search, the funnel and the type proposals, each writing Postgres as
-      it finishes, and prints the time per set and overall); the summary
+      search, the funnel, the type proposals and the assignment, each
+      writing Postgres as it finishes, and prints the time per set and
+      overall); the summary
       quotes the measure report's "committed units"
       line, the spend, the path of the proposals
       (data/types/<id>-<version>/proposals.md) and the "everything ...s"

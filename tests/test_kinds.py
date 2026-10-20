@@ -78,8 +78,16 @@ def test_proposals_are_asked_once_per_run_with_only_committed_units(store):
 
 def test_assignment_needs_an_approved_list_and_asks_one_yes_no_per_type(store):
     data, lab, _, dec_calls = store
-    with pytest.raises(SystemExit):
-        types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    monkeypatch_data = os.environ.get("WBG_DATA")
+    os.environ["WBG_DATA"] = data           # no proposal written yet: nothing to assign
+    try:
+        with pytest.raises(SystemExit):
+            types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    finally:
+        if monkeypatch_data is None:
+            os.environ.pop("WBG_DATA", None)
+        else:
+            os.environ["WBG_DATA"] = monkeypatch_data
     _csv(os.path.join(lab, "cra_types.csv"),
          ["measure_id", "type_id", "type_name", "definition", "active"],
          [{"measure_id": "cra", "type_id": "mapping", "type_name": "Hazard mapping",
@@ -96,3 +104,13 @@ def test_assignment_needs_an_approved_list_and_asks_one_yes_no_per_type(store):
 def test_a_completion_without_the_json_is_not_stored():
     with pytest.raises(classify.TransportError):
         types_stage.parse_types({"choices": [{"message": {"content": "Sorry, no."}}]})
+
+
+def test_the_proposal_is_the_list_until_a_person_writes_one(store, monkeypatch):
+    data, lab, gen_calls, dec_calls = store
+    monkeypatch.setenv("WBG_DATA", data)
+    types_stage.propose("cra", data, api_key="k", runs=1, log=lambda *_: None)
+    assert os.path.exists(os.path.join(data, "types", "cra_types.csv"))
+    out = types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    rows = list(csv.DictReader(open(os.path.join(out, "assignments.csv"))))
+    assert {r["types_yes"] for r in rows} <= {"mapping", ""} and len(rows) == 2

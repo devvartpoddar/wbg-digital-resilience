@@ -121,6 +121,15 @@ def load_set(name, dirs=None, taxonomy=None):
 def _optional(name, suffix, dirs, taxonomy):
     d = taxonomy or folder(name, dirs)
     path = os.path.join(d, f"{name}{suffix}.csv")
+    if not os.path.exists(path) and suffix == "_types":
+        # No list written by a person: the decision model's own proposal,
+        # which the types stage writes to data/types/<set>_types.csv, is
+        # the list. A file in analysis/labels/ overrides it whenever one
+        # is written; nothing waits on a person.
+        from paths import data_root, where
+        proposed = where(data_root(), "types", f"{name}_types.csv")
+        if os.path.exists(proposed):
+            return proposed, rows(proposed)
     return path, (rows(path) if os.path.exists(path) else [])
 
 
