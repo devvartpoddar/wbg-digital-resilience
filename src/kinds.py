@@ -293,7 +293,7 @@ def assign_questions(types):
         for t in types}
 
 
-def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
+def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, read_at=0.5, **kw):
     """(run folder, approved, rows [(label, unit, questions)], out folder): what
     an assignment run asks and where it goes, without asking. The folder is
     keyed on the measure run, the model and every request, so a changed
@@ -312,6 +312,8 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
             rows.append((lid, u, qs))
     h = hashlib.sha256()
     h.update(f"{os.path.basename(run_folder)}\t{model}\n".encode())
+    if read_at != 0.5:          # the default keeps the folders made before it was keyed
+        h.update(f"read_at={read_at}\n".encode())
     for (lid, u, _), sha in zip(rows, shas):
         h.update(f"{u['unit_id']}:{sha}\n".encode())
     return run_folder, approved, rows, where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
@@ -329,7 +331,8 @@ def current_assign(name, data, **kw):
 
 def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=print,
            workers=classify.WORKERS, read_at=0.5, **kw):
-    run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log, **kw)
+    run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log,
+                                                  read_at=read_at, **kw)
     log(f"{name}: {len(rows):,} committed units x their approved types -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")

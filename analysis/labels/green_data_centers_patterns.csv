@@ -1,5 +1,5 @@
 measure_id,pattern_id,pattern,active
-green_data_centers,pue,\b(?-i:PUE)\b|\bpower usage effectiveness\b,true
-green_data_centers,green_dc,\b(?:green|sustainable|energy[- ]efficient) (?:data cent(?:re|er)s?|facilit(?:y|ies)|buildings?)\b,true
-green_data_centers,waste_heat,\bwaste heat\b,true
-green_data_centers,dc_cooling,"\bdata cent(?:re|er)s?\b[^.;]{0,60}?\b(?:cooling|energy[- ]efficien\w*|renewable|solar|green|sustainab\w*|LEED|tier)\b",true
+green_data_centers,pue,\b(?-i:PUE)\b|\bpower usage effectiveness\b,false
+green_data_centers,green_dc,\b(?:green|sustainable|energy[- ]efficient) (?:data cent(?:re|er)s?|facilit(?:y|ies)|buildings?)\b,false
+green_data_centers,waste_heat,\bwaste heat\b,false
+green_data_centers,dc_cooling,"\bdata cent(?:re|er)s?\b[^.;]{0,60}?\b(?:cooling|energy[- ]efficien\w*|renewable|solar|green|sustainab\w*|LEED|tier)\b",false

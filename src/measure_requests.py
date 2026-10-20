@@ -179,7 +179,7 @@ def run_one(conn, data, log=print, runner=subprocess.run):
             + (f" - {error}" if error else ""))
         return status
 
-    why = check(req, set(labels.label_sets()))
+    why = check(req, set(labels.label_sets(include_inactive=True)))
     if why:
         return finish("failed", why)
     name = req["label_set"]

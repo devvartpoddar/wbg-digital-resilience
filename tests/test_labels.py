@@ -25,6 +25,14 @@ def test_sets_are_found_in_both_folders_and_a_clash_is_an_error(tmp_path):
         labels.folder("nothing", (str(a), str(b)))
 
 
+def test_a_set_with_no_active_label_is_switched_off(tmp_path):
+    a = tmp_path / "analysis"
+    _set(a, "kept", "x,X,a measure,true\n")
+    _set(a, "off", "y,Y,an old measure,false\n")
+    assert labels.label_sets((str(a),)) == ["kept"]
+    assert labels.label_sets((str(a),), include_inactive=True) == ["kept", "off"]
+
+
 def test_load_set_keeps_inactive_labels_and_names_the_folder(tmp_path):
     a = tmp_path / "inputs"
     _set(a, "assets", "fiber,Fiber,cables  and  ducts,true\nold,Old,gone,false\n")
@@ -96,3 +104,15 @@ def test_groups_are_a_reading_layer_and_a_label_sits_in_one_group(tmp_path):
     with pytest.raises(SystemExit, match="two groups"):
         labels.load_groups("assets", (str(a),))
     assert labels.load_groups("nothing_here", taxonomy=str(a)) == []
+
+
+def test_definition_rows_copy_every_phrase_pattern_and_grade():
+    import load_pg
+    queries, patterns, scale = load_pg.definition_rows()
+    sets = set(labels.label_sets())
+    assert {r["label_set"] for r in scale} == sets
+    assert all("{name}" not in r["description"] and len(r["file_sha256"]) == 64 for r in scale)
+    assert {r["active"] for r in queries} <= {"true", "false"}
+    assert all(r["label_set"] in sets and r["pattern_id"] for r in patterns)
+    ews = [r for r in scale if r["label_set"] == "ews"]
+    assert [r["grade"] for r in ews] == ["0", "1", "2", "3"]

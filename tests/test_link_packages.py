@@ -77,6 +77,12 @@ def store(tmp_path, monkeypatch):
           {"asset_id": "data_hosting", "group_id": "data", "group_name": "Data", "active": "true"},
           {"asset_id": "digital_systems", "group_id": "systems", "group_name": "Systems",
            "active": "true"}])
+    # The measure: its phrase points at data hosting (axis 1).
+    _csv(str(lab / "cra.csv"), ["measure_id", "measure_name", "definition", "active"],
+         [{"measure_id": "cra", "measure_name": "Climate risk", "definition": "risk to sites",
+           "active": "true"}])
+    _csv(str(lab / "cra_queries.csv"), ["measure_id", "query_id", "query", "active"],
+         [{"measure_id": "cra", "query_id": "q", "query": "cra phrase", "active": "true"}])
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
     # The embedding cache, pre-filled: no network.
     root = embed.cache_root(str(data), embed.DEFAULT_MODEL, DIM)
@@ -87,6 +93,9 @@ def store(tmp_path, monkeypatch):
         for text in (f"{a} phrase", f"{a.replace('_', ' ').title()}: {a} as infrastructure"):
             embed.write_cached(root, hashlib.sha256(text.encode()).hexdigest(),
                                embed.pack(_vec(axis, 1.0), DIM))
+    for text in ("cra phrase", "Climate risk: risk to sites"):
+        embed.write_cached(root, hashlib.sha256(text.encode()).hexdigest(),
+                           embed.pack(_vec(1, 1.0), DIM))
     # A measure run with three committed units.
     run = data / "measures" / "cra-abc"
     _csv(str(run / "units.csv"), measure.UNIT_COLS,
@@ -137,7 +146,8 @@ def test_each_package_is_asked_its_best_assets_by_cosine(store):
 def test_pairs_need_a_shared_asset_or_group_and_the_same_project(store):
     data, calls = store
     out = link.link(data, api_key="k", asset_top=2, dim=DIM, log=lambda *_: None)
-    pairs = {(r["unit_id"], r["package_id"]): r for r in _rows(out, "commitment_packages.csv")}
+    pairs = {(r["unit_id"], r["package_id"]): r for r in _rows(out, "commitment_packages.csv")
+             if r["route"] == "asset"}
     # U1 (fiber, P1) meets the fibre package by asset and the data-centre
     # package not at all; U3 (towers, P2) meets the towers package by asset.
     assert ("U1", "P1:A") in pairs and pairs[("U1", "P1:A")]["shared_asset_ids"] == "fiber"
@@ -150,7 +160,24 @@ def test_pairs_need_a_shared_asset_or_group_and_the_same_project(store):
     assert not any(u == "U4" for u, _ in pairs)   # not the top grade
 
 
-def test_a_second_run_asks_nothing_and_a_changed_depth_is_a_new_version(store):
+def test_packages_nearest_the_measure_are_paired_without_a_shared_asset(store, monkeypatch):
+    """A commitment meets its project's packages nearest the measure even when
+    they share no asset: U2 (data centre, P1) is paired with B by asset, and
+    by the measure with the next nearest, A; U3 (P2) has only D, already
+    paired by asset."""
+    monkeypatch.setattr(link, "MEASURE_TOP", 1)
+    data, calls = store
+    out = link.link(data, api_key="k", asset_top=2, dim=DIM, log=lambda *_: None)
+    rows = _rows(out, "commitment_packages.csv")
+    by = {(r["unit_id"], r["package_id"]): r for r in rows if r["route"] == "measure"}
+    assert ("U2", "P1:A") in by and by[("U2", "P1:A")]["measure_rank"] == "1"
+    assert ("U2", "P1:B") not in by                    # already paired by asset
+    assert not any(u == "U3" for u, _ in by)           # its one package is asset-paired
+    assert not any(u == "U4" for u, _ in by)           # not the top grade
+
+
+def test_a_second_run_asks_nothing_and_a_changed_depth_is_a_new_version(store, monkeypatch):
+    monkeypatch.setattr(link, "MEASURE_TOP", 0)
     data, calls = store
     out = link.link(data, api_key="k", asset_top=2, dim=DIM, log=lambda *_: None)
     n = len(calls)

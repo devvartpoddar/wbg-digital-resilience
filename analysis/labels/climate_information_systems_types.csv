@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+climate_information_systems,observation_monitoring,Observation and monitoring,"Collects weather, climate, hydrological or environmental observations",true,v4
+climate_information_systems,data_management,Climate data management,"Stores, integrates, processes or distributes climate-related data",true,v4
+climate_information_systems,forecasting,Climate and hazard forecasting,"Produces weather, climate, flood, drought or related forecasts",true,v4
+climate_information_systems,climate_services,Climate information services,Makes climate information available in usable forms for decision makers,true,v4
+climate_information_systems,environmental_monitoring,Environmental monitoring,Monitors environmental conditions relevant to climate risk,true,v4

@@ -1,5 +1,7 @@
 measure_id,pattern_id,pattern,active
-renewable_energy,solar_power,"\bsolar\b[^.;]{0,30}?\b(?:power\w*|panels?|energy|PV|photovoltaic|systems?|hybrid|home systems?)\b|\bphotovoltaic\b",true
-renewable_energy,renewable,\b(?:renewable|clean|green) (?:energy|power|electricity)\b,true
-renewable_energy,wind_power,\bwind (?:power|energy|turbines?|farms?)\b,true
-renewable_energy,off_grid,\boff-?grid\b,true
+renewable_energy,v4_solar_photovoltaic,\bsolar photovoltaic\b,true
+renewable_energy,v4_renewable_energy,\brenewable energy\b,true
+renewable_energy,solar_power,"\bsolar\b[^.;]{0,30}?\b(?:power\w*|panels?|energy|PV|photovoltaic|systems?|hybrid|home systems?)\b|\bphotovoltaic\b",false
+renewable_energy,renewable,\b(?:renewable|clean|green) (?:energy|power|electricity)\b,false
+renewable_energy,wind_power,\bwind (?:power|energy|turbines?|farms?)\b,false
+renewable_energy,off_grid,\boff-?grid\b,false

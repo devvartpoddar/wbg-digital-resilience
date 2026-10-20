@@ -71,10 +71,10 @@ DROP VIEW IF EXISTS wbg.commitment_status_by_quarter CASCADE;
 CREATE VIEW wbg.commitment_status_by_quarter AS
 SELECT c.label_set, c.measure_name, c.type_name, c.country_name, ps.package_status,
        CASE WHEN ps.package_status = 'Overdue' THEN 'Overdue'
-            WHEN ps.next_date IS NOT NULL
-              THEN to_char(ps.next_date, 'YYYY') || '-Q' || to_char(ps.next_date, 'Q')
             WHEN ps.signed_date IS NOT NULL
               THEN to_char(ps.signed_date, 'YYYY') || '-Q' || to_char(ps.signed_date, 'Q')
+            WHEN ps.next_date IS NOT NULL
+              THEN to_char(ps.next_date, 'YYYY') || '-Q' || to_char(ps.next_date, 'Q')
             ELSE 'No date' END AS quarter,
        count(DISTINCT ps.package_id) AS packages
 FROM wbg.commitments c
@@ -86,10 +86,15 @@ COMMENT ON VIEW wbg.commitment_status_by_quarter IS
 DROP VIEW IF EXISTS wbg.type_procurement_profile CASCADE;
 CREATE VIEW wbg.type_procurement_profile AS
 WITH p AS (
-  SELECT DISTINCT c.label_set, c.measure_name, c.type_name, ps.package_id, ps.method_code,
-         ps.category, ps.estimated_amount_usd, ps.description_clean, ps.link_probability
+  -- one row per type and package, however many of the type's commitments link to it
+  SELECT c.label_set, c.measure_name, c.type_name, ps.package_id,
+         min(ps.method_code) AS method_code, min(ps.category) AS category,
+         max(ps.estimated_amount_usd) AS estimated_amount_usd,
+         min(ps.description_clean) AS description_clean,
+         max(ps.link_probability) AS link_probability
   FROM wbg.commitments c
   JOIN wbg.commitment_package_status ps USING (commitment_id)
+  GROUP BY c.label_set, c.measure_name, c.type_name, ps.package_id
 )
 SELECT label_set, measure_name, type_name, count(DISTINCT package_id) AS packages_linked,
        mode() WITHIN GROUP (ORDER BY method_code) AS usual_method,
@@ -176,3 +181,19 @@ LANGUAGE sql STABLE AS $$
 $$;
 COMMENT ON FUNCTION wbg.commitments_under IS
   'The commitments of a measure under the dashboard filters (type, region, country, months to the next date); every argument but the measure may be NULL. Rows as wbg.commitments.';
+
+-- The "How it's defined" tab: each pattern with the units it matched in the
+-- measure's current run (measure_findings holds the run's pool, and each
+-- unit's matched_patterns). The phrases and the grade scale are read from
+-- label_queries and label_scale as they are.
+DROP VIEW IF EXISTS wbg.label_pattern_hits CASCADE;
+CREATE VIEW wbg.label_pattern_hits AS
+SELECT p.label_set, p.label_id, p.pattern_id, p.pattern, p.is_active, p.version, p.file_sha256,
+       count(f.unit_id) AS units_matched,
+       count(f.unit_id) FILTER (WHERE f.most_likely_grade = 3) AS units_matched_committed
+FROM wbg.label_patterns p
+LEFT JOIN wbg.measure_findings f
+  ON f.label_set = p.label_set AND f.label_id = p.label_id AND p.pattern_id = ANY(f.matched_patterns)
+GROUP BY p.label_set, p.label_id, p.pattern_id, p.pattern, p.is_active, p.version, p.file_sha256;
+COMMENT ON VIEW wbg.label_pattern_hits IS
+  'Each word pattern of each set (label_patterns) with how many units of the measure''s current run it matched, and how many of those the decision model graded committed. A pattern only adds units to the pool; the model still grades every one.';

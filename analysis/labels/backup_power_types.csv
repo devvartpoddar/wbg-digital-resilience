@@ -1,0 +1,7 @@
+measure_id,type_id,type_name,definition,active,version
+backup_power,ups,Uninterruptible power supply,Provides short-duration electricity continuity during interruptions,true,v4
+backup_power,battery_backup,Battery backup,Uses batteries charged from the main supply to maintain operations during outages,true,v4
+backup_power,standby_generation,Standby generation,Uses dedicated generation when the primary electricity supply fails,true,v4
+backup_power,redundant_power_feed,Redundant power supply,Provides an independent alternative electricity feed,true,v4
+backup_power,renewable_backup,Renewable backup power,Uses solar or other renewable generation with storage to maintain operations during outages,true,v4
+backup_power,power_autonomy,Extended power autonomy,Provides backup electricity for a specified duration,false,v4

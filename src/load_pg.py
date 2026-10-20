@@ -461,7 +461,8 @@ def measure_rows(data, projects=None, sets=None):
 ASSET_LINK_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
                    "model_served", "cost"]
 PAIR_LINK_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
-                  "shared_asset_ids", "shared_group_ids", "probability", "model_served", "cost"]
+                  "shared_asset_ids", "shared_group_ids", "route", "measure_rank",
+                  "measure_cosine", "probability", "model_served", "cost"]
 
 
 def link_rows(data, projects=None):
@@ -531,6 +532,49 @@ def label_rows():
                          "definition": r["definition"], "active": r["active"],
                          "version": r["version"], "folder": r["folder"]})
     return rows
+
+
+QUERY_COLS = ["label_set", "label_id", "query_id", "query", "active", "version", "file_sha256"]
+PATTERN_COLS = ["label_set", "label_id", "pattern_id", "pattern", "active", "version",
+                "file_sha256"]
+SCALE_COLS = ["label_set", "label_id", "grade", "description", "version", "file_sha256"]
+
+
+def definition_rows():
+    """(queries, patterns, scale): a copy of every set's phrase, pattern and
+    grade-scale files, every row active or not, each with the file's SHA-256
+    and the label's version, so a page can show the wording a run used. The
+    scale is one row per label and grade with {name} filled in."""
+    queries, patterns, scale = [], [], []
+    for name in labels.label_sets():
+        d = labels.folder(name)
+        lab = {r["id"]: r for r in labels.load_set(name)}
+
+        def version(lid):
+            return (lab.get(lid) or {}).get("version", "")
+
+        for suffix, out, cols in (("_queries", queries, ("query_id", "query")),
+                                  ("_patterns", patterns, ("pattern_id", "pattern"))):
+            path = os.path.join(d, f"{name}{suffix}.csv")
+            if not os.path.exists(path):
+                continue
+            sha = sha256_file(path)
+            for r in labels.rows(path):
+                lid = r[next(c for c in r if c.endswith("_id") and c not in cols)].strip()
+                out.append({"label_set": name, "label_id": lid, cols[0]: r[cols[0]].strip(),
+                            cols[1]: r[cols[1]], "active": str(labels.is_active(r)).lower(),
+                            "version": version(lid), "file_sha256": sha})
+        path = os.path.join(d, f"{name}_scale.csv")
+        if os.path.exists(path):
+            sha = sha256_file(path)
+            grades = sorted(labels.rows(path), key=lambda r: int(r["grade"]))
+            for lid, r in lab.items():
+                for g in grades:
+                    scale.append({"label_set": name, "label_id": lid, "grade": g["grade"],
+                                  "description": " ".join(g["description"].split())
+                                  .replace("{name}", r["name"]),
+                                  "version": r["version"], "file_sha256": sha})
+    return queries, patterns, scale
 
 
 def vector_kind(conn, dim):
@@ -819,6 +863,9 @@ def main():
         grp = group_rows()
         derived(conn, "label_groups", hashlib.sha256(repr(grp).encode()).hexdigest(),
                 ["label_set", "label_id", "group_id", "group_name"], grp)
+        for table, cols, rows_ in zip(("label_queries", "label_patterns", "label_scale"),
+                                      (QUERY_COLS, PATTERN_COLS, SCALE_COLS), definition_rows()):
+            derived(conn, table, hashlib.sha256(repr(rows_).encode()).hexdigest(), cols, rows_)
         t0 = time.time()
         print(f"  {'sentence_vectors':<20} {load_vectors(conn, args.data, release_id, args.force)}"
               f"{took(t0)}")

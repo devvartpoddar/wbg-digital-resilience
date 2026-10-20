@@ -8,9 +8,18 @@ SELECT
   -- A unit counts towards a commitment when the model's most likely grade is
   -- 3 (committed), P(grade 3) is at least this (Dev: no floor; 0),
   0.0::numeric AS commitment_min_probability,
-  -- and its asset link is at one of these levels ('unit': the sentence's own
-  -- words name the asset; add 'paragraph', 'component', 'none' to widen).
-  ARRAY['unit']::text[] AS commitment_link_levels,
+  -- and its asset is found at one of these levels: 'unit', the sentence's
+  -- own words name it (every asset the model says yes to); 'paragraph', the
+  -- sentence names none and the paragraph's asset map gives it (Dev,
+  -- 2026-10-20: a measure found in a sentence takes its asset from the
+  -- sentence or, failing that, its paragraph). 'component' and 'none' widen.
+  ARRAY['unit', 'paragraph']::text[] AS commitment_link_levels,
+  -- Only Investment Project Financing operations (Dev, 2026-10-20).
+  true AS ipf_only,
+  -- A sentence counts under its one best asset and one best type (false), or
+  -- under every asset and type the model says yes to (true; on the test
+  -- slice that made about seven commitments of each sentence). Undecided.
+  false AS every_asset_and_type,
   -- A unit is "not waiting on a later study" below this conditional
   -- probability.
   0.3::numeric AS not_conditional_below,
@@ -21,7 +30,7 @@ SELECT
   -- sentences hold at least this share of the sentence's six-word runs.
   0.5::numeric AS near_copy_share;
 COMMENT ON VIEW wbg.dashboard_settings IS
-  'The readings the dashboard views apply (one row): the floor on P(committed) for a unit to count, the asset-link levels that count, the conditional-probability line for "not waiting on a later study", the probability at which a package counts as linked, and the share of six-word runs that makes another project''s wording a near copy.';
+  'The readings the dashboard views apply (one row): the floor on P(committed) for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, whether a sentence counts under every asset and type it is given or only its best, the conditional-probability line for "not waiting on a later study", the probability at which a package counts as linked, and the share of six-word runs that makes another project''s wording a near copy.';
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the

@@ -20,3 +20,9 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 - **The no-objection date on awards** follows the signing date in 2,970 of 3,024 cases (median 64 days) and is present mostly on post-review contracts: it reads as the Bank's post-review date, not a pre-signature clearance.
 - **Seven projects have no approval date and seven a commitment of 0** in the projects interface, among them active ones (P502532, P505095); a filter on either drops them.
 - **Status is a fact at a date.** `status_as_of` is the date of the plan or contract that stated it, not today. A package whose newest plan prints no status stays `unknown` unless a signed contract matches it; an older plan's status is not used.
+- **Only Investment Project Financing.** Policy loans (appraised in a Program Document) and results programmes (a Program Appraisal Document) are not fetched: 21 Development Policy Lending and 9 Program-for-Results operations in the cohort have no text, by choice (Dev, 2026-10-20), and the commitments views count only IPF operations.
+- **Results-framework rows are left out**, even those saying "will" (1,877 of 6,679 such rows on 2026-10-20), by choice.
+- **Section headings in title case are not read.** A paper whose sections read "II. Project Description" rather than "II. PROJECT DESCRIPTION" is filed wholly as front matter and yields no unit (documents 34125635 and 34295176 on 2026-10-20). Changing the rule re-reads every PDF (the reader's cache is keyed on its code), so it waits for the next re-parse.
+- **Short activities are dropped**: a unit under five words ("Sites will be flood-proofed.") and a sentence whose words, counted without digits and with hyphens splitting them, fall under four ("Elevate 25 substations.").
+- **Copies ignore digits**: two sentences differing only in figures or component numbers are one text, searched through the first.
+

@@ -1,7 +1,16 @@
 measure_id,query_id,query,active
-climate_informed_siting,avoid_flood,tower sites will avoid flood-prone areas,true
-climate_informed_siting,routes_hazard,infrastructure routes will be selected based on hazard maps,true
-climate_informed_siting,outside_risk,facilities will be located outside high-risk zones,true
-climate_informed_siting,risk_informs,climate risk considerations will inform site selection,true
-climate_informed_siting,relocate,network assets will be relocated from vulnerable locations,true
-climate_informed_siting,projections,siting decisions will account for future climate projections,true
+climate_informed_siting,v4_facility_located_away_flood_prone,the facility will be located away from the flood-prone areas identified in the hazard maps,true
+climate_informed_siting,v4_infrastructure_located_outside_areas_identified,infrastructure will be located outside areas identified as being at high risk of flooding,true
+climate_informed_siting,v4_route_selection_take_account_exposure,route selection will take into account exposure to floods landslides and other natural hazards,true
+climate_informed_siting,v4_sites_selected_based_findings_climate,sites will be selected based on the findings of the climate and disaster risk assessment,true
+climate_informed_siting,v4_alignment_avoid_areas_vulnerable_coastal,the alignment will avoid areas vulnerable to coastal erosion and storm surge,true
+climate_informed_siting,v4_critical_facilities_located_areas_lower,critical facilities will be located in areas with lower exposure to climate-related hazards,true
+climate_informed_siting,v4_final_route_adjusted_avoid_sections,the final route will be adjusted to avoid sections identified as highly vulnerable to flooding,true
+climate_informed_siting,v4_alternative_sites_evaluated_reduce_exposure,alternative sites will be evaluated to reduce exposure to sea-level rise and coastal hazards,true
+climate_informed_siting,v4_climate_risk_information_inform_selection,climate risk information will inform the selection of locations for the proposed investments,false
+climate_informed_siting,avoid_flood,tower sites will avoid flood-prone areas,false
+climate_informed_siting,routes_hazard,infrastructure routes will be selected based on hazard maps,false
+climate_informed_siting,outside_risk,facilities will be located outside high-risk zones,false
+climate_informed_siting,risk_informs,climate risk considerations will inform site selection,false
+climate_informed_siting,relocate,network assets will be relocated from vulnerable locations,false
+climate_informed_siting,projections,siting decisions will account for future climate projections,false

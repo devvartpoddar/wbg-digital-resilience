@@ -44,7 +44,10 @@ COMMENT ON FUNCTION wbg.due_date(date, date) IS
 --   Under implementation  the plan says Under Implementation
 --   Cancelled             the plan says Canceled or Terminated
 --   Tendered              pending in the plan, a linked notice
---   Overdue               pending, nothing linked, due date (due_date) past
+--   Not in latest plan    pending, nothing linked, and the newest plan no
+--                         longer lists it (557 of 850 "overdue" packages on
+--                         2026-10-20 were such: dropped or replanned, not late)
+--   Overdue               pending, nothing linked, in the latest plan, due date past
 --   Planned               pending, nothing linked, due today or later or no date
 -- A status the plan leaves blank or unknown is read as pending. Nothing is
 -- called complete or delivered: a completed contract is not delivery.
@@ -74,17 +77,26 @@ SELECT p.package_id, p.project_id, p.description_clean, p.category, p.method_cod
          WHEN p.status IN ('Canceled', 'Terminated') THEN 'Cancelled'
          WHEN a.signed_date IS NOT NULL THEN 'Contract signed'
          WHEN n.package_id IS NOT NULL THEN 'Tendered'
+         WHEN NOT coalesce(p.in_latest_plan, true) THEN 'Not in latest plan'
          WHEN wbg.due_date(p.planned_date, p.revised_date) < current_date THEN 'Overdue'
          ELSE 'Planned'
        END AS package_status,
-       (SELECT min(x) FROM unnest(ARRAY[wbg.due_date(p.planned_date, p.revised_date),
-                                        n.notice_deadline]) x
-         WHERE x >= current_date) AS next_date
+       -- A date to act on, only while the package is still to come: a future
+       -- due date for a planned one, a future deadline for a tendered one.
+       CASE
+         WHEN p.status IN ('Completed', 'Signed', 'Under Implementation', 'Canceled',
+                           'Terminated') OR a.signed_date IS NOT NULL THEN NULL
+         WHEN n.package_id IS NOT NULL
+           THEN CASE WHEN n.notice_deadline >= current_date THEN n.notice_deadline END
+         WHEN NOT coalesce(p.in_latest_plan, true) THEN NULL
+         WHEN wbg.due_date(p.planned_date, p.revised_date) >= current_date
+           THEN wbg.due_date(p.planned_date, p.revised_date)
+       END AS next_date
 FROM wbg.packages p
 LEFT JOIN n ON n.package_id = p.package_id
 LEFT JOIN a ON a.package_id = p.package_id;
 COMMENT ON VIEW wbg.package_status IS
-  'One row per procurement-plan package with where it stands: the plan''s own status first (Contract completed, Contract signed, Under implementation, Cancelled); where the plan says pending, a linked signed contract (Contract signed) or notice (Tendered); else Overdue when its due date (the revised date where printed, else the planned date) has passed, Planned otherwise. A package with a linked notice or contract is never Overdue. A completed contract is not delivery. next_date is the earliest future due date or notice deadline.';
+  'One row per procurement-plan package with where it stands: the plan''s own status first (Contract completed, Contract signed, Under implementation, Cancelled); where the plan says pending, a linked signed contract (Contract signed) or notice (Tendered); else Not in latest plan when the newest plan no longer lists it, Overdue when its due date (the revised date where printed, else the planned date) has passed, Planned otherwise. A package with a linked notice or contract is never Overdue. A completed contract is not delivery. next_date is set only while the package is still to come: a future due date (Planned) or notice deadline (Tendered).';
 
 -- Packages still to come: Planned in package_status (pending, nothing
 -- linked, due today or later, or no date).

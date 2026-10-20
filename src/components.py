@@ -151,7 +151,9 @@ class Tagger:
             m = RUN_IN_COMP.match(head)
             if m:
                 return self._open(m.group(1), title, path)
-        if block == "heading" or short:
+        # A short footnote or table row that names a component ("Component 2:
+        # see Annex 3", a cost table's row) refers to it; it does not open it.
+        if block == "heading" or (short and block in ("narrative", "annex")):
             m = COMP_HEAD.match(text)
             if m:
                 return self._open(m.group(1), m.group(2), path)

@@ -1,0 +1,8 @@
+measure_id,type_id,type_name,definition,active,version
+resilient_infrastructure_design,flood_protection,Flood protection,"Physically protects infrastructure from inundation with barriers, sealing or waterproof ducts, other than by elevation or drainage",true,v4
+resilient_infrastructure_design,elevation,Elevation,Raises equipment or structures above expected flood levels,true,v4
+resilient_infrastructure_design,drainage,Protective drainage,Uses drainage measures to reduce flood or water exposure,true,v4
+resilient_infrastructure_design,wind_hardening,Wind and storm hardening,Strengthens structures against high winds or storms,true,v4
+resilient_infrastructure_design,heat_hardening,Heat-resilient design,Protects equipment or structures against extreme temperatures,true,v4
+resilient_infrastructure_design,structural_reinforcement,Structural reinforcement,"Strengthens foundations, structures, ducts or other physical components against hazards other than wind",true,v4
+resilient_infrastructure_design,weatherproofing,Weatherproofing and protective enclosure,"Protects equipment from rain, dust, humidity or severe weather with enclosures or materials, other than against flood water",true,v4

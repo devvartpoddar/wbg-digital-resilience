@@ -1,6 +1,8 @@
 measure_id,pattern_id,pattern,active
-disaster_recovery,disaster_recovery,\bdisaster recovery\b,true
-disaster_recovery,continuity,\bbusiness continuity\b,true
-disaster_recovery,backup,\bdata back-?ups?\b|\bbackup (?:site|system|cent(?:re|er))s?\b,true
-disaster_recovery,failover,\bfail-?over\b,true
-disaster_recovery,replication,\b(?:data|site|cloud) replication\b,true
+disaster_recovery,v4_disaster_recovery_site_center,\bdisaster recovery (?:site|center|centre)\b,true
+disaster_recovery,v4_recovery_time_point_objective,\brecovery (?:time|point) objective\b,true
+disaster_recovery,disaster_recovery,\bdisaster recovery\b,false
+disaster_recovery,continuity,\bbusiness continuity\b,false
+disaster_recovery,backup,\bdata back-?ups?\b|\bbackup (?:site|system|cent(?:re|er))s?\b,false
+disaster_recovery,failover,\bfail-?over\b,false
+disaster_recovery,replication,\b(?:data|site|cloud) replication\b,false

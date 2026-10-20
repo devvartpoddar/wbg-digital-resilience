@@ -1,0 +1,5 @@
+measure_id,type_id,type_name,definition,active,version
+adaptation_applications,climate_advisory,Climate advisory service,"Gives climate-informed recommendations to users outside agriculture and water management, such as households, businesses or local officials",true,v4
+adaptation_applications,adaptation_decision_support,Adaptation decision support,"Helps planners choose among adaptation options for identified climate risks, by comparing or prioritising specific measures",true,v4
+adaptation_applications,climate_smart_agriculture,Climate-smart agriculture application,"Advises farmers, herders, fishers or extension agents on climate-resilient practices or decisions",true,v4
+adaptation_applications,drought_water_management,Drought and water management application,"Advises on water allocation, irrigation or drought response, other than farm-level crop advice",true,v4

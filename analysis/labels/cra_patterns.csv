@@ -1,4 +1,6 @@
 measure_id,pattern_id,pattern,active
-cra,risk_assess,"\b(?:climate|disaster|hazard|flood|cyclone|seismic|multi-hazard)\w*\b[^.;]{0,60}?\b(?:risk|vulnerabilit\w*|resilience)\b[^.;]{0,30}?\b(?:assessments?|assessed|screening|screened|analys[ie]s|mapping|maps|evaluations?|studies|study)\b",true
-cra,assess_climate,"\b(?:assess\w*|screen\w*|evaluat\w*|map(?:ping)?)\b[^.;]{0,50}?\b(?:climate|disaster|hazard)\w*\b[^.;]{0,30}?\b(?:risks?|vulnerabilit\w*|exposure)\b",true
-cra,vulnerability_assessment,"\b(?:vulnerability|hazard|risk) (?:assessments?|mapping|maps)\b",true
+cra,v4_climate_disaster_risk_assessment,\bclimate (?:and disaster )?risk assessment\b,true
+cra,v4_climate_vulnerability_assessment,\bclimate vulnerability assessment\b,true
+cra,risk_assess,"\b(?:climate|disaster|hazard|flood|cyclone|seismic|multi-hazard)\w*\b[^.;]{0,60}?\b(?:risk|vulnerabilit\w*|resilience)\b[^.;]{0,30}?\b(?:assessments?|assessed|screening|screened|analys[ie]s|mapping|maps|evaluations?|studies|study)\b",false
+cra,assess_climate,"\b(?:assess\w*|screen\w*|evaluat\w*|map(?:ping)?)\b[^.;]{0,50}?\b(?:climate|disaster|hazard)\w*\b[^.;]{0,30}?\b(?:risks?|vulnerabilit\w*|exposure)\b",false
+cra,vulnerability_assessment,\b(?:vulnerability|hazard|risk) (?:assessments?|mapping|maps)\b,false

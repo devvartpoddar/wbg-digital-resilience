@@ -1,7 +1,16 @@
 measure_id,query_id,query,active
-renewable_energy,solar_telecom,solar systems will power telecommunications sites,true
-renewable_energy,renewable_ops,renewable energy generation will support facility operations,true
-renewable_energy,off_grid,off-grid solar solutions will be deployed,true
-renewable_energy,wind,wind energy will be used to power project infrastructure,true
-renewable_energy,installed,renewable power systems will be installed,true
-renewable_energy,clean,facilities will operate using clean energy sources,true
+renewable_energy,v4_solar_photovoltaic_systems_installed_supply,solar photovoltaic systems will be installed to supply electricity to project-supported facilities,true
+renewable_energy,v4_remote_locations_equipped_solar_generation,remote locations will be equipped with solar generation and battery storage,true
+renewable_energy,v4_project_finance_renewable_energy_systems,the project will finance renewable-energy systems for off-grid operations,true
+renewable_energy,v4_renewable_electricity_replace_or_reduce,renewable electricity will replace or reduce the use of diesel generation,true
+renewable_energy,v4_solar_powered_systems_provide_electricity,solar-powered systems will provide electricity in locations without grid access,true
+renewable_energy,v4_facilities_incorporate_site_renewable_energy,the facilities will incorporate on-site renewable-energy generation,true
+renewable_energy,v4_solar_generation_battery_storage_supply,solar generation and battery storage will supply electricity to remote installations,true
+renewable_energy,v4_project_support_replacement_diesel_powered,the project will support replacement of diesel-powered systems with renewable-energy solutions,true
+renewable_energy,v4_renewable_electricity_procured_project_supported,renewable electricity will be procured for project-supported operations,true
+renewable_energy,solar_telecom,solar systems will power telecommunications sites,false
+renewable_energy,renewable_ops,renewable energy generation will support facility operations,false
+renewable_energy,off_grid,off-grid solar solutions will be deployed,false
+renewable_energy,wind,wind energy will be used to power project infrastructure,false
+renewable_energy,installed,renewable power systems will be installed,false
+renewable_energy,clean,facilities will operate using clean energy sources,false

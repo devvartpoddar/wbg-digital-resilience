@@ -1,5 +1,5 @@
 measure_id,pattern_id,pattern,active
-energy_efficiency,energy_efficiency,\benergy[- ]efficien\w*,true
-energy_efficiency,consumption,"\b(?:energy|electricity|power) (?:consumption|use|demand|savings?)\b[^.;]{0,40}?\b(?:reduc\w*|lower\w*|cut\w*|sav\w*)|\b(?:reduc\w*|lower\w*|cut\w*)\b[^.;]{0,40}?\b(?:energy|electricity|power) (?:consumption|use|demand)\b",true
-energy_efficiency,efficient_cooling,\b(?:efficient|free|liquid) cooling\b,true
-energy_efficiency,energy_management,\benergy management systems?\b,true
+energy_efficiency,energy_efficiency,\benergy[- ]efficien\w*,false
+energy_efficiency,consumption,"\b(?:energy|electricity|power) (?:consumption|use|demand|savings?)\b[^.;]{0,40}?\b(?:reduc\w*|lower\w*|cut\w*|sav\w*)|\b(?:reduc\w*|lower\w*|cut\w*)\b[^.;]{0,40}?\b(?:energy|electricity|power) (?:consumption|use|demand)\b",false
+energy_efficiency,efficient_cooling,\b(?:efficient|free|liquid) cooling\b,false
+energy_efficiency,energy_management,\benergy management systems?\b,false

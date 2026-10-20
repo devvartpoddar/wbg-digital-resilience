@@ -82,6 +82,7 @@ RENAME_IN = {
                    "action": "restructuring_action"},
     "packages": {"component": "component_name"},
     "labels": {"name": "label_name"},
+    "label_scale": {"grade": "grade"},
 }
 
 # Types by column name (after renaming). Anything not here is text, except
@@ -92,7 +93,7 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
-           "template_project_count", "cosine_rank", "graded_units"}
+           "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "embedding_score", "embedding_percentile",
@@ -100,7 +101,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "grade_confidence", "probability_grade_0", "probability_grade_1",
            "probability_grade_2", "probability_grade_3", "probability_grade_4",
            "committed_probability_calibrated", "best_type_probability",
-           "model_cost_usd", "precision", "recall",
+           "model_cost_usd", "precision", "recall", "measure_cosine",
            "paragraph_best_asset_probability", "component_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
@@ -453,6 +454,33 @@ TABLES = {
                 "person): a presentation layer the views add beside the label; the labels "
                 "keep their ids and answers. The assets are grouped into about six.",
         columns={"group_id": "The group's id.", "group_name": "The group's name."}),
+    "label_queries": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "query_id"), foreign=[],
+        comment="A copy of each set's search phrases (<set>_queries.csv, kept by a person): "
+                "the sentences the search ranks units against. Inactive rows are kept.",
+        columns={"query_id": "The phrase's id.", "query": "The phrase.",
+                 "is_active": "Whether the search uses it.",
+                 "version": "The label's version (its set file's version column).",
+                 "file_sha256": "SHA-256 of the file the row was copied from."}),
+    "label_patterns": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "pattern_id"), foreign=[],
+        comment="A copy of each set's word patterns (<set>_patterns.csv, kept by a person): "
+                "regular expressions that add units to a measure's pool. Inactive rows are "
+                "kept. label_pattern_hits counts the units each matched in the current run.",
+        columns={"pattern_id": "The pattern's id.",
+                 "pattern": "The regular expression, matched without regard to case.",
+                 "is_active": "Whether the search uses it.",
+                 "version": "The label's version (its set file's version column).",
+                 "file_sha256": "SHA-256 of the file the row was copied from."}),
+    "label_scale": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "grade"), foreign=[],
+        comment="A copy of each set's grade scale (<set>_scale.csv, kept by a person), one row "
+                "per label and grade with the label's name filled in: the grades the decision "
+                "model chooses among.",
+        columns={"grade": "The grade, 0 the lowest.",
+                 "description": "What the grade means, as the model is shown it.",
+                 "version": "The label's version (its set file's version column).",
+                 "file_sha256": "SHA-256 of the file the row was copied from."}),
     "package_assets": dict(
         schema=PUBLIC, key=("package_id", "label_id"),
         foreign=[("package_id", "packages", "package_id"),
@@ -476,7 +504,8 @@ TABLES = {
                  ("project_id", "projects", "project_id")],
         comment="Which procurement packages would carry out a commitment: one row per "
                 "committed unit and package of the same project that share an asset or an "
-                "asset reading group, with the decision model's yes probability "
+                "asset reading group, or that is among the project's packages nearest the "
+                "measure itself (route), with the decision model's yes probability "
                 "(src/link_packages.py). Many to many: a commitment may link to several "
                 "packages and a package to several commitments. Filter on the probability.",
         columns={
@@ -485,6 +514,9 @@ TABLES = {
             "unit_id": "The committed unit (wbg.measure_findings).",
             "shared_asset_ids": "Assets both the unit's answers and the package's answers name at 0.5.",
             "shared_group_ids": "Asset reading groups (wbg.label_groups) both name at 0.5.",
+            "route": "How the pair was made: asset (a shared asset or reading group) or measure (the package is among the project's nearest to the measure's phrases; no asset needed).",
+            "measure_rank": "For the measure route, the package's rank by cosine to the measure among the project's packages not paired by asset.",
+            "measure_cosine": "For the measure route, the package description's best cosine to the measure's phrases and definition.",
             "probability": "The decision model's probability that carrying out the package is where the commitment is delivered or applied.",
             "model_served": "The decision-model snapshot that answered.",
         }),
