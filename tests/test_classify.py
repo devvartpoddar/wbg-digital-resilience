@@ -29,6 +29,7 @@ def _csv(path, cols, rows):
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
+    monkeypatch.setattr(classify, "MIN_COSINE", 0.0)
     data = tmp_path / "data"
     text = "\n\n".join(TEXTS)
     (data / "appraisal" / "text").mkdir(parents=True)
@@ -73,6 +74,7 @@ def store(tmp_path, monkeypatch):
 
 def _run(store, **kw):
     data, tax, _ = store
+    kw.setdefault("min_cosine", 0.0)      # the full map: these stores have no search run
     return classify.classify("assets", data, api_key="k", taxonomy=tax, log=lambda *_: None,
                              workers=1, **kw)
 
@@ -176,3 +178,27 @@ def test_a_run_made_before_markers_gets_one_when_found_again(store):
     assert classify.current_run("assets", data, taxonomy=tax) == first   # falls back to the default gate
     assert _run(store) == first                                           # "already written" path
     assert os.path.exists(classify._marker(data, "assets", None))
+
+
+def test_a_reader_finds_the_run_without_planning_again(store, monkeypatch):
+    """current_run remembers which folder its inputs plan to: the second
+    lookup reads that, and a changed input plans again."""
+    data, tax, _ = store
+    first = _run(store)
+    assert classify.current_run("assets", data, taxonomy=tax, min_cosine=0.0) == first
+    calls = []
+    real = classify.plan
+    monkeypatch.setattr(classify, "plan", lambda *a, **k: calls.append(1) or real(*a, **k))
+    assert classify.current_run("assets", data, taxonomy=tax, min_cosine=0.0) == first
+    assert calls == []
+    _csv(os.path.join(data, "appraisal", "components.csv"), ["doc_id", "source", "number",
+                                                             "name"],
+         [{"doc_id": "D", "source": "datasheet", "number": "1", "name": "Renamed"}])
+    assert classify.current_run("assets", data, taxonomy=tax, min_cosine=0.0) is None
+    assert calls == [1]
+
+
+def test_a_set_never_classified_is_not_planned(store, monkeypatch):
+    data, tax, _ = store
+    monkeypatch.setattr(classify, "plan", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
+    assert classify.current_run("cra", data, taxonomy=tax) is None

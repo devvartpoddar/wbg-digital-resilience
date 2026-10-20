@@ -300,10 +300,16 @@ def run(args, data):
         elif stage == "classify":
             _run("classify.py", "assets", *dry, *scope, data=data)
         elif stage == "measure":
+            # Each set's three steps leave Postgres alone; the stage writes
+            # every set once at the end (a publish rebuilds every view).
+            quiet = dry or ["--no-publish"]
             failed = _parallel(args.jobs, sets, lambda n: [
-                ["measure.py", n, "--workers", str(args.workers), *dry, *scope],
+                ["measure.py", n, "--workers", str(args.workers), *quiet, *scope],
                 ["kinds.py", n, *dry, *scope],
-                ["kinds.py", n, "--assign", *dry, *scope]], data)
+                ["kinds.py", n, "--assign", *quiet, *scope]], data)
+            done = [n for n in sets if n not in failed]
+            if done and not args.dry_run:
+                _run("store.py", *done, *scope, data=data)
         elif stage == "link":
             _run("link_packages.py", *dry, *scope, data=data)
         elif stage == "publish":
@@ -967,7 +973,7 @@ def main(argv=None):
     if args.cmd == "classify":
         extra = (["--dry-run"] if args.dry_run else []) + \
             (["--limit", str(args.limit)] if args.limit else []) + \
-            (["--min-cosine", str(args.min_cosine)] if args.min_cosine else [])
+            ["--min-cosine", str(args.min_cosine)]
         _run("classify.py", args.label_set, *extra, *_scope(args), data=data)
         return 0
     if args.cmd == "measure":

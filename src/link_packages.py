@@ -283,6 +283,8 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
         got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers)
         calls, cost = st["calls"], st["cost_usd"]
         if st["failures"] or not all(got):
+            classify.record_spend(data, "link", "packages", model, calls, cost,
+                                  time.time() - t0, "failed")
             log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
     asset_rows, has = [], defaultdict(set)
@@ -324,6 +326,8 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
         calls += st2["calls"]
         cost += st2["cost_usd"]
         if st2["failures"] or not all(got2):
+            classify.record_spend(data, "link", "packages", model, calls, cost,
+                                  time.time() - t0, "failed")
             log(f"  {len(st2['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
     pair_rows = []

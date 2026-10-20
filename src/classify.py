@@ -62,8 +62,10 @@ TABLE_ROWS = True
 # every paragraph). Measured against the full asset map on the 70-project
 # corpus: 0.25 asks 58 per cent of the questions and loses 5.8 per cent of
 # the links at 0.5 (4.0 per cent at 0.9); 0.30 asks 39 per cent and loses
-# 9.0 (5.4). The questions are most of the cost, so this is the dial.
-MIN_COSINE = 0.0
+# 9.0 (5.4). The questions are most of the cost, so this is the dial. On
+# from 2026-10-21 (Dev's decision): 0.25 is the default for every run; pass
+# --min-cosine 0 for the full map a gate is measured against.
+MIN_COSINE = 0.25
 WORKERS = 10
 SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
               "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
@@ -358,6 +360,69 @@ def write_marker(data, name, projects, out, min_cosine):
     os.replace(marker + ".part", marker)
 
 
+def _plan_key(name, data, taxonomy, min_cosine, projects, model):
+    """A cheap fingerprint of everything plan() reads: the corpus tables (by
+    their remembered checksums), the label set's files, the pipeline's code,
+    the search run a gate reads, the model, gate and scope. Equal keys mean
+    plan() would name the same run folder, so readers need not rebuild
+    every request to find it (that was 40,000 request bodies hashed on each
+    lookup, about ten lookups per measure)."""
+    from paths import file_sha256
+    h = hashlib.sha256(f"{name}\t{model}\t{min_cosine}\t{sorted(projects or [])}\t"
+                       f"{MAX_REQUEST_CHARS}\t{BLOCKS}\t{TABLE_ROWS}\n".encode())
+    for f in ("paragraphs.csv", "components.csv", "sentences.csv"):
+        p = where(data, "appraisal", f)
+        h.update((file_sha256(p) if os.path.exists(p) else "-").encode())
+    folder = taxonomy or labels.folder(name)
+    for f in (f"{name}.csv", f"{name}_scale.csv"):
+        p = os.path.join(folder, f)
+        h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
+    src = os.path.dirname(os.path.abspath(__file__))
+    for f in sorted(os.listdir(src)):
+        if f.endswith(".py"):
+            h.update(file_sha256(os.path.join(src, f), remember=False).encode())
+    if min_cosine:
+        import search
+        h.update(os.path.basename(search.run_folder(name, data, taxonomy=taxonomy)[0]).encode())
+    return h.hexdigest()[:24]
+
+
+def _plan_cache(data, key):
+    return where(data, "classify", "current", "plans", f"{key}.json")
+
+
+def remember_plan(data, key, out):
+    path = _plan_cache(data, key)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path + ".part", "w", encoding="utf-8") as fh:
+            json.dump({"run": os.path.basename(out)}, fh)
+        os.replace(path + ".part", path)
+    except OSError:
+        pass
+
+
+def planned_run(name, data, *, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, projects=None,
+                model=MODEL):
+    """The run folder plan() would name, from the fingerprint cache when it
+    has seen these inputs before, else by planning (and remembering)."""
+    try:
+        key = _plan_key(name, data, taxonomy, min_cosine, projects, model)
+    except (OSError, SystemExit):
+        key = None
+    if key:
+        try:
+            with open(_plan_cache(data, key), encoding="utf-8") as fh:
+                return where(data, "classify", json.load(fh)["run"])
+        except (OSError, ValueError, KeyError):
+            pass
+    out = plan(name, data, model=model, taxonomy=taxonomy, min_cosine=min_cosine,
+               projects=projects)[5]
+    if key:
+        remember_plan(data, key, out)
+    return out
+
+
 def current_run(name, data, taxonomy=TAXONOMY, min_cosine=None, projects=None):
     """The run folder for the label set and paragraphs as they stand now, or
     None if that run has not been written. With min_cosine None (the
@@ -365,6 +430,9 @@ def current_run(name, data, taxonomy=TAXONOMY, min_cosine=None, projects=None):
     scope was made with (the marker it wrote); the run is still checked
     against the paragraphs, questions and gate as they stand, so a stale
     marker finds nothing rather than something old."""
+    import glob
+    if not glob.glob(where(data, "classify", f"{glob.escape(name)}-*", "manifest.json")):
+        return None                 # this set was never classified (a measure, say)
     gates = [min_cosine]
     if min_cosine is None:
         gates = [MIN_COSINE]
@@ -372,9 +440,10 @@ def current_run(name, data, taxonomy=TAXONOMY, min_cosine=None, projects=None):
         if os.path.exists(marker):
             with open(marker, encoding="utf-8") as fh:
                 gates.insert(0, float(json.load(fh).get("min_cosine", MIN_COSINE)))
-    for gate in gates:
+    for gate in dict.fromkeys(gates):
         try:
-            out = plan(name, data, taxonomy=taxonomy, min_cosine=gate, projects=projects)[5]
+            out = planned_run(name, data, taxonomy=taxonomy, min_cosine=gate,
+                              projects=projects)
         except SystemExit:          # a gated plan with no search run to gate on
             continue
         if os.path.exists(os.path.join(out, "manifest.json")):
@@ -389,6 +458,11 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     labels, scale, qs, bodies, shas, out, cosines = plan(
         name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine,
         projects=projects)
+    if not limit:
+        try:
+            remember_plan(data, _plan_key(name, data, taxonomy, min_cosine, projects, model), out)
+        except (OSError, SystemExit):
+            pass
     n_q = sum(len(b["questions"]) for _, b in bodies)
     log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} paragraphs, "
         f"{n_q:,} questions"

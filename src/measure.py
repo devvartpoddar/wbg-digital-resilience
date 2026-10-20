@@ -726,6 +726,11 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         cost += k
         if failures:
             run.pool.shutdown(wait=True)
+            c, k, _ = run.collect_extras()
+            # Paid calls are paid whether or not the run completes: the
+            # ledger must match the provider's bill.
+            classify.record_spend(data, "measure", name, run.settings["model"], calls + c,
+                                  cost + k, time.time() - t0, "failed")
             log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
             for sha, err in failures[:5]:
                 log(f"    {sha[:12]}: {err}")
@@ -753,6 +758,8 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
     calls += c
     cost += k
     if failures:
+        classify.record_spend(data, "measure", name, run.settings["model"], calls, cost,
+                              time.time() - t0, "failed")
         log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
         for sha, err in failures[:5]:
             log(f"    {sha[:12]}: {err}")
