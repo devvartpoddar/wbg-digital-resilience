@@ -319,9 +319,10 @@ def _run_rows(data, finder, file):
 
 
 def classify_rows(data, projects=None, min_cosine=None):
+    """The current asset map for the scope. With min_cosine None, the gate
+    is the one the last run was made with (classify's marker); the flag
+    still names one explicitly."""
     import classify
-    if min_cosine is None:
-        min_cosine = classify.MIN_COSINE
     return _run_rows(data, lambda n, d: classify.current_run(
         n, d, projects=projects, min_cosine=min_cosine), "scores.csv")
 

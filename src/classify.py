@@ -373,6 +373,17 @@ def _marker(data, name, projects):
     return where(data, "classify", "current", f"{name}-{scope}.json")
 
 
+def write_marker(data, name, projects, out, min_cosine):
+    """Name the run just written (or found already written) as the current
+    one for this set and scope, with the gate it was made with."""
+    marker = _marker(data, name, projects)
+    os.makedirs(os.path.dirname(marker), exist_ok=True)
+    with open(marker + ".part", "w", encoding="utf-8") as fh:
+        json.dump({"run": os.path.basename(out), "min_cosine": min_cosine,
+                   "projects": sorted(projects) if projects else None}, fh, indent=1)
+    os.replace(marker + ".part", marker)
+
+
 def current_run(name, data, taxonomy=TAXONOMY, min_cosine=None, projects=None):
     """The run folder for the label set and paragraphs as they stand now, or
     None if that run has not been written. With min_cosine None (the
@@ -411,6 +422,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
            if min_cosine else ""))
     if os.path.exists(os.path.join(out, "manifest.json")):
         log(f"  already written: {out}")
+        if not limit:
+            write_marker(data, name, projects, out, min_cosine)   # a run made before markers
         return out
     import answers
     requests_ = [(p["state"], b["questions"]) for p, b in bodies if b["questions"]]
@@ -463,12 +476,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         json.dump(manifest, fh, indent=1, ensure_ascii=False)
     os.replace(part, out)
     if not limit:
-        marker = _marker(data, name, projects)
-        os.makedirs(os.path.dirname(marker), exist_ok=True)
-        with open(marker + ".part", "w", encoding="utf-8") as fh:
-            json.dump({"run": os.path.basename(out), "min_cosine": min_cosine,
-                       "projects": sorted(projects) if projects else None}, fh, indent=1)
-        os.replace(marker + ".part", marker)
+        write_marker(data, name, projects, out, min_cosine)
     prefix = "smoke_" if limit else ""
     report = where(data, "reports", f"{prefix}classify_{name}.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)

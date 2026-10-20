@@ -194,3 +194,12 @@ def test_readers_find_the_run_whatever_gate_it_was_made_with(store):
     assert classify.current_run("assets", data, taxonomy=tax, min_cosine=0.0) == first
     marker = classify._marker(data, "assets", None)
     assert os.path.exists(marker)
+
+
+def test_a_run_made_before_markers_gets_one_when_found_again(store):
+    data, tax, _ = store
+    first = _run(store)
+    os.remove(classify._marker(data, "assets", None))
+    assert classify.current_run("assets", data, taxonomy=tax) == first   # falls back to the default gate
+    assert _run(store) == first                                           # "already written" path
+    assert os.path.exists(classify._marker(data, "assets", None))
