@@ -284,19 +284,11 @@ class Run:
         self.facets = load_facets()
         self.qs = questions(self.labels, self.scale, context, self.assets, self.kinds,
                             self.facets)
-        self.para_assets, self.comp_assets, self.asset_run = asset_map(data, self.projects)
+        asset_folder = classify.current_run(ASSET_SET, data, projects=self.projects)
+        self.asset_run = os.path.basename(asset_folder) if asset_folder else ""
         if gate in ("paragraph", "component") and not self.asset_run:
             raise SystemExit(f"measure: --gate {gate} needs the asset map: run ./wbg classify "
                              f"{ASSET_SET} first")
-        self.paras = paragraph_rows(data)
-        self.names = component_names(data)
-        run, _ = search.run_folder(name, data)
-        _, _, self.index = search.load_run(run, data)
-        self.row_of = {r["unit_id"]: i for i, r in enumerate(self.index)}
-        self.matrix = numpy.load(where(data, "embeddings", "sentence_emb.npy"), mmap_mode="r")
-        self.texts = commitment.unit_texts(data, self.index)
-        self.commit = commitment.current_scores(data)
-        self.doc_texts = {}
         # Platt scaling from a graded sheet (./wbg check <set> --evaluate), when
         # one exists: applied to P(committed) as p_committed_calibrated. Part
         # of the version, so new grades give a new run (from the store, free).
@@ -315,6 +307,30 @@ class Run:
         h.update(json.dumps(self.qs, sort_keys=True).encode())
         h.update(json.dumps(self.calibration, sort_keys=True).encode())
         self.out = where(data, "measures", f"{name}-{h.hexdigest()[:12]}")
+        # The run folder is known from the inputs' names alone. A reader
+        # (the load, the types stage, the evaluation) stops here; what
+        # follows reads the corpus and is only for a run or a check sheet.
+        self._loaded = False
+        if build:
+            self.load_corpus()
+
+    def load_corpus(self):
+        """The paragraphs, the index, the matrix, the texts, the commitment
+        scores and the asset map's two levels: everything a run reads."""
+        if self._loaded:
+            return
+        data = self.data
+        self.para_assets, self.comp_assets, _ = asset_map(data, self.projects)
+        self.paras = paragraph_rows(data)
+        self.names = component_names(data)
+        run, _ = search.run_folder(self.name, data)
+        _, _, self.index = search.load_run(run, data)
+        self.row_of = {r["unit_id"]: i for i, r in enumerate(self.index)}
+        self.matrix = numpy.load(where(data, "embeddings", "sentence_emb.npy"), mmap_mode="r")
+        self.texts = commitment.unit_texts(data, self.index)
+        self.commit = commitment.current_scores(data)
+        self.doc_texts = {}
+        self._loaded = True
 
     # ---- units
 

@@ -132,11 +132,9 @@ def training_sets(index, sections, texts):
 
 
 def _sha_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
+    """The file's SHA-256, remembered beside it (paths.file_sha256)."""
+    from paths import file_sha256
+    return file_sha256(path)
 
 
 def version(data):

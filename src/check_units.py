@@ -113,6 +113,7 @@ def build(name, data, seed=1, per=PER, elusion=False, **kw):
     if not folder:
         raise SystemExit(f"check: no measure run for {name} as it stands; run ./wbg measure {name}")
     run = measure.Run(name, data, build=False, log=lambda *_: None, **kw)
+    run.load_corpus()
     qsha = classify.question_shas(run.qs)
     with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
         units = list(csv.DictReader(fh))

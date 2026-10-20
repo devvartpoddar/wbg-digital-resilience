@@ -118,6 +118,38 @@ LAYOUT = {
 }
 
 
+def file_sha256(path):
+    """The SHA-256 of a file, remembered beside it: <path>.sha256 holds the
+    size, the modification time and the digest, and is trusted while both
+    match. Every stage keys its runs on the big files (the 1.8 GB sentence
+    matrix, the paragraphs table), and hashing them again on every call was
+    minutes of each run on this hardware; a stale sidecar can only name a
+    digest for bytes that have since changed, and the size and mtime check
+    rules that out."""
+    import hashlib
+    st = os.stat(path)
+    side = path + ".sha256"
+    try:
+        with open(side, encoding="utf-8") as fh:
+            size, mtime, sha = fh.read().split()
+        if int(size) == st.st_size and int(mtime) == st.st_mtime_ns and len(sha) == 64:
+            return sha
+    except (OSError, ValueError):
+        pass
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for block in iter(lambda: fh.read(1 << 20), b""):
+            h.update(block)
+    sha = h.hexdigest()
+    try:
+        with open(side + ".part", "w", encoding="utf-8") as fh:
+            fh.write(f"{st.st_size} {st.st_mtime_ns} {sha}\n")
+        os.replace(side + ".part", side)
+    except OSError:
+        pass          # a read-only copy still hashes, it just does not remember
+    return sha
+
+
 def where(data, name, *parts):
     """The path of a named place in the data folder (see LAYOUT)."""
     return os.path.join(data, LAYOUT[name], *parts)

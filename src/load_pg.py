@@ -35,7 +35,7 @@ peer authentication over the local socket - no password anywhere).
   python3 src/load_pg.py
   python3 src/load_pg.py --force
 """
-import argparse, csv, glob, hashlib, os, re, sys
+import argparse, time, csv, glob, hashlib, os, re, sys
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -70,11 +70,9 @@ _ISO_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[
 
 
 def sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
+    """The file's SHA-256, remembered beside it (paths.file_sha256)."""
+    from paths import file_sha256
+    return file_sha256(path)
 
 
 def col_type(csv_name):
@@ -273,14 +271,36 @@ def search_tables(data):
             folders.append((name, folder))
     if not folders:
         return None, None
-    rollup = []
-    for name, folder in folders:
-        run = os.path.basename(folder)
-        for lid in search.run_labels(folder):
-            rows = search.hits(folder, data, labels=[lid])
-            rollup.extend(dict(r, label_set=name, run=run)
-                          for r in search.paragraph_rollup(rows))
+    # A generator: the rows are read only when the table is loaded, and the
+    # sha alone says whether it will be.
+    rollup = (dict(r, label_set=name, run=os.path.basename(folder))
+              for name, folder in folders for r in run_rollup(folder, data))
     return "|".join(os.path.basename(f) for _, f in folders), rollup
+
+
+def run_rollup(folder, data):
+    """A search run's paragraph rollup, computed once and kept in the run
+    folder as paragraph_hits.csv: a run never changes, and re-ranking
+    150,000 units for every label set on every load was most of the
+    load's time."""
+    import search
+    path = os.path.join(folder, "paragraph_hits.csv")
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            return list(csv.DictReader(fh))
+    out = []
+    for lid in search.run_labels(folder):
+        out.extend(search.paragraph_rollup(search.hits(folder, data, labels=[lid])))
+    cols = [c for c in ROLLUP_COLS if c not in ("label_set", "run")]
+    try:
+        with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n", extrasaction="ignore")
+            w.writeheader()
+            w.writerows(out)
+        os.replace(path + ".part", path)
+    except OSError:
+        pass
+    return out
 
 
 ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "project_ids",
@@ -643,14 +663,20 @@ def main():
         return ("  unparseable -> NULL: " + ", ".join(f"{k}={v}" for k, v in sorted(bad.items()))
                 if bad else "")
 
+    t_start = time.time()
+
+    def took(t0):
+        return f"  ({time.time() - t0:.0f}s)"
+
     def derived(conn, table, sha, cols, rows, after=()):
+        t0 = time.time()
         if sha is None:
             print(f"  {table:<20} skipped: no source")
         elif not args.force and _last_sha(conn, table) == sha:
-            print(f"  {table:<20} unchanged")
+            print(f"  {table:<20} unchanged{took(t0)}")
         else:
             n, bad = load_rows(conn, table, cols, rows, sha, release_id, after=after)
-            print(f"  {table:<20} {n:>8} rows{note(bad)}")
+            print(f"  {table:<20} {n:>8} rows{note(bad)}{took(t0)}")
 
     with psycopg.connect(args.dsn, autocommit=True) as conn:
         prepare(conn)
@@ -662,8 +688,9 @@ def main():
             if not args.force and _last_sha(conn, table) == sha256_file(path):
                 print(f"  {table:<20} unchanged")
                 continue
+            t0 = time.time()
             n, bad = load_table(conn, args.data, table, rel, release_id)
-            print(f"  {table:<20} {n:>8} rows{note(bad)}")
+            print(f"  {table:<20} {n:>8} rows{note(bad)}{took(t0)}")
 
         sha, rows = paragraph_projects(args.data)
         derived(conn, "paragraph_projects", sha, ["paragraph_id", "project_id", "doc_id"], rows)
@@ -693,10 +720,14 @@ def main():
         grp = group_rows()
         derived(conn, "label_groups", hashlib.sha256(repr(grp).encode()).hexdigest(),
                 ["label_set", "label_id", "group_id", "group_name"], grp)
-        print(f"  {'sentence_vectors':<20} {load_vectors(conn, args.data, release_id, args.force)}")
+        t0 = time.time()
+        print(f"  {'sentence_vectors':<20} {load_vectors(conn, args.data, release_id, args.force)}"
+              f"{took(t0)}")
         load_release(conn, args.data, release_id)
+        t0 = time.time()
         finish(conn)
-        print(f"  release {release_id}")
+        print(f"  keys, comments, views{took(t0)}")
+        print(f"  release {release_id}; load took {time.time() - t_start:.0f}s")
     return 0
 
 
