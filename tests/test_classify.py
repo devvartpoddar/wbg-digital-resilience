@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import sys
+import time
 
 import pytest
 
@@ -158,6 +159,27 @@ def test_spend_is_recorded_per_run_and_summed_for_today(store):
     _run(store)
     calls, cost = classify.spend_today(data)
     assert calls == 3 and cost == 0.0        # the ledger keeps four decimals; US$0.00003 rounds away
+
+
+def test_a_ledger_row_holding_a_float_count_still_reads(store):
+    """A link run before its count was an integer wrote "33.0" into the
+    ledger, and the ledger is never rewritten: the day's total must still
+    parse, or the next stage's log line stops the run."""
+    data, _, _ = store
+    _run(store)
+    calls, cost = classify.spend_today(data)
+    path = os.path.join(data, "reports", "spend.csv")
+    with open(path, newline="") as fh:
+        cols = csv.DictReader(fh).fieldnames
+    assert cols
+    with open(path, "a", newline="") as fh:
+        csv.DictWriter(fh, fieldnames=cols, lineterminator="\n").writerow(
+            {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "stage": "link",
+             "label_set": "packages", "model": classify.MODEL, "calls": "33.0",
+             "cost_usd": "0.0007", "seconds": "2", "run": "packages-bc0a3596c38d"})
+    again = classify.spend_today(data)
+    assert again[0] == calls + 33
+    assert again[1] == pytest.approx(cost + 0.0007)
 
 
 def test_readers_find_the_run_whatever_gate_it_was_made_with(store):

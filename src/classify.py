@@ -106,7 +106,9 @@ def spend_today(data):
         with open(path, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
                 if r["at"].startswith(today):
-                    calls += int(r["calls"])
+                    # A ledger row can hold "33.0": older link runs recorded a
+                    # float count, and the ledger is never rewritten.
+                    calls += int(float(r["calls"]))
                     cost += float(r["cost_usd"])
     return calls, cost
 

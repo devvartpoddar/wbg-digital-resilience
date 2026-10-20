@@ -19,7 +19,7 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
   - `requested_labels/`: the files of measures requested from the dashboard (section 5f), read as a third label folder;
   - `archive/`: tables an earlier version wrote and nothing reads (`document_projects.csv`, `package_changes.csv`), moved there by `src/paths.py`, never deleted;
   - `releases/`: one folder per data release with its manifest and a copy of the cleaned tables, and `index.csv`;
-  - `reports/`: every stage's report, the run notes, and `spend.csv`, one line per model run with calls, cost and seconds (a run that failed part-way is recorded too, with `run` = `failed`, since its answers were paid for);
+  - `reports/`: every stage's report, the run notes, and `spend.csv`, one line per model run with calls, cost and seconds (a run that failed part-way is recorded too, with `run` = `failed`, since its answers were paid for; the calls column is a whole number, and the reader also accepts the float a link run wrote before 2026-10-20, since the ledger is never rewritten);
   - `review/`: the review spreadsheets;
   - `runs/`: exports for a selection, one folder per selection and date (`./wbg export`).
 
