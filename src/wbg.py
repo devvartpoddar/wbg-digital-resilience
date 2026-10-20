@@ -280,6 +280,20 @@ def run(args, data):
     import time
     t_all = time.time()
     stages = stages_between(args.from_stage, args.to_stage, args.only)
+    if args.dry_run:
+        # fetch and prepare call no model: a dry run is for the model stages'
+        # estimates, against the corpus as it stands.
+        skipped = [s for s in stages if s in ("fetch", "prepare")]
+        stages = [s for s in stages if s not in ("fetch", "prepare")]
+        if skipped:
+            print(f"run: --dry-run skips {', '.join(skipped)} (no model calls); the "
+                  f"estimates are for the corpus as it stands", flush=True)
+    if getattr(args, "max_spend", None) is not None:
+        # One cap for the whole run: each stage's answer store stops before a
+        # request that would pass what is left of it (src/answers.py).
+        os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"
+        os.environ["WBG_SPEND_SINCE"] = datetime.datetime.now(
+            datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     sets = args.measures or [n for n in labels_mod.label_sets() if n != "assets"]
     scope = _scope(args)
     dry = ["--dry-run"] if args.dry_run else []
@@ -457,6 +471,25 @@ def stale_stages(data=None):
     return out
 
 
+PROJECT_REFRESH_DAYS = 7
+
+
+def _record_due(pid, fetched_on, today, data, _status={}):
+    """Whether a project's record is old enough to fetch again: fetched
+    PROJECT_REFRESH_DAYS ago or more (or before dates were recorded), and the
+    project not Closed."""
+    if not _status.get(data):
+        _status[data] = {r["project_id"]: r.get("status", "")
+                         for r in _read(where(data, "projects"))}
+    if _status[data].get(pid) == "Closed":
+        return False
+    try:
+        age = (datetime.date.fromisoformat(today) - datetime.date.fromisoformat(fetched_on)).days
+    except ValueError:
+        return True
+    return age >= PROJECT_REFRESH_DAYS
+
+
 def prepare(sel=None, update=False, data=None, fetch=True):
     """Bring the store up to date for a selection.
 
@@ -480,11 +513,12 @@ def prepare(sel=None, update=False, data=None, fetch=True):
                              ("projects", "fetch_projects.py")):
             done = state.setdefault("fetched", {}).setdefault(kind, {})
             # Project records (status, closing date, commitment) change under a
-            # restructuring or an extension and cost two small requests each:
-            # they are fetched again once a day. Documents and procurement are
-            # fetched once, and again with --update.
+            # restructuring or an extension: an open project's record is
+            # fetched again once it is PROJECT_REFRESH_DAYS old; a closed
+            # one's is not. Documents and procurement are fetched once, and
+            # again with --update.
             todo = [p for p in sel.ids if update or p not in done
-                    or (kind == "projects" and done[p] != today)]
+                    or (kind == "projects" and _record_due(p, done[p], today, data))]
             if not todo:
                 continue
             args = ["--projects", ",".join(todo)]
@@ -885,7 +919,11 @@ def main(argv=None):
     p.add_argument("--workers", type=int, default=ADD_WORKERS,
                    help="parallel requests to the decision model per set")
     p.add_argument("--update", action="store_true", help="fetch the selected projects again")
-    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--dry-run", action="store_true",
+                   help="the model stages' estimates only (fetch and prepare are skipped)")
+    p.add_argument("--max-spend", type=float, default=None,
+                   help="US$ the whole run may spend on models: a stage stops before a "
+                        "request that would pass it (no dry run needed)")
     p = sub.add_parser("add", help="a measure from its files to Postgres: run --from search "
                                    "--to measure --measures <set>...")
     p.add_argument("label_set", nargs="+", help="set(s) in analysis/labels/")
@@ -893,6 +931,8 @@ def main(argv=None):
     p.add_argument("--jobs", type=int, default=3)
     p.add_argument("--workers", type=int, default=ADD_WORKERS)
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--max-spend", type=float, default=None,
+                   help="US$ the run may spend on models (stops before passing it)")
     p = sub.add_parser("publish", help="write the current runs of the sets named (or every "
                                        "set) into Postgres; the stages do this themselves, "
                                        "this catches up after a database was unreachable")

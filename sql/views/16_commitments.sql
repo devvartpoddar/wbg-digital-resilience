@@ -6,42 +6,66 @@
 --
 -- Package status precedence for a commitment with several packages (Dev,
 -- 2026-10-20): Overdue first, then Planned, Tendered, Contract signed,
--- Contract completed; Under implementation sits with Tendered (the process
--- is under way), Cancelled last.
+-- Contract completed; Under implementation comes after Tendered (the process
+-- is under way); a package the newest plan dropped, and Cancelled, last.
 DROP VIEW IF EXISTS wbg.package_status_order CASCADE;
 CREATE VIEW wbg.package_status_order AS
 SELECT * FROM (VALUES (1, 'Overdue'), (2, 'Planned'), (3, 'Tendered'),
                       (4, 'Under implementation'), (5, 'Contract signed'),
-                      (6, 'Contract completed'), (7, 'Cancelled'))
+                      (6, 'Contract completed'), (7, 'Not in latest plan'), (8, 'Cancelled'))
   AS o(status_rank, package_status);
 COMMENT ON VIEW wbg.package_status_order IS
-  'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Cancelled.';
+  'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Not in latest plan, Cancelled.';
 
--- One row per committed unit that counts, per project it belongs to, with
--- the commitment it makes up. The base of the views below.
+-- One row per committed unit that counts, per project, asset and type: the
+-- base of the views below. The asset is the one the sentence names (its
+-- best) or, where it names none, its paragraph's; the type its best above
+-- 0.5. With dashboard_settings.every_asset_and_type a unit counts instead
+-- under every asset and type the model says yes to ("backup power for the
+-- towers and the data centre" becomes a commitment for both assets).
 DROP VIEW IF EXISTS wbg.commitment_units CASCADE;
 CREATE VIEW wbg.commitment_units AS
-WITH u AS (
-  SELECT f.label_set, f.label_id, pp.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
-         f.document_id, f.text, f.probability_grade_3, f.conditional_probability, f.firmness,
-         f.template_project_count, f.copy_unit_ids, f.linked_asset_level, f.component_key,
-         coalesce(f.linked_asset_id, '(no asset)') AS asset_id,
-         CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) > 0
-              THEN f.best_type_id ELSE '(no type)' END AS type_id,
-         -- the wording, for collapsing word-for-word copies
-         regexp_replace(lower(f.text), '\s+', ' ', 'g') AS wording
+WITH f AS (
+  SELECT f.*, pp.project_id, s.every_asset_and_type
   FROM wbg.measure_findings f
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
+  JOIN wbg.project_info i ON i.project_id = pp.project_id
   CROSS JOIN wbg.dashboard_settings s
   WHERE f.was_sent_to_model AND f.most_likely_grade = 3
     AND f.probability_grade_3 >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
+    AND (i.is_ipf OR NOT s.ipf_only)
+),
+u AS (
+  SELECT f.label_set, f.label_id, f.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
+         f.document_id, f.text, f.probability_grade_3, f.conditional_probability, f.firmness,
+         f.template_project_count, f.copy_unit_ids, f.linked_asset_level, f.component_key,
+         f.component_number, f.subcomponent_number,
+         CASE coalesce(f.linked_asset_level, 'none')
+           WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph'
+           WHEN 'component' THEN 'component' ELSE 'none' END AS asset_from,
+         a.asset_id, t.type_id,
+         -- the wording, for collapsing word-for-word copies
+         regexp_replace(lower(f.text), '\s+', ' ', 'g') AS wording
+  FROM f
+  CROSS JOIN LATERAL (
+    SELECT DISTINCT x AS asset_id FROM unnest(
+      CASE WHEN f.every_asset_and_type AND f.linked_asset_level = 'unit'
+                AND coalesce(cardinality(f.asset_ids_above_threshold), 0) > 0
+             THEN f.asset_ids_above_threshold
+           WHEN f.linked_asset_id IS NOT NULL THEN ARRAY[f.linked_asset_id]
+           ELSE ARRAY['(no asset)'] END) x) a
+  CROSS JOIN LATERAL (
+    SELECT DISTINCT x AS type_id FROM unnest(
+      CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0 THEN ARRAY['(no type)']
+           WHEN f.every_asset_and_type THEN f.type_ids_above_threshold
+           ELSE ARRAY[f.best_type_id] END) x) t
 )
 SELECT md5(project_id || '|' || label_set || '|' || asset_id || '|' || type_id) AS commitment_id,
        u.*
 FROM u;
 COMMENT ON VIEW wbg.commitment_units IS
-  'Every committed unit that counts towards a commitment (grade 3, the probability floor and link levels of dashboard_settings), per project, with its commitment_id: the MD5 of project_id|label_set|asset_id|type_id, the id the dashboards'' links pass. A unit with no linked asset has asset_id ''(no asset)'', one with no type above 0.5 type_id ''(no type)''.';
+  'Every committed unit that counts (grade 3, in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type above 0.5 has type_id ''(no type)''.';
 
 -- Each commitment's linked packages with where they stand.
 DROP VIEW IF EXISTS wbg.commitment_package_status CASCADE;
@@ -91,10 +115,12 @@ sh AS (
   FROM w, generate_series(1, greatest(cardinality(w.ws) - 5, 1)) i
 ),
 n AS (SELECT unit_id, project_id, count(*) AS runs FROM sh GROUP BY unit_id, project_id),
-project_runs AS (SELECT DISTINCT project_id, h FROM sh),
 shared AS (
-  SELECT a.unit_id, a.project_id, b.project_id AS other_project, count(*) AS runs_shared
-  FROM sh a JOIN project_runs b ON b.h = a.h AND b.project_id <> a.project_id
+  -- another project's committed units, never the same unit listed under a
+  -- second project (a regional paragraph is not a copy of itself)
+  SELECT a.unit_id, a.project_id, b.project_id AS other_project,
+         count(DISTINCT a.h) AS runs_shared
+  FROM sh a JOIN sh b ON b.h = a.h AND b.project_id <> a.project_id AND b.unit_id <> a.unit_id
   GROUP BY a.unit_id, a.project_id, b.project_id
 )
 SELECT n.unit_id, n.project_id, n.runs,
@@ -137,6 +163,10 @@ DROP VIEW IF EXISTS wbg.commitments CASCADE;
 CREATE VIEW wbg.commitments AS
 WITH c AS (
   SELECT u.commitment_id, u.project_id, u.label_set, u.asset_id, u.type_id,
+         CASE WHEN bool_or(u.asset_from = 'sentence') THEN 'sentence'
+              ELSE min(u.asset_from) END AS asset_from,
+         string_agg(DISTINCT nullif(coalesce(nullif(u.subcomponent_number, ''),
+                                             u.component_number), ''), ', ') AS components,
          count(DISTINCT u.wording) AS sentences,
          count(DISTINCT u.paragraph_id) AS paragraphs,
          count(DISTINCT u.document_id) AS documents,
@@ -171,6 +201,7 @@ SELECT c.commitment_id,
        coalesce(ag.group_id, '(no asset)') AS asset_group_id,
        coalesce(ag.group_name, '(no asset)') AS asset_group_name,
        c.type_id, coalesce(t.type_name, c.type_id) AS type_name,
+       c.asset_from, c.components,
        c.sentences, c.paragraphs, c.documents, c.strongest_p,
        c.share_not_conditional, c.first_seen_date, c.same_wording_projects,
        c.dropped_by_restructuring,

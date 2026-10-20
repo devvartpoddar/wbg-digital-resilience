@@ -43,7 +43,11 @@ import embed  # noqa: E402
 import labels  # noqa: E402
 from search import TAXONOMY, _active, _rows  # noqa: E402
 
-MODEL = "typesafe/jev-1.13"
+# The dated snapshot, as the measure stage uses (measure.MODEL): the alias
+# moves when the vendor ships a release. Answers stored under the alias
+# (ALIASES) are reused where the snapshot that served them is this one.
+MODEL = "typesafe/jev-1.13-20260917"
+ALIASES = ("typesafe/jev-1.13",)
 ENDPOINT = "https://openrouter.ai/api/alpha/decisions"
 # US$ per million input tokens (output is free), for the dry-run estimate only.
 PRICE_PER_MTOK = 0.042
@@ -476,7 +480,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     import answers
     requests_ = [(p["state"], b["questions"]) for p, b in bodies if b["questions"]]
     got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                          dry_run=True)
+                          dry_run=True, aliases=ALIASES)
     log(f"  answers stored already for {sum(1 for g in got if g):,} paragraphs; calls to make: "
         f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
     if dry_run:
@@ -487,7 +491,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
             raise SystemExit(f"classify: no credential: set ${embed.KEY_VAR} or put the "
                              f"key in {embed.KEY_FILE} in the main checkout")
         log(f"  spent today before this run: US${spend_today(data)[1]:.2f}")
-        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers)
+        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                              aliases=ALIASES)
         record_spend(data, "classify", name, model, st["calls"], st["cost_usd"], st["seconds"],
                      os.path.basename(out))
     if st["failures"] or not all(got):

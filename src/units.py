@@ -251,7 +251,10 @@ def search_units(data):
     from paths import file_sha256
     inputs = [where(data, "appraisal", f) for f in ("paragraphs.csv", "sentences.csv",
                                                      "components.csv")]
-    inputs.append(os.path.abspath(__file__))
+    # The code that shapes a unit: this file and what it calls on.
+    here = os.path.dirname(os.path.abspath(__file__))
+    inputs += [os.path.join(here, f) for f in ("units.py", "sentences.py", "keys.py",
+                                                "common.py")]
     key = hashlib.sha256("\n".join(file_sha256(f, remember=not f.endswith(".py"))
                                    if os.path.exists(f) else "-"
                                    for f in inputs).encode()).hexdigest()[:16]

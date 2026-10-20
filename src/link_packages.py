@@ -59,15 +59,22 @@ import labels  # noqa: E402
 import measure  # noqa: E402
 import search  # noqa: E402
 
-LINK_VERSION = "1"
+LINK_VERSION = "2"
 MODEL = measure.MODEL
 ASSET_SET = "assets"
 ASSET_TOP = 4        # assets asked per package: its best by cosine over the taxonomy's phrases
+# Packages also paired by the measure itself (Dev, 2026-10-20): a climate
+# risk assessment consultancy or works to raise tower sites buys no digital
+# asset, so the asset route never pairs them. For each committed unit, its
+# project's packages nearest the measure's phrases and definition (cosine
+# over the stored embeddings), not already paired by asset, up to this many.
+MEASURE_TOP = 3
 YES = 0.5            # the reading threshold: an asset at or above it is one the package "has"
 ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
               "model_served", "cost"]
 PAIR_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
-             "shared_asset_ids", "shared_group_ids", "probability", "model_served", "cost"]
+             "shared_asset_ids", "shared_group_ids", "route", "measure_rank", "measure_cosine",
+             "probability", "model_served", "cost"]
 
 
 # ------------------------------------------------------------------ questions
@@ -183,7 +190,7 @@ class Plan:
                  dim=embed.DEFAULT_DIM, log=print):
         self.data, self.log, self.dim = data, log, dim
         self.settings = {"model": model, "asset_top": asset_top, "yes": YES,
-                         "link_version": LINK_VERSION}
+                         "measure_top": MEASURE_TOP, "link_version": LINK_VERSION}
         self.packages = load_packages(data, projects)
         self.assets = [a for a in labels.load_set(ASSET_SET) if a["active"] == "true"]
         self.groups = {g["label_id"]: g["group_id"] for g in labels.load_groups(ASSET_SET)}
@@ -191,7 +198,10 @@ class Plan:
         self.asset_qs = asset_questions(self.assets)
         self.runs = committed_units(data, projects, sets)
         h = hashlib.sha256()
-        h.update(f"{LINK_VERSION}\t{model}\t{asset_top}\n".encode())
+        h.update(f"{LINK_VERSION}\t{model}\t{asset_top}\t{MEASURE_TOP}\n".encode())
+        for name in sorted(self.runs):
+            for q in search.load_queries(name, labels.folder(name)):
+                h.update(f"{name}\t{q['query_id']}\t{q['text']}\n".encode())
         pk = where(data, "procurement", "packages.csv")
         h.update(hashlib.sha256(open(pk, "rb").read()).hexdigest().encode())
         for q in self.queries:
@@ -234,7 +244,7 @@ class Plan:
     def asset_candidates(self, api_key):
         """[(package, [(asset_id, cosine, rank)])]: each package's best
         asset_top assets by cosine over the taxonomy's phrases."""
-        vecs = self.package_vectors(api_key)
+        vecs = self.vecs = self.package_vectors(api_key)
         qv = search.query_vectors(self.queries, self.data, embed.DEFAULT_MODEL, self.dim,
                                   embed.DEFAULT_BASE, api_key, log=self.log)
         scores = vecs @ qv.T                                   # (P, Q)
@@ -316,10 +326,37 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
                     sg = ug & {plan.groups[a] for a in pa if a in plan.groups}
                     if shared or sg:
                         pairs.append((name, run, u, pid, p, shared, sg))
-    requests_ = [(pair_state(u, p), {"pair": PAIR_QUESTION}) for _, _, u, _, p, _, _ in pairs]
+    # The measure route: for each committed unit, its project's packages
+    # nearest the measure (not already paired by asset), MEASURE_TOP of them.
+    asset_paired = {(name, u["unit_id"], pid, p["package_id"])
+                    for name, _, u, pid, p, _, _ in pairs}
+    pairs = [x + ("asset", "", "") for x in pairs]
+    row_of = {p["package_id"]: i for i, p in enumerate(plan.packages)}
+    for name, (run, units) in sorted(plan.runs.items()):
+        if not units or not plan.settings["measure_top"]:
+            continue
+        mq = search.query_vectors(search.load_queries(name, labels.folder(name)), plan.data,
+                                  embed.DEFAULT_MODEL, plan.dim, embed.DEFAULT_BASE, api_key,
+                                  log=log)
+        best = (plan.vecs @ mq.T).max(axis=1)              # package x measure
+        for u in units:
+            for pid in u["project_ids"].split("|"):
+                cands = sorted(by_project.get(pid, []),
+                               key=lambda p: (-best[row_of[p["package_id"]]], p["package_id"]))
+                n = 0
+                for p in cands:
+                    if n >= plan.settings["measure_top"]:
+                        break
+                    if (name, u["unit_id"], pid, p["package_id"]) in asset_paired:
+                        continue
+                    n += 1
+                    pairs.append((name, run, u, pid, p, set(), set(), "measure", n,
+                                  f"{float(best[row_of[p['package_id']]]):.4f}"))
+    requests_ = [(pair_state(u, p), {"pair": PAIR_QUESTION}) for _, _, u, _, p, *_ in pairs]
     got2, st2 = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
                             dry_run=True)
-    log(f"  pairs: {len(pairs):,} commitment-package pairs share an asset or a group; "
+    log(f"  pairs: {len(pairs):,} commitment-package pairs (by a shared asset or group, or "
+        f"nearest the measure); "
         f"to ask: {st2['to_ask']:,} (about US${st2['estimate_usd']:.3f})")
     if st2["to_ask"]:
         got2, st2 = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers)
@@ -331,12 +368,13 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
             log(f"  {len(st2['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
     pair_rows = []
-    for (name, run, u, pid, p, shared, sg), g in zip(pairs, got2):
+    for (name, run, u, pid, p, shared, sg, route, mrank, mcos), g in zip(pairs, got2):
         e = g["pair"]
         pair_rows.append({"label_set": name, "run": run, "label_id": u["label_id"],
                           "unit_id": u["unit_id"], "package_id": p["package_id"],
                           "project_id": pid, "shared_asset_ids": "|".join(sorted(shared)),
                           "shared_group_ids": "|".join(sorted(sg)),
+                          "route": route, "measure_rank": mrank, "measure_cosine": mcos,
                           "probability": f"{float(e['answer']['noul']):.3f}",
                           "model_served": e["model"],
                           "cost": f"{float(e.get('cost_usd') or 0):.6f}"})
@@ -369,6 +407,17 @@ def report_lines(plan, asset_rows, pair_rows):
     for a, n in sorted(per_asset.items(), key=lambda x: -x[1]):
         lines.append(f"    {names.get(a, a):<50} {n:>6,}")
     lines.append(f"  commitment-package pairs asked: {len(pair_rows):,}")
+    for route in ("asset", "measure"):
+        rs = [r for r in pair_rows if r.get("route", "asset") == route]
+        ys = [r for r in rs if float(r["probability"]) >= YES]
+        line = f"    by {route}: {len(rs):,} pairs, {len(ys):,} at {YES}"
+        if route == "measure" and ys:
+            by = defaultdict(int)
+            for r in ys:
+                by[int(r["measure_rank"])] += 1
+            line += ("; yes by rank " + ", ".join(f"{k}: {by[k]:,}" for k in sorted(by))
+                     + f" (rank {plan.settings['measure_top']} is the last asked)")
+        lines.append(line)
     for name, (run, units) in sorted(plan.runs.items()):
         ps = [r for r in pair_rows if r["label_set"] == name]
         linked = {r["unit_id"] for r in ps if float(r["probability"]) >= YES}

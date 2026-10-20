@@ -92,7 +92,7 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
-           "template_project_count", "cosine_rank", "graded_units"}
+           "template_project_count", "cosine_rank", "graded_units", "measure_rank"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "embedding_score", "embedding_percentile",
@@ -100,7 +100,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "grade_confidence", "probability_grade_0", "probability_grade_1",
            "probability_grade_2", "probability_grade_3", "probability_grade_4",
            "committed_probability_calibrated", "best_type_probability",
-           "model_cost_usd", "precision", "recall",
+           "model_cost_usd", "precision", "recall", "measure_cosine",
            "paragraph_best_asset_probability", "component_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
@@ -476,7 +476,8 @@ TABLES = {
                  ("project_id", "projects", "project_id")],
         comment="Which procurement packages would carry out a commitment: one row per "
                 "committed unit and package of the same project that share an asset or an "
-                "asset reading group, with the decision model's yes probability "
+                "asset reading group, or that is among the project's packages nearest the "
+                "measure itself (route), with the decision model's yes probability "
                 "(src/link_packages.py). Many to many: a commitment may link to several "
                 "packages and a package to several commitments. Filter on the probability.",
         columns={
@@ -485,6 +486,9 @@ TABLES = {
             "unit_id": "The committed unit (wbg.measure_findings).",
             "shared_asset_ids": "Assets both the unit's answers and the package's answers name at 0.5.",
             "shared_group_ids": "Asset reading groups (wbg.label_groups) both name at 0.5.",
+            "route": "How the pair was made: asset (a shared asset or reading group) or measure (the package is among the project's nearest to the measure's phrases; no asset needed).",
+            "measure_rank": "For the measure route, the package's rank by cosine to the measure among the project's packages not paired by asset.",
+            "measure_cosine": "For the measure route, the package description's best cosine to the measure's phrases and definition.",
             "probability": "The decision model's probability that carrying out the package is where the commitment is delivered or applied.",
             "model_served": "The decision-model snapshot that answered.",
         }),

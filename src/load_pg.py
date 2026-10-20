@@ -461,7 +461,8 @@ def measure_rows(data, projects=None, sets=None):
 ASSET_LINK_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
                    "model_served", "cost"]
 PAIR_LINK_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
-                  "shared_asset_ids", "shared_group_ids", "probability", "model_served", "cost"]
+                  "shared_asset_ids", "shared_group_ids", "route", "measure_rank",
+                  "measure_cosine", "probability", "model_served", "cost"]
 
 
 def link_rows(data, projects=None):

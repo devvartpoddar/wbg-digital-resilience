@@ -71,10 +71,10 @@ DROP VIEW IF EXISTS wbg.commitment_status_by_quarter CASCADE;
 CREATE VIEW wbg.commitment_status_by_quarter AS
 SELECT c.label_set, c.measure_name, c.type_name, c.country_name, ps.package_status,
        CASE WHEN ps.package_status = 'Overdue' THEN 'Overdue'
-            WHEN ps.next_date IS NOT NULL
-              THEN to_char(ps.next_date, 'YYYY') || '-Q' || to_char(ps.next_date, 'Q')
             WHEN ps.signed_date IS NOT NULL
               THEN to_char(ps.signed_date, 'YYYY') || '-Q' || to_char(ps.signed_date, 'Q')
+            WHEN ps.next_date IS NOT NULL
+              THEN to_char(ps.next_date, 'YYYY') || '-Q' || to_char(ps.next_date, 'Q')
             ELSE 'No date' END AS quarter,
        count(DISTINCT ps.package_id) AS packages
 FROM wbg.commitments c
@@ -86,10 +86,15 @@ COMMENT ON VIEW wbg.commitment_status_by_quarter IS
 DROP VIEW IF EXISTS wbg.type_procurement_profile CASCADE;
 CREATE VIEW wbg.type_procurement_profile AS
 WITH p AS (
-  SELECT DISTINCT c.label_set, c.measure_name, c.type_name, ps.package_id, ps.method_code,
-         ps.category, ps.estimated_amount_usd, ps.description_clean, ps.link_probability
+  -- one row per type and package, however many of the type's commitments link to it
+  SELECT c.label_set, c.measure_name, c.type_name, ps.package_id,
+         min(ps.method_code) AS method_code, min(ps.category) AS category,
+         max(ps.estimated_amount_usd) AS estimated_amount_usd,
+         min(ps.description_clean) AS description_clean,
+         max(ps.link_probability) AS link_probability
   FROM wbg.commitments c
   JOIN wbg.commitment_package_status ps USING (commitment_id)
+  GROUP BY c.label_set, c.measure_name, c.type_name, ps.package_id
 )
 SELECT label_set, measure_name, type_name, count(DISTINCT package_id) AS packages_linked,
        mode() WITHIN GROUP (ORDER BY method_code) AS usual_method,

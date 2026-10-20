@@ -13,10 +13,21 @@ SELECT p.project_id,
        coalesce(p.region, '(record pending)') AS region,
        coalesce(p.country_name, '(record pending)') AS country_name,
        wbg.iso_country_code(p.country_code) AS country_code,
-       coalesce(p.country_code ~ '^[0-9]', false) AS is_regional
+       coalesce(p.country_code ~ '^[0-9]', false) AS is_regional,
+       -- Investment Project Financing: the projects interface says so, or (a
+       -- record from its v3 form gives no instrument) the project has a
+       -- Project Appraisal Document, which only that instrument is appraised
+       -- in (results programmes have a Program Appraisal Document, policy
+       -- loans a Program Document, and neither is fetched).
+       coalesce(p.lending_instrument = 'Investment Project Financing'
+                OR (coalesce(p.lending_instrument, '') = ''
+                    AND EXISTS (SELECT 1 FROM wbg.documents d
+                                WHERE p.project_id = ANY (d.project_ids)
+                                  AND d.document_type = 'Project Appraisal Document')),
+                false) AS is_ipf
 FROM wbg.projects p;
 COMMENT ON VIEW wbg.project_info IS
-  'One row per cohort project with a name and place that are never blank: a project the projects interface has no record of is "(record pending: <id>)" and is_record_pending; country_code is ISO 3166 alpha-2 for the world map, NULL for a regional operation (is_regional, whose country_name is the region the interface gives).';
+  'One row per cohort project with a name and place that are never blank: a project the projects interface has no record of is "(record pending: <id>)" and is_record_pending; country_code is ISO 3166 alpha-2 for the world map, NULL for a regional operation (is_regional, whose country_name is the region the interface gives). is_ipf marks Investment Project Financing, the operations the commitments count.';
 
 -- A project's documents, one row per document id. Two papers can share a
 -- title and a date (P171305 has two restructuring papers of 27 June 2025,
@@ -100,7 +111,7 @@ LEFT JOIN LATERAL (
   SELECT o.cost_usd_millions, o.cost_before_restructuring_usd_millions, o.restructuring_action,
          o.document_id, o.disclosure_date,
          CASE WHEN o.document_id = x.document_id THEN 'same document'
-              WHEN o.name_key = x.name_key
+              WHEN (o.name_key <> '' AND o.name_key = x.name_key)
                 OR (least(length(o.name_key), length(x.name_key)) >= 12
                     AND (o.name_key LIKE x.name_key || '%' OR x.name_key LIKE o.name_key || '%'))
                 THEN 'name'
@@ -108,12 +119,12 @@ LEFT JOIN LATERAL (
   FROM c o
   WHERE o.project_id = x.project_id AND o.component_level = x.component_level
     AND o.cost_usd_millions IS NOT NULL
-    AND (o.name_key = x.name_key
+    AND ((o.name_key <> '' AND o.name_key = x.name_key)
          OR (least(length(o.name_key), length(x.name_key)) >= 12
              AND (o.name_key LIKE x.name_key || '%' OR x.name_key LIKE o.name_key || '%'))
          OR o.component_number = x.component_number)
   ORDER BY (o.document_id = x.document_id) DESC,
-           (o.name_key = x.name_key
+           ((o.name_key <> '' AND o.name_key = x.name_key)
             OR (least(length(o.name_key), length(x.name_key)) >= 12
                 AND (o.name_key LIKE x.name_key || '%' OR x.name_key LIKE o.name_key || '%'))) DESC,
            o.disclosure_date DESC NULLS LAST, o.document_id DESC

@@ -134,18 +134,32 @@ def bodies_for(state, questions, model):
 _spent_here = [0.0]
 
 
-def spend_cap():
+def spend_cap(data=None):
+    """US$ this process may still spend: $WBG_SPEND_CAP_USD, less what the
+    ledger records since $WBG_SPEND_SINCE (set by ./wbg run --max-spend, so
+    the cap covers every stage of a run), less what this process has spent
+    and not yet recorded. None without a cap."""
     try:
-        return float(os.environ["WBG_SPEND_CAP_USD"])
+        cap = float(os.environ["WBG_SPEND_CAP_USD"])
     except (KeyError, ValueError):
         return None
+    since = os.environ.get("WBG_SPEND_SINCE")
+    if since and data:
+        import csv
+        path = where(data, "reports", "spend.csv")
+        if os.path.exists(path):
+            with open(path, newline="", encoding="utf-8") as fh:
+                cap -= sum(float(r["cost_usd"] or 0) for r in csv.DictReader(fh)
+                           if r["at"] >= since)
+    return cap
 
 
 class CapReached(SystemExit):
     """The process's spend cap would be or was passed."""
 
 
-def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False):
+def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False,
+        aliases=()):
     """Answers for every request, asking only what is not stored.
     Returns (answers, stats): answers = [{qid: entry}] per request (None for
     a request with a missing answer when nothing could be asked), stats =
@@ -155,6 +169,17 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     root_ = root(data, model)
     keys = [{qid: key(model, state, q) for qid, q in qs.items()} for state, qs in requests]
     todo = {}
+    # Answers asked under an alias of the model (the moving name the asset
+    # map once used) count when the snapshot that served them is this model:
+    # they are copied under this model's key, never asked again.
+    for alias in aliases:
+        aroot = root(data, alias)
+        for (state, qs), ks in zip(requests, keys):
+            for qid, q in qs.items():
+                if read(root_, ks[qid]) is None:
+                    old = read(aroot, key(alias, state, q))
+                    if old and old.get("model") == model:
+                        write(root_, ks[qid], dict(old, migrated_from=alias))
     for (state, qs), ks in zip(requests, keys):
         missing = {qid: q for qid, q in qs.items() if read(root_, ks[qid]) is None}
         for body in bodies_for(state, missing, model):
@@ -163,7 +188,7 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     stats = {"to_ask": len(todo), "chars": chars, "calls": 0, "cost_usd": 0.0, "failures": [],
              "seconds": 0.0,
              "estimate_usd": chars / 4 / 1e6 * classify.PRICE_PER_MTOK}
-    cap = spend_cap()
+    cap = spend_cap(data)
     if todo and not dry_run and cap is not None and \
             _spent_here[0] + stats["estimate_usd"] > cap:
         raise CapReached(f"answers: spend cap US${cap:.2f} would be passed (spent "

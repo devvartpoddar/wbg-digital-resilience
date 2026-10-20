@@ -202,3 +202,21 @@ def test_a_set_never_classified_is_not_planned(store, monkeypatch):
     data, tax, _ = store
     monkeypatch.setattr(classify, "plan", lambda *a, **k: (_ for _ in ()).throw(AssertionError))
     assert classify.current_run("cra", data, taxonomy=tax) is None
+
+
+def test_answers_under_the_alias_are_reused_for_the_snapshot(tmp_path, monkeypatch):
+    """An answer asked under the moving alias counts for the dated snapshot
+    when that snapshot served it; one served by another snapshot does not."""
+    import answers
+    data = str(tmp_path)
+    q = {"type": "noul", "instructions": "towers?", "criteria": {"true": "y", "false": "n"}}
+    for state, served in (({"p": "a"}, "snap"), ({"p": "b"}, "other")):
+        answers.write(answers.root(data, "alias"), answers.key("alias", state, q),
+                      {"answer": {"type": "noul", "noul": 0.9}, "model": served})
+    asked = []
+    monkeypatch.setattr(classify, "decide", lambda body, **k: asked.append(body) or
+                        {"model": "snap", "answers": {"q": {"type": "noul", "noul": 0.1}}})
+    got, st = answers.ask("snap", [({"p": "a"}, {"q": q}), ({"p": "b"}, {"q": q})], data,
+                          api_key="k", workers=1, aliases=("alias",))
+    assert len(asked) == 1 and asked[0]["state"] == {"p": "b"}
+    assert got[0]["q"]["answer"]["noul"] == 0.9 and got[0]["q"]["migrated_from"] == "alias"
