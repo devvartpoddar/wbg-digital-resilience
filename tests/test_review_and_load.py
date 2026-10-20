@@ -125,6 +125,38 @@ def test_a_set_without_a_current_run_keeps_its_rows():
         assert got == [("a", "u3", "activity"), ("b", "u2", None)]
 
 
+def test_cell_text_marks_what_xml_refuses_and_keeps_the_page_break():
+    """A control character is marked, not deleted: two words either side of it
+    must not run together into a sentence a person grades. A form feed is a
+    page break the reader wants to see, so it keeps its own visible marker."""
+    import check_units
+    assert check_units.cell_text("are: \uffff technical") == "are: \ufffd technical"
+    assert check_units.cell_text("law\uffff)") == "law\ufffd)"
+    assert check_units.cell_text("a\x00b\x1fc") == "a\ufffdb\ufffdc"
+    assert check_units.cell_text("page\fbreak") == "page\n[page break]\nbreak"
+    assert check_units.cell_text("tabs\tand\nnewlines\rstay") == "tabs\tand\nnewlines\rstay"
+    assert check_units.cell_text(None) == ""
+
+
+def test_a_noncharacter_from_the_parse_does_not_stop_the_sheet(tmp_path):
+    """The parse carries U+FFFF where the PDF's extractor met a glyph it could
+    not map (nine files of the corpus do), and lxml refuses it at wb.save - so
+    the sheet could not be written at all and the truncated file blocked the
+    seed. The sheet is now written, with the character marked."""
+    import check_units
+    from openpyxl import load_workbook
+    path = str(tmp_path / "sheet.xlsx")
+    check_units._write_xlsx(path, [{"row_id": 1, "measure": "renewable energy",
+                                    "measure means": "a measure", "project": "P1",
+                                    "section": "A", "component": "C1",
+                                    "sentence": "The activities are: \uffff technical assistance.",
+                                    "paragraph": "p\uffffq", "grade": "", "asset": "", "note": ""}],
+                            ["no"], ["datacentre"])
+    got = [c.value for c in load_workbook(path)["grade these"][2]]
+    assert got[6] == "The activities are: \ufffd technical assistance."
+    assert got[7] == "p\ufffdq"
+
+
 def test_an_evaluation_writes_its_headline_numbers(tmp_path):
     """check --evaluate keeps one row per measure and question in
     data/labels/measure_quality.csv; a later evaluation replaces it."""

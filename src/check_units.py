@@ -33,7 +33,7 @@ in two strata (near: within ELUSION_BAND below the pool threshold; far: the
 rest), weighted back to their strata, which is how a technology-assisted
 review is signed off.
 """
-import argparse, csv, datetime, hashlib, math, os, random, sys
+import argparse, csv, datetime, hashlib, math, os, random, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
@@ -42,13 +42,32 @@ import measure  # noqa: E402
 
 CELL_MAX = 32_000   # Excel's limit on a cell's characters
 
+# Everything XML 1.0 does not allow in a text node: the C0 controls except tab,
+# newline and carriage return, any lone surrogate (the gap between U+D7FF and
+# U+E000), and the BMP noncharacters U+FFFF and U+FFFE, which is why the top of
+# the range stops at U+FFFC. openpyxl ships ILLEGAL_CHARACTERS_RE, which covers
+# only the C0 run, so this is that run plus the code points it leaves behind.
+#
+# The gap is not theoretical: the parse carries U+FFFF wherever the PDF's
+# extractor met a glyph it could not map - a list bullet in 34361318.txt, the
+# bracket of "system law)", a slash in "GI/KACE"; nine files of the corpus hold
+# it (grep for the code point under data/raw/pdf_text). lxml refuses it at
+# wb.save, and since the .key.csv is written first the failure left a truncated
+# .xlsx that build() then refused to overwrite, so the seed could not be
+# redrawn. A writer must never produce a file a person could mistake for a
+# sheet.
+XML_ILLEGAL_RE = re.compile("[^\u0009\u000a\u000d\u0020-\ud7ff\ue000-\ufffc\U00010000-\U0010ffff]")
+
 
 def cell_text(value):
-    """Excel refuses control characters. A form feed is a page break in the
-    raw file, which the reader wants to see, so it gets a visible marker."""
-    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    """Excel refuses anything XML 1.0 refuses, so an unusable code point is
+    replaced with U+FFFD - the marker the procurement cleaner already counts
+    for an unmapped character - rather than silently deleted: two words either
+    side of it must not run together into text a person grades. A form feed is
+    a page break in the raw file, which the reader wants to see, so it gets a
+    visible marker of its own."""
     text = str(value if value is not None else "").replace("\f", "\n[page break]\n")
-    return ILLEGAL_CHARACTERS_RE.sub("", text)[:CELL_MAX]
+    return XML_ILLEGAL_RE.sub("\ufffd", text)[:CELL_MAX]
 
 PER = {"3": 30, "2": 15, "1": 20, "0": 20, "feedback": 10}
 ELUSION_PER = {"near": 25, "far": 25}
