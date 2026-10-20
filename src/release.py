@@ -25,7 +25,7 @@ Writes data/releases/<id>/manifest.json,
   python3 src/release.py --status   the current release, the code it was made
                                     with, and whether that code is current
 """
-import argparse, csv, glob, hashlib, json, os, subprocess, sys, time
+import argparse, csv, glob, hashlib, json, os, re, subprocess, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -99,8 +99,14 @@ def _fetched(data):
             fetched = json.load(fh).get("fetched", {})
     except (OSError, ValueError):
         return {}
-    return {k: {"projects": len(v), "latest": max(v.values()) if v else ""}
-            for k, v in sorted(fetched.items())}
+    # A project fetched before stages.json existed is stamped "before
+    # stages.json"; as text it sorts after every ISO date, so the latest
+    # date is taken over the dates alone (it was loaded as NULL: the
+    # Overview's blank "procurement fetched").
+    def latest(v):
+        dates = [d for d in v.values() if re.match(r"\d{4}-\d{2}-\d{2}", str(d))]
+        return max(dates) if dates else ""
+    return {k: {"projects": len(v), "latest": latest(v)} for k, v in sorted(fetched.items())}
 
 
 def _runs(data, kind):

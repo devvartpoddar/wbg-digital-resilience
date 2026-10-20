@@ -254,6 +254,37 @@ def calibrated(p, ab):
     return 1 / (1 + math.exp(-z))
 
 
+QUALITY_COLS = ["label_set", "question_sha256", "run_id", "graded_units", "precision",
+                "recall", "evaluated_at", "report_path"]
+
+
+def write_quality(data, name, key, rows, top):
+    """The headline numbers of an evaluation, one row per measure and exact
+    question in data/labels/measure_quality.csv (loaded as
+    wbg.measure_quality): precision and recall of the model's most likely
+    grade at the top of the scale against the person's grade."""
+    tp = sum(1 for r in rows if r["model_grade"] >= top and r["grade"] >= top)
+    pp = sum(1 for r in rows if r["model_grade"] >= top)
+    ap = sum(1 for r in rows if r["grade"] >= top)
+    path = where(data, "labels", "measure_quality.csv")
+    current = {}
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            current = {(r["label_set"], r["question_sha256"]): r for r in csv.DictReader(fh)}
+    current[(name, key["question_sha256"])] = {
+        "label_set": name, "question_sha256": key["question_sha256"],
+        "run_id": key["measure_dir"], "graded_units": len(rows),
+        "precision": f"{tp / pp:.3f}" if pp else "", "recall": f"{tp / ap:.3f}" if ap else "",
+        "evaluated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+        "report_path": f"reports/evaluate_units_{name}.md"}
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=QUALITY_COLS, lineterminator="\n")
+        w.writeheader()
+        w.writerows(sorted(current.values(), key=lambda r: (r["label_set"], r["evaluated_at"])))
+    os.replace(path + ".part", path)
+
+
 def calibration_path(name, data):
     return where(data, "labels", f"{name}_calibration.json")
 
@@ -366,6 +397,7 @@ def evaluate(name, data, seed=1, elusion=False, **kw):
                      f"{after:.3f} (fitted and scored on the same {len(ps)} rows: an "
                      f"in-sample figure)")
     lines.append("")
+    write_quality(data, name, key[0], rows, top)
     cpath = calibration_path(name, data)
     with open(cpath + ".part", "w", encoding="utf-8") as fh:
         json.dump(cal, fh, indent=1, sort_keys=True)

@@ -92,7 +92,7 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
-           "template_project_count", "cosine_rank"}
+           "template_project_count", "cosine_rank", "graded_units"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "embedding_score", "embedding_percentile",
@@ -100,7 +100,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "grade_confidence", "probability_grade_0", "probability_grade_1",
            "probability_grade_2", "probability_grade_3", "probability_grade_4",
            "committed_probability_calibrated", "best_type_probability",
-           "model_cost_usd",
+           "model_cost_usd", "precision", "recall",
            "paragraph_best_asset_probability", "component_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
@@ -428,6 +428,22 @@ TABLES = {
                  "definition": "The definition the decision model was given.",
                  "merged_from": "Type ids the file merges into this one (merge_into), "
                                 "pipe-separated; their yes answers count as this type's."}),
+    "measure_quality": dict(
+        schema=PUBLIC, key=("label_set", "question_sha256"), foreign=[],
+        comment="How well the decision model reads a measure, against a sheet a person graded "
+                "(./wbg check <set> --evaluate): one row per measure and exact question "
+                "wording, the latest evaluation. Precision and recall are of the model's most "
+                "likely grade 3 against the person's grade 3, unweighted, with recall within "
+                "the graded pool, not the corpus. Quote graded_units beside them.",
+        columns={"question_sha256": "SHA-256 of the exact question the sheet was graded "
+                                    "under: a revised definition is a new row.",
+                 "run_id": "The measure run the sheet was drawn from.",
+                 "graded_units": "Rows the person graded.",
+                 "precision": "Of the units the model grades committed, the share the person "
+                              "graded committed.",
+                 "recall": "Of the units the person graded committed, the share the model "
+                           "grades committed (within the graded pool).",
+                 "report_path": "The evaluation report under data/reports/."}),
     "label_groups": dict(
         schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
         comment="How a set's labels are grouped for reading (<set>_groups.csv, kept by a "

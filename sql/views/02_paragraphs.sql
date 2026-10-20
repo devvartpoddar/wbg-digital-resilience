@@ -21,7 +21,8 @@ COMMENT ON VIEW wbg.paragraph_project_links IS
 DROP VIEW IF EXISTS wbg.data_as_of;
 CREATE VIEW wbg.data_as_of AS
 SELECT release_id, commit, has_uncommitted_code, loaded_at, appraisal_fetched_date,
-       procurement_fetched_date, projects_fetched_date
+       procurement_fetched_date, projects_fetched_date,
+       (SELECT max(fetched_at) FROM wbg.packages) AS procurement_plans_fetched_at
 FROM wbg.data_release;
 COMMENT ON VIEW wbg.data_as_of IS
-  'The one data release this database holds: when it was loaded and when each kind of record was last fetched.';
+  'The one data release this database holds: when it was loaded and when each kind of record was last fetched (the latest date any project of that kind was fully read; procurement covers plans, notices and awards), and when the newest procurement plan row was fetched.';

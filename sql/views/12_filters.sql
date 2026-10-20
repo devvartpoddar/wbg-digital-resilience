@@ -43,9 +43,11 @@ LANGUAGE sql STABLE AS $$
     AND (findings_under.country IS NULL OR f.country_name = findings_under.country)
     AND (findings_under.region IS NULL OR f.project_id IN (SELECT p.project_id FROM wbg.projects p WHERE p.region = findings_under.region))
     AND (findings_under.status IS NULL OR f.project_id IN (SELECT p.project_id FROM wbg.projects p WHERE p.status = findings_under.status))
-    AND (findings_under.months IS NULL OR EXISTS (SELECT 1 FROM wbg.upcoming_packages u
+    AND (findings_under.months IS NULL OR EXISTS (SELECT 1 FROM wbg.package_status u
                                    WHERE u.project_id = f.project_id
-                                     AND u.planned_date <= current_date + findings_under.months * interval '1 month'))
+                                     AND (u.package_status = 'Overdue'
+                                          OR (u.package_status = 'Planned'
+                                              AND u.planned_date <= current_date + findings_under.months * interval '1 month'))))
     AND (findings_under.asset IS NULL
          OR (findings_under.asset = '(no asset)' AND f.linked_asset_id IS NULL)
          OR EXISTS (SELECT 1 FROM wbg.measure_finding_lists x

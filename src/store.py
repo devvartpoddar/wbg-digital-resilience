@@ -89,6 +89,12 @@ def _publish(conn, data, sets, projects, links, log, written):
         if bad:
             log(f"  {table}: unparseable -> NULL: "
                 + ", ".join(f"{k}={v}" for k, v in sorted(bad.items())))
+    # The graded sheets' headline numbers (./wbg check --evaluate) are small
+    # and change with every evaluation: written whole on every publish.
+    qpath = os.path.join(data, "labels", "measure_quality.csv")
+    if os.path.exists(qpath):
+        written["measure_quality"] = load_pg.load_table(conn, data, "measure_quality",
+                                                        "labels/measure_quality.csv")[0]
     if links:
         sha, assets_, pairs_ = load_pg.link_rows(data, projects)
         if sha is not None:

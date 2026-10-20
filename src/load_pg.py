@@ -57,6 +57,7 @@ TABLES = [
     ("packages", "procurement/packages.csv"),
     ("notices", "procurement/notices.csv"),
     ("awards", "procurement/awards.csv"),
+    ("measure_quality", "labels/measure_quality.csv"),
 ]
 # Names earlier layouts used in wbg, and tables no longer loaded; dropped
 # once so nothing stale lingers. The earlier wbg_internal schema is folded
