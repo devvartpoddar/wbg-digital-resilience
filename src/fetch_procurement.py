@@ -49,6 +49,19 @@ from clean_procurement import (                        # noqa: E402
 
 WDS = "https://search.worldbank.org/api/v3/wds"
 NOTICES = "https://search.worldbank.org/api/v2/procnotices"
+
+
+def last_page(batch, records, response, offset, cap=20000):
+    """Whether a paged listing is done: the interface's own total is reached
+    when it gives one, else a page came back empty or short. A short page
+    alone would end early if the interface ever capped pages below PAGE."""
+    try:
+        total = int(response.get("total"))
+    except (TypeError, ValueError):
+        total = None
+    if total is not None:
+        return len(records) >= total or not batch or offset > cap
+    return len(batch) < PAGE or offset > cap
 AWARDS = "https://search.worldbank.org/api/contractdata"
 
 PLAN_DOCTY = "Procurement Plan"
@@ -935,7 +948,7 @@ def collect_notices(projects, data, log, refresh, delay):
                     records.extend(batch)
                     pages.append(len(batch))
                     offset += PAGE
-                    if len(batch) < PAGE or offset > 20000:
+                    if last_page(batch, records, j, offset):
                         break
                     time.sleep(delay)
                 records = [_without_personal(r) for r in records]
@@ -990,7 +1003,7 @@ def collect_awards(projects, data, log, refresh, delay):
                     log.record("awards", AWARDS, q, len(batch), sha256_bytes(r.content))
                     records.extend(batch)
                     offset += PAGE
-                    if len(batch) < PAGE or offset > 20000:
+                    if last_page(batch, records, j, offset):
                         break
                     time.sleep(delay)
                 records = [_without_personal(r) for r in records]

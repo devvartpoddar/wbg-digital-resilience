@@ -82,15 +82,15 @@ latest AS (
   JOIN wbg.documents_distinct d ON d.project_id = c.project_id AND d.document_id = c.document_id
   ORDER BY c.project_id, c.disclosure_date DESC NULLS LAST, c.document_id DESC
 )
-SELECT DISTINCT ON (c.project_id, c.component_level, c.component_number, c.component_name)
+SELECT DISTINCT ON (c.project_id, c.component_level, coalesce(c.component_number, c.component_name))
        c.project_id, c.document_id, c.disclosure_date AS document_date, c.component_level,
        c.component_number, c.component_name, c.cost_usd_millions,
        c.cost_before_restructuring_usd_millions, c.restructuring_action, c.read_from
 FROM c JOIN latest l ON l.project_id = c.project_id AND l.document_id = c.document_id
-ORDER BY c.project_id, c.component_level, c.component_number, c.component_name,
+ORDER BY c.project_id, c.component_level, coalesce(c.component_number, c.component_name),
          (c.read_from = 'heading'), c.component_id;
 COMMENT ON VIEW wbg.project_components IS
-  'The components (and sub-components) of each project''s latest document that lists any, with cost in US$ millions as that document prints it. Read from the data sheet or the restructuring table where there is one, else from headings.';
+  'The components (and sub-components) of each project''s latest document that lists any, one row per number, with cost in US$ millions as that document prints it: the data sheet''s or restructuring table''s row where there is one (it carries the cost), else the heading''s.';
 
 -- Project x asset from the asset map: how many paragraphs the decision
 -- model grades financed (3) or supported without paying for the asset (2).

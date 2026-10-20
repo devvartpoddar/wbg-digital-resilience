@@ -164,3 +164,31 @@ def test_read_headings_takes_a_bare_decimal_heading_only_under_its_component():
     assert [(r["level"], r["number"]) for r in found] == [("component", "1"),
                                                           ("subcomponent", "1.2")]
     assert found[1]["name"] == "Last-mile access"
+
+
+def test_a_table_without_numbers_takes_them_from_the_names():
+    """A restructuring table that prints no numbers and lists component 2
+    first is numbered by name from the headings, not by row order (invented
+    names)."""
+    import components as C
+    from keys import name_key
+
+    def row(source, number, name, printed=None, doc="D2"):
+        r = {"doc_id": doc, "project_ids": "P1", "source": source, "level": "component",
+             "number": number, "name": name, "name_key": name_key(name)}
+        if printed is not None:
+            r["number_printed"] = printed
+        return r
+    rows = [row("heading", "1", "Building the Backbone Network", doc="D1"),
+            row("heading", "2", "Digital Services for Citizens", doc="D1"),
+            row("heading", "3", "Project Management and Coordination", doc="D1"),
+            row("restructuring", "1", "Digital Services for Citizens", False),
+            row("restructuring", "2", "Building the Backbone Network", False),
+            row("restructuring", "3", "Project Management", False),
+            row("restructuring", "4", "Contingent Emergency Response", False),
+            row("datasheet", "7", "Printed Seven", True)]
+    C.number_by_name(rows)
+    got = {r["name"]: r["number"] for r in rows if r["source"] != "heading"}
+    assert got == {"Digital Services for Citizens": "2", "Building the Backbone Network": "1",
+                   "Project Management": "3", "Contingent Emergency Response": "4",
+                   "Printed Seven": "7"}

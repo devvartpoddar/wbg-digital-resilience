@@ -756,3 +756,11 @@ def test_a_lone_review_word_at_the_end_is_part_of_the_description():
     # With a method or approach after it, the review word is a cell.
     desc, cells = P.split_cells("Supply of laptops Post Request for Bids Open - National")
     assert desc == "Supply of laptops"
+
+
+def test_paging_stops_at_the_interfaces_total():
+    import fetch_procurement as F
+    assert F.last_page([1] * 100, [1] * 100, {"total": "100"}, 500)            # all read
+    assert not F.last_page([1] * 100, [1] * 100, {"total": "250"}, 100)        # capped page
+    assert F.last_page([], [1] * 100, {"total": "250"}, 200)                   # nothing more
+    assert F.last_page([1] * 3, [1] * 3, {}, F.PAGE)                           # no total: short page
