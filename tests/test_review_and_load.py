@@ -137,3 +137,4 @@ def test_an_evaluation_writes_its_headline_numbers(tmp_path):
     got = list(csv.DictReader(open(tmp_path / "labels" / "measure_quality.csv")))
     assert len(got) == 1 and got[0]["graded_units"] == "2"
     assert got[0]["precision"] == "1.000" and got[0]["recall"] == "0.500"
+    assert got[0]["version"]                     # the measure file's version column

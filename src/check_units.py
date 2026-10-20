@@ -254,8 +254,8 @@ def calibrated(p, ab):
     return 1 / (1 + math.exp(-z))
 
 
-QUALITY_COLS = ["label_set", "question_sha256", "run_id", "graded_units", "precision",
-                "recall", "evaluated_at", "report_path"]
+QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "graded_units",
+                "precision", "recall", "evaluated_at", "report_path"]
 
 
 def write_quality(data, name, key, rows, top):
@@ -271,8 +271,10 @@ def write_quality(data, name, key, rows, top):
     if os.path.exists(path):
         with open(path, newline="", encoding="utf-8") as fh:
             current = {(r["label_set"], r["question_sha256"]): r for r in csv.DictReader(fh)}
+    import labels
+    version = next((lab.get("version") or "" for lab in labels.load_set(name)), "")
     current[(name, key["question_sha256"])] = {
-        "label_set": name, "question_sha256": key["question_sha256"],
+        "label_set": name, "version": version, "question_sha256": key["question_sha256"],
         "run_id": key["measure_dir"], "graded_units": len(rows),
         "precision": f"{tp / pp:.3f}" if pp else "", "recall": f"{tp / ap:.3f}" if ap else "",
         "evaluated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),

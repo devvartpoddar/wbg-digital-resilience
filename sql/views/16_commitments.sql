@@ -4,17 +4,18 @@
 -- set in wbg.dashboard_settings (13_dashboard_settings.sql). The id is the MD5
 -- of the four parts, so it is the same on every load.
 --
--- Package status precedence for a commitment with several packages
--- (DECIDE): the first in this order, which puts what needs a conversation
--- first.
+-- Package status precedence for a commitment with several packages (Dev,
+-- 2026-10-20): Overdue first, then Planned, Tendered, Contract signed,
+-- Contract completed; Under implementation sits with Tendered (the process
+-- is under way), Cancelled last.
 DROP VIEW IF EXISTS wbg.package_status_order CASCADE;
 CREATE VIEW wbg.package_status_order AS
-SELECT * FROM (VALUES (1, 'Overdue'), (2, 'Planned'), (3, 'Planned, no date'), (4, 'Tendered'),
-                      (5, 'Contract signed'), (6, 'In process per plan'),
-                      (7, 'Signed per plan'), (8, 'Canceled'), (9, 'Status unknown'))
+SELECT * FROM (VALUES (1, 'Overdue'), (2, 'Planned'), (3, 'Tendered'),
+                      (4, 'Under implementation'), (5, 'Contract signed'),
+                      (6, 'Contract completed'), (7, 'Cancelled'))
   AS o(status_rank, package_status);
 COMMENT ON VIEW wbg.package_status_order IS
-  'The order in which a commitment with several linked packages takes its status: Overdue first, then Planned, Tendered, Contract signed and the plan-only states. A proposal for Dev to confirm.';
+  'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Cancelled.';
 
 -- One row per committed unit that counts, per project it belongs to, with
 -- the commitment it makes up. The base of the views below.
@@ -23,7 +24,7 @@ CREATE VIEW wbg.commitment_units AS
 WITH u AS (
   SELECT f.label_set, f.label_id, pp.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
          f.document_id, f.text, f.probability_grade_3, f.conditional_probability, f.firmness,
-         f.template_project_count, f.copy_unit_ids, f.linked_asset_level,
+         f.template_project_count, f.copy_unit_ids, f.linked_asset_level, f.component_key,
          coalesce(f.linked_asset_id, '(no asset)') AS asset_id,
          CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) > 0
               THEN f.best_type_id ELSE '(no type)' END AS type_id,
@@ -63,6 +64,75 @@ GROUP BY u.commitment_id, cp.package_id, s.project_id, s.description_clean, s.ca
 COMMENT ON VIEW wbg.commitment_package_status IS
   'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings, 0.5): the package''s plan columns, latest notice, signed contract and package_status (see package_status). A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
 
+-- Near-identical wording across projects. Word-for-word equality found 17
+-- of 2,150 commitments, while four operations of one programme (DRC,
+-- Malawi, Angola and the regional Eastern and Southern Africa project)
+-- print one climate section with small edits. So each committed unit's text
+-- is cut into runs of six words (lower case, letters and digits only), and
+-- another project counts when its committed units hold at least half of the
+-- unit's runs (dashboard_settings.near_copy_share). Materialised: computed
+-- once per load, not per card.
+DROP MATERIALIZED VIEW IF EXISTS wbg.unit_wording_overlap CASCADE;
+CREATE MATERIALIZED VIEW wbg.unit_wording_overlap AS
+WITH u AS (
+  SELECT DISTINCT f.unit_id, pp.project_id, f.text
+  FROM wbg.measure_findings f
+  JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
+  WHERE f.was_sent_to_model AND f.most_likely_grade = 3
+),
+w AS (
+  SELECT unit_id, project_id,
+         regexp_split_to_array(trim(regexp_replace(lower(text), '[^a-z0-9]+', ' ', 'g')), ' ')
+           AS ws
+  FROM u
+),
+sh AS (
+  SELECT DISTINCT w.unit_id, w.project_id, md5(array_to_string(w.ws[i:i + 5], ' ')) AS h
+  FROM w, generate_series(1, greatest(cardinality(w.ws) - 5, 1)) i
+),
+n AS (SELECT unit_id, project_id, count(*) AS runs FROM sh GROUP BY unit_id, project_id),
+project_runs AS (SELECT DISTINCT project_id, h FROM sh),
+shared AS (
+  SELECT a.unit_id, a.project_id, b.project_id AS other_project, count(*) AS runs_shared
+  FROM sh a JOIN project_runs b ON b.h = a.h AND b.project_id <> a.project_id
+  GROUP BY a.unit_id, a.project_id, b.project_id
+)
+SELECT n.unit_id, n.project_id, n.runs,
+       count(s.other_project) FILTER (WHERE s.runs_shared >= ds.near_copy_share * n.runs)
+         AS near_copy_projects
+FROM n
+CROSS JOIN wbg.dashboard_settings ds
+LEFT JOIN shared s ON s.unit_id = n.unit_id AND s.project_id = n.project_id
+GROUP BY n.unit_id, n.project_id, n.runs, ds.near_copy_share;
+CREATE INDEX ON wbg.unit_wording_overlap (unit_id, project_id);
+COMMENT ON MATERIALIZED VIEW wbg.unit_wording_overlap IS
+  'For each committed unit and its project: how many other projects'' committed units hold at least half of its six-word runs (near-identical wording, small edits allowed). Rebuilt on every load.';
+
+-- A commitment dropped by a later restructuring: only where a later paper's
+-- restructuring table marks the component the sentence sits under "Marked
+-- for Deletion" (matched by name). A commitment none of whose sentences sits
+-- under a known component is NULL, not false: short papers restate nothing,
+-- so absence from a later paper is not read as dropping (on 2026-10-20 that
+-- reading showed 38 per cent of commitments as missing).
+DROP VIEW IF EXISTS wbg.unit_dropped_by_restructuring CASCADE;
+CREATE VIEW wbg.unit_dropped_by_restructuring AS
+SELECT u.commitment_id, u.unit_id,
+       CASE WHEN coalesce(u.component_key, '') = '' THEN NULL
+            ELSE EXISTS (
+              SELECT 1 FROM wbg.components c
+              JOIN wbg.documents d0 ON d0.document_id = u.document_id
+              WHERE u.project_id = ANY (c.project_ids) AND c.read_from = 'restructuring'
+                AND c.restructuring_action = 'Marked for Deletion'
+                AND c.disclosure_date > d0.disclosure_date
+                AND (c.name_key = u.component_key
+                     OR (least(length(c.name_key), length(u.component_key)) >= 12
+                         AND (c.name_key LIKE u.component_key || '%'
+                              OR u.component_key LIKE c.name_key || '%'))))
+       END AS dropped
+FROM wbg.commitment_units u;
+COMMENT ON VIEW wbg.unit_dropped_by_restructuring IS
+  'For each committed unit: true when a later restructuring paper marks its component "Marked for Deletion", false when its component is known and no later paper does, NULL when the unit sits under no known component.';
+
 DROP VIEW IF EXISTS wbg.commitments CASCADE;
 CREATE VIEW wbg.commitments AS
 WITH c AS (
@@ -71,16 +141,18 @@ WITH c AS (
          count(DISTINCT u.paragraph_id) AS paragraphs,
          count(DISTINCT u.document_id) AS documents,
          max(u.probability_grade_3) AS strongest_p,
-         bool_or(dd.is_latest) AS in_latest_document,
+         -- dropped only if every sentence under a known component was
+         bool_and(ud.dropped) FILTER (WHERE ud.dropped IS NOT NULL) AS dropped_by_restructuring,
          avg((coalesce(u.conditional_probability, 0) < ds.not_conditional_below)::int)::numeric(4, 3)
            AS share_not_conditional,
          min(d.disclosure_date) AS first_seen_date,
-         max(u.template_project_count) AS same_wording_projects
+         coalesce(max(wo.near_copy_projects), 0) AS same_wording_projects
   FROM wbg.commitment_units u
   CROSS JOIN wbg.dashboard_settings ds
   LEFT JOIN wbg.documents d ON d.document_id = u.document_id
-  LEFT JOIN wbg.project_documents dd
-         ON dd.project_id = u.project_id AND dd.document_id = u.document_id
+  LEFT JOIN wbg.unit_wording_overlap wo ON wo.unit_id = u.unit_id AND wo.project_id = u.project_id
+  LEFT JOIN wbg.unit_dropped_by_restructuring ud
+         ON ud.commitment_id = u.commitment_id AND ud.unit_id = u.unit_id
   GROUP BY u.commitment_id, u.project_id, u.label_set, u.asset_id, u.type_id
 ),
 p AS (
@@ -100,8 +172,12 @@ SELECT c.commitment_id,
        coalesce(ag.group_name, '(no asset)') AS asset_group_name,
        c.type_id, coalesce(t.type_name, c.type_id) AS type_name,
        c.sentences, c.paragraphs, c.documents, c.strongest_p,
-       coalesce(c.in_latest_document, false) AS in_latest_document,
        c.share_not_conditional, c.first_seen_date, c.same_wording_projects,
+       c.dropped_by_restructuring,
+       CASE WHEN c.asset_id = '(no asset)' THEN NULL
+            ELSE EXISTS (SELECT 1 FROM wbg.project_assets pa
+                         WHERE pa.project_id = c.project_id AND pa.asset_id = c.asset_id
+                           AND pa.paragraphs_financed > 0) END AS asset_in_asset_map,
        coalesce(p.linked_packages, 0) AS linked_packages,
        coalesce(p.status, 'No package found') AS status,
        p.next_date
@@ -116,7 +192,7 @@ LEFT JOIN (SELECT DISTINCT ON (label_set, type_id) label_set, type_id, type_name
            FROM wbg.measure_types ORDER BY label_set, type_id, label_id) t
        ON t.label_set = c.label_set AND t.type_id = c.type_id;
 COMMENT ON VIEW wbg.commitments IS
-  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest P(committed); in_latest_document says whether any sentence is in the project''s most recently disclosed document; share_not_conditional is the share of sentences below the conditional line; first_seen_date the earliest disclosure date; same_wording_projects the most other projects printing the same words. status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments.';
+  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest P(committed); share_not_conditional is the share of sentences below the conditional line; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether the project''s asset map grades a paragraph as financing this asset. status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments.';
 
 -- The commitment's sentences, one row per distinct wording (the strongest
 -- unit printing it).
@@ -126,7 +202,7 @@ SELECT DISTINCT ON (u.commitment_id, u.wording)
        u.commitment_id, u.unit_id, u.text, u.probability_grade_3, u.conditional_probability,
        u.firmness, pa.section_title, d.document_kind, d.disclosure_date AS document_date,
        u.document_id, u.paragraph_id, pa.page_from AS page_number,
-       d.pdf_url || CASE WHEN pa.page_from IS NOT NULL THEN '#page=' || pa.page_from ELSE '' END
+       wbg.https(d.pdf_url) || CASE WHEN pa.page_from IS NOT NULL THEN '#page=' || pa.page_from ELSE '' END
          AS pdf_url,
        (SELECT count(DISTINCT split_part(x, ':', 1)) FROM unnest(u.copy_unit_ids) x
          WHERE split_part(x, ':', 1) <> u.document_id) AS also_in_documents
@@ -174,7 +250,7 @@ SELECT a.commitment_id, a.paragraph_id, pa.document_id, d.document_kind,
        d.disclosure_date AS document_date, pa.section_title,
        coalesce(nullif(pa.subcomponent_name, ''), pa.component_name) AS component_name,
        pa.page_from AS page_number,
-       d.pdf_url || CASE WHEN pa.page_from IS NOT NULL THEN '#page=' || pa.page_from ELSE '' END
+       wbg.https(d.pdf_url) || CASE WHEN pa.page_from IS NOT NULL THEN '#page=' || pa.page_from ELSE '' END
          AS pdf_url,
        a.sentences, a.strongest_p, a.key_sentence,
        coalesce(mk.paragraph_marked, pa.text) AS paragraph_marked

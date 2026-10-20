@@ -5,7 +5,7 @@
 
 -- measure_quality is loaded from data/labels/measure_quality.csv once a sheet
 -- has been evaluated; until then an empty table keeps the summary working.
-CREATE TABLE IF NOT EXISTS wbg.measure_quality (label_set text, question_sha256 text,
+CREATE TABLE IF NOT EXISTS wbg.measure_quality (label_set text, version text, question_sha256 text,
   run_id text, graded_units integer, precision numeric, recall numeric,
   evaluated_at timestamptz, report_path text);
 
@@ -23,14 +23,15 @@ c AS (
   FROM wbg.commitments GROUP BY label_set
 ),
 q AS (
-  SELECT DISTINCT ON (label_set) label_set, graded_units, precision, recall,
+  SELECT DISTINCT ON (label_set) label_set, version AS graded_version, graded_units, precision, recall,
          run_id AS graded_run_id, question_sha256 AS graded_question_sha256, evaluated_at
   FROM wbg.measure_quality ORDER BY label_set, evaluated_at DESC
 )
 SELECT m.label_set, m.measure_name, m.definition, m.version,
        coalesce(c.commitments, 0) AS commitments, coalesce(c.projects, 0) AS projects,
        coalesce(c.countries, 0) AS countries, coalesce(c.types, 0) AS types,
-       q.graded_units, q.precision, q.recall, q.graded_run_id, q.graded_question_sha256,
+       q.graded_units, q.precision, q.recall, q.graded_version, q.graded_run_id,
+       q.graded_question_sha256,
        q.evaluated_at AS graded_at
 FROM m
 LEFT JOIN c USING (label_set)
@@ -101,6 +102,30 @@ FROM p GROUP BY label_set, measure_name, type_name;
 COMMENT ON VIEW wbg.type_procurement_profile IS
   'For each measure and type, the packages linked to its commitments: how many, the usual procurement method and category, the median estimated amount (US$, packages with an estimate above zero) and the most strongly linked package''s description as an example.';
 
+-- How many committed units two measures share: a report, not a
+-- correction. A unit can be a commitment to several measures (on 2026-10-20
+-- 42 per cent of committed units counted under two or more; energy
+-- efficiency and green data centres shared 207), and every count above
+-- counts it under each.
+DROP VIEW IF EXISTS wbg.measure_overlap CASCADE;
+CREATE VIEW wbg.measure_overlap AS
+WITH u AS (
+  SELECT DISTINCT label_set, unit_id FROM wbg.measure_findings
+  WHERE was_sent_to_model AND most_likely_grade = 3
+),
+n AS (SELECT label_set, count(*) AS committed_units FROM u GROUP BY label_set)
+SELECT a.label_set AS label_set_a, b.label_set AS label_set_b,
+       count(*) AS shared_units,
+       na.committed_units AS units_a, nb.committed_units AS units_b,
+       round(count(*)::numeric / least(na.committed_units, nb.committed_units), 3)
+         AS share_of_smaller
+FROM u a JOIN u b ON b.unit_id = a.unit_id AND b.label_set > a.label_set
+JOIN n na ON na.label_set = a.label_set
+JOIN n nb ON nb.label_set = b.label_set
+GROUP BY a.label_set, b.label_set, na.committed_units, nb.committed_units;
+COMMENT ON VIEW wbg.measure_overlap IS
+  'For each pair of measures, how many committed units (the model''s grade 3, any asset link) both count, and that as a share of the smaller measure. A report only: nothing is deduplicated, and a unit committed to two measures counts under each everywhere else.';
+
 -- Filter values, one view per dashboard filter.
 DROP VIEW IF EXISTS wbg.filter_measures CASCADE;
 CREATE VIEW wbg.filter_measures AS
@@ -136,14 +161,8 @@ CREATE FUNCTION wbg.commitments_under(
     region text DEFAULT NULL,
     country text DEFAULT NULL,
     months double precision DEFAULT NULL)
-RETURNS TABLE (commitment_id text, project_id text, project_name text, cohort_set text,
-               country_name text, country_code text, region text, is_regional boolean,
-               label_set text, measure_name text, asset_id text, asset_name text,
-               asset_group_id text, asset_group_name text, type_id text, type_name text,
-               sentences bigint, paragraphs bigint, documents bigint, strongest_p numeric,
-               in_latest_document boolean, share_not_conditional numeric,
-               first_seen_date date, same_wording_projects integer, linked_packages bigint,
-               status text, next_date date)
+-- The rows of wbg.commitments: rebuilt with it on every load (17 runs after 16).
+RETURNS SETOF wbg.commitments
 LANGUAGE sql STABLE AS $$
   SELECT c.* FROM wbg.commitments c
   WHERE c.label_set = commitments_under.measure

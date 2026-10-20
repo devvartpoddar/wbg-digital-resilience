@@ -73,11 +73,11 @@ section 5f: `commitments` (the grain of every page), `commitment_evidence`,
 `project_header`, `project_documents`, `project_components`,
 `project_assets`, `measure_summary`, `measure_asset_matrix`,
 `measure_type_asset_flow`, `measure_country_type`,
-`commitment_status_by_quarter`, `type_procurement_profile`, the
-`filter_*` views, and the functions `commitments_under()`,
-`similar_projects()` and `try_phrase()`. Their readings (probability floor,
-link levels, conditional line, package-link threshold) are one edit in
-`sql/views/13_dashboard_settings.sql`. Earlier cards read:
+`commitment_status_by_quarter`, `type_procurement_profile`,
+`measure_overlap`, the `filter_*` views, and the functions `commitments_under()`,
+`similar_projects()` and `try_phrase()`. Their readings (link levels, conditional line, package-link threshold,
+near-copy share) are one edit in `sql/views/13_dashboard_settings.sql`, and
+the due-date rule one edit in `wbg.due_date()` (`03_procurement_links.sql`). Earlier cards read:
 
 - `measure_findings_by_project`: one row per project and measure, with the
   assets linked, how delivered, by whom (the project list and map);

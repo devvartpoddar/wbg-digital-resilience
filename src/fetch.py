@@ -9,7 +9,7 @@ Writes data/raw/pdf/{doc_id}.pdf   the PDF, which src/pdf_layout.py reads
 Resumable: a document whose PDF already exists is not re-fetched.
 Run again after an interruption and it picks up where it stopped.
 """
-import argparse, csv, hashlib, json, os, sys, time
+import argparse, csv, hashlib, json, os, re, sys, time
 import urllib.parse
 import requests
 
@@ -225,7 +225,9 @@ def main():
                     "title": doc["title"], "disclosure_date": doc["disclosure_date"],
                     "lang": doc["lang"],
                     "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when)),
-                    "pdf_url": doc["pdfurl"],
+                    # The interface gives some addresses as http; the same
+                    # address serves https, which a browser will open.
+                    "pdf_url": re.sub(r"^http://", "https://", doc["pdfurl"]),
                     "pdf_bytes": len(pdf_blob),
                     "pdf_sha256": hashlib.sha256(pdf_blob).hexdigest(),
                     "owner_unit": doc["owner_unit"],

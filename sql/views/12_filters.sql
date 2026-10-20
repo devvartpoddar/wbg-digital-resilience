@@ -47,7 +47,7 @@ LANGUAGE sql STABLE AS $$
                                    WHERE u.project_id = f.project_id
                                      AND (u.package_status = 'Overdue'
                                           OR (u.package_status = 'Planned'
-                                              AND u.planned_date <= current_date + findings_under.months * interval '1 month'))))
+                                              AND u.due_date <= current_date + findings_under.months * interval '1 month'))))
     AND (findings_under.asset IS NULL
          OR (findings_under.asset = '(no asset)' AND f.linked_asset_id IS NULL)
          OR EXISTS (SELECT 1 FROM wbg.measure_finding_lists x

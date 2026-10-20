@@ -436,7 +436,9 @@ TABLES = {
                 "wording, the latest evaluation. Precision and recall are of the model's most "
                 "likely grade 3 against the person's grade 3, unweighted, with recall within "
                 "the graded pool, not the corpus. Quote graded_units beside them.",
-        columns={"question_sha256": "SHA-256 of the exact question the sheet was graded "
+        columns={"version": "The measure's version (its file's version column) when the "
+                            "sheet was evaluated.",
+                 "question_sha256": "SHA-256 of the exact question the sheet was graded "
                                     "under: a revised definition is a new row.",
                  "run_id": "The measure run the sheet was drawn from.",
                  "graded_units": "Rows the person graded.",

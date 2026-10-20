@@ -33,7 +33,7 @@ WITH d AS (
   FROM wbg.documents
 )
 SELECT d.project_id, d.document_id, d.disclosure_date AS document_date, d.document_kind,
-       d.title, d.pdf_url,
+       d.title, wbg.https(d.pdf_url) AS pdf_url,
        row_number() OVER (PARTITION BY d.project_id
                           ORDER BY d.disclosure_date DESC NULLS LAST, d.document_id DESC) = 1
          AS is_latest,
@@ -49,6 +49,7 @@ DROP VIEW IF EXISTS wbg.project_header CASCADE;
 CREATE VIEW wbg.project_header AS
 SELECT i.project_id, i.project_name, i.is_record_pending, i.cohort_set, i.country_name,
        i.country_code, i.region, i.is_regional, i.status, i.approval_fiscal_year,
+       i.approval_fiscal_year AS approval_fy,
        i.commitment_usd_millions AS commitment_usd_m, i.closing_date,
        (i.closing_date - current_date) AS days_to_closing,
        (SELECT count(*) FROM wbg.project_documents d WHERE d.project_id = i.project_id)
@@ -87,7 +88,13 @@ SELECT x.project_id, x.document_id, x.disclosure_date AS document_date, x.compon
        x.component_number, x.component_name, k.cost_usd_millions,
        k.cost_before_restructuring_usd_millions, k.restructuring_action,
        k.document_id AS cost_document_id, k.disclosure_date AS cost_document_date,
-       k.matched_by AS cost_matched_by, x.read_from
+       k.matched_by AS cost_matched_by,
+       -- The tables give one cost per component, all funding sources together:
+       -- in 32 of 148 projects they add up to more than 1.5 times the Bank's
+       -- financing. No table read here splits the sources.
+       CASE WHEN k.cost_usd_millions IS NOT NULL THEN 'All sources (Bank and others)' END
+         AS cost_covers,
+       x.read_from
 FROM listed x
 LEFT JOIN LATERAL (
   SELECT o.cost_usd_millions, o.cost_before_restructuring_usd_millions, o.restructuring_action,
@@ -113,7 +120,7 @@ LEFT JOIN LATERAL (
   LIMIT 1
 ) k ON true;
 COMMENT ON VIEW wbg.project_components IS
-  'The components (and sub-components) of each project''s latest document that lists any, one row per number. The cost (US$ millions) is that document''s where it prints one, else the most recent document of the project that states a cost for the same component (by name, failing that by number); cost_document_id, cost_document_date and cost_matched_by say where it came from. A component no document costs has none.';
+  'The components (and sub-components) of each project''s latest document that lists any, one row per number. The cost (US$ millions) is that document''s where it prints one, else the most recent document of the project that states a cost for the same component (by name, failing that by number); cost_document_id, cost_document_date and cost_matched_by say where it came from. The cost covers all funding sources, not the Bank''s financing alone (cost_covers). A component no document costs has none.';
 
 -- Project x asset from the asset map: how many paragraphs the decision
 -- model grades financed (3) or supported without paying for the asset (2).
