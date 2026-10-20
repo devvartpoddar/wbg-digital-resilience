@@ -9,7 +9,7 @@ This checks all of them, so a defect affecting 0.2% of the corpus is a number
 rather than a thing nobody happened to look at.
 
 Each check reports a count, a share of the block it applies to, and a few
-example paragraph ids so any hit can be read in the review sheets (src/review_sheets.py).
+example paragraph ids so any hit can be read (the Read and search dashboard, or data/appraisal/text/).
 
   python3 src/audit.py
   python3 src/audit.py --examples 8

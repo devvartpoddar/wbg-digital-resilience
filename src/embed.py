@@ -386,50 +386,70 @@ def chunked(shas, unique):
         yield batch
 
 
-def fetch_missing(todo, unique, root, dim, *, model, api_key, base_url, log):
-    """Embed and cache every text in todo. Returns (stats, failures)."""
+EMBED_WORKERS = 4   # requests in flight at once: the first corpus took 57 minutes one at a time
+
+
+def _embed_batch(n, total, batch, unique, root, dim, *, model, api_key, base_url, log):
+    """One request, with the per-text retry. Returns (requests, tokens,
+    stored, retried_singly, rate_limit, served, failures)."""
+    texts = [unique[s] for s in batch]
+    requests_, tokens, stored, singly, failures, rate_limit, served = 0, 0, 0, 0, [], {}, ""
+    try:
+        vectors, meta = embed_texts(texts, model=model, api_key=api_key, base_url=base_url)
+        requests_ += 1
+        tokens += meta["tokens"]
+        rate_limit = meta["rate_limit"] or rate_limit
+        served = meta["model"] or served
+        for sha, vec in zip(batch, vectors):
+            write_cached(root, sha, pack(vec, dim))
+            stored += 1
+    except TransportError as exc:
+        # One pathological input must not cost the other ninety-five their
+        # vectors, so the chunk is retried a text at a time and only what
+        # actually fails is recorded as failed. A chunk can fail partway:
+        # vectors ahead of the bad one were validated and cached before it
+        # was reached, so the retry covers only what is actually missing.
+        log(f"  chunk {n}/{total} failed ({exc}); retrying singly")
+        singly += 1
+        for sha in batch:
+            if read_cached(root, sha, dim) is not None:
+                continue
+            try:
+                vectors, meta = embed_texts([unique[sha]], model=model, api_key=api_key,
+                                            base_url=base_url)
+                requests_ += 1
+                tokens += meta["tokens"]
+                write_cached(root, sha, pack(vectors[0], dim))
+                stored += 1
+            except TransportError as inner:
+                failures.append((sha, str(inner)[:200]))
+    return requests_, tokens, stored, singly, rate_limit, served, failures
+
+
+def fetch_missing(todo, unique, root, dim, *, model, api_key, base_url, log,
+                  workers=EMBED_WORKERS):
+    """Embed and cache every text in todo, several requests in flight at
+    once. Returns (stats, failures)."""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     stats = {"requests": 0, "tokens": 0, "stored": 0, "retried_singly": 0}
     rate_limit, served = {}, ""
     failures = []
     batches = list(chunked(todo, unique))
-
-    for n, batch in enumerate(batches, 1):
-        texts = [unique[s] for s in batch]
-        try:
-            vectors, meta = embed_texts(texts, model=model, api_key=api_key,
-                                        base_url=base_url)
-            stats["requests"] += 1
-            stats["tokens"] += meta["tokens"]
-            rate_limit = meta["rate_limit"] or rate_limit
-            served = meta["model"] or served
-            for sha, vec in zip(batch, vectors):
-                write_cached(root, sha, pack(vec, dim))
-                stats["stored"] += 1
-        except TransportError as exc:
-            # One pathological input must not cost the other ninety-five their
-            # vectors, so the chunk is retried a text at a time and only what
-            # actually fails is recorded as failed.
-            log(f"  chunk {n}/{len(batches)} failed ({exc}); retrying singly")
-            stats["retried_singly"] += 1
-            for sha in batch:
-                # A chunk can fail partway: vectors ahead of the bad one were
-                # validated and cached before it was reached. Re-sending those
-                # would pay for them a second time and store what is already
-                # there, so the retry covers only what is actually missing.
-                if read_cached(root, sha, dim) is not None:
-                    continue
-                try:
-                    vectors, meta = embed_texts([unique[sha]], model=model,
-                                                api_key=api_key, base_url=base_url)
-                    stats["requests"] += 1
-                    stats["tokens"] += meta["tokens"]
-                    write_cached(root, sha, pack(vectors[0], dim))
-                    stats["stored"] += 1
-                except TransportError as inner:
-                    failures.append((sha, str(inner)[:200]))
-        if n % 10 == 0 or n == len(batches):
-            log(f"  {n}/{len(batches)} requests, {stats['stored']:,} vectors cached")
-
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = [pool.submit(_embed_batch, n, len(batches), batch, unique, root, dim,
+                               model=model, api_key=api_key, base_url=base_url, log=log)
+                   for n, batch in enumerate(batches, 1)]
+        for done, f in enumerate(as_completed(futures), 1):
+            r, t, st, sg, rl, sv, fl = f.result()
+            stats["requests"] += r
+            stats["tokens"] += t
+            stats["stored"] += st
+            stats["retried_singly"] += sg
+            rate_limit = rl or rate_limit
+            served = sv or served
+            failures.extend(fl)
+            if done % 10 == 0 or done == len(batches):
+                log(f"  {done}/{len(batches)} requests, {stats['stored']:,} vectors cached")
     stats["rate_limit"] = rate_limit
     stats["served_model"] = served
     return stats, failures

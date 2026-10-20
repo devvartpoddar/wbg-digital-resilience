@@ -193,11 +193,7 @@ def _same_text(text):
     return " ".join(WORD.findall(text.lower()))
 
 
-def _read(path):
-    if not os.path.exists(path):
-        return []
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+from common import read_csv as _read  # noqa: E402
 
 
 def component_keys(data):
@@ -256,7 +252,8 @@ def search_units(data):
     inputs = [where(data, "appraisal", f) for f in ("paragraphs.csv", "sentences.csv",
                                                      "components.csv")]
     inputs.append(os.path.abspath(__file__))
-    key = hashlib.sha256("\n".join(file_sha256(f) if os.path.exists(f) else "-"
+    key = hashlib.sha256("\n".join(file_sha256(f, remember=not f.endswith(".py"))
+                                   if os.path.exists(f) else "-"
                                    for f in inputs).encode()).hexdigest()[:16]
     cache = where(data, "cache", f"search_units-{key}.json")
     try:

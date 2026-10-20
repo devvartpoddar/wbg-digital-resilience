@@ -51,24 +51,18 @@ each prints its estimate before asking anything (`--dry-run`).
 ## The run
 
 ```
-./wbg prepare                                    # fetch what is missing; read, clean, components, procurement
-./wbg classify assets --min-cosine 0.25 --dry-run
-./wbg classify assets --min-cosine 0.25          # the asset map (reads the store first; stops on a refusal)
-./wbg add cra ews backup_power ...               # each measure end to end, several side by side: search, funnel, types, Postgres
-./wbg link                                       # which asset each package buys, which commitments it carries out (after the measures)
-./wbg publish                                    # only if a stage could not reach Postgres: write every current run
-python3 src/run_report.py                        # the run note for the vault, when one is wanted
+./wbg run                                        # everything, fetch to publish; every stage skips what is up to date
+./wbg run --from search --measures <set>         # a new or changed measure, in Postgres when it returns (./wbg add <set> is the same)
+./wbg run --from classify                        # after an asset definition changed
+./wbg run --only link                            # the package links alone
+./wbg status                                     # what is out of date
 ```
 
-Every stage writes Postgres itself as it finishes; `./wbg prepare` loads the
-corpus tables and cuts the release when the corpus changed. The whole
-included cohort is the default scope; give `--set` only for a deliberate
-subset, and then to every stage alike.
-
-`./wbg prepare` is the long step and can be left overnight; it writes
-`data/reports/fetch_status/` so a project that failed is tried again next
-time. Everything else is minutes to an hour. `./wbg status` says what is out
-of date.
+Every stage writes Postgres itself as it finishes; `prepare` loads the corpus
+tables and cuts the release when the corpus changed. The whole included
+cohort is the default scope; give `--set` only for a deliberate subset, and
+then to every stage alike. The fetch is the long step on a new cohort and can
+be left overnight; everything else is minutes.
 
 ## What Metabase sees
 

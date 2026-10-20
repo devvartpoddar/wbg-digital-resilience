@@ -69,10 +69,7 @@ _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _ISO_STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}[T ]\d{2}:\d{2}(:\d{2})?(\.\d+)?(Z|[+-]\d{2}:?\d{2})?$")
 
 
-def sha256_file(path):
-    """The file's SHA-256, remembered beside it (paths.file_sha256)."""
-    from paths import file_sha256
-    return file_sha256(path)
+from common import file_sha256 as sha256_file  # noqa: E402
 
 
 def col_type(csv_name):
@@ -294,7 +291,7 @@ def search_unit_rows(data):
 
 # ------------------------------------------------------------ results tables
 #
-# The search, the asset map, the candidates and the measure write versioned
+# The search, the asset map and the measure write versioned
 # runs; Postgres holds the run for each label set as it stands now, one
 # table each across label sets, so a reader filters by label_set.
 
@@ -355,8 +352,8 @@ CLASSIFY_COLS = ["label_set", "run", "paragraph_id", "doc_id", "project_ids",
                  "confidence", "p0", "p1", "p2", "p3", "p4", "model_served"]
 MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
                 "project_ids", "component_number", "subcomponent_number", "component_key",
-                "copies", "route", "round", "rank", "score", "patterns", "p_commitment",
-                "firmness", "read_order", "asset_para", "asset_p_para", "asset_comp",
+                "copies", "route", "round", "rank", "score", "patterns",
+                "firmness", "asset_para", "asset_p_para", "asset_comp",
                 "asset_p_comp", "asset_unit", "asset_p_unit", "assets_yes", "asset_link",
                 "asset_link_level", "asset_link_p", "kinds_yes", "kind_best", "kind_p",
                 "conditional_p", "actors_yes", "actor_best", "actor_p",

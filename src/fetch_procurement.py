@@ -128,15 +128,7 @@ def sha256_bytes(blob):
     return hashlib.sha256(blob).hexdigest()
 
 
-def write_csv(path, cols, rows):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".part"
-    with open(tmp, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n",
-                           extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(tmp, path)
+from common import write_csv  # noqa: E402
 
 
 class FetchLog:

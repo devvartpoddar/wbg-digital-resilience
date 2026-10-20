@@ -208,32 +208,6 @@ def request_sha(body):
 
 # ------------------------------------------------------------------- the store
 
-def cache_root(data, model):
-    return where(data, "classify", "cache", model.replace("/", "__").replace(":", "_"))
-
-
-def cache_path(root, sha):
-    return os.path.join(root, sha[:2], sha + ".json")
-
-
-def read_cached(root, sha):
-    try:
-        with open(cache_path(root, sha), encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return None
-
-
-def write_cached(root, sha, response):
-    path = cache_path(root, sha)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path + ".part", "w", encoding="utf-8") as fh:
-        json.dump(response, fh, ensure_ascii=False, sort_keys=True)
-    os.replace(path + ".part", path)
-
-
-# --------------------------------------------------------------- the transport
-
 def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
     """One request to the decisions endpoint. THE transport seam."""
     headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json",
@@ -428,7 +402,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     import answers
     requests_ = [(p["state"], b["questions"]) for p, b in bodies if b["questions"]]
     got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                          dry_run=True, legacy_questions=(qs,))
+                          dry_run=True)
     log(f"  answers stored already for {sum(1 for g in got if g):,} paragraphs; calls to make: "
         f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
     if dry_run:
@@ -439,8 +413,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
             raise SystemExit(f"classify: no credential: set ${embed.KEY_VAR} or put the "
                              f"key in {embed.KEY_FILE} in the main checkout")
         log(f"  spent today before this run: US${spend_today(data)[1]:.2f}")
-        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                              legacy_questions=(qs,))
+        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers)
         record_spend(data, "classify", name, model, st["calls"], st["cost_usd"], st["seconds"],
                      os.path.basename(out))
     if st["failures"] or not all(got):

@@ -122,33 +122,6 @@ def test_a_dry_run_asks_nothing(store):
     assert _run(store, dry_run=True) is None and calls == []
 
 
-def test_a_graded_sheet_becomes_labels_and_a_measurement(store):
-    import check_sheet
-    import evaluate
-    from openpyxl import load_workbook
-    data, tax, _ = store
-    _run(store)
-    path, n = check_sheet.build("assets", data, per=5, seed=1, taxonomy=tax)
-    assert n == 4           # two strata: grade 2 (two), grade 0 (one, and the footnote)
-    wb = load_workbook(path)
-    ws = wb["grade these"]
-    head = [c.value for c in ws[1]]
-    assert "grade" in head and "p0" not in head   # the model's answer is not shown
-    for row in ws.iter_rows(min_row=2):
-        passage = row[head.index("passage")].value
-        row[head.index("grade")].value = 2 if "towers" in passage else 0
-    wb.save(path)
-    out, graded = evaluate.evaluate("assets", data, seed=1, taxonomy=tax)
-    assert graded == 4
-    labels = list(csv.DictReader(open(os.path.join(data, "labels", "assets.csv"))))
-    assert {r["grade"] for r in labels} == {"0", "2"}
-    assert all(len(r["text_sha256"]) == 64 for r in labels)
-    report = open(out).read()
-    assert "| 0.5 | 1.00 | 1.00 |" in report
-    with pytest.raises(SystemExit):              # a graded sheet is never overwritten
-        check_sheet.build("assets", data, per=5, seed=1, taxonomy=tax)
-
-
 def test_a_refusal_stops_the_run_and_stores_nothing(store, monkeypatch):
     calls = []
 

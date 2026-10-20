@@ -19,9 +19,6 @@ between US$0.35 and US$2.15 for one edit on the 70-project corpus.
                                  with the call's cost shared equally. Returns
                                  [{qid: answer}] in request order, assembled
                                  from the store.
-  The earlier code stored whole responses under the SHA-256 of the whole
-  request (data/classify/cache/); ask() splits such a response into this
-  store the first time the same request is needed, so nothing is asked twice.
 
 Stored under data/classify/answers/<model>/<aa>/<sha>.json:
   {"answer": {...}, "model": "<snapshot served>", "cost_usd": share,
@@ -130,8 +127,7 @@ def bodies_for(state, questions, model):
     return out
 
 
-def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False,
-        legacy_questions=()):
+def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False):
     """Answers for every request, asking only what is not stored.
     Returns (answers, stats): answers = [{qid: entry}] per request (None for
     a request with a missing answer when nothing could be asked), stats =
@@ -140,29 +136,9 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     import classify
     root_ = root(data, model)
     keys = [{qid: key(model, state, q) for qid, q in qs.items()} for state, qs in requests]
-    legacy = classify.cache_root(data, model)
     todo = {}
     for (state, qs), ks in zip(requests, keys):
         missing = {qid: q for qid, q in qs.items() if read(root_, ks[qid]) is None}
-        if missing:
-            # The earlier code stored whole responses under the SHA-256 of the
-            # whole request. If this exact request was answered then, split it
-            # now rather than ask again.
-            # Also any wider set the stage asked in one body before (a
-            # measure with its asset and kind questions): split the whole.
-            for full in (qs, *legacy_questions):
-                whole = classify.request_body(state, full, model)
-                old = classify.read_cached(legacy, classify.request_sha(whole))
-                if old is None:
-                    continue
-                try:
-                    for qid, entry in split(old, full, classify.request_sha(whole)).items():
-                        write(root_, key(model, state, full[qid]), entry)
-                except classify.TransportError:
-                    continue
-                missing = {qid: q for qid, q in qs.items() if read(root_, ks[qid]) is None}
-                if not missing:
-                    break
         for body in bodies_for(state, missing, model):
             todo.setdefault(classify.request_sha(body), body)   # the same request asks once
     chars = sum(len(json.dumps(b, ensure_ascii=False)) for b in todo.values())

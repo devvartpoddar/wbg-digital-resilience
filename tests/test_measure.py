@@ -1,4 +1,4 @@
-"""The measure stage (src/measure.py): candidates graded by the decision
+"""The measure stage (src/measure.py): the pool graded by the decision
 model with the asset map as columns, on an invented store and a fake
 endpoint. No document text is committed."""
 import csv
@@ -103,12 +103,6 @@ def store(tmp_path, monkeypatch):
     numpy.save(os.path.join(folder, "scores.npy"), scores)
     with open(os.path.join(folder, "manifest.json"), "w") as fh:
         json.dump({"index_sha256": search._sha_file(str(emb / "sentence_index.csv"))}, fh)
-    # Commitment needs training groups; give it a fixed score instead.
-    import commitment
-    monkeypatch.setattr(commitment, "score", lambda d, log=print: str(data / "commitment" / "v"))
-    monkeypatch.setattr(commitment, "current_scores",
-                        lambda d: {u["unit_id"]: (0.5, "activity") for u in us})
-    monkeypatch.setattr(commitment, "version", lambda d: "v")
     # The asset map: paragraph 1 is about an asset, the others are not.
     amap = data / "classify" / "assets-abc"
     amap.mkdir(parents=True)

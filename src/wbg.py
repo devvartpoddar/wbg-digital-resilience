@@ -33,7 +33,6 @@ from collections import Counter, defaultdict
 SRC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SRC)
 sys.path.insert(0, SRC)
-import candidates as _candidates  # noqa: E402  (defaults for the command line)
 import classify as _classify  # noqa: E402
 import measure as _measure  # noqa: E402
 import link_packages as _link  # noqa: E402
@@ -186,8 +185,6 @@ STAGES = [
                                      "keys.py"],
      [("documents",), ("appraisal", "paragraphs.csv")],
      [("appraisal", "components.csv")]),
-    ("audit", "audit.py", ["audit.py"], [("appraisal", "paragraphs.csv")],
-     [("reports", "audit.txt")]),
     ("clean_procurement", "clean_procurement.py",
      ["clean_procurement.py", "glue.py", "text_rules.py", "plan_table.py", "links.py",
       "keys.py"],
@@ -196,13 +193,6 @@ STAGES = [
       ("appraisal", "paragraphs.csv")],
      [("procurement", "packages.csv"), ("procurement", "notices.csv"),
       ("procurement", "awards.csv"), ("procurement", "superseded_packages.csv")]),
-    ("audit_procurement", "audit_procurement.py",
-     ["audit_procurement.py", "glue.py", "clean_procurement.py"],
-     [("procurement", "packages.csv"), ("procurement", "notices.csv"),
-      ("procurement", "awards.csv"), ("procurement", "packages_raw.csv"),
-      ("procurement", "notices_raw.csv"), ("procurement", "awards_raw.csv"),
-      ("text", "*.txt")],
-     [("reports", "audit_procurement.txt")]),
 ]
 
 
@@ -216,35 +206,37 @@ def _library_versions():
         return "pdfplumber=unknown"
 
 
-ADD_WORKERS = 10   # parallel decision-model requests per set under ./wbg add
+ADD_WORKERS = 10   # parallel decision-model requests per set under ./wbg run
+# The pipeline, in order. ./wbg run walks it from --from to --to (fetch to
+# publish by default; audit only when asked); every stage skips what is up
+# to date, so running from an earlier stage than needed costs seconds.
+RUN_STAGES = ("fetch", "prepare", "embed", "search", "classify", "measure", "link", "publish",
+              "audit")
 
 
-def add(args, data):
-    """A measure (or several) from its label files to Postgres in one
-    command, timed. Per set, in its own process: search, the funnel, type
-    proposals, and the assignment when an approved list exists. Each stage
-    writes its own rows to Postgres as it finishes (src/store.py), so there
-    is no load step. Sets run side by side, up to --jobs at once: the
-    matrix is memory-mapped, so they share one copy in the page cache and
-    each takes one core. The time is printed per set and overall; the
-    target is a measure visible in Metabase within five minutes of its
-    files landing."""
+def stages_between(start=None, stop=None, only=None):
+    """The stages ./wbg run walks: one with --only, else from start (fetch)
+    to stop (publish; audit must be asked for)."""
+    if only:
+        return [only]
+    i = RUN_STAGES.index(start) if start else 0
+    j = RUN_STAGES.index(stop) if stop else RUN_STAGES.index("publish")
+    if j < i:
+        raise SystemExit(f"run: --to {stop} comes before --from {start}")
+    return list(RUN_STAGES[i:j + 1])
+
+
+def _parallel(jobs, names, commands, data):
+    """Run commands (name -> [[script, *args], ...]) for several names at
+    once, each name's commands in order in its own process. Prints each
+    name's output when it finishes. Returns the names that failed."""
     import time
     from concurrent.futures import ThreadPoolExecutor
-    t_all = time.time()
-    scope = _scope(args)
-    dry = ["--dry-run"] if args.dry_run else []
     env = dict(os.environ, WBG_DATA=data)
-    # The sentence embeddings first, once: every set reads the same matrix.
-    _run("embed.py", *dry, "--context", "none", data=data)
 
     def one(name):
-        t0 = time.time()
-        log = []
-        for script, extra in (("search.py", [name, *dry]),
-                              ("measure.py", [name, "--workers", str(args.workers), *dry, *scope]),
-                              ("kinds.py", [name, *dry, *scope]),
-                              ("kinds.py", [name, "--assign", *dry, *scope])):
+        t0, log = time.time(), []
+        for script, *extra in commands(name):
             cmd = [_python(), os.path.join(SRC, script), *extra]
             done = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
             log.append(f"== {script} {' '.join(extra)}\n{done.stdout.rstrip()}")
@@ -253,22 +245,79 @@ def add(args, data):
                 return name, time.time() - t0, False, "\n".join(log)
         return name, time.time() - t0, True, "\n".join(log)
 
-    with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
-        results = list(pool.map(one, args.label_set))
     failed = []
-    for name, secs, ok, log in results:
-        print(log, flush=True)
-        print(f"-- {name}: {'done' if ok else 'FAILED'} in {secs:.0f}s", flush=True)
-        if not ok:
-            failed.append(name)
-    if failed:
-        print(f"add: {', '.join(failed)} failed; nothing loaded. Run again to resume.")
-        return 1
-    if args.dry_run:
-        print(f"add: --dry-run, nothing loaded ({time.time() - t_all:.0f}s)")
-        return 0
-    print(f"add: {', '.join(args.label_set)} in Postgres; everything {time.time() - t_all:.0f}s",
-          flush=True)
+    with ThreadPoolExecutor(max_workers=max(1, jobs)) as pool:
+        for name, secs, ok, log in pool.map(one, names):
+            print(log, flush=True)
+            print(f"-- {name}: {'done' if ok else 'FAILED'} in {secs:.0f}s", flush=True)
+            if not ok:
+                failed.append(name)
+    return failed
+
+
+def run(args, data):
+    """The whole pipeline, or any stretch of it, in one command:
+
+      fetch     the documents, procurement and project records the cohort lacks
+      prepare   read the PDFs, clean, components, procurement; load the corpus
+                tables and cut the release when they changed
+      embed     the sentence vectors (only what is not cached)
+      search    every label set's phrases against the vectors (assets and the
+                measures, side by side)
+      classify  the asset map
+      measure   each measure through the funnel, its types proposed and
+                assigned, side by side
+      link      which asset each package buys, which commitments it carries out
+      publish   every current run into Postgres (the stages do this themselves;
+                this is the catch-up)
+      audit     the parse and procurement audits (only with --to audit or --only)
+
+    Every stage skips what is up to date, and the model stages read their
+    answer store, so --from an early stage is cheap; --measures names the
+    sets (default: every set in analysis/labels/). Prints the time per
+    stage and overall."""
+    import labels as labels_mod
+    import time
+    t_all = time.time()
+    stages = stages_between(args.from_stage, args.to_stage, args.only)
+    sets = args.measures or [n for n in labels_mod.label_sets() if n != "assets"]
+    scope = _scope(args)
+    dry = ["--dry-run"] if args.dry_run else []
+    timings = []
+    for stage in stages:
+        t0 = time.time()
+        print(f"#### {stage}", flush=True)
+        failed = []
+        if stage == "fetch":
+            prepare(_sel(args), update=args.update, data=data, fetch=True)
+        elif stage == "prepare":
+            prepare(_sel(args), data=data, fetch=False)
+        elif stage == "embed":
+            _run("embed.py", *dry, "--context", "none", data=data)
+        elif stage == "search":
+            failed = _parallel(args.jobs, ["assets", *sets],
+                               lambda n: [["search.py", n, *dry]], data)
+        elif stage == "classify":
+            _run("classify.py", "assets", *dry, *scope, data=data)
+        elif stage == "measure":
+            failed = _parallel(args.jobs, sets, lambda n: [
+                ["measure.py", n, "--workers", str(args.workers), *dry, *scope],
+                ["kinds.py", n, *dry, *scope],
+                ["kinds.py", n, "--assign", *dry, *scope]], data)
+        elif stage == "link":
+            _run("link_packages.py", *dry, *scope, data=data)
+        elif stage == "publish":
+            if not args.dry_run:
+                _run("store.py", "--links", *scope, data=data)
+        elif stage == "audit":
+            _run("audit.py", data=data, tail=2)
+            _run("audit_procurement.py", data=data, tail=2)
+        timings.append((stage, time.time() - t0))
+        if failed:
+            print(f"run: {stage} failed for {', '.join(failed)}; stopped. Run again to resume.")
+            return 1
+    print("run: " + ", ".join(f"{s} {t:.0f}s" for s, t in timings)
+          + f"; everything {time.time() - t_all:.0f}s", flush=True)
     return 0
 
 
@@ -449,7 +498,7 @@ def prepare(sel=None, update=False, data=None, fetch=True):
                 state["stages"][name] = {"in": fp, "out": out}
                 _save_state(data, state)
             continue
-        _run(script, data=data, tail=2 if name.startswith("audit") else 0)
+        _run(script, data=data)
         state.setdefault("stages", {})[name] = {"in": _fingerprint(data, code, inputs),
                                                 "out": _outputs(data, outputs)}
         _save_state(data, state)
@@ -465,11 +514,7 @@ def prepare(sel=None, update=False, data=None, fetch=True):
 
 # ------------------------------------------------------------------ reading
 
-def _read(path):
-    if not os.path.exists(path):
-        return []
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+from common import read_csv as _read  # noqa: E402
 
 
 def _in(sel, ids):
@@ -799,14 +844,7 @@ def main(argv=None):
     p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
     p.add_argument("--min-cosine", type=float, default=_classify.MIN_COSINE,
                    help="ask a label of a paragraph only when a unit scores at least this")
-    p = sub.add_parser("candidates", help="every unit a label's patterns or its embedding "
-                                          "top N find, with p_commitment, firmness and types "
-                                          "(after ./wbg search)")
-    p.add_argument("label_set", help="any set in analysis/labels/ or inputs/taxonomy/")
-    p.add_argument("--top", type=int, default=_measure.TOP, help="pool by count (0 = off)")
-    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
-                   help="pool: every unit whose best cosine reaches this (0 = off)")
-    p = sub.add_parser("measure", help="grade a measure's candidates with the decision model, "
+    p = sub.add_parser("measure", help="grade a measure's pool with the decision model, "
                                        "with the asset map as columns (after ./wbg search "
                                        "<set> and ./wbg classify assets)")
     p.add_argument("label_set", help="a set in analysis/labels/")
@@ -822,15 +860,27 @@ def main(argv=None):
                    help="a round yielding fewer committed units than this is the last")
     p.add_argument("--max-rounds", type=int, default=_measure.MAX_ROUNDS)
     p.add_argument("--dry-run", action="store_true")
-    p = sub.add_parser("add", help="a measure from its files to Postgres in one go: search, "
-                                   "the funnel, type proposals, one load and one release; "
-                                   "several sets run side by side")
-    p.add_argument("label_set", nargs="+", help="set(s) in analysis/labels/")
+    p = sub.add_parser("run", help="the pipeline, or any stretch of it: fetch > prepare > embed "
+                                   "> search > classify > measure > link > publish (> audit)")
     _filters(p)
-    p.add_argument("--jobs", type=int, default=3,
-                   help="sets run at once (each is one process on one core)")
+    p.add_argument("--from", dest="from_stage", choices=RUN_STAGES, default=None,
+                   help="first stage (default fetch)")
+    p.add_argument("--to", dest="to_stage", choices=RUN_STAGES, default=None,
+                   help="last stage (default publish; audit only when asked)")
+    p.add_argument("--only", choices=RUN_STAGES, default=None, help="one stage alone")
+    p.add_argument("--measures", nargs="*", default=None,
+                   help="measure sets (default: every set in analysis/labels/)")
+    p.add_argument("--jobs", type=int, default=3, help="sets run at once (one core each)")
     p.add_argument("--workers", type=int, default=ADD_WORKERS,
                    help="parallel requests to the decision model per set")
+    p.add_argument("--update", action="store_true", help="fetch the selected projects again")
+    p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("add", help="a measure from its files to Postgres: run --from search "
+                                   "--to measure --measures <set>...")
+    p.add_argument("label_set", nargs="+", help="set(s) in analysis/labels/")
+    _filters(p)
+    p.add_argument("--jobs", type=int, default=3)
+    p.add_argument("--workers", type=int, default=ADD_WORKERS)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("publish", help="write the current runs of the sets named (or every "
                                        "set) into Postgres; the stages do this themselves, "
@@ -878,15 +928,7 @@ def main(argv=None):
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
-    p = sub.add_parser("words", help="the words that set a label's candidates apart from "
-                                     "the corpus: what types it has")
-    p.add_argument("label_set")
-    p.add_argument("label_id")
-    p.add_argument("--top", type=int, default=_measure.TOP, help="the measure's pool by count")
-    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
-                   help="the measure's pool by cosine")
-    p.add_argument("--committed", action="store_true",
-                   help="only candidates with p_commitment >= 0.5")
+    sub.add_parser("audit", help="the parse and procurement audits (reports in data/reports/)")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
                                            "paragraph, component-tag and sentence settings")
     p.add_argument("--docs", type=int, default=10,
@@ -897,15 +939,19 @@ def main(argv=None):
                                   "and what is out of date")
     sub.add_parser("release", help="record the store's current data as a release "
                                    "(data/releases/), if it changed")
-    p = sub.add_parser("pipeline", help="everything run.sh does: prepare all, release, "
-                                        "load, review sheets, run report")
+    p = sub.add_parser("pipeline", help="the same as run with no options: every stage, "
+                                        "fetch to publish, over the whole cohort")
     p.add_argument("--update", action="store_true", help="fetch every project again")
     args = ap.parse_args(argv)
 
     data = data_root()
-    if args.cmd == "pipeline":
-        prepare(select(), update=args.update, data=data)
-        return 0
+    if args.cmd in ("pipeline", "run"):
+        if args.cmd == "pipeline":
+            args.from_stage, args.to_stage, args.only = None, None, None
+            args.measures, args.jobs, args.workers, args.dry_run = None, 3, ADD_WORKERS, False
+            for k in ("project", "cohort_set", "country", "region", "fy", "practice", "unit"):
+                setattr(args, k, None)
+        return run(args, data)
     if args.cmd == "status":
         import release
         print("\n".join(release.status(data)))
@@ -924,10 +970,6 @@ def main(argv=None):
             (["--min-cosine", str(args.min_cosine)] if args.min_cosine else [])
         _run("classify.py", args.label_set, *extra, *_scope(args), data=data)
         return 0
-    if args.cmd == "candidates":
-        _run("candidates.py", args.label_set, "--top", str(args.top), "--min-cosine",
-             str(args.min_cosine), data=data)
-        return 0
     if args.cmd == "measure":
         _run("measure.py", args.label_set, "--context", args.context, "--gate", args.gate,
              "--asset-min", str(args.asset_min), "--top", str(args.top),
@@ -937,7 +979,9 @@ def main(argv=None):
              data=data)
         return 0
     if args.cmd == "add":
-        return add(args, data)
+        args.from_stage, args.to_stage, args.only = "search", "measure", None
+        args.measures, args.update = args.label_set, False
+        return run(args, data)
     if args.cmd == "link":
         _run("link_packages.py", "--asset-top", str(args.asset_top),
              *[x for st in (args.sets or []) for x in ("--label-set", st)],
@@ -964,10 +1008,9 @@ def main(argv=None):
              "--context", args.context, "--gate", args.gate, "--asset-min", str(args.asset_min),
              *_scope(args), data=data)
         return 0
-    if args.cmd == "words":
-        _run("candidates.py", args.label_set, args.label_id, "--words", "--top", str(args.top),
-             "--min-cosine", str(args.min_cosine),
-             *(["--committed"] if args.committed else []), data=data)
+    if args.cmd == "audit":
+        _run("audit.py", data=data, tail=2)
+        _run("audit_procurement.py", data=data, tail=2)
         return 0
     if args.cmd == "sensitivity":
         _run("sensitivity.py", "--docs", str(args.docs),

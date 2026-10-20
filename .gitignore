@@ -8,3 +8,4 @@ __pycache__/
 .worktrees/
 # The project's own API key, mode 0600 (src/embed.py). Never committed.
 .secrets/
+*.sha256
