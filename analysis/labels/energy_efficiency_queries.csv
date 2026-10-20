@@ -1,0 +1,7 @@
+measure_id,query_id,query,active
+energy_efficiency,upgrade,the project will upgrade equipment to improve energy efficiency,true
+energy_efficiency,fibre_copper,fibre networks will replace legacy copper infrastructure to reduce energy use,true
+energy_efficiency,reduce,energy consumption will be reduced through modernization,true
+energy_efficiency,cooling,efficient cooling technologies will be deployed,true
+energy_efficiency,ems,energy management systems will be adopted,true
+energy_efficiency,demand,network upgrades will lower electricity demand,true

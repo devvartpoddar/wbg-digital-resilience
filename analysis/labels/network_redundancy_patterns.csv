@@ -1,0 +1,4 @@
+measure_id,pattern_id,pattern,active
+network_redundancy,redundant_network,"\bredundan\w*\b[^.;]{0,50}?\b(?:links?|routes?|paths?|network\w*|fib(?:re|er)|cables?|connect\w*|architecture|backbone)\b",true
+network_redundancy,route_diversity,\b(?:route|path) diversity\b|\bdiverse rout\w*,true
+network_redundancy,backup_link,\b(?:backup|secondary|alternative) (?:links?|routes?|paths?|connect\w*)\b,true

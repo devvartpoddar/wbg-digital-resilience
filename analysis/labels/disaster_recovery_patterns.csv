@@ -1,0 +1,6 @@
+measure_id,pattern_id,pattern,active
+disaster_recovery,disaster_recovery,\bdisaster recovery\b,true
+disaster_recovery,continuity,\bbusiness continuity\b,true
+disaster_recovery,backup,\bdata back-?ups?\b|\bbackup (?:site|system|cent(?:re|er))s?\b,true
+disaster_recovery,failover,\bfail-?over\b,true
+disaster_recovery,replication,\b(?:data|site|cloud) replication\b,true

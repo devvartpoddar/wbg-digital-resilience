@@ -1,0 +1,7 @@
+measure_id,query_id,query,active
+network_redundancy,redundant_fibre,redundant fibre routes will be established,true
+network_redundancy,diverse_paths,the network will include diverse transmission paths,true
+network_redundancy,backup_links,backup connectivity links will ensure continuity of service,true
+network_redundancy,duplicated_ixp,interconnection points will be duplicated,true
+network_redundancy,route_diversity,route diversity requirements will be included in network design,true
+network_redundancy,alternative,alternative communication pathways will be provided,true

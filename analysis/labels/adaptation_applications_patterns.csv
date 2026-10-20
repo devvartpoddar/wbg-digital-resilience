@@ -1,0 +1,5 @@
+measure_id,pattern_id,pattern,active
+adaptation_applications,climate_advisory,\bclimate[- ]?(?:advisory|advisories|information) (?:services?|tools?|apps?|applications?|platforms?)\b,true
+adaptation_applications,climate_smart,"\bclimate[- ]smart\b[^.;]{0,50}?\b(?:digital|apps?|applications?|platforms?|advisory|advisories|information|mobile|ICT|e-|SMS|data)\b",true
+adaptation_applications,drought,\bdrought (?:management|advisory|early)\b,true
+adaptation_applications,adaptation_app,"\badaptation\b[^.;]{0,40}?\b(?:applications?|apps?|platforms?|tools?|services?)\b",true

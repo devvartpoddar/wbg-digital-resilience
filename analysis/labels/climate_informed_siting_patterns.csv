@@ -1,0 +1,5 @@
+measure_id,pattern_id,pattern,active
+climate_informed_siting,hazard_prone,\b(?:flood|hazard|risk|erosion|landslide)[- ]?(?:prone|exposed)\b,true
+climate_informed_siting,risk_zone,\b(?:high[- ]risk|hazard|flood) zones?\b,true
+climate_informed_siting,siting_climate,"\b(?:sit(?:e selection|ing)|locat(?:ion|ed)|rout(?:e|ing))\b[^.;]{0,60}?\b(?:climate|flood|hazard|disaster|sea[- ]level)\w*",true
+climate_informed_siting,climate_siting,"\b(?:climate|flood|hazard|disaster)\w*\b[^.;]{0,60}?\b(?:sit(?:e selection|ing)|location of|rout(?:e|ing) of)\b",true

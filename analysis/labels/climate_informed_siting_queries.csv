@@ -1,0 +1,7 @@
+measure_id,query_id,query,active
+climate_informed_siting,avoid_flood,tower sites will avoid flood-prone areas,true
+climate_informed_siting,routes_hazard,infrastructure routes will be selected based on hazard maps,true
+climate_informed_siting,outside_risk,facilities will be located outside high-risk zones,true
+climate_informed_siting,risk_informs,climate risk considerations will inform site selection,true
+climate_informed_siting,relocate,network assets will be relocated from vulnerable locations,true
+climate_informed_siting,projections,siting decisions will account for future climate projections,true

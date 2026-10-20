@@ -1,3 +1,6 @@
 measure_id,pattern_id,pattern,active
 backup_power,generator,\bgenerators?\b,true
 backup_power,ups,\b(?-i:UPS)\b|\buninterruptible power\b,true
+backup_power,battery,\bbattery storage\b|\bbatteries\b,true
+backup_power,autonomy,\bpower autonomy\b|\bhours of autonomy\b,true
+backup_power,backup_power,\b(?:backup|back-up|standby|stand-by) power\b,true

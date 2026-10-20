@@ -1,0 +1,5 @@
+grade,description
+0,"The passage does not describe {name}: nothing of the kind is financed, built, installed, required or assigned by this project."
+1,"{name} is mentioned only as background, a risk, a lesson, a general aim, the country's situation or another party's existing work, not as something this project does."
+2,"This project intends or plans {name}, or makes it conditional, subject to a later study, design or recommendation."
+3,"This project commits to {name}: it finances it, requires it in design, specifications, tender documents, contracts or safeguards instruments, or makes the borrower or operator responsible for it."

@@ -1,0 +1,7 @@
+measure_id,query_id,query,active
+disaster_recovery,dr_site,disaster recovery facilities will be established,true
+disaster_recovery,replication,critical data will be replicated across multiple locations,true
+disaster_recovery,bcp,business continuity plans will be developed,true
+disaster_recovery,restoration,backup systems will support service restoration,true
+disaster_recovery,tested,recovery procedures will be tested regularly,true
+disaster_recovery,cloud_dr,cloud-based disaster recovery solutions will be deployed,true
