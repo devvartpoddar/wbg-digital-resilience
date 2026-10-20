@@ -31,7 +31,7 @@ written down once:
   data/embeddings/   the vector cache, sentence_emb.npy, sentence_index.csv
   data/classify/     every decision-model answer (answers/) and one folder per
                      label set and version of the asset map (src/classify.py)
-  data/labels/       grades a person gave (src/evaluate.py, src/check_units.py) and
+  data/labels/       grades a person gave (src/check_units.py) and
                      the hand-labelled activities workbook (src/evaluate_activities.py)
   data/releases/     one folder per data release, and index.csv (src/release.py)
   data/reports/      every stage's report, the run notes for the vault, and
@@ -41,11 +41,7 @@ written down once:
   data/archive/      tables an earlier version wrote and nothing reads (kept, never deleted)
   data/search/       a label set's scores over the sentences, one folder per
                      label set and version (src/search.py)
-  data/commitment/   p_commitment and firmness for every searched unit, one
-                     folder per version of the index (src/commitment.py)
-  data/candidates/   each label's candidate units, one folder per label set
-                     and version (src/candidates.py)
-  data/measures/     a measure's candidates graded by the decision model, with
+  data/measures/     a measure's pool graded by the decision model, with
                      the asset map's columns, one folder per label set and
                      version (src/measure.py)
   data/types/        a measure's types: stored generative-model proposals and
@@ -105,8 +101,6 @@ LAYOUT = {
     "review": "review",
     "runs": "runs",
     "search": "search",
-    "commitment": "commitment",
-    "candidates": "candidates",
     "measures": "measures",
     "types": "types",
     "links": "links",
@@ -118,7 +112,7 @@ LAYOUT = {
 }
 
 
-def file_sha256(path):
+def file_sha256(path, remember=True):
     """The SHA-256 of a file, remembered beside it: <path>.sha256 holds the
     size, the modification time and the digest, and is trusted while both
     match. Every stage keys its runs on the big files (the 1.8 GB sentence
@@ -129,18 +123,21 @@ def file_sha256(path):
     import hashlib
     st = os.stat(path)
     side = path + ".sha256"
-    try:
-        with open(side, encoding="utf-8") as fh:
-            size, mtime, sha = fh.read().split()
-        if int(size) == st.st_size and int(mtime) == st.st_mtime_ns and len(sha) == 64:
-            return sha
-    except (OSError, ValueError):
-        pass
+    if remember:
+        try:
+            with open(side, encoding="utf-8") as fh:
+                size, mtime, sha = fh.read().split()
+            if int(size) == st.st_size and int(mtime) == st.st_mtime_ns and len(sha) == 64:
+                return sha
+        except (OSError, ValueError):
+            pass
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         for block in iter(lambda: fh.read(1 << 20), b""):
             h.update(block)
     sha = h.hexdigest()
+    if not remember:
+        return sha
     try:
         with open(side + ".part", "w", encoding="utf-8") as fh:
             fh.write(f"{st.st_size} {st.st_mtime_ns} {sha}\n")

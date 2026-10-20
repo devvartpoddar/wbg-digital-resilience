@@ -157,6 +157,7 @@ def main():
                     help="comma-separated project ids: fetch only these; the rest keep "
                          "what earlier runs recorded")
     ap.add_argument("--delay", type=float, default=0.5, help="seconds between requests")
+    ap.add_argument("--workers", type=int, default=4, help="projects fetched at once")
     args = ap.parse_args()
 
     projects = read_cohort(args.cohort)
@@ -173,51 +174,64 @@ def main():
     pdf_dir = where(args.out, "pdf")
     os.makedirs(pdf_dir, exist_ok=True)
 
-    for n, proj in enumerate(projects, 1):
+    def one(proj):
+        """List and download one project's documents. Returns (pid, listed,
+        [(doc, blob or None)], counts, notes): its own tallies, merged on
+        the main thread, so four projects can run at once."""
         pid = proj["project_id"]
+        c = {"no_docs": 0, "error": 0, "pdf_fetched": 0, "pdf_cached": 0, "pdf_missing": 0}
+        nts, got = [], []
         try:
             docs = []
             for dt in DOC_TYPES:
                 docs += list_docs(pid, dt)
                 time.sleep(args.delay)
         except Exception as exc:
-            counts["error"] += 1
-            notes.append(f"{pid}\tLISTING FAILED\t{exc}")
-            print(f"[{n}/{len(projects)}] {pid} listing failed: {exc}", flush=True)
-            continue
-
-        listed.add(pid)
+            c["error"] += 1
+            nts.append(f"{pid}\tLISTING FAILED\t{exc}")
+            return pid, False, got, c, nts
         if not docs:
-            counts["no_docs"] += 1
-            notes.append(f"{pid}\tno appraisal documents returned")
-            continue
-
+            c["no_docs"] += 1
+            nts.append(f"{pid}\tno appraisal documents returned")
         for doc in docs:
-            if doc["doc_id"] in by_doc:
-                by_doc[doc["doc_id"]]["_projects"].add(pid)
-                continue
-            pdf_path = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
-            pdf_blob = fetch_pdf(doc, pdf_dir, counts, notes, pid, args.delay)
-            if not pdf_blob:
-                continue
-            # The file's own time, on this run and every later one, so a
-            # re-listing of an unchanged document leaves documents.csv as it was.
-            when = os.path.getmtime(pdf_path)
-            by_doc[doc["doc_id"]] = {
-                "_projects": {pid},
-                "doc_id": doc["doc_id"], "doc_type": doc["doc_type"],
-                "doc_kind": classify(doc["doc_type"], doc["title"]),
-                "title": doc["title"], "disclosure_date": doc["disclosure_date"],
-                "lang": doc["lang"],
-                "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when)),
-                "pdf_url": doc["pdfurl"],
-                "pdf_bytes": len(pdf_blob),
-                "pdf_sha256": hashlib.sha256(pdf_blob).hexdigest(),
-                "owner_unit": doc["owner_unit"],
-            }
+            got.append((doc, fetch_pdf(doc, pdf_dir, c, nts, pid, args.delay)))
+        return pid, True, got, c, nts
 
-        if n % 10 == 0:
-            print(f"  ...{n}/{len(projects)} projects, {len(by_doc)} documents", flush=True)
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
+        results = pool.map(one, projects)
+        for n, (pid, ok, got, c, nts) in enumerate(results, 1):
+            for k, v in c.items():
+                counts[k] += v
+            notes.extend(nts)
+            if not ok:
+                print(f"[{n}/{len(projects)}] {pid} listing failed", flush=True)
+                continue
+            listed.add(pid)
+            for doc, pdf_blob in got:
+                if doc["doc_id"] in by_doc:
+                    by_doc[doc["doc_id"]]["_projects"].add(pid)
+                    continue
+                if not pdf_blob:
+                    continue
+                pdf_path = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
+                # The file's own time, on this run and every later one, so a
+                # re-listing of an unchanged document leaves documents.csv as it was.
+                when = os.path.getmtime(pdf_path)
+                by_doc[doc["doc_id"]] = {
+                    "_projects": {pid},
+                    "doc_id": doc["doc_id"], "doc_type": doc["doc_type"],
+                    "doc_kind": classify(doc["doc_type"], doc["title"]),
+                    "title": doc["title"], "disclosure_date": doc["disclosure_date"],
+                    "lang": doc["lang"],
+                    "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when)),
+                    "pdf_url": doc["pdfurl"],
+                    "pdf_bytes": len(pdf_blob),
+                    "pdf_sha256": hashlib.sha256(pdf_blob).hexdigest(),
+                    "owner_unit": doc["owner_unit"],
+                }
+            if n % 10 == 0:
+                print(f"  ...{n}/{len(projects)} projects, {len(by_doc)} documents", flush=True)
 
     docs_csv = where(args.out, "documents")
     # A project this run did not list - outside a --limit smoke run, or its

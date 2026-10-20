@@ -4,77 +4,76 @@ deepen the search while it still yields.
 
 The funnel, each level cheaper than the next and each one's loss measurable:
 
-  1. Candidates (src/candidates.py): the units a measure's word patterns
-     match, plus its embedding top N (default 2,000). No model reads anything.
+  1. The pool: the units a measure's word patterns match (<set>_patterns.csv),
+     plus every unit whose best cosine over the measure's phrases reaches
+     --min-cosine (or its embedding top N, when --top is on). No model reads
+     anything here; a cosine threshold carries between a rare measure and a
+     common one where a count does not.
   2. The asset map (src/classify.py on the assets set), as columns on every
      unit: the best asset in its paragraph and in its component.
   3. The decision model reads each unit in two passes: the measure's graded
      question for every unit, then, for the units graded 2 or more, one
      yes/no question per digital asset ("does this sentence concern fiber
-     networks?") and one per activity kind (govern, build, sustain, use), so
-     the asset is answered for the sentence itself and the question tokens,
-     which are most of the cost, are spent only where they matter.
+     networks?"), one per activity kind (govern, build, sustain, use) and
+     the facets (conditional; who carries it out), so the asset is answered
+     for the sentence itself and the question tokens, which are most of the
+     cost, are spent only where they matter. The second pass runs in the
+     background while the next round's first pass goes out.
   4. Relevance feedback: the vectors of the units the model graded committed
-     are averaged into a centroid; the corpus is re-ranked by cosine to it;
-     the next --batch unseen units are graded in one parallel batch; and this
-     repeats until a round yields fewer committed units than --min-yield, or
-     --max-rounds is reached. Each round is one batch of parallel requests,
-     tens of seconds, not a reading loop. The stopping rule is a yield rule
-     for retrieval depth, not a recall guarantee: what the search never
-     reaches stays unmeasured until a person grades a sample.
+     are averaged into a centroid (minus half the rejected units' centroid);
+     the corpus is re-ranked by cosine to it; the next --batch unseen units
+     are graded in one parallel batch; and this repeats until a round yields
+     fewer committed units than --min-yield, or --max-rounds is reached. The
+     stopping rule is a yield rule for retrieval depth, not a recall
+     guarantee: what the search never reaches stays unmeasured until a
+     person grades a sample.
+  5. The asset link of a unit, the three levels combined (asset_link,
+     asset_link_level, asset_link_p): the unit answer when any asset is at
+     LINK_MIN or more (the sentence names it), else the paragraph map at
+     LINK_MIN, else the component map, else none.
 
 The measure's question names the measure and its definition and never the
 asset: the decision model reads literally, and a question about "climate
 risk assessment of digital infrastructure" scored a tower-siting assessment
 at 0.17 where the same question without the asset phrase scored it 0.97.
 
-  5. The asset link of a unit, the three levels combined (asset_link,
-     asset_link_level, asset_link_p): the unit answer when any asset is at
-     LINK_MIN or more (the sentence names it), else the paragraph map at
-     LINK_MIN (the sentence sits in a paragraph about the asset: "a
-     site-specific assessment for individual rooms" in a data-centre
-     paragraph), else the component map, else none. On the first run 95 of
-     130 committed units linked at the unit, 30 at the paragraph, 3 at the
-     component and 2 not at all.
+Nothing is gated by default. --gate link|unit|paragraph|component with
+--asset-min sends only the units the chosen asset link scores at least that
+high. Every row carries the wording's firmness (activity, outcome, none): a
+column to filter on, never a cut.
 
-Nothing is gated by default. --gate link|unit|paragraph|component with --asset-min
-sends only the units the chosen asset link scores at least that high: the
-setting at scale, once the gate's cost has been measured
-(src/evaluate_activities.py). The unit gate can only apply from round 1 on
-(round 0 is what produces the unit answers), so it is reported, not applied,
-for round 0.
-
-Reads  data/candidates/<set>-<version>/candidates.csv
+Reads  data/search/<set>-<version>/{scores.npy,queries.csv}
        data/classify/assets-<version>/scores.csv        the asset map (optional)
        data/embeddings/{sentence_emb.npy,sentence_index.csv}
        data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
-       analysis/labels/<set>.csv, <set>_scale.csv; inputs/taxonomy/assets.csv
-Writes data/classify/cache/<model>/...                   every response, once
-       data/measures/<set>-<version>/units.csv           one row per graded unit
+       analysis/labels/<set>.csv, <set>_scale.csv, <set>_patterns.csv;
+       inputs/taxonomy/assets.csv
+Writes data/classify/answers/<model>/...                 every answer, once
+       data/measures/<set>-<version>/units.csv           one row per unit seen
        data/measures/<set>-<version>/manifest.json       rounds, calls, cost, time
        data/reports/measure_<set>.txt
+       and, with --publish (the default from the command line), its rows in
+       Postgres (src/store.py)
 
-<version> is a SHA-256 over the candidates version, the asset map version,
-the exact questions, the model, the context design, the gate and the
-feedback settings. The units a feedback round reads depend on the stored
-answers, which are the record, so an unchanged run reads the store and asks
-nothing.
+<version> is a SHA-256 over the search run, the patterns, the asset map
+version, the exact questions, the model, the context design, the gate and
+the feedback settings. The units a feedback round reads depend on the
+stored answers, which are the record, so an unchanged run reads the store
+and asks nothing.
 
-  ./wbg measure cra                      sentence context, top 2,000, feedback rounds
+  ./wbg measure cra                      sentence context, cosine pool, feedback rounds
   ./wbg measure cra --context paragraph
   ./wbg measure cra --gate unit --asset-min 0.5
   ./wbg measure cra --dry-run            round 0 only, no request
 """
-import argparse, csv, hashlib, json, os, sys, time
+import argparse, csv, hashlib, json, os, re, sys, time
 from collections import defaultdict
 
 import numpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
-import candidates  # noqa: E402
 import classify  # noqa: E402
-import commitment  # noqa: E402
 import labels as labels_mod  # noqa: E402
 import search  # noqa: E402
 
@@ -101,6 +100,38 @@ CONTEXTS = ("sentence", "paragraph")
 # grader on 13 of 28 committed units; the grader had read the paragraph.
 EXTRAS_CONTEXT = "paragraph"
 GATES = ("none", "link", "unit", "paragraph", "component")
+
+# Firmness of the wording, read by fixed word lists: 'activity' (the project
+# finances, builds, requires, includes...), 'outcome' ("will enable", "is
+# expected to": what should follow, not what is done) or 'none'. A column to
+# filter on, never a cut. An activity phrase anywhere wins.
+ACTIVITY = re.compile(
+    r"\b(?:will|shall|to) (?:also |further |specifically |be )?(?:be )?"
+    r"(?:financ|fund|support|install|deploy|build|construct|establish|develop|procur|"
+    r"integrat|link|connect|upgrad|rehabilitat|conduct|carr(?:y|ied) out|undertak|prepar|"
+    r"design|implement|introduc|provid|acquir|equip|strengthen(?:ed|ing)? (?:the|its)|"
+    r"set up|put in place|creat|adopt|requir|includ|incorporat|expand|digiti[sz]|"
+    r"mainstream|assess|map|bur(?:y|ied)|elevat|reinforc|harden|relocat|backup|back up)\w*"
+    r"|\b(?:is|are) (?:being |to be )?(?:financed|supported|required|included|integrated|"
+    r"deployed|installed|built|procured|conducted|undertaken|planned|designed)\b"
+    r"|\b(?:activities|investments) (?:will )?includ\w*|\bthe following\b|\bincludes?\b"
+    r"|\bsupported by the (?:project|component)|\bunder (?:this |the )?(?:sub-?)?component\b"
+    r"|\bthe (?:project|component|program(?:me)?) (?:will )?(?:finances?|supports?)\b"
+    r"|^\(?[a-z0-9ivx]{1,4}[).]\s", re.I)
+OUTCOME = re.compile(
+    r"\bwill (?:also |further |thus |therefore |thereby |in turn |greatly )?"
+    r"(?:enable|allow|help|contribut|improv|enhanc|increas|reduc|mitigat|facilitat|"
+    r"make it|lead|result|benefit|boost|promot|foster|minimi[sz]|lower|empower)\w*"
+    r"|\bby enabling\b|\b(?:is|are) expected to\b", re.I)
+
+
+def firmness(text):
+    """'activity', 'outcome' or 'none'."""
+    if ACTIVITY.search(text):
+        return "activity"
+    if OUTCOME.search(text):
+        return "outcome"
+    return "none"
 LINK_MIN = 0.5        # an asset answer or map score at or above this makes a link
 TOP = 0               # embedding depth of round 0 by count; 0 = off (the cosine gate is the pool)
 MIN_COSINE = 0.45     # round 0 pool: every unit whose best cosine over the measure's phrases
@@ -113,7 +144,7 @@ NEGATIVE_WEIGHT = 0.5  # Rocchio: how much of the rejected units' centroid is su
 EXTRAS_MIN_GRADE = 2   # asset and kind questions are asked of units graded at least this
 UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
              "component_number", "subcomponent_number", "component_key", "copies", "route",
-             "round", "rank", "score", "patterns", "p_commitment", "firmness", "read_order",
+             "round", "rank", "score", "patterns", "firmness",
              "asset_para", "asset_p_para", "asset_comp", "asset_p_comp",
              "asset_unit", "asset_p_unit", "assets_yes", "asset_link", "asset_link_level",
              "asset_link_p", "kinds_yes", "kind_best", "kind_p", "conditional_p",
@@ -212,6 +243,24 @@ def asset_map(data, projects=None):
     return para, comp, os.path.basename(folder)
 
 
+def unit_texts(data, index):
+    """{unit_id: text as embedded} (a list item with its lead-in)."""
+    import units
+    every = {u["unit_id"]: u for u in units.search_units(data)}
+    cache, out = {}, {}
+    for r in index:
+        u = every[r["unit_id"]]
+        d = u["doc_id"]
+        if d not in cache:
+            with open(where(data, "text", f"{d}.txt"), encoding="utf-8") as fh:
+                cache[d] = fh.read()
+        body = cache[d][int(u["char_start"]):int(u["char_end"])]
+        if u.get("lead_in_start"):
+            body = cache[d][int(u["lead_in_start"]):int(u["lead_in_end"])] + "\n" + body
+        out[r["unit_id"]] = body
+    return out
+
+
 def paragraph_rows(data):
     with open(where(data, "appraisal", "paragraphs.csv"), newline="", encoding="utf-8") as fh:
         return {r["paragraph_id"]: r for r in csv.DictReader(fh)}
@@ -268,13 +317,11 @@ class Run:
                          "extras_context": EXTRAS_CONTEXT,
                          "projects": sorted(projects) if projects else None}
         self.projects = sorted(projects) if projects else None
-        # A reader (the load, the evaluation, the types stage) must not build
-        # anything as a side effect: it asks for the run as it stands.
-        self.cand = candidates.build(name, data, top=top, log=log, min_cosine=min_cosine) \
-            if build else candidates.current(name, data, top=top, min_cosine=min_cosine)
-        if not self.cand:
-            raise SystemExit(f"measure: no candidates for {name} at top {top}; run "
-                             f"./wbg measure {name}")
+        self.search_run, _ = search.run_folder(name, data)
+        if not os.path.exists(os.path.join(self.search_run, "manifest.json")):
+            raise SystemExit(f"measure: {name} has no search run for the current index; "
+                             f"run ./wbg search {name} first")
+        self.patterns = labels_mod.load_patterns(name)
         self.labels, self.scale = classify.load_labels(name, None)
         self.assets = [a for a in labels_mod.load_set(ASSET_SET) if a["active"] == "true"]
         self.kinds = [{"id": k["kind_id"].strip(), "name": k["kind_name"].strip(),
@@ -302,8 +349,10 @@ class Run:
             if cal.get("question_sha256") == classify.question_shas(self.qs)[self.labels[0]["id"]]:
                 self.calibration = cal.get("grades", {}).get(str(len(self.scale) - 1))
         h = hashlib.sha256()
-        h.update(f"{os.path.basename(self.cand)}\t{self.asset_run}\t"
+        h.update(f"{os.path.basename(self.search_run)}\t{self.asset_run}\t"
                  f"{json.dumps(self.settings, sort_keys=True)}\n".encode())
+        for pt in self.patterns:
+            h.update(f"p\t{pt['label_id']}\t{pt['pattern_id']}\t{pt['pattern']}\n".encode())
         h.update(json.dumps(self.qs, sort_keys=True).encode())
         h.update(json.dumps(self.calibration, sort_keys=True).encode())
         self.out = where(data, "measures", f"{name}-{h.hexdigest()[:12]}")
@@ -323,12 +372,10 @@ class Run:
         self.para_assets, self.comp_assets, _ = asset_map(data, self.projects)
         self.paras = paragraph_rows(data)
         self.names = component_names(data)
-        run, _ = search.run_folder(self.name, data)
-        _, _, self.index = search.load_run(run, data)
+        self.queries, self.scores, self.index = search.load_run(self.search_run, data)
         self.row_of = {r["unit_id"]: i for i, r in enumerate(self.index)}
         self.matrix = numpy.load(where(data, "embeddings", "sentence_emb.npy"), mmap_mode="r")
-        self.texts = commitment.unit_texts(data, self.index)
-        self.commit = commitment.current_scores(data)
+        self.texts = unit_texts(data, self.index)
         self.doc_texts = {}
         self.pool, self.pending = None, []
         self._loaded = True
@@ -340,12 +387,10 @@ class Run:
         para = self.paras[r["paragraph_id"]]
         a_para = self.para_assets.get(r["paragraph_id"], ("", ""))
         a_comp = self.comp_assets.get((r["doc_id"], r.get("component_number") or ""), ("", ""))
-        p_commit, firm = self.commit.get(r["unit_id"], (None, ""))
+        text = self.texts[r["unit_id"]]
         return {**{c: r.get(c, "") for c in search.CONTEXT}, "label_id": self.labels[0]["id"],
                 "route": route, "round": rnd, "rank": rank, "score": score,
-                "patterns": patterns,
-                "p_commitment": "" if p_commit is None else f"{p_commit:.4f}",
-                "firmness": firm, "read_order": "",
+                "patterns": patterns, "firmness": firmness(text),
                 "asset_para": a_para[0],
                 "asset_p_para": "" if a_para[1] == "" else f"{a_para[1]:.4f}",
                 "asset_comp": a_comp[0],
@@ -356,18 +401,34 @@ class Run:
                 "actor_p": "", "template_projects": r.get("template_projects", ""),
                 "template_share": r.get("template_share", ""), "p_committed_calibrated": "",
                 "sent": "false",
-                "text": self.texts[r["unit_id"]], "_para": para}
+                "text": text, "_para": para}
 
     def candidate_rows(self):
+        """Round 0's pool: every unit a word pattern matches, plus every unit
+        whose best cosine over the measure's phrases reaches min_cosine (or
+        ranks in the top N when that is on). No model reads anything here;
+        a cosine threshold carries between a rare measure and a common one
+        where a count does not."""
+        lid = self.labels[0]["id"]
+        cols = [j for j, q in enumerate(self.queries) if q["label_id"] == lid]
+        best = numpy.asarray(self.scores[:, cols]).max(axis=1) if cols else \
+            numpy.zeros(len(self.index), dtype="float32")
+        order = numpy.lexsort((numpy.arange(len(best)), -best))   # best first, ties by row
+        rank = numpy.empty(len(best), dtype=int)
+        rank[order] = numpy.arange(1, len(best) + 1)
+        top, floor = self.settings["top"], self.settings["min_cosine"]
+        mine = [p for p in self.patterns if p["label_id"] == lid]
         rows = []
-        with open(os.path.join(self.cand, "candidates.csv"), newline="", encoding="utf-8") as fh:
-            for c in csv.DictReader(fh):
-                r = self.index[self.row_of[c["unit_id"]]]
-                if not classify.in_scope(r, self.projects):
-                    continue
-                row = self.base_row(r, c["route"], 0, c["rank"], c["score"], c["patterns"])
-                row["read_order"] = c.get("read_order", "")
-                rows.append(row)
+        for i in order.tolist():
+            r = self.index[i]
+            if not classify.in_scope(r, self.projects):
+                continue
+            hit = [p["pattern_id"] for p in mine if p["regex"].search(self.texts[r["unit_id"]])]
+            near = (top and rank[i] <= top) or (floor and best[i] >= floor)
+            if not hit and not near:
+                continue
+            route = "both" if hit and near else ("pattern" if hit else "embedding")
+            rows.append(self.base_row(r, route, 0, int(rank[i]), f"{best[i]:.6f}", "|".join(hit)))
         return rows
 
     def gated(self, row, rnd):
@@ -460,8 +521,7 @@ class Run:
         first = {k: v for k, v in self.qs.items() if ":" not in k}
         extras = {k: v for k, v in self.qs.items() if ":" in k}
         got, st = answers.ask(model, [(r["_state"], first) for r in sent], self.data,
-                              api_key=api_key, log=self.log, workers=workers, dry_run=True,
-                              legacy_questions=(self.qs,))
+                              api_key=api_key, log=self.log, workers=workers, dry_run=True)
         self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} pass the gate; measure "
                  f"question: {st['to_ask']:,} to ask (about US${st['estimate_usd']:.3f})")
         if dry_run:
@@ -471,8 +531,7 @@ class Run:
             if not api_key:
                 raise SystemExit("measure: no credential: set $WBG_OPENROUTER_KEY")
             got, st = answers.ask(model, [(r["_state"], first) for r in sent], self.data,
-                                  api_key=api_key, log=self.log, workers=workers,
-                                  legacy_questions=(self.qs,))
+                                  api_key=api_key, log=self.log, workers=workers)
             calls, cost = st["calls"], st["cost_usd"]
             if st["failures"] or not all(got):
                 return calls, cost, st["failures"] or [("", "an answer is missing")]
@@ -489,12 +548,10 @@ class Run:
                 # questions go out; collect_extras() gathers them.
                 self.pending.append((need, self.pool.submit(
                     answers.ask, model, [(s, extras) for s in states], self.data,
-                    api_key=api_key, log=self.log, workers=workers,
-                    legacy_questions=(self.qs,))))
+                    api_key=api_key, log=self.log, workers=workers)))
                 return calls, cost, []
             got2, st2 = answers.ask(model, [(s, extras) for s in states], self.data,
-                                    api_key=api_key, log=self.log, workers=workers,
-                                    legacy_questions=(self.qs,))
+                                    api_key=api_key, log=self.log, workers=workers)
             calls += st2["calls"]
             cost += st2["cost_usd"]
             self.log(f"    asset and kind questions for {len(need):,} units graded >= "
@@ -574,7 +631,8 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
              + (f" >= {s['asset_min']}" if s["gate"] != "none" else "")
              + f", pool: cosine >= {s['min_cosine']}" + (f" or top {s['top']}" if s["top"] else "")
              + f", batch {s['batch']}, min yield {s['min_yield']})",
-             f"  candidates {os.path.basename(run.cand)}; asset map {run.asset_run or 'none'}",
+             f"  search run {os.path.basename(run.search_run)}; {len(run.patterns)} pattern(s); "
+             f"asset map {run.asset_run or 'none'}",
              f"  this run: {calls:,} calls, US${cost:.4f}, {seconds:.0f}s; models served: {served}",
              "  rounds (units graded / committed): " + ", ".join(
                  f"{k}: {v['graded']}/{v['committed']}" for k, v in rounds.items()),
@@ -716,8 +774,8 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         w.writeheader()
         w.writerows(rows)
     lines = report_lines(run, rows, rounds, calls, cost, seconds, dict(served))
-    manifest = dict(run.settings, label_set=name, candidates=os.path.basename(run.cand),
-                    asset_map=run.asset_run, calibration=run.calibration, version=os.path.basename(run.out).rsplit("-", 1)[1],
+    manifest = dict(run.settings, label_set=name, search_run=os.path.basename(run.search_run),
+                    asset_map=run.asset_run, patterns=len(run.patterns), calibration=run.calibration, version=os.path.basename(run.out).rsplit("-", 1)[1],
                     units_seen=len(rows), graded=sum(1 for r in rows if r["sent"] == "true"),
                     rounds=rounds, questions=run.qs, question_sha256=classify.question_shas(run.qs),
                     scale=run.scale, models_served=dict(served), calls_this_run=calls,

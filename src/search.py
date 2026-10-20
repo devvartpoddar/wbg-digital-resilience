@@ -74,9 +74,7 @@ BLOCK = 20_000
 
 # ------------------------------------------------------------------ the labels
 
-def _rows(path):
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+from common import read_csv as _rows, file_sha256 as _sha_file  # noqa: E402
 
 
 def _active(r):
@@ -240,10 +238,6 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
 
 # ---------------------------------------------------------------- the filters
 
-def _sha_file(path):
-    """The file's SHA-256, remembered beside it (paths.file_sha256)."""
-    from paths import file_sha256
-    return file_sha256(path)
 
 
 def load_run(folder, data):

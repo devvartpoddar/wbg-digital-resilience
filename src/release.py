@@ -18,14 +18,14 @@ two releases can be compared row by row later; the raw files are never
 overwritten anyway, and the embedding and model caches are content-addressed.
 
 Reads  data/ (the outputs below), inputs/, data/reports/stages.json
-Writes data/releases/<id>/manifest.json, data/releases/<id>/tables.tar.gz,
+Writes data/releases/<id>/manifest.json,
        data/releases/index.csv            one row per release, oldest first
 
   python3 src/release.py            cut a release if the data changed; print it
   python3 src/release.py --status   the current release, the code it was made
                                     with, and whether that code is current
 """
-import argparse, csv, glob, hashlib, json, os, subprocess, sys, tarfile, time
+import argparse, csv, glob, hashlib, json, os, subprocess, sys, time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -51,10 +51,7 @@ INDEX_COLS = ["release_id", "created_at", "commit", "code_dirty", "paragraphs", 
               "notices", "awards", "sentences_embedded", "search_runs", "classify_runs"]
 
 
-def sha256_file(path):
-    """The file's SHA-256, remembered beside it (paths.file_sha256)."""
-    from paths import file_sha256
-    return file_sha256(path)
+from common import file_sha256 as sha256_file  # noqa: E402
 
 
 def _rows(path):
@@ -149,12 +146,6 @@ def cut(data, log=print):
         return m["release_id"]
     m["created_at"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
     os.makedirs(folder, exist_ok=True)
-    with tarfile.open(os.path.join(folder, "tables.tar.gz.part"), "w:gz") as tar:
-        for name, spec in TABLES:
-            path = where(data, *spec)
-            if os.path.exists(path):
-                tar.add(path, arcname=f"{name}.csv")
-    os.replace(os.path.join(folder, "tables.tar.gz.part"), os.path.join(folder, "tables.tar.gz"))
     with open(os.path.join(folder, "manifest.json.part"), "w", encoding="utf-8") as fh:
         json.dump(m, fh, indent=1, sort_keys=True)
     os.replace(os.path.join(folder, "manifest.json.part"), os.path.join(folder, "manifest.json"))

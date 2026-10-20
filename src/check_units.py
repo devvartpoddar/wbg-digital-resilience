@@ -39,7 +39,16 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import classify  # noqa: E402
 import measure  # noqa: E402
-from review_sheets import cell_text  # noqa: E402
+
+CELL_MAX = 32_000   # Excel's limit on a cell's characters
+
+
+def cell_text(value):
+    """Excel refuses control characters. A form feed is a page break in the
+    raw file, which the reader wants to see, so it gets a visible marker."""
+    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
+    text = str(value if value is not None else "").replace("\f", "\n[page break]\n")
+    return ILLEGAL_CHARACTERS_RE.sub("", text)[:CELL_MAX]
 
 PER = {"3": 30, "2": 15, "1": 20, "0": 20, "feedback": 10}
 ELUSION_PER = {"near": 25, "far": 25}

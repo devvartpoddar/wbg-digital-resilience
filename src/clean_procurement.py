@@ -32,6 +32,7 @@ import unicodedata
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import common  # noqa: E402
 from paths import data_root, where  # noqa: E402
 
 from text_rules import fold_chars                       # noqa: E402
@@ -823,19 +824,10 @@ def read_csv(path):
     if not os.path.exists(path):
         raise SystemExit(f"clean_procurement: {path} is missing - run "
                          f"src/fetch_procurement.py first")
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+    return common.read_csv(path)
 
 
-def write_csv(path, cols, rows):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    tmp = path + ".part"
-    with open(tmp, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n",
-                           extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(tmp, path)
+write_csv = common.write_csv
 
 
 def clean_description(text, vocab, names, lang, own_ref, counters, comps=None, pid=""):

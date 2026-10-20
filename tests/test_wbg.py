@@ -235,3 +235,13 @@ def test_a_project_whose_fetch_failed_is_tried_again(store, cohort, monkeypatch)
     wbg.prepare(sel, data=store)
     assert "fetch_procurement.py" in calls
     assert "fetch.py" not in calls, "the appraisal fetch succeeded and is not repeated"
+
+
+def test_run_walks_the_stages_in_order():
+    assert wbg.stages_between() == ["fetch", "prepare", "embed", "search", "classify", "measure",
+                                    "link", "publish"]
+    assert wbg.stages_between("search", "measure") == ["search", "classify", "measure"]
+    assert wbg.stages_between(only="link") == ["link"]
+    assert wbg.stages_between(stop="audit")[-1] == "audit"
+    with pytest.raises(SystemExit):
+        wbg.stages_between("measure", "search")

@@ -97,7 +97,7 @@ def test_a_reader_run_reads_no_corpus(tmp_path, monkeypatch):
     """measure.current_run (the load, the types stage) must not open the
     matrix or the texts: it names the folder from the inputs alone."""
     import measure
-    import candidates
+    import search
     import classify
     import labels
     lab = tmp_path / "labels"
@@ -116,7 +116,10 @@ def test_a_reader_run_reads_no_corpus(tmp_path, monkeypatch):
             w.writerows(rows)
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
     monkeypatch.setattr(classify, "TAXONOMY", str(lab))
-    monkeypatch.setattr(candidates, "current", lambda *a, **k: str(tmp_path / "cand-1"))
+    folder = tmp_path / "search" / "cra-1"
+    folder.mkdir(parents=True)
+    (folder / "manifest.json").write_text("{}")
+    monkeypatch.setattr(search, "run_folder", lambda *a, **k: (str(folder), []))
     monkeypatch.setattr(classify, "current_run", lambda *a, **k: None)
     monkeypatch.setattr(measure, "paragraph_rows", lambda d: (_ for _ in ()).throw(AssertionError("corpus read")))
     run = measure.Run("cra", str(tmp_path), build=False, log=lambda *_: None)

@@ -39,9 +39,7 @@ GAPS = [(1.45, 3), (1.30, 3), (1.60, 3), (1.45, 2), (1.45, 4)]   # default first
 WORD_MINIMUMS = [3, 2, 4]                                        # default first
 
 
-def _read(path):
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+from common import read_csv as _read  # noqa: E402
 
 
 def sample_documents(data, n):

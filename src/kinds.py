@@ -43,6 +43,7 @@ import requests
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import classify  # noqa: E402
+import common  # noqa: E402
 import labels  # noqa: E402
 import measure  # noqa: E402
 
@@ -177,7 +178,7 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
         return out
-    missing = [r for r in requests_ if classify.read_cached(root, r[4]) is None]
+    missing = [r for r in requests_ if common.read_json(root, r[4]) is None]
     log(f"  stored already: {len(requests_) - len(missing)}; to ask: {len(missing)}")
     if dry_run:
         log("  --dry-run: nothing asked, nothing written")
@@ -192,10 +193,10 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
         except classify.TransportError as exc:
             log(f"  {lid} run {k}: failed ({exc}); nothing written, run again to resume")
             return None
-        classify.write_cached(root, sha, response)
+        common.write_json(root, sha, response)
     rows, md = [], [f"# Proposed types for {name}", ""]
     for lid, k, chosen, body, sha in requests_:
-        response = classify.read_cached(root, sha)
+        response = common.read_json(root, sha)
         md.append(f"## {lid}, run {k} ({response.get('model', '')})\n")
         for t in parse_types(response):
             ex = [chosen[i - 1]["unit_id"] for i in t["examples"] if 0 < i <= len(chosen)]
@@ -231,9 +232,9 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
         w.writeheader()
         w.writerows(listed)
     os.replace(default + ".part", default)
-    usage = [classify.read_cached(root, r[4]).get("usage", {}) for r in requests_]
+    usage = [common.read_json(root, r[4]).get("usage", {}) for r in requests_]
     manifest = {"label_set": name, "measure_run": os.path.basename(run_folder), "model": model,
-                "models_served": sorted({classify.read_cached(root, r[4]).get("model", "")
+                "models_served": sorted({common.read_json(root, r[4]).get("model", "")
                                          for r in requests_}),
                 "runs": runs, "max_types": max_types,
                 "units": {lid: len(us) for lid, us in units.items()},
@@ -245,7 +246,7 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
         json.dump(manifest, fh, indent=1, sort_keys=True)
     os.replace(part, out)
     classify.record_spend(data, "types-propose", name, model, len(missing),
-                          sum(float((classify.read_cached(root, r[4]).get("usage") or {}).get("cost") or 0)
+                          sum(float((common.read_json(root, r[4]).get("usage") or {}).get("cost") or 0)
                               for r in missing), time.time() - t0, os.path.basename(out))
     log(f"  {len(rows)} types proposed over {runs} run(s); US${manifest['cost_usd']:.4f}; "
         f"the first run's {len(listed)} are the list ({default}) until "

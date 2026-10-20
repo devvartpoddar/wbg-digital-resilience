@@ -24,7 +24,7 @@ def test_the_same_data_is_the_same_release(tmp_path):
     assert release.cut(data, log=lambda *_: None) == first
     rows = release.releases(data)
     assert [r["release_id"] for r in rows] == [first] and rows[0]["packages"] == "1"
-    assert os.path.exists(os.path.join(data, "releases", first, "tables.tar.gz"))
+    assert os.path.exists(os.path.join(data, "releases", first, "manifest.json"))
 
 
 def test_changed_data_is_a_new_release_and_the_old_one_is_kept(tmp_path):
