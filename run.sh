@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Everything: put data/ in its layout, fetch any cohort project not fetched
-# before, rebuild every stage whose code or inputs changed, load Postgres,
-# write review sheets and the run report. Unchanged work is skipped.
+# before, rebuild every stage whose code or inputs changed and write
+# Postgres. Unchanged work is skipped.
 #
 #   ./run.sh                 everything
 #   ./run.sh --update        fetch every project again first

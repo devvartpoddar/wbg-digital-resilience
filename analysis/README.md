@@ -20,8 +20,6 @@ A label set's name is its file name without `.csv`, and the same name must not e
 ./wbg evaluate cra --column "Resilient telecom"   # the funnel against the hand-labelled activities workbook
 ./wbg types cra                # propose the measure's types from its committed units (read, then approve)
 ./wbg types cra --assign       # assign every committed unit to the approved types
-./wbg candidates cra           # the candidates alone, with p_commitment, firmness, pattern types, reading order
-./wbg words cra cra            # the words that set the measure's candidates apart
 ```
 
 Changing what the dashboards show is rows too, and free: merge two types (`merge_into`), rename one (`display_name`), regroup the assets (`assets_groups.csv`), then `src/load_pg.py`; nothing is asked again. Dropping a type from the list or changing its definition re-asks the list (US$0.02 per measure on the 70-project runs), because the assignment request carries every question at once.

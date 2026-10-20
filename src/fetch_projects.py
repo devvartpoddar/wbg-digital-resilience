@@ -29,13 +29,48 @@ FIELDS = ("id", "project_name", "status", "boardapprovaldate", "approvalfy",
           "sector2", "sector3")
 
 
-def fetch_record(project_id):
-    """The project's record, or {} when the interface has none."""
-    q = urllib.parse.urlencode({"format": "json", "id": project_id,
-                                "fl": ",".join(FIELDS)})
-    data = get(f"{PROJECTS}?{q}", timeout=60).json()
+# The interface's v3 form holds records v2 does not (81 of 251 cohort
+# projects had none in v2 on 2026-10-20, most of them P5xxxxx operations)
+# and is the more current of the two: it carries the revised closing date
+# after an extension (P171305: v2 30 May 2026, v3 31 August 2027) and the
+# commitment after cancellations. It lacks the fiscal year, the lending
+# instrument, the Global Practice and the sectors, which v2 gives.
+PROJECTS_V3 = "https://search.worldbank.org/api/v3/projects"
+V3_FIRST = ("project_name", "status", "boardapprovaldate", "closingdate", "regionname",
+            "countrycode", "countryshortname")
+
+
+def _record(url, project_id):
+    q = urllib.parse.urlencode({"format": "json", "id": project_id, "fl": ",".join(FIELDS)})
+    data = get(f"{url}?{q}", timeout=60).json()
     rec = (data.get("projects") or {}).get(project_id) or {}
     return {k: rec[k] for k in FIELDS if k in rec}
+
+
+def merge(v2, v3):
+    """One record from both forms: v3 first for the fields in V3_FIRST and
+    for the commitment (v3 gives it in US$, v2 in US$ millions; stored in
+    millions), v2 for the rest. record_source says which forms answered."""
+    rec = dict(v2)
+    for k in V3_FIRST:
+        if v3.get(k):
+            rec[k] = v3[k]
+    try:
+        rec["curr_total_commitment"] = f"{float(v3['curr_total_commitment']) / 1e6:g}"
+        rec["commitment_source"] = "v3"
+    except (KeyError, TypeError, ValueError):
+        if v2.get("curr_total_commitment"):
+            rec["commitment_source"] = "v2"
+    present = [n for n, r in (("v2", v2), ("v3", v3)) if set(r) - {"id"}]
+    if present:
+        rec["record_source"] = "+".join(present)
+    return rec
+
+
+def fetch_record(project_id):
+    """The project's record from both forms of the interface, or {} when
+    neither has one."""
+    return merge(_record(PROJECTS, project_id), _record(PROJECTS_V3, project_id))
 
 
 def fetch(project_ids, data, delay=0.3):

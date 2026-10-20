@@ -56,3 +56,14 @@ def test_an_interrupted_cut_is_finished_by_the_next_one(tmp_path, monkeypatch):
     assert release.cut(data, log=lambda *_: None) == rid
     assert [r["release_id"] for r in release.releases(data)] == [rid]
     assert release.status(data)[1].startswith(f"data:     release {rid}")
+
+
+def test_the_latest_fetch_date_ignores_the_old_stamp(tmp_path):
+    """A project stamped "before stages.json" must not hide the latest date
+    (as text it sorts after every ISO date and loaded as NULL)."""
+    import json
+    import release
+    (tmp_path / "reports").mkdir()
+    (tmp_path / "reports" / "stages.json").write_text(json.dumps({"fetched": {
+        "procurement": {"P1": "before stages.json", "P2": "2026-10-19", "P3": "2026-10-13"}}}))
+    assert release._fetched(str(tmp_path))["procurement"] == {"projects": 3, "latest": "2026-10-19"}

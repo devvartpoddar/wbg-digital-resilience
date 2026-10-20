@@ -39,51 +39,73 @@ def publish(data, *, sets=None, projects=None, links=False, log=print, conn=None
     conn = conn or connect()
     written = {}
     try:
-        load_pg.prepare(conn)
-        sets = sorted(sets) if sets else None
-        for table, cols, rows in (
-                ("labels", ["label_set", "label_id", "name", "definition", "active", "version",
-                            "folder"], load_pg.label_rows()),
-                ("measure_types", ["label_set", "label_id", "type_id", "type_name", "definition",
-                                   "merged_from"], load_pg.type_rows()),
-                ("label_groups", ["label_set", "label_id", "group_id", "group_name"],
-                 load_pg.group_rows())):
-            n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", None,
-                                                 f"publish:{_now()}")
-            written[table] = n
-        for table, cols, finder in (
-                ("search_paragraphs", load_pg.ROLLUP_COLS,
-                 lambda: load_pg.search_tables(data, sets)),
-                ("paragraph_grades", load_pg.CLASSIFY_COLS,
-                 lambda: load_pg.classify_rows(data, projects, None, sets)),
-                ("measure_findings", load_pg.MEASURE_COLS,
-                 lambda: load_pg.measure_rows(data, projects, sets))):
-            sha, rows = finder()
-            if sha is None:
-                continue
-            keys = sets if sets else None
-            n, bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", keys, sha)
-            written[table] = n
-            if bad:
-                log(f"  {table}: unparseable -> NULL: "
-                    + ", ".join(f"{k}={v}" for k, v in sorted(bad.items())))
-        if links:
-            sha, assets_, pairs_ = load_pg.link_rows(data, projects)
-            if sha is not None:
-                for table, cols, rows in (("package_assets", load_pg.ASSET_LINK_COLS, assets_),
-                                          ("commitment_packages", load_pg.PAIR_LINK_COLS, pairs_)):
-                    n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "package_id",
-                                                         None, sha)
-                    written[table] = n
-        # Keys, comments, views and functions, every time: sql/views/ is
-        # code, and a publish is when a changed view or function lands.
-        load_pg.finish(conn, log=log)
+        # One transaction for every table and the views rebuilt over them: a
+        # dashboard sees the old state or the new one, never a measure gone
+        # between two writes or a view missing while its table is replaced.
+        with conn.transaction():
+            _publish(conn, data, sets, projects, links, log, written)
     finally:
         if own:
             conn.close()
     log("  postgres: " + ", ".join(f"{t} {n:,}" for t, n in written.items())
         + f" ({time.time() - t0:.0f}s)")
     return written
+
+
+def _publish(conn, data, sets, projects, links, log, written):
+    """The writes of publish(), inside its transaction."""
+    load_pg.prepare(conn)
+    sets = sorted(sets) if sets else None
+    for table, cols, rows in (
+            ("labels", ["label_set", "label_id", "name", "definition", "active", "version",
+                        "folder"], load_pg.label_rows()),
+            ("measure_types", ["label_set", "label_id", "type_id", "type_name", "definition",
+                               "merged_from"], load_pg.type_rows()),
+            ("label_groups", ["label_set", "label_id", "group_id", "group_name"],
+             load_pg.group_rows())):
+        n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", None,
+                                             f"publish:{_now()}")
+        written[table] = n
+    for table, cols, finder in (
+            ("search_paragraphs", load_pg.ROLLUP_COLS,
+             lambda: load_pg.search_tables(data, sets)),
+            ("paragraph_grades", load_pg.CLASSIFY_COLS,
+             lambda: load_pg.classify_rows(data, projects, None, sets)),
+            ("measure_findings", load_pg.MEASURE_COLS,
+             lambda: load_pg.measure_rows(data, projects, sets))):
+        sha, rows = finder()
+        if sha is None:
+            continue
+        # Only the sets with a current run are replaced; a set named but
+        # not found (being re-run, or run over another scope) keeps its
+        # rows, and says so.
+        keys = load_pg.found_sets(sha)
+        missing = sorted(set(sets or []) - set(keys))
+        if missing:
+            log(f"  {table}: no current run for {', '.join(missing)}; their rows are kept")
+        n, bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", keys, sha)
+        load_pg.purge_removed_sets(conn, table)
+        written[table] = n
+        if bad:
+            log(f"  {table}: unparseable -> NULL: "
+                + ", ".join(f"{k}={v}" for k, v in sorted(bad.items())))
+    # The graded sheets' headline numbers (./wbg check --evaluate) are small
+    # and change with every evaluation: written whole on every publish.
+    qpath = os.path.join(data, "labels", "measure_quality.csv")
+    if os.path.exists(qpath):
+        written["measure_quality"] = load_pg.load_table(conn, data, "measure_quality",
+                                                        "labels/measure_quality.csv")[0]
+    if links:
+        sha, assets_, pairs_ = load_pg.link_rows(data, projects)
+        if sha is not None:
+            for table, cols, rows in (("package_assets", load_pg.ASSET_LINK_COLS, assets_),
+                                      ("commitment_packages", load_pg.PAIR_LINK_COLS, pairs_)):
+                n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "package_id",
+                                                     None, sha)
+                written[table] = n
+    # Keys, comments, views and functions, every time: sql/views/ is
+    # code, and a publish is when a changed view or function lands.
+    load_pg.finish(conn, log=log)
 
 
 def _now():

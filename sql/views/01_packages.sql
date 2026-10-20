@@ -15,9 +15,5 @@ SELECT * FROM wbg.packages_with_project WHERE in_latest_plan;
 COMMENT ON VIEW wbg.latest_plan_packages IS
   'Packages that are in their project''s most recently disclosed procurement plan.';
 
-DROP VIEW IF EXISTS wbg.upcoming_packages;
-CREATE VIEW wbg.upcoming_packages AS
-SELECT * FROM wbg.packages_with_project
-WHERE status IN ('Pending', 'Pending Implementation', 'Under Review', 'Planned');
-COMMENT ON VIEW wbg.upcoming_packages IS
-  'Packages still to come (status Pending, Pending Implementation, Under Review or Planned), whether or not in the latest plan: in_latest_plan says which. A planned date already past is what the plan records, not evidence of delay.';
+-- upcoming_packages is defined in 03_procurement_links.sql, from the package
+-- status that notices and awards give.

@@ -57,6 +57,7 @@ TABLES = [
     ("packages", "procurement/packages.csv"),
     ("notices", "procurement/notices.csv"),
     ("awards", "procurement/awards.csv"),
+    ("measure_quality", "labels/measure_quality.csv"),
 ]
 # Names earlier layouts used in wbg, and tables no longer loaded; dropped
 # once so nothing stale lingers. The earlier wbg_internal schema is folded
@@ -205,9 +206,25 @@ def replace_rows(conn, table, cols, rows, key_col, key_values, source_sha, relea
     created = False
     with conn.transaction(), conn.cursor() as cur:
         if not _exists(conn, table) or _columns(conn, ident) != set(names):
-            cur.execute(f"DROP TABLE IF EXISTS {ident} CASCADE")
+            # The columns changed (new code): the table is made again, and
+            # the rows of every key this call does not replace are carried
+            # into it (the columns both shapes share), so a set whose run is
+            # not found now keeps what it had rather than vanishing.
+            keep = None
+            if _exists(conn, table) and key_values is not None:
+                keep = sorted(_columns(conn, ident) & set(names))
+                cur.execute(f"ALTER TABLE {ident} RENAME TO {table}__old")
+            else:
+                cur.execute(f"DROP TABLE IF EXISTS {ident} CASCADE")
             cur.execute(f"CREATE TABLE {ident} ("
                         + ", ".join(f'"{n}" {k}' for n, k in zip(names, kinds)) + ")")
+            if keep:
+                kc = ", ".join(f'"{c}"' for c in keep)
+                cur.execute(f'INSERT INTO {ident} ({kc}) SELECT {kc} FROM {PUBLIC}.{table}__old '
+                            f'WHERE NOT ("{S.rename(table, key_col)}" = ANY(%s))',
+                            (list(key_values),))
+            if keep is not None:
+                cur.execute(f"DROP TABLE {PUBLIC}.{table}__old CASCADE")
             for nm in names:
                 if nm in S.INDEXED:
                     cur.execute(f'CREATE INDEX ON {ident} ("{nm}")')
@@ -361,6 +378,24 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
                 "p_committed_calibrated", "types_yes", "best_type", "best_p", "model_served",
                 "cost", "text"]
+
+
+def found_sets(source_sha):
+    """The label sets a run-table source (the run folder names joined with
+    "|") holds a current run for: the keys a write may replace. A set
+    whose current run is not found (being re-run, or made over another
+    scope) is not among them, and its rows are left as they were."""
+    names = set(labels.label_sets())
+    return sorted({r.rsplit("-", 1)[0] for r in (source_sha or "").split("|") if "-" in r}
+                  & names)
+
+
+def purge_removed_sets(conn, table):
+    """Delete the rows of label sets that no longer exist in inputs/ or
+    analysis/labels/: the one way a set's rows leave a run table."""
+    if _exists(conn, table):
+        conn.execute(f"DELETE FROM {S.qualified(table)} WHERE label_set <> ALL(%s)",
+                     (list(labels.label_sets()),))
 
 
 def _run_rows(data, finder, file, sets=None):
@@ -724,7 +759,11 @@ def main():
             n, bad = load_rows(conn, table, cols, rows, sha, release_id, after=after)
             print(f"  {table:<20} {n:>8} rows{note(bad)}{took(t0)}")
 
-    with psycopg.connect(args.dsn, autocommit=True) as conn:
+    # One transaction for the whole load, views included: a reader (a
+    # Metabase card) sees the database as it was or as it is now, never a
+    # table replaced and its views not yet put back. Readers of a replaced
+    # table wait for the commit instead.
+    with psycopg.connect(args.dsn, autocommit=True) as conn, conn.transaction():
         prepare(conn)
         for table, rel in TABLES:
             path = os.path.join(args.data, rel)
@@ -743,13 +782,27 @@ def main():
         sha, rows = search_unit_rows(args.data)
         derived(conn, "search_units", sha, SEARCH_UNIT_COLS, rows)
 
-        sha, rollup = search_tables(args.data)
-        derived(conn, "search_paragraphs", sha, ROLLUP_COLS, rollup)
-
-        sha, rows = classify_rows(args.data, projects, args.min_cosine)
-        derived(conn, "paragraph_grades", sha, CLASSIFY_COLS, rows)
-        sha, rows = measure_rows(args.data, projects)
-        derived(conn, "measure_findings", sha, MEASURE_COLS, rows)
+        # The run tables are replaced set by set: a set whose current run is
+        # not found keeps the rows it had (found_sets).
+        for table, cols, (sha, rows) in (
+                ("search_paragraphs", ROLLUP_COLS, search_tables(args.data)),
+                ("paragraph_grades", CLASSIFY_COLS,
+                 classify_rows(args.data, projects, args.min_cosine)),
+                ("measure_findings", MEASURE_COLS, measure_rows(args.data, projects))):
+            t0 = time.time()
+            if sha is None:
+                print(f"  {table:<20} skipped: no current run")
+                continue
+            if not args.force and _last_sha(conn, table) == sha:
+                print(f"  {table:<20} unchanged{took(t0)}")
+                continue
+            n, bad, _ = replace_rows(conn, table, cols, rows, "label_set", found_sets(sha), sha,
+                                     release_id)
+            conn.execute(f"INSERT INTO {LOADS} (table_name, source_sha256, row_count, loaded_at, "
+                         f"release_id) VALUES (%s, %s, %s, %s, %s)",
+                         (table, sha, n, _now(), release_id))
+            purge_removed_sets(conn, table)
+            print(f"  {table:<20} {n:>8} rows{note(bad)}{took(t0)}")
 
         sha, assets_, pairs_ = link_rows(args.data, projects)
         derived(conn, "package_assets", sha, ASSET_LINK_COLS, assets_)

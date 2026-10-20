@@ -12,7 +12,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 from paths import file_sha256  # noqa: E402
 
 
-def test_a_checksum_is_remembered_and_forgotten_when_the_file_changes(tmp_path):
+def test_a_checksum_is_remembered_and_forgotten_when_the_file_changes(tmp_path, monkeypatch):
+    import paths
+    monkeypatch.setattr(paths, "REMEMBER_MIN_BYTES", 0)
     f = tmp_path / "big.bin"
     f.write_bytes(b"a" * 1000)
     first = file_sha256(str(f))
@@ -30,6 +32,14 @@ def test_a_checksum_is_remembered_and_forgotten_when_the_file_changes(tmp_path):
     assert file_sha256(str(f)) == "0" * 64   # trusted: size and mtime match (by design)
     f.write_bytes(b"a" * 999)
     assert file_sha256(str(f)) != "0" * 64
+
+
+def test_a_small_file_gets_no_sidecar(tmp_path):
+    """Hand-kept inputs are small; hashing one must not write beside it."""
+    f = tmp_path / "labels.csv"
+    f.write_text("id,name\n1,a\n")
+    assert file_sha256(str(f)) == file_sha256(str(f), remember=False)
+    assert not (tmp_path / "labels.csv.sha256").exists()
 
 
 def test_the_unit_index_is_computed_once_per_state_of_its_inputs(tmp_path, monkeypatch):

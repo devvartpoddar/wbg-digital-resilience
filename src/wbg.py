@@ -300,10 +300,16 @@ def run(args, data):
         elif stage == "classify":
             _run("classify.py", "assets", *dry, *scope, data=data)
         elif stage == "measure":
+            # Each set's three steps leave Postgres alone; the stage writes
+            # every set once at the end (a publish rebuilds every view).
+            quiet = dry or ["--no-publish"]
             failed = _parallel(args.jobs, sets, lambda n: [
-                ["measure.py", n, "--workers", str(args.workers), *dry, *scope],
+                ["measure.py", n, "--workers", str(args.workers), *quiet, *scope],
                 ["kinds.py", n, *dry, *scope],
-                ["kinds.py", n, "--assign", *dry, *scope]], data)
+                ["kinds.py", n, "--assign", *quiet, *scope]], data)
+            done = [n for n in sets if n not in failed]
+            if done and not args.dry_run:
+                _run("store.py", *done, *scope, data=data)
         elif stage == "link":
             _run("link_packages.py", *dry, *scope, data=data)
         elif stage == "publish":
@@ -473,7 +479,12 @@ def prepare(sel=None, update=False, data=None, fetch=True):
         for kind, script in (("appraisal", "fetch.py"), ("procurement", "fetch_procurement.py"),
                              ("projects", "fetch_projects.py")):
             done = state.setdefault("fetched", {}).setdefault(kind, {})
-            todo = [p for p in sel.ids if update or p not in done]
+            # Project records (status, closing date, commitment) change under a
+            # restructuring or an extension and cost two small requests each:
+            # they are fetched again once a day. Documents and procurement are
+            # fetched once, and again with --update.
+            todo = [p for p in sel.ids if update or p not in done
+                    or (kind == "projects" and done[p] != today)]
             if not todo:
                 continue
             args = ["--projects", ",".join(todo)]
@@ -928,6 +939,11 @@ def main(argv=None):
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
+    p = sub.add_parser("requests", help="run the measures asked for from the dashboard "
+                                        "(wbg_requests.measure_requests), one at a time, "
+                                        "US$1 cap each")
+    p.add_argument("--once", action="store_true", help="one request, then stop")
+    p.add_argument("--schema", action="store_true", help="create the request table only")
     sub.add_parser("audit", help="the parse and procurement audits (reports in data/reports/)")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
                                            "paragraph, component-tag and sentence settings")
@@ -967,7 +983,7 @@ def main(argv=None):
     if args.cmd == "classify":
         extra = (["--dry-run"] if args.dry_run else []) + \
             (["--limit", str(args.limit)] if args.limit else []) + \
-            (["--min-cosine", str(args.min_cosine)] if args.min_cosine else [])
+            ["--min-cosine", str(args.min_cosine)]
         _run("classify.py", args.label_set, *extra, *_scope(args), data=data)
         return 0
     if args.cmd == "measure":
@@ -1007,6 +1023,10 @@ def main(argv=None):
              *(["--text-regex", args.text_regex] if args.text_regex else []),
              "--context", args.context, "--gate", args.gate, "--asset-min", str(args.asset_min),
              *_scope(args), data=data)
+        return 0
+    if args.cmd == "requests":
+        _run("measure_requests.py", *(["--once"] if args.once else []),
+             *(["--schema"] if args.schema else []), data=data)
         return 0
     if args.cmd == "audit":
         _run("audit.py", data=data, tail=2)

@@ -66,7 +66,18 @@ be left overnight; everything else is minutes.
 
 ## What Metabase sees
 
-Schema `wbg` only. Start cards from the views, not the tables:
+Schema `wbg` only. Start cards from the views, not the tables. The
+dashboards built from 2026-10-21 read the views of `docs/methodology.md`
+section 5f: `commitments` (the grain of every page), `commitment_evidence`,
+`commitment_sentences`, `commitment_package_status`, `package_status`,
+`project_header`, `project_documents`, `project_components`,
+`project_assets`, `measure_summary`, `measure_asset_matrix`,
+`measure_type_asset_flow`, `measure_country_type`,
+`commitment_status_by_quarter`, `type_procurement_profile`,
+`measure_overlap`, the `filter_*` views, and the functions `commitments_under()`,
+`similar_projects()` and `try_phrase()`. Their readings (link levels, conditional line, package-link threshold,
+near-copy share) are one edit in `sql/views/13_dashboard_settings.sql`, and
+the due-date rule one edit in `wbg.due_date()` (`03_procurement_links.sql`). Earlier cards read:
 
 - `measure_findings_by_project`: one row per project and measure, with the
   assets linked, how delivered, by whom (the project list and map);
@@ -152,3 +163,17 @@ US$0.02), after which the measure appears in every dashboard filter.
   the new cohort, and it refits the calibration.
 - The elusion sheet (`./wbg check <set> --elusion`) when there is time.
 - Copy the run note to the vault (AGENTS.md rule 8).
+
+## New measures from the dashboard
+
+`./wbg requests` runs what the New measure form queued in
+`wbg_requests.measure_requests`, one request at a time, US$1 each and US$3 a
+day at most (`src/measure_requests.py`; `--schema` creates the table, `--once`
+runs one). Three things live in yggdrasil, not here, and are a card of their
+own: a Postgres role that can only `INSERT` and `SELECT` on
+`wbg_requests.measure_requests`; a second Metabase database connection using
+that role, with model actions on (the existing connection stays read-only);
+and a timer that runs `./wbg requests` (every 15 minutes is plenty). A
+requested measure's files sit in `data/requested_labels/` until a person
+copies them into `analysis/labels/` and deletes them there.
+

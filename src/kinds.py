@@ -186,14 +186,27 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
     if missing and not api_key:
         raise SystemExit("types: no credential: set $WBG_OPENROUTER_KEY")
     t0 = time.time()
-    for lid, k, chosen, body, sha in missing:
-        try:
-            response = generate(body, api_key=api_key)
-            parse_types(response)
-        except classify.TransportError as exc:
-            log(f"  {lid} run {k}: failed ({exc}); nothing written, run again to resume")
-            return None
+
+    def one(req):
+        lid, k, chosen, body, sha = req
+        response = generate(body, api_key=api_key)
+        parse_types(response)
         common.write_json(root, sha, response)
+
+    # The proposal calls are independent (a seeded order each): asked side
+    # by side, a measure's three take the time of one.
+    from concurrent.futures import ThreadPoolExecutor
+    with ThreadPoolExecutor(max_workers=max(1, min(len(missing), 4))) as pool:
+        futures = [(req, pool.submit(one, req)) for req in missing]
+    failed = []
+    for (lid, k, *_), f in futures:
+        try:
+            f.result()
+        except classify.TransportError as exc:
+            failed.append(f"{lid} run {k}: {exc}")
+    if failed:
+        log(f"  {'; '.join(failed)}: failed; nothing written, run again to resume")
+        return None
     rows, md = [], [f"# Proposed types for {name}", ""]
     for lid, k, chosen, body, sha in requests_:
         response = common.read_json(root, sha)
@@ -412,6 +425,8 @@ def main():
     ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--no-publish", action="store_true",
+                    help="leave Postgres alone (./wbg run publishes once per stage)")
     args = ap.parse_args()
     import embed
     key = "" if args.dry_run else embed.read_key("")
@@ -420,7 +435,7 @@ def main():
     if args.assign:
         out = assign(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
                      read_at=args.read_at, **kw)
-        if out and not args.dry_run:
+        if out and not (args.dry_run or args.no_publish):
             import store
             store.try_publish(args.data, sets=[args.label_set], projects=kw["projects"])
     else:

@@ -694,9 +694,7 @@ def main():
         for k in sorted(stats["rate_limit"]):
             out.append(f"  {k}: {stats['rate_limit'][k]}")
     out.append("")
-    out.append("Requests are issued serially. A cohort ten to twenty times this "
-               "size wants either concurrency here or the batch transport; "
-               "embed_texts() is the only function either one changes.")
+    out.append(f"Requests are issued {EMBED_WORKERS} at a time (EMBED_WORKERS).")
 
     body = "\n".join(out)
     with open(rep_path, "w", encoding="utf-8") as fh:

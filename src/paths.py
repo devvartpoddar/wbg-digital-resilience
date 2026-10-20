@@ -106,10 +106,14 @@ LAYOUT = {
     "links": "links",
     "classify": "classify",
     "labels": "labels",
+    "requested_labels": "requested_labels",
     "releases": "releases",
     "fetch_status": "reports/fetch_status",
     "archive": "archive",
 }
+
+
+REMEMBER_MIN_BYTES = 1 << 20
 
 
 def file_sha256(path, remember=True):
@@ -119,10 +123,14 @@ def file_sha256(path, remember=True):
     matrix, the paragraphs table), and hashing them again on every call was
     minutes of each run on this hardware; a stale sidecar can only name a
     digest for bytes that have since changed, and the size and mtime check
-    rules that out."""
+    rules that out. A file under REMEMBER_MIN_BYTES is hashed afresh and
+    gets no sidecar: it costs microseconds, and the hand-kept inputs
+    (inputs/, analysis/labels/) are small and must not gain files beside
+    them on every run."""
     import hashlib
     st = os.stat(path)
     side = path + ".sha256"
+    remember = remember and st.st_size >= REMEMBER_MIN_BYTES
     if remember:
         try:
             with open(side, encoding="utf-8") as fh:

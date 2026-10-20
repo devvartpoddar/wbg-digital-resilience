@@ -1,55 +1,55 @@
 # AGENTS.md
 
-**Read this before writing code here. Read `docs/methodology.md` before changing what the pipeline does.**
-
 ## What this is
 
-The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement records, finds which digital assets a project finances and which climate resilience measures it commits to for them, and links that to upcoming procurement. The output helps an advisor decide which Task Team Leaders (TTLs, the staff leading each operation) to talk to, and when. Anything outside the four questions in `docs/methodology.md` does not belong here.
+The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement records, finds which digital assets a project finances and which climate resilience measures it commits to for them, and links that to upcoming procurement, so an advisor knows which Task Team Leaders (TTLs) to talk to, and when. Anything outside the four questions at the top of `docs/methodology.md` does not belong here.
 
-**Two parts.** `src/` is the pipeline: fetch, prepare, embed, search, classify, measure, link, publish (`./wbg run`). It takes any label set by name and holds no measure's definition; the few settings it does hold (the pool threshold, the link threshold, the activity kinds) are constants named in `docs/methodology.md`. `inputs/taxonomy/` holds the assets (changed rarely), `analysis/labels/` the measures and any set being tried (changed freely), `analysis/sql/` questions over the Postgres schema. Keep analysis assumptions out of `src/`; keep pipeline mechanics out of `analysis/`.
+`src/` is the pipeline (`./wbg run`: fetch > prepare > embed > search > classify > measure > link > publish); it takes any label set by name and holds no measure's definition. `inputs/taxonomy/` holds the assets, `analysis/labels/` the measures, `analysis/sql/` questions over Postgres, `sql/views/` the views the dashboards read. Keep analysis assumptions out of `src/` and pipeline mechanics out of `analysis/`.
 
-**Current focus: tuning on one measure (climate risk assessment) at 70 projects against the graded sample.** The asset map and the first measure have run; the asset taxonomy was tightened once; the first sheet of 95 units is graded (definition v2: precision 0.96, recall 0.78 within the pool; the single asset link agreed on 13 of 26), the elusion sheet awaits grading, and no cut-off is chosen yet. The asset definitions are the next decision, and they are a person's. Keep model spend small: the per-question answer store makes a definition edit cheap, and `data/reports/spend.csv` says what each run cost.
+## Read little, spend little
+
+Reading and model calls are what a task costs. So:
+
+- Read `docs/methodology.md` (a short index), then **only** the `docs/method/` file for the code you change. `docs/method/history.md` is evidence, not instructions: open it only when a choice needs its numbers.
+- Find code with a search, then read the lines around it. Do not read a whole source file over 300 lines, a whole method file you are not changing, or anything under `data/` beyond the rows you need.
+- A measure is files, not code: adding or revising one needs no reading of `src/` (`docs/runbook-box.md`, "Adding a measure from the board").
+- Before any stage that calls a model, run it with `--dry-run` and read the estimate. Stop and ask if it is above US$1, or if the stage would re-ask what is already stored. Never run the whole cohort to check a change: use `--project <id>`.
+- Report in a few lines: what changed, what was run, the spend from `data/reports/spend.csv`.
 
 ## Where it runs
 
-**One box, one folder.** Everything lives in `/ygg/projects/wbg-digital-resilience/`. Do not read or write anywhere else on the box.
+Everything lives in `/ygg/projects/wbg-digital-resilience/`; do not read or write elsewhere on the box. Board cards work in `.worktrees/<task-id>`. Data is always the main checkout's `data/` (`src/paths.py` resolves it; `WBG_DATA` overrides it for tests). Python: `/opt/yggdrasil/venvs/work/bin/python`; do not pip-install, say what is missing. Postgres: schema `wbg` in `postgresql:///work` (`WBG_PG` overrides it). Hardware: four slow cores, 15 GB, no graphics card; stream large files.
 
-- **Code**: the main checkout is `/ygg/projects/wbg-digital-resilience`. Board cards work in `.worktrees/<task-id>` inside it, and that folder is deleted when the card completes.
-- **Data**: always the main checkout's `data/`, never a worktree's. `src/paths.py` resolves this through git, so every script does the right thing from a worktree. Do not hard-code another data path. `WBG_DATA` overrides it for tests.
-- **Python**: `/opt/yggdrasil/venvs/work/bin/python`. Do not pip-install. If a package is missing, say so; adding one is a change to the yggdrasil repo.
-- **Postgres**: schema `wbg` in database `work` (`postgresql:///work`, no password). `WBG_PG` overrides it.
-- **Hardware**: an Intel N150, four efficiency cores, about 15 GB of memory, no graphics card. Stream large files rather than loading them whole. Anything that needs a graphics card is the wrong design here.
-
-Run everything with `./wbg run` (`./run.sh` is the same): fetch > prepare > embed > search > classify > measure > link > publish, any stretch with `--from`, `--to` or `--only`, any sets with `--measures`, any projects with the selection filters. Every stage skips what is up to date and writes its own rows into Postgres as it finishes (`src/store.py`), so a measure is in Metabase when `./wbg add <set>` returns. A smoke run is `./wbg run --to prepare --project <id>` followed by `./wbg summary --project <id>`.
+A smoke run is `./wbg run --to prepare --project <id>` then `./wbg summary --project <id>`. Every stage skips what is up to date and writes its own rows to Postgres.
 
 ## The principle
 
-Every decision the pipeline makes must be **repeatable** (same text, same answer), **scored** (a probability with a chosen cut-off) and **checkable** (measured against examples a person checked). A model that meets all three may be used, including an external one, provided its exact version is pinned and every response is stored on the box and re-read on re-runs rather than requested again. See `docs/methodology.md`.
+Every decision is **repeatable** (same text, same answer), **scored** (a probability with a chosen cut-off) and **checkable** (measured against examples a person checked). An external model may be used if its exact version is pinned and every response is stored on the box and re-read on re-runs.
 
 ## Rules
 
-1. **Never delete data to save space, and never treat a stage's input as disposable.** If disk is a problem, say so.
-2. **No document text in git.** Tables carry identifiers, offsets and checksums. Text lives in `data/` and in Postgres, on the box. Test fixtures are invented.
-3. **Hand-maintained inputs are read, never written.** `inputs/config/`, `inputs/taxonomy/` and `analysis/labels/` are kept by people. Changing an asset definition invalidates every label collected under it, so if a task seems to need it, stop and ask. A set in `analysis/labels/` may be added or revised freely: every run is keyed on its exact wording, and grades are keyed on the question they were given under.
-4. **Secrets come from the environment or the project key file.** The embedding key is `$WBG_OPENROUTER_KEY` or `.secrets/wbg-openrouter-key` in the main checkout (gitignored, mode 0600, owned by the account that runs the pipeline). Never in a committed file, a command line or a log. If you see one anywhere else, stop, say so and recommend rotation.
-5. **Identifiers are deterministic.** A re-run on unchanged input produces byte-identical identifiers and outputs.
-6. **Stages are resumable and skip unchanged work**, keyed on content checksums. On this hardware, reprocessing everything is expensive in hours, not just in principle.
-7. **The parse must be reproducible.** Identifiers are positional, so pin tool versions and check `text_sha256` on re-parse. A silent boundary shift repoints every label.
-8. **Reports go to the notes vault, never the repository.** Run `src/run_report.py`, then copy the note it writes in `data/reports/` to `Projects/WBG Digital Resilience/Reports/` with the notes tools and add a line to that folder's `README.md` index. Git holds code, hand-maintained inputs and docs, nothing else.
-9. **Labels change often.** Key them by the SHA-256 of the unit's text plus the name of the label set, never by position alone, and let nothing but evaluation read them.
+1. Never delete data to save space, and never treat a stage's input as disposable. If disk is a problem, say so.
+2. No document text in git: tables carry identifiers, offsets and checksums. Test fixtures are invented.
+3. `inputs/config/`, `inputs/taxonomy/` and `analysis/labels/` are kept by people: read, never written by code. Changing an asset definition invalidates every label under it: stop and ask. A set in `analysis/labels/` may be added or revised freely.
+4. Secrets come from the environment or `.secrets/wbg-openrouter-key` (mode 0600). Never in a committed file, a command line or a log; if you see one anywhere else, stop, say so and recommend rotation.
+5. Identifiers are deterministic: a re-run on unchanged input gives byte-identical ids and outputs.
+6. Stages are resumable and skip unchanged work, keyed on content checksums.
+7. The parse must be reproducible: pin tool versions and check `text_sha256` on re-parse.
+8. Reports go to the notes vault, never the repository: run `src/run_report.py`, copy its note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` and add a line to that folder's `README.md`.
+9. Labels are keyed by the SHA-256 of the unit's text plus the label set and question, never by position, and only evaluation reads them.
 
 ## Language in anything a person reads
 
-Plain language; expand every abbreviation on first use. No claim beyond what the data supports: documented is not done, nothing is causal, coverage is below 100 per cent. Never characterise a country, government or institution negatively: say what a document records, not how a borrower is doing. No staff names in any committed file.
+Plain language; expand every abbreviation on first use. No claim beyond the data: documented is not done, nothing is causal, coverage is below 100 per cent. Never characterise a country, government or institution negatively. No staff names in any committed file.
 
 ## Done means
 
-- `python -m pytest` passes (run it locally; the box's worker venv has no pytest).
-- The change was run on real data, at least `./wbg prepare --project <id>` on one real project, and the output was looked at.
-- Re-running on unchanged input produces identical output; an interrupted run restarts without redoing finished work.
-- Nothing under `data/` is staged, and no new table carries document text into git.
-- `docs/methodology.md` says what the code now does.
+- `python -m pytest` passes (locally; the box's venv has no pytest).
+- The change was run on real data (at least one project) and the output looked at.
+- A re-run on unchanged input gives identical output; an interrupted run restarts without redoing finished work.
+- Nothing under `data/` is staged.
+- The `docs/method/` file covering the code says what it now does.
 
 ## When unsure
 
-**Say so and stop.** Do not guess at an asset boundary, a measure definition, a threshold or whether a commitment counts. Those are judgements for people. A task that halts with a clear question is a good outcome; a plausible-looking table built on a guess is the worst one.
+Say so and stop. Do not guess at an asset boundary, a measure definition, a threshold or whether a commitment counts: those are judgements for people. A task that halts with a clear question is a good outcome; a plausible table built on a guess is the worst one.

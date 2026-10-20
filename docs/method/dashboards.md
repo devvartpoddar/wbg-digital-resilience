@@ -1,0 +1,55 @@
+# What the dashboards read
+
+Part of the method (`docs/methodology.md` is the index). Measured results and trials: `docs/method/history.md`.
+
+## 5f. What the dashboards read (`sql/views/13_*` to `19_*`)
+
+The dashboards (Metabase collection "WBG v2": Overview, Measure, Project, Commitment) read views, not tables, and those views are the interface: columns may be added, but one is renamed or removed only after telling Dev. Every view carries a comment written for a reader. Views a pivot or heatmap reads are flat (plain columns, no arrays), so Metabase's query builder can use them. The views are rebuilt inside the load's transaction (section 4), so a card never sees them half-built.
+
+**A commitment** is one project, one digital asset, one measure and one type (Dev's decision). The sentences that make it up are the units whose most likely grade is 3 and whose asset link is the sentence's own (`linked_asset_level = 'unit'`); there is no probability floor and no strength cut-off (Dev: show everything linked). A unit with no linked asset counts under `(no asset)`, one with no type at 0.5 under `(no type)`. `commitment_id` is `md5(project_id|label_set|asset_id|type_id)`, the id the dashboards' links pass, so a reload on unchanged data gives the same ids. A paragraph in two projects (a regional document's programme-wide part) gives its sentences to both. The readings are one row in `wbg.dashboard_settings`: the floor (0), the link levels (`unit`), the conditional line (0.3), the package-link threshold (0.5) and the near-copy share (0.5).
+
+| View or function | One row per | Reads |
+|---|---|---|
+| `dashboard_settings` | the settings (one row) | |
+| `iso_country_code()`, `https()`, `due_date()` | helpers: ISO 3166 alpha-2 (NULL for a regional code, `ZR` read as `CD`); a link made https (115 of 317 stored addresses were http); the date a package falls due | |
+| `project_info` | project: a name never blank (`(record pending: <id>)`), map-ready `country_code`, `is_regional` | projects |
+| `project_header` | project: place, status, `approval_fy`, commitment, closing date and days to it, documents read, latest document date | project_info, project_documents |
+| `project_documents` | project and document: date, kind, title, https PDF link, `is_latest`, `same_title_and_date_as` (P171305 has two papers of 27 June 2025 with different PDFs; both are kept) | documents |
+| `project_components` | component of the project's latest document that lists any (one document, so papers of one date are never added together), one per number. The cost is that document's, else the most recent document's that states one for the same component (by name, failing that by number), with `cost_document_id`, `cost_document_date`, `cost_matched_by`, and `cost_covers` = all funding sources: no table read here splits Bank from other financing, and in 32 of 148 projects the costs add up to more than 1.5 times the Bank's | components |
+| `project_assets` | project and asset: paragraphs graded financed (3), supported (2), `how` | paragraph_grades |
+| `package_status` | package: plan columns, `revised_date`, `due_date`, latest linked notice, linked signed contract, `package_status`, `next_date` | packages, notices, awards |
+| `upcoming_packages` | package still to come (Planned) | package_status |
+| `commitment_units` | committed unit that counts, per project, with its `commitment_id` | measure_findings |
+| `unit_wording_overlap` (materialised) | committed unit and project: how many other projects print it near-identically | measure_findings |
+| `unit_dropped_by_restructuring` | committed unit: whether a later paper marks its component for deletion | commitment_units, components |
+| `commitments` | commitment: project and place; measure, asset and group, type; `sentences` (copies collapsed), `paragraphs`, `documents`, `strongest_p`, `share_not_conditional`, `first_seen_date`; `same_wording_projects`; `dropped_by_restructuring`; `asset_in_asset_map`; `linked_packages`, `status`, `next_date` | the views above |
+| `commitment_evidence` | commitment and paragraph: document, kind, date, section, component, page, https PDF link to the page, sentences, strongest P, key sentence, and the paragraph with each of the commitment's sentences wrapped in 【 】, placed by character offsets (a unit's text can carry a list lead-in, so a string match would miss) | commitment_units, search_units, paragraphs |
+| `commitment_sentences` | commitment and distinct sentence: text, P(committed), conditional probability, firmness, section, document kind and date, `paragraph_id`, `page_number`, page link, `also_in_documents` | commitment_units |
+| `commitment_package_status` | commitment and package linked to any of its sentences at 0.5 | commitment_packages, package_status |
+| `package_status_order` | status, in the order a commitment takes its status | |
+| `measure_summary` | measure: definition, version, commitments, projects, countries (regional operations not counted), types, and the latest graded sheet's units, precision, recall and version | commitments, measure_quality |
+| `measure_asset_matrix`, `measure_type_asset_flow`, `measure_country_type` | measure and asset group; measure, type and asset group; measure, country and type: commitments and projects | commitments |
+| `commitment_status_by_quarter` | measure, type, country, package status and quarter (of the next date, or of signing; `Overdue`; `No date`): packages | commitment_package_status |
+| `type_procurement_profile` | measure and type: packages linked, usual method and category, median estimate, an example package | commitment_package_status |
+| `measure_overlap` | pair of measures: committed units both count, and that as a share of the smaller (a report; nothing is deduplicated) | measure_findings |
+| `filter_measures`, `filter_types`, `filter_regions`, `filter_countries` | a filter's values | |
+| `commitments_under(measure, type_, region, country, months)` | rows of `commitments` under the filters (every argument but the measure may be NULL; `months`: Overdue, or a next date within that many months) | commitments |
+| `similar_projects(commitment_id, k)` | other project whose sentences are nearest the commitment's three strongest (stored embeddings, `similar_units`, 60 each; no model call): closeness, close sentences, `commits_to_measure`, `has_same_commitment` | sentence_vectors |
+| `try_phrase(phrase, k)` | unit and project nearest a typed phrase (`search_phrase`, one embedding call), with the measures already grading it committed | sentence_vectors |
+| `measure_quality` (table) | measure and exact question: `version`, graded units, precision and recall of the model's grade 3 against the person's (unweighted; recall within the graded pool), when; written by `./wbg check <set> --evaluate` to `data/labels/measure_quality.csv` and loaded by every publish | |
+
+`findings_under()` stays until no card uses it; its `months` filter reads `package_status`.
+
+**Package status.** The plan's own status comes first: *Contract completed* (Completed), *Contract signed* (Signed), *Under implementation* (Under Implementation), *Cancelled* (Canceled or Terminated). Where the plan says pending (Pending, Pending Implementation, Under Review, Planned, or no status), the evidence that moves decides: a linked award with a signing date is *Contract signed*, a linked notice *Tendered*; with neither, the package is *Overdue* when its due date has passed and *Planned* otherwise. A package with a linked notice or award is never Overdue. Nothing is called complete or delivered: a completed contract is not delivery.
+
+**The due date** is `due_date(planned, revised)` = the revised date where the plan prints one, else the planned date (Dev's rule: on 2026-10-20, 807 of 1,117 pending packages past their planned date had a revised date still ahead). It decides Overdue, Planned, `upcoming_packages` and `next_date` (the earliest future due date or notice deadline). A caution: the parser keeps a row's last printed date as `revised_date` (section 3.1 step 9), which for a pending package can be a later milestone rather than a new tender date; `due_date()` is the one place to change the rule.
+
+**A commitment's status** is the first of its linked packages' statuses in the order Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Cancelled, or *No package found*.
+
+**Same wording across projects.** Word-for-word equality flagged 17 of 2,150 commitments, while four operations of one programme (DRC, Malawi, Angola and the regional Eastern and Southern Africa project) print one climate section with small edits. So each committed unit's text is cut into runs of six words (lower case, letters and digits only), and another project counts when its committed units hold at least half of the unit's runs; `same_wording_projects` is the most other projects any of the commitment's sentences is near-copied in. On the 17-project test slice, 67 of the DRC operation's 80 commitments are near-copied in the regional project.
+
+**Dropped by a restructuring.** A commitment is flagged only where a later restructuring paper's component table marks the component its sentences sit under "Marked for Deletion" (matched by name): true when every sentence with a known component is so marked, false when none is, NULL when no sentence sits under a known component (58 per cent of committed units on 2026-10-20). Absence from a later paper is not read as dropping: short papers restate nothing, which made 38 per cent of commitments read as missing. Only 2 component rows in all restructuring tables were marked for deletion on 2026-10-20, so the column is mostly false or NULL; it is exact where it says true.
+
+**Asset map agreement.** `asset_in_asset_map` says whether the project's asset map grades any paragraph as financing the commitment's asset (NULL for `(no asset)`): a commitment whose asset the map never finds as financed is worth a second look.
+
+**Requested measures (later, not now).** `src/measure_requests.py` and `./wbg requests` hold a queue in `wbg_requests.measure_requests` run one at a time under a US$1 cap a request and US$3 a day (`$WBG_SPEND_CAP_USD`, enforced in `src/answers.py`), writing a requested set's files to `data/requested_labels/`. Nothing schedules it: the write-only Metabase connection, its Postgres role and a timer are yggdrasil changes, and where dashboard-made measures live is Dev's decision.

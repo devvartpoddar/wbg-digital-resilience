@@ -237,7 +237,7 @@ def _split_number(name, order):
     nxt = re.search(rf"\s{COMP_WORD}\s*(?:\d{{1,2}}|{'|'.join(NUMBER_WORDS)})\b", rest, re.I)
     if nxt:
         rest = rest[:nxt.start()]
-    return number, rest.strip(" -–:")
+    return number, rest.strip(" -–:"), bool(m)
 
 
 def _explode(grid):
@@ -326,8 +326,8 @@ def read_datasheet(grid):
             continue
         if not name:
             continue
-        number, clean_name = _split_number(name, len(out) + 1)
-        out.append({"number": number, "name": clean_name,
+        number, clean_name, printed = _split_number(name, len(out) + 1)
+        out.append({"number": number, "name": clean_name, "number_printed": printed,
                     "cost_usd_m": _to_millions(nums[-1] if nums else None, header_text),
                     "action": ""})
     return out
@@ -393,8 +393,8 @@ def read_restructuring(grid):
             continue
         if STOP_ROW.match(name):
             break
-        number, clean_name = _split_number(name, len(out) + 1)
-        out.append({"number": number, "name": clean_name,
+        number, clean_name, printed = _split_number(name, len(out) + 1)
+        out.append({"number": number, "name": clean_name, "number_printed": printed,
                     "cost_usd_m": _to_millions(cost, "millions"),
                     # The cost before the paper, when it prints one beside the
                     # proposed cost: a restructuring that cuts or adds funds.
@@ -543,6 +543,52 @@ def read_table_pages(pdf_path, pages):
     return []
 
 
+def _same_component(a, b):
+    """Whether two name keys name one component: equal, or one the start of
+    the other ('projectmanagement' and 'projectmanagementandinstitutional...'),
+    the shorter at least 12 characters."""
+    short, long_ = sorted((a, b), key=len)
+    return bool(short) and (short == long_ or (len(short) >= 12 and long_.startswith(short)))
+
+
+def number_by_name(rows):
+    """A table that prints no component numbers is numbered by row order,
+    and a restructuring paper may list its components in another order
+    (P171305's 2026 paper puts component 2 first): such a row takes the
+    number the project's headings and numbered tables give the same name,
+    preferring the same document. A row no name matches keeps its position
+    unless that number is taken, and then gets the smallest number free.
+    Rows whose number was printed are left alone."""
+    by_doc = defaultdict(list)
+    for r in rows:
+        by_doc[(r["doc_id"], r["project_ids"])].append(r)
+    for (did, owners), rs in by_doc.items():
+        table = [r for r in rs if r.get("source") in ("datasheet", "restructuring")
+                 and r.get("level", "component") == "component" and r["number"]
+                 and r.get("number_printed") is False]
+        if not table:
+            continue
+        known = []          # (rank, name_key, number): this document first
+        for r in rows:
+            if r.get("level", "component") == "component" and r["number"] \
+                    and set(r["project_ids"].split("|")) & set(owners.split("|")) \
+                    and (r.get("source") == "heading" or r.get("number_printed")):
+                known.append((0 if r["doc_id"] == did else 1, r["name_key"], r["number"]))
+        known.sort()
+        taken, unmatched = set(), []
+        for r in table:
+            hit = next((n for _, k, n in known if _same_component(r["name_key"], k)), None)
+            if hit and hit not in taken:
+                r["number"] = hit
+                taken.add(hit)
+            else:
+                unmatched.append(r)
+        for r in unmatched:
+            if r["number"] in taken:
+                r["number"] = str(next(i for i in range(1, 100) if str(i) not in taken))
+            taken.add(r["number"])
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=data_root())
@@ -627,6 +673,7 @@ def main():
 
     for r in out:
         r["name_key"] = name_key(r["name"])
+    number_by_name(out)
     out.sort(key=lambda r: (r["doc_id"], r["project_ids"], r["source"], r["level"],
                             [int(x) for x in r["number"].split(".") if x.isdigit()]))
     dest = where(args.data, "appraisal", "components.csv")

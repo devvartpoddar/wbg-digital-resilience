@@ -172,8 +172,9 @@ def test_prepare_fetches_only_what_is_new_and_skips_what_did_not_change(
     monkeypatch.setattr(wbg, "_run", run)
     sel = wbg.select(project="P000001", path=cohort)
     wbg.prepare(sel, data=store)
-    # The store already holds P000001's documents and packages: nothing to fetch.
-    assert not any(s.startswith("fetch") for s, _ in calls)
+    # The store already holds P000001's documents and packages: only the
+    # project record is fetched again (once a day: status and closing dates move).
+    assert [s for s, _ in calls if s.startswith("fetch")] == ["fetch_projects.py"]
     assert {s for s, _ in calls} >= {"clean.py", "components.py"}
     calls.clear()
     wbg.prepare(sel, data=store)
