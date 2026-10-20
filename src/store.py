@@ -37,7 +37,7 @@ def publish(data, *, sets=None, projects=None, links=False, log=print, conn=None
     t0 = time.time()
     own = conn is None
     conn = conn or connect()
-    written, created = {}, False
+    written = {}
     try:
         load_pg.prepare(conn)
         sets = sorted(sets) if sets else None
@@ -51,7 +51,6 @@ def publish(data, *, sets=None, projects=None, links=False, log=print, conn=None
             n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", None,
                                                  f"publish:{_now()}")
             written[table] = n
-            created |= made
         for table, cols, finder in (
                 ("search_paragraphs", load_pg.ROLLUP_COLS,
                  lambda: load_pg.search_tables(data, sets)),
@@ -65,7 +64,6 @@ def publish(data, *, sets=None, projects=None, links=False, log=print, conn=None
             keys = sets if sets else None
             n, bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", keys, sha)
             written[table] = n
-            created |= made
             if bad:
                 log(f"  {table}: unparseable -> NULL: "
                     + ", ".join(f"{k}={v}" for k, v in sorted(bad.items())))
@@ -77,20 +75,15 @@ def publish(data, *, sets=None, projects=None, links=False, log=print, conn=None
                     n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "package_id",
                                                          None, sha)
                     written[table] = n
-                    created |= made
-        if created or not _views_present(conn):
-            load_pg.finish(conn, log=log)
+        # Keys, comments, views and functions, every time: sql/views/ is
+        # code, and a publish is when a changed view or function lands.
+        load_pg.finish(conn, log=log)
     finally:
         if own:
             conn.close()
     log("  postgres: " + ", ".join(f"{t} {n:,}" for t, n in written.items())
         + f" ({time.time() - t0:.0f}s)")
     return written
-
-
-def _views_present(conn):
-    return bool(conn.execute("SELECT 1 FROM pg_views WHERE schemaname = %s AND viewname = %s",
-                             (load_pg.PUBLIC, "measure_findings_in_context")).fetchone())
 
 
 def _now():
