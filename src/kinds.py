@@ -214,6 +214,23 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
         w.writerows(rows)
     with open(os.path.join(part, "proposals.md"), "w", encoding="utf-8") as fh:
         fh.write("\n".join(md))
+    # The first run's list is the measure's types until a person writes
+    # analysis/labels/<set>_types.csv (labels.load_types reads that first).
+    # Overwritten by every proposal run, so the default follows the measure.
+    default = where(data, "types", f"{name}_types.csv")
+    seen, listed = set(), []
+    for r in rows:
+        if r["run"] == 0 and r["type_id"] not in seen and r["definition"]:
+            seen.add(r["type_id"])
+            listed.append({"measure_id": name, "type_id": r["type_id"],
+                           "type_name": r["type_name"], "definition": r["definition"],
+                           "active": "true", "source": "proposed"})
+    with open(default + ".part", "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=["measure_id", "type_id", "type_name", "definition",
+                                           "active", "source"], lineterminator="\n")
+        w.writeheader()
+        w.writerows(listed)
+    os.replace(default + ".part", default)
     usage = [classify.read_cached(root, r[4]).get("usage", {}) for r in requests_]
     manifest = {"label_set": name, "measure_run": os.path.basename(run_folder), "model": model,
                 "models_served": sorted({classify.read_cached(root, r[4]).get("model", "")
@@ -231,8 +248,8 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
                           sum(float((classify.read_cached(root, r[4]).get("usage") or {}).get("cost") or 0)
                               for r in missing), time.time() - t0, os.path.basename(out))
     log(f"  {len(rows)} types proposed over {runs} run(s); US${manifest['cost_usd']:.4f}; "
-        f"read {os.path.join(out, 'proposals.md')} and write the approved list to "
-        f"analysis/labels/{name}_types.csv")
+        f"the first run's {len(listed)} are the list ({default}) until "
+        f"analysis/labels/{name}_types.csv says otherwise")
     return out
 
 
@@ -241,19 +258,14 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
 def load_approved(name):
     """The approved types with definitions: {label_id: [{type_id, type_name,
     definition}]}."""
-    path = os.path.join(labels.folder(name), f"{name}_types.csv")
-    if not os.path.exists(path):
-        raise SystemExit(f"types: no approved list {path}; run ./wbg types {name} and "
-                         f"write it from the proposals")
     out = defaultdict(list)
-    for r in labels.rows(path):
-        if not labels.is_active(r) or not (r.get("definition") or "").strip():
-            continue
-        lid = r[labels._id_col(r, path)].strip()
-        out[lid].append({"type_id": r["type_id"].strip(), "type_name": r["type_name"].strip(),
-                         "definition": " ".join(r["definition"].split())})
+    for t in labels.load_types(name):
+        if t["definition"]:
+            out[t["label_id"]].append({"type_id": t["type_id"], "type_name": t["type_name"],
+                                       "definition": t["definition"]})
     if not out:
-        raise SystemExit(f"types: {path} has no active type with a definition")
+        raise SystemExit(f"types: no type list for {name}: neither analysis/labels/"
+                         f"{name}_types.csv nor a proposal (run ./wbg types {name} first)")
     return dict(out)
 
 

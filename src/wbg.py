@@ -241,12 +241,10 @@ def add(args, data):
     def one(name):
         t0 = time.time()
         log = []
-        approved = os.path.exists(os.path.join(ROOT, "analysis", "labels", f"{name}_types.csv"))
         for script, extra in (("search.py", [name, *dry]),
                               ("measure.py", [name, "--workers", str(args.workers), *dry, *scope]),
                               ("kinds.py", [name, *dry, *scope]),
-                              *((("kinds.py", [name, "--assign", *dry, *scope]),)
-                                if approved or args.assign else ())):
+                              ("kinds.py", [name, "--assign", *dry, *scope])):
             cmd = [_python(), os.path.join(SRC, script), *extra]
             done = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
             log.append(f"== {script} {' '.join(extra)}\n{done.stdout.rstrip()}")
@@ -833,8 +831,6 @@ def main(argv=None):
                    help="sets run at once (each is one process on one core)")
     p.add_argument("--workers", type=int, default=ADD_WORKERS,
                    help="parallel requests to the decision model per set")
-    p.add_argument("--assign", action="store_true",
-                   help="assign types even without <set>_types.csv (done automatically with one)")
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("publish", help="write the current runs of the sets named (or every "
                                        "set) into Postgres; the stages do this themselves, "
