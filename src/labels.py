@@ -78,9 +78,12 @@ def _is_set(path):
     return not name.endswith(_SUFFIXES)
 
 
-def label_sets(dirs=None):
+def label_sets(dirs=None, include_inactive=False):
     """Every label set's name, inputs first, then analysis, then requested,
-    each sorted."""
+    each sorted. A set whose labels are all inactive is switched off: it is
+    left out (not run, and its rows leave Postgres at the next load, as a
+    removed set's do), unless `include_inactive`. Its stored answers stay,
+    so switching it back on asks nothing again."""
     dirs = _dirs(dirs)
     out, seen = [], {}
     for d in dirs:
@@ -92,7 +95,8 @@ def label_sets(dirs=None):
                 raise SystemExit(f"labels: {name!r} is in both {seen[name]} and {d}; "
                                  f"rename one")
             seen[name] = d
-            out.append(name)
+            if include_inactive or any(is_active(r) for r in rows(path)):
+                out.append(name)
     return out
 
 

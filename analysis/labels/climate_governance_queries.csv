@@ -1,7 +1,15 @@
 measure_id,query_id,query,active
-climate_governance,standards,resilience standards will be adopted for infrastructure,true
-climate_governance,regulations,climate resilience requirements will be incorporated into regulations,true
-climate_governance,strategy,national resilience strategies will be developed,true
-climate_governance,guidelines,technical guidelines will include climate considerations,true
-climate_governance,sector_plans,sector plans will integrate climate risks,true
-climate_governance,procurement,resilience requirements will be embedded in procurement documents,true
+climate_governance,v4_project_support_development_regulations_incorporating,the project will support the development of regulations incorporating climate resilience requirements,true
+climate_governance,v4_technical_codes_revised_incorporate_requirements,technical codes will be revised to incorporate requirements for climate and disaster resilience,true
+climate_governance,v4_regulatory_framework_establish_minimum_resilience,the regulatory framework will establish minimum resilience requirements for future infrastructure investments,true
+climate_governance,v4_project_support_adoption_sector_standards,the project will support adoption of sector standards for infrastructure exposed to climate hazards,true
+climate_governance,v4_sector_regulations_revised_incorporate_energy,sector regulations will be revised to incorporate energy-efficiency requirements,true
+climate_governance,v4_government_develop_mandatory_guidelines_integrating,the government will develop mandatory guidelines for integrating climate risk into infrastructure planning,true
+climate_governance,v4_activity_support_adoption_climate_resilient,the activity will support the adoption of climate-resilient infrastructure standards,true
+climate_governance,v4_project_establish_regulatory_framework_incorporating,the project will establish a regulatory framework for incorporating climate resilience into sector investments,true
+climate_governance,standards,resilience standards will be adopted for infrastructure,false
+climate_governance,regulations,climate resilience requirements will be incorporated into regulations,false
+climate_governance,strategy,national resilience strategies will be developed,false
+climate_governance,guidelines,technical guidelines will include climate considerations,false
+climate_governance,sector_plans,sector plans will integrate climate risks,false
+climate_governance,procurement,resilience requirements will be embedded in procurement documents,false

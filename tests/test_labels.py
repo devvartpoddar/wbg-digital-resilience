@@ -25,6 +25,14 @@ def test_sets_are_found_in_both_folders_and_a_clash_is_an_error(tmp_path):
         labels.folder("nothing", (str(a), str(b)))
 
 
+def test_a_set_with_no_active_label_is_switched_off(tmp_path):
+    a = tmp_path / "analysis"
+    _set(a, "kept", "x,X,a measure,true\n")
+    _set(a, "off", "y,Y,an old measure,false\n")
+    assert labels.label_sets((str(a),)) == ["kept"]
+    assert labels.label_sets((str(a),), include_inactive=True) == ["kept", "off"]
+
+
 def test_load_set_keeps_inactive_labels_and_names_the_folder(tmp_path):
     a = tmp_path / "inputs"
     _set(a, "assets", "fiber,Fiber,cables  and  ducts,true\nold,Old,gone,false\n")

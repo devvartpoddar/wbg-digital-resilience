@@ -1,6 +1,8 @@
 measure_id,pattern_id,pattern,active
-ews,early_warning,\bearly[- ]warning\b,true
-ews,alert_system,\b(?:alert|warning) (?:systems?|platforms?|services?)\b,true
-ews,emergency_comms,\bemergency communications?\b,true
-ews,cell_broadcast,\bcell broadcast\b,true
-ews,disaster_alert,\bdisaster (?:alerts?|warnings?|notifications?)\b,true
+ews,v4_early_warning_system,\bearly warning system\b,true
+ews,v4_cell_broadcast,\bcell broadcast\b,true
+ews,early_warning,\bearly[- ]warning\b,false
+ews,alert_system,\b(?:alert|warning) (?:systems?|platforms?|services?)\b,false
+ews,emergency_comms,\bemergency communications?\b,false
+ews,cell_broadcast,\bcell broadcast\b,false
+ews,disaster_alert,\bdisaster (?:alerts?|warnings?|notifications?)\b,false

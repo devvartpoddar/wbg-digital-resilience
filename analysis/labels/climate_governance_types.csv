@@ -1,0 +1,5 @@
+measure_id,type_id,type_name,definition,active,version
+climate_governance,policy_framework,Climate-informed policy framework,Establishes formal climate-related policy requirements for the sector,true,v4
+climate_governance,regulation,Climate-informed regulation,Establishes binding regulatory requirements related to resilience or emissions,true,v4
+climate_governance,code_standard,Climate-informed code or sector standard,Establishes technical requirements applying beyond an individual project asset,true,v4
+climate_governance,planning_framework,Climate-informed planning framework,Establishes formal rules for incorporating climate risk into sector planning,true,v4

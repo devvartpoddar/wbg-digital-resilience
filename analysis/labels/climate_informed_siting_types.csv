@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+climate_informed_siting,site_selection,Climate-informed site selection,Selects among candidate locations based on hazard exposure,true,v4
+climate_informed_siting,route_selection,Climate-informed route selection,Selects or modifies an infrastructure route based on hazard exposure,true,v4
+climate_informed_siting,hazard_avoidance,Hazard avoidance,Avoids locations identified as having unacceptable hazard exposure,false,v4
+climate_informed_siting,relocation,Climate-informed relocation,Moves planned or existing infrastructure away from exposed locations,true,v4
+climate_informed_siting,deployment_configuration,Climate-informed deployment configuration,Changes the physical deployment approach because of identified hazard conditions,true,v4

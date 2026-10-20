@@ -1,7 +1,16 @@
 measure_id,query_id,query,active
-backup_power,generators_ups,backup generators and uninterruptible power supply will be installed,true
-backup_power,solar_storage,sites will be equipped with solar panels and battery storage,true
-backup_power,autonomy,the facility will have at least 48 hours of power autonomy,true
-backup_power,specs,specifications will require backup power systems,true
-backup_power,redundant_feeds,redundant power feeds will be provided,true
-backup_power,standby,standby power arrangements will be maintained,true
+backup_power,v4_backup_power_systems_installed_maintain,backup power systems will be installed to maintain operations during grid outages,true
+backup_power,v4_facilities_equipped_uninterruptible_power_supply,the facilities will be equipped with uninterruptible power supply systems and battery backup,true
+backup_power,v4_contractor_provide_sufficient_backup_power,the contractor shall provide sufficient backup power to maintain essential operations during electricity interruptions,true
+backup_power,v4_standby_generators_provide_emergency_power,standby generators will provide emergency power in the event of grid failure,true
+backup_power,v4_battery_systems_provide_power_autonomy,battery systems will provide power autonomy during prolonged outages,true
+backup_power,v4_critical_facilities_provided_redundant_electricity,critical facilities will be provided with redundant electricity supplies,true
+backup_power,v4_solar_photovoltaic_systems_battery_storage,solar photovoltaic systems with battery storage will provide backup power during grid interruptions,true
+backup_power,v4_technical_specifications_require_emergency_power,the technical specifications will require emergency power systems for critical equipment,true
+backup_power,v4_backup_power_capacity_sufficient_maintain,backup power capacity shall be sufficient to maintain essential services for the required period,true
+backup_power,generators_ups,backup generators and uninterruptible power supply will be installed,false
+backup_power,solar_storage,sites will be equipped with solar panels and battery storage,false
+backup_power,autonomy,the facility will have at least 48 hours of power autonomy,false
+backup_power,specs,specifications will require backup power systems,false
+backup_power,redundant_feeds,redundant power feeds will be provided,false
+backup_power,standby,standby power arrangements will be maintained,false

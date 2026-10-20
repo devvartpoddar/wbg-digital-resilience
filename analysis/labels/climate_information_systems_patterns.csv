@@ -1,4 +1,5 @@
 measure_id,pattern_id,pattern,active
-climate_information_systems,climate_info,"\b(?:climate|weather|hydro(?:logical|met\w*)|meteorolog\w*|agro-?met\w*)\b[^.;]{0,40}?\b(?:information|data|forecast\w*|observation|monitoring|services?) (?:systems?|platforms?|services?|networks?|stations?)\b",true
-climate_information_systems,forecasting_climate,\b(?:weather|climate|flood|seasonal|hydrolog\w*) forecast\w*,true
-climate_information_systems,met_service,\b(?:meteorolog\w*|hydrolog\w*) (?:services?|agenc\w*|stations?|networks?)\b,true
+climate_information_systems,v4_hydrometeorological_information_system,\bhydrometeorological information system\b,true
+climate_information_systems,climate_info,"\b(?:climate|weather|hydro(?:logical|met\w*)|meteorolog\w*|agro-?met\w*)\b[^.;]{0,40}?\b(?:information|data|forecast\w*|observation|monitoring|services?) (?:systems?|platforms?|services?|networks?|stations?)\b",false
+climate_information_systems,forecasting_climate,\b(?:weather|climate|flood|seasonal|hydrolog\w*) forecast\w*,false
+climate_information_systems,met_service,\b(?:meteorolog\w*|hydrolog\w*) (?:services?|agenc\w*|stations?|networks?)\b,false

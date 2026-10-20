@@ -1,7 +1,16 @@
 measure_id,query_id,query,active
-climate_information_systems,platform,climate information platforms will be established,true
-climate_information_systems,met_data,meteorological data systems will be upgraded,true
-climate_information_systems,forecast_tools,forecasting tools will support climate decision making,true
-climate_information_systems,observations,weather observations will be digitized,true
-climate_information_systems,data_services,climate data services will be expanded,true
-climate_information_systems,env_monitoring,environmental monitoring systems will be modernized,true
+climate_information_systems,v4_project_strengthen_hydrometeorological_information_system,the project will strengthen the hydrometeorological information system and associated data services,true
+climate_information_systems,v4_automated_weather_stations_transmit_observations,automated weather stations will transmit observations to a centralized data platform,true
+climate_information_systems,v4_activity_establish_platform_collecting_processing,the activity will establish a platform for collecting and processing climate and hydrological information,true
+climate_information_systems,v4_forecasting_systems_upgraded_improve_availability,forecasting systems will be upgraded to improve the availability of weather and climate information,true
+climate_information_systems,v4_project_establish_integrated_hydrometeorological_data,the project will establish an integrated hydrometeorological data management system,true
+climate_information_systems,v4_climate_information_services_developed_support,climate information services will be developed to support planning and decision making,true
+climate_information_systems,v4_system_integrate_meteorological_hydrological_environmental,the system will integrate meteorological hydrological and environmental monitoring data,true
+climate_information_systems,v4_observation_networks_data_processing_systems,observation networks and data-processing systems will be modernized to improve climate monitoring,true
+climate_information_systems,v4_platform_provide_access_historical_forecast,the platform will provide access to historical and forecast climate information,true
+climate_information_systems,platform,climate information platforms will be established,false
+climate_information_systems,met_data,meteorological data systems will be upgraded,false
+climate_information_systems,forecast_tools,forecasting tools will support climate decision making,false
+climate_information_systems,observations,weather observations will be digitized,false
+climate_information_systems,data_services,climate data services will be expanded,false
+climate_information_systems,env_monitoring,environmental monitoring systems will be modernized,false

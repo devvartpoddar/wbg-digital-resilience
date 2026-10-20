@@ -1,0 +1,7 @@
+measure_id,type_id,type_name,definition,active,version
+disaster_recovery,data_backup,Data backup,Creates recoverable copies of data at the same location,true,v4
+disaster_recovery,offsite_backup,Off-site backup,Stores backup copies of data at a separate location or in the cloud,true,v4
+disaster_recovery,replication,Data or system replication,"Replicates data, applications or systems across environments",true,v4
+disaster_recovery,failover,Failover,Transfers services to an alternative environment following failure,true,v4
+disaster_recovery,recovery_site,Disaster recovery site,Provides a secondary environment for restoring critical services,true,v4
+disaster_recovery,recovery_objectives,Recovery objectives,Establishes defined recovery time or recovery point requirements,true,v4

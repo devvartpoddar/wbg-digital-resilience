@@ -1,0 +1,7 @@
+measure_id,type_id,type_name,definition,active,version
+energy_efficiency,efficient_equipment,Energy-efficient equipment,Uses equipment selected for lower energy consumption,true,v4
+energy_efficiency,network_efficiency,Network energy efficiency,Uses network design or technology changes that explicitly reduce energy requirements,true,v4
+energy_efficiency,efficient_cooling,Energy-efficient cooling,Reduces electricity consumption associated with cooling,true,v4
+energy_efficiency,energy_management,Energy management,Uses monitoring or control systems to optimize energy consumption,true,v4
+energy_efficiency,legacy_replacement,Efficiency-driven legacy replacement,Replaces existing technology specifically to achieve energy savings,true,v4
+energy_efficiency,efficiency_requirement,Energy-performance requirement,Applies a defined efficiency benchmark to project-financed equipment,false,v4
