@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,active
+backup_power,generator,\bgenerators?\b,true
+backup_power,ups,\b(?-i:UPS)\b|\buninterruptible power\b,true

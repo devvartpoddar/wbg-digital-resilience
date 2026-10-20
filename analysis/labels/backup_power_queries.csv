@@ -1,0 +1,7 @@
+measure_id,query_id,query,active
+backup_power,generators_ups,backup generators and uninterruptible power supply will be installed at the data centre,true
+backup_power,solar_storage,sites will be equipped with solar panels and battery storage to ensure continuity of service,true
+backup_power,autonomy_hours,the facility will have at least 48 hours of power autonomy,true
+backup_power,tower_spec,specifications for towers will require backup power for a minimum number of hours,true
+backup_power,redundant_feeds,redundant power feeds and fuel supply arrangements for the hosting facility,true
+backup_power,operator_standby,the operator will be responsible for maintaining standby power at all sites,true
