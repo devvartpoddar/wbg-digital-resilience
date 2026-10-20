@@ -36,6 +36,7 @@ sys.path.insert(0, SRC)
 import candidates as _candidates  # noqa: E402  (defaults for the command line)
 import classify as _classify  # noqa: E402
 import measure as _measure  # noqa: E402
+import link_packages as _link  # noqa: E402
 from paths import data_root, where  # noqa: E402
 
 COHORT = os.path.join(ROOT, "inputs", "config", "cohort.csv")
@@ -761,6 +762,15 @@ def main(argv=None):
                    help="a round yielding fewer committed units than this is the last")
     p.add_argument("--max-rounds", type=int, default=_measure.MAX_ROUNDS)
     p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("link", help="which asset each procurement package buys and which "
+                                    "commitments it would carry out (decision model, stored; "
+                                    "after ./wbg measure)")
+    _filters(p)
+    p.add_argument("--asset-top", type=int, default=_link.ASSET_TOP,
+                   help="assets asked per package, its best by cosine")
+    p.add_argument("--label-set", action="append", dest="sets",
+                   help="measure set(s) to pair; default: every set with a current run")
+    p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("types", help="propose a measure's types from its committed units "
                                      "(generative model, stored), or --assign them with the "
                                      "decision model once a person has approved the list")
@@ -857,6 +867,13 @@ def main(argv=None):
              str(args.batch), "--min-yield", str(args.min_yield), "--max-rounds",
              str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), *_scope(args),
              data=data)
+        if not args.dry_run:
+            _run("release.py", data=data)
+        return 0
+    if args.cmd == "link":
+        _run("link_packages.py", "--asset-top", str(args.asset_top),
+             *[x for st in (args.sets or []) for x in ("--label-set", st)],
+             *(["--dry-run"] if args.dry_run else []), *_scope(args), data=data)
         if not args.dry_run:
             _run("release.py", data=data)
         return 0

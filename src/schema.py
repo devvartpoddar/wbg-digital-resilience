@@ -93,7 +93,7 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "reading_order", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
-           "template_project_count"}
+           "template_project_count", "cosine_rank"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "embedding_score", "embedding_percentile",
@@ -105,7 +105,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "paragraph_best_asset_probability", "component_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
-           "best_actor_probability"}
+           "best_actor_probability", "cosine", "probability"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
            "was_sent_to_model", "was_asked"}
@@ -113,7 +113,8 @@ BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_lat
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
          "matched_types", "asset_ids_above_threshold", "activity_kinds_above_threshold",
-         "actor_ids_above_threshold", "type_ids_above_threshold", "component_mentions"}
+         "actor_ids_above_threshold", "type_ids_above_threshold", "component_mentions",
+         "shared_asset_ids", "shared_group_ids"}
 INDEXED = {"document_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
            "award_id", "unit_id", "borrower_reference_normalised", "label_id", "label_set",
            "type_id"}
@@ -436,6 +437,41 @@ TABLES = {
                 "person): a presentation layer the views add beside the label; the labels "
                 "keep their ids and answers. The assets are grouped into about six.",
         columns={"group_id": "The group's id.", "group_name": "The group's name."}),
+    "package_assets": dict(
+        schema=PUBLIC, key=("package_id", "label_id"),
+        foreign=[("package_id", "packages", "package_id"),
+                 ("project_id", "projects", "project_id")],
+        comment="Which digital asset a procurement package buys, builds, installs, connects "
+                "or operates: one row per package and asset asked (its best few by cosine "
+                "over the asset taxonomy's phrases), with the decision model's yes "
+                "probability (src/link_packages.py). Filter on the probability; no cut-off "
+                "is built in.",
+        columns={
+            "label_id": "The asset's id in wbg.labels (label_set assets).",
+            "cosine": "The package description's best cosine over the asset's search phrases.",
+            "cosine_rank": "The asset's rank among the package's assets by that cosine; 1 is the best.",
+            "probability": "The decision model's probability that the package procures this asset.",
+            "model_served": "The decision-model snapshot that answered.",
+        }),
+    "commitment_packages": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "unit_id", "package_id"),
+        foreign=[("package_id", "packages", "package_id"),
+                 ("unit_id", "search_units", "unit_id"),
+                 ("project_id", "projects", "project_id")],
+        comment="Which procurement packages would carry out a commitment: one row per "
+                "committed unit and package of the same project that share an asset or an "
+                "asset reading group, with the decision model's yes probability "
+                "(src/link_packages.py). Many to many: a commitment may link to several "
+                "packages and a package to several commitments. Filter on the probability.",
+        columns={
+            "label_set": "The measure's set.",
+            "label_id": "The measure.",
+            "unit_id": "The committed unit (wbg.measure_findings).",
+            "shared_asset_ids": "Assets both the unit's answers and the package's answers name at 0.5.",
+            "shared_group_ids": "Asset reading groups (wbg.label_groups) both name at 0.5.",
+            "probability": "The decision model's probability that carrying out the package is where the commitment is delivered or applied.",
+            "model_served": "The decision-model snapshot that answered.",
+        }),
     "sentence_vectors": dict(
         schema=INTERNAL, key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
         comment="Pipeline bookkeeping: one embedding per search unit (3,072 dimensions), used "

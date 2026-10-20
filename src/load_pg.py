@@ -357,6 +357,26 @@ def measure_rows(data, projects=None):
     return sha + "|" + "|".join(runs) + "|" + merges, rows
 
 
+ASSET_LINK_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
+                   "model_served", "cost"]
+PAIR_LINK_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
+                  "shared_asset_ids", "shared_group_ids", "probability", "model_served", "cost"]
+
+
+def link_rows(data, projects=None):
+    """(sha, package-asset rows, commitment-package rows) of the current
+    link run (src/link_packages.py), or (None, [], []) when there is none."""
+    import link_packages
+    folder = link_packages.current_run(data, projects=projects)
+    if not folder:
+        return None, [], []
+    out = []
+    for file in ("package_assets.csv", "commitment_packages.csv"):
+        with open(os.path.join(folder, file), newline="", encoding="utf-8") as fh:
+            out.append(list(csv.DictReader(fh)))
+    return os.path.basename(folder), out[0], out[1]
+
+
 def apply_type_resolution(rows, mapping):
     """Show each unit's types as the label file says now: a type merged into
     another is replaced by it (duplicates dropped, order kept) in types_yes
@@ -657,6 +677,10 @@ def main():
         derived(conn, "paragraph_grades", sha, CLASSIFY_COLS, rows)
         sha, rows = measure_rows(args.data, projects)
         derived(conn, "measure_findings", sha, MEASURE_COLS, rows)
+
+        sha, assets_, pairs_ = link_rows(args.data, projects)
+        derived(conn, "package_assets", sha, ASSET_LINK_COLS, assets_)
+        derived(conn, "commitment_packages", sha, PAIR_LINK_COLS, pairs_)
 
         lab = label_rows()
         derived(conn, "labels", hashlib.sha256(repr(lab).encode()).hexdigest(),

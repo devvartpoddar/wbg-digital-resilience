@@ -58,6 +58,7 @@ each prints its estimate before asking anything (`--dry-run`).
 ./wbg search ews && ./wbg measure ews
 ./wbg types cra --assign --set digital           # the approved types (analysis/labels/cra_types.csv) on the committed units
 ./wbg types ews --assign --set digital
+./wbg link --set digital                         # which asset each package buys, which commitments it carries out (after every measure)
 python3 src/load_pg.py --set digital             # Postgres: tables, keys, comments, views; the digital set's runs
 python3 src/run_report.py                        # the run note for the vault
 ```
@@ -78,6 +79,10 @@ Schema `wbg` only. Start cards from the views, not the tables:
   measure's cluster) and the text around it (filter `most_likely_grade = 3`);
 - `measure_finding_lists`: one row per unit and asset, kind, actor or type,
   for dashboard filters on what the array columns hold;
+- `packages_with_commitments`: one row per package with the assets it buys,
+  the measures linked to it and how many commitments (at 0.5); the pairs
+  themselves are `commitment_packages_in_context`, the package-asset answers
+  `package_assets_in_context`;
 - `asset_map`, `search_paragraphs_with_text`, `paragraphs_with_document`,
   `packages_with_project`, `upcoming_packages`, `notices_with_package`,
   `awards_with_package`, `data_as_of`.

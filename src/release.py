@@ -127,7 +127,7 @@ def manifest(data):
               "libraries": _library()}
     code = code_state()
     runs = {"search": _runs(data, "search"), "classify": _runs(data, "classify"),
-            "measures": _runs(data, "measures")}
+            "measures": _runs(data, "measures"), "links": _runs(data, "links")}
     # The data's identity: the same tables from the same inputs are the same
     # release whatever commit is checked out now, and whatever library
     # version is installed now (that is recorded, not identifying); the commit

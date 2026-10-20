@@ -51,6 +51,9 @@ written down once:
   data/types/        a measure's types: stored generative-model proposals and
                      the decision model's assignments, one folder per label
                      set and version (src/kinds.py)
+  data/links/        which asset each package buys and which commitments it
+                     would carry out, one folder per version
+                     (src/link_packages.py)
 
 Order of precedence for the data root:
   1. $WBG_DATA, if set
@@ -106,6 +109,7 @@ LAYOUT = {
     "candidates": "candidates",
     "measures": "measures",
     "types": "types",
+    "links": "links",
     "classify": "classify",
     "labels": "labels",
     "releases": "releases",
