@@ -20,7 +20,7 @@ The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement
 - **Postgres**: schema `wbg` in database `work` (`postgresql:///work`, no password). `WBG_PG` overrides it.
 - **Hardware**: an Intel N150, four efficiency cores, about 15 GB of memory, no graphics card. Stream large files rather than loading them whole. Anything that needs a graphics card is the wrong design here.
 
-Run everything with `./run.sh`. For one project, country, region or approval year use `./wbg` (`./wbg --help`); a smoke run is `./wbg prepare --project <id>` followed by `./wbg summary --project <id>`. Both skip work whose code and inputs have not changed.
+Run everything with `./run.sh`. For one project, country, region or approval year use `./wbg` (`./wbg --help`); a smoke run is `./wbg prepare --project <id>` followed by `./wbg summary --project <id>`. Both skip work whose code and inputs have not changed. A measure goes from its files to Metabase with `./wbg add <set>`: every model stage writes its own rows into Postgres as it finishes (`src/store.py`), so there is no separate load to remember.
 
 ## The principle
 

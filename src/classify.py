@@ -64,7 +64,7 @@ TABLE_ROWS = True
 # the links at 0.5 (4.0 per cent at 0.9); 0.30 asks 39 per cent and loses
 # 9.0 (5.4). The questions are most of the cost, so this is the dial.
 MIN_COSINE = 0.0
-WORKERS = 6
+WORKERS = 10
 SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
               "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
               "p3", "p4", "model_served"]
@@ -528,6 +528,9 @@ def main():
     out = classify(args.label_set, args.data, model=args.model, api_key=key,
                    limit=args.limit, dry_run=args.dry_run, workers=args.workers,
                    min_cosine=args.min_cosine, projects=scope(args.projects))
+    if out and not (args.dry_run or args.limit):
+        import store
+        store.try_publish(args.data, sets=[args.label_set], projects=scope(args.projects))
     return 0 if out or args.dry_run else 1
 
 
