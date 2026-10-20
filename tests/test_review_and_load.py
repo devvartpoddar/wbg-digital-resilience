@@ -94,3 +94,32 @@ def test_dates_flags_and_stamps_are_typed_for_metabase():
     assert L.convert("fetched_at", "2026-10-13T14:31:08Z", bad) == "2026-10-13T14:31:08Z"
     assert L.convert("fetched_at", "yesterday", bad) is None
     assert bad == {"planned_date": 1, "for_model": 1, "fetched_at": 1}
+
+
+def test_found_sets_reads_the_run_names(monkeypatch):
+    monkeypatch.setattr(L.labels, "label_sets", lambda: ["assets", "cra", "ews"])
+    sha = "cra-abc123def456|ews-0123456789ab|cra-assign-aaaaaaaaaaaa|9f8e7d6c5b4a"
+    assert L.found_sets(sha) == ["cra", "ews"]
+    assert L.found_sets(None) == []
+
+
+@pytest.mark.skipif(not os.environ.get("WBG_PG_TEST"), reason="set WBG_PG_TEST to a scratch database")
+def test_a_set_without_a_current_run_keeps_its_rows():
+    """Replacing one set's rows, even when the table's columns changed,
+    leaves every other set's rows in place (a measure being re-run must not
+    vanish from the dashboards)."""
+    import psycopg
+    with psycopg.connect(os.environ["WBG_PG_TEST"], autocommit=True) as conn:
+        conn.execute("DROP SCHEMA IF EXISTS wbg CASCADE")
+        L.prepare(conn)
+        cols = ["label_set", "unit_id", "text"]
+        L.replace_rows(conn, "measure_findings", cols,
+                       [{"label_set": "a", "unit_id": "u1", "text": "x"},
+                        {"label_set": "b", "unit_id": "u2", "text": "y"}], "label_set", ["a", "b"], "s1")
+        # New code adds a column: set a is replaced, set b (no current run) is carried over.
+        L.replace_rows(conn, "measure_findings", cols + ["firmness"],
+                       [{"label_set": "a", "unit_id": "u3", "text": "z", "firmness": "activity"}],
+                       "label_set", ["a"], "s2")
+        got = conn.execute("SELECT label_set, unit_id, firmness FROM wbg.measure_findings "
+                           "ORDER BY 1").fetchall()
+        assert got == [("a", "u3", "activity"), ("b", "u2", None)]
