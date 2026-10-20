@@ -1,0 +1,5 @@
+measure_id,pattern_id,pattern,active
+resilient_infrastructure_design,flood_protection,\bflood[- ]?(?:protection|proof\w*)\b,true
+resilient_infrastructure_design,elevate_harden,"\b(?:elevat\w*|harden\w*|reinforc\w*|wind[- ]resist\w*)\b[^.;]{0,60}?\b(?:flood|climate|storm|cyclone|hazard|wind|heat)\w*",true
+resilient_infrastructure_design,resilient_design,\b(?:climate[- ]resilient|resilient) (?:design|engineering|standards?|specifications?)\b,true
+resilient_infrastructure_design,design_standards_climate,"\bdesign standards?\b[^.;]{0,60}?\b(?:climate|flood|hazard|resilien)\w*",true

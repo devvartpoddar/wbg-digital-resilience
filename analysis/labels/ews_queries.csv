@@ -1,8 +1,7 @@
 measure_id,query_id,query,active
-ews,multi_hazard,the project will finance a multi-hazard early warning system,true
-ews,alert_dissemination,dissemination of early warnings to the public through SMS cell broadcast sirens and radio,true
-ews,emergency_centre,an emergency operations centre and emergency call and dispatch platform,true
-ews,monitoring_forecast,hydrological and meteorological monitoring stations and forecasting systems that feed warnings,true
-ews,last_mile_warning,last-mile dissemination of warnings to communities at risk,true
-ews,protocols,standard operating procedures and protocols for issuing warnings and alerts,true
-ews,outbreak,disease surveillance and outbreak alert system,true
+ews,national_ews,a national early warning system will be deployed,true
+ews,mobile_alerts,emergency alerts will be transmitted through mobile networks,true
+ews,cell_broadcast,cell broadcast capabilities will support disaster warnings,true
+ews,crisis_comms,crisis communication systems will be strengthened,true
+ews,notifications,disaster notifications will be delivered to affected populations,true
+ews,response_comms,emergency response communications will be upgraded,true

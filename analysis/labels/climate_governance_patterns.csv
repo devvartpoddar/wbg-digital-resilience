@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,active
+climate_governance,resilience_framework,"\b(?:climate[- ]resilien\w*|resilien\w*|climate|adaptation)\b[^.;]{0,40}?\b(?:standards?|regulations?|guidelines?|codes?|strateg(?:y|ies)|policies|policy|plans?|frameworks?)\b",true
+climate_governance,framework_climate,"\b(?:standards?|regulations?|guidelines?|codes?|strateg(?:y|ies)|policies|policy|plans?)\b[^.;]{0,40}?\b(?:climate|resilien\w*|adaptation|hazard)\b",true

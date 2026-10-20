@@ -1,0 +1,7 @@
+measure_id,query_id,query,active
+resilient_infrastructure_design,withstand,infrastructure will be designed to withstand extreme weather events,true
+resilient_infrastructure_design,elevated,facilities will be elevated above projected flood levels,true
+resilient_infrastructure_design,standards,resilient engineering standards will be incorporated,true
+resilient_infrastructure_design,flood_protection,flood protection measures will be included in facility designs,true
+resilient_infrastructure_design,hardened,assets will be hardened against climate risks,true
+resilient_infrastructure_design,specs,technical specifications will incorporate resilience requirements,true

@@ -1,0 +1,7 @@
+measure_id,query_id,query,active
+renewable_energy,solar_telecom,solar systems will power telecommunications sites,true
+renewable_energy,renewable_ops,renewable energy generation will support facility operations,true
+renewable_energy,off_grid,off-grid solar solutions will be deployed,true
+renewable_energy,wind,wind energy will be used to power project infrastructure,true
+renewable_energy,installed,renewable power systems will be installed,true
+renewable_energy,clean,facilities will operate using clean energy sources,true

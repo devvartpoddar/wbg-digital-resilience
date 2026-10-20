@@ -1,0 +1,7 @@
+measure_id,query_id,query,active
+green_data_centers,performance,the data centre will meet energy performance targets,true
+green_data_centers,cooling,advanced cooling technologies will reduce energy use,true
+green_data_centers,renewable_dc,renewable energy will power data centre operations,true
+green_data_centers,criteria,sustainability criteria will guide facility design,true
+green_data_centers,pue,low-PUE facilities will be developed,true
+green_data_centers,water,water-efficient cooling systems will be deployed,true
