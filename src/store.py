@@ -34,6 +34,7 @@ def connect():
 def publish(data, *, sets=None, projects=None, links=False, log=print, conn=None):
     """Write the named sets' current runs into Postgres. Returns the
     tables written, with their row counts."""
+    import psycopg.errors as pg_errors
     t0 = time.time()
     own = conn is None
     conn = conn or connect()
@@ -42,8 +43,17 @@ def publish(data, *, sets=None, projects=None, links=False, log=print, conn=None
         # One transaction for every table and the views rebuilt over them: a
         # dashboard sees the old state or the new one, never a measure gone
         # between two writes or a view missing while its table is replaced.
+        # Rebuilding a view takes a lock a dashboard card holds while it
+        # reads, so this waits LOCK_TIMEOUT and no longer: a publish stuck
+        # behind a reader looks like a crash, and holds the reader up too.
         with conn.transaction():
+            load_pg.lock_timeout(conn)
             _publish(conn, data, sets, projects, links, log, written)
+    except pg_errors.LockNotAvailable:
+        log(f"  postgres: no lock within {load_pg.LOCK_TIMEOUT}; nothing was "
+            f"written. Who holds one:")
+        load_pg.report_lock_wait(conn, log)
+        raise SystemExit(1)
     finally:
         if own:
             conn.close()

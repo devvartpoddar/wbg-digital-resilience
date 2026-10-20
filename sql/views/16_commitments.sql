@@ -23,8 +23,22 @@ COMMENT ON VIEW wbg.package_status_order IS
 -- 0.5. With dashboard_settings.every_asset_and_type a unit counts instead
 -- under every asset and type the model says yes to ("backup power for the
 -- towers and the data centre" becomes a commitment for both assets).
-DROP VIEW IF EXISTS wbg.commitment_units CASCADE;
-CREATE VIEW wbg.commitment_units AS
+-- Materialised: built once per load, not once per card, and indexed, so a
+-- dashboard read is milliseconds (as a plain view Postgres estimated 27
+-- committed units against thousands, chose nested loops and re-ran the
+-- asset-map subquery for every row).
+DO $do$
+DECLARE kind "char";
+BEGIN
+  SELECT c.relkind INTO kind FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'wbg' AND c.relname = 'commitment_units';
+  IF kind = 'v' THEN EXECUTE 'DROP VIEW wbg.commitment_units CASCADE';
+  ELSIF kind = 'm' THEN EXECUTE 'DROP MATERIALIZED VIEW wbg.commitment_units CASCADE';
+  END IF;
+END
+$do$;
+CREATE MATERIALIZED VIEW wbg.commitment_units AS
 WITH f AS (
   SELECT f.*, pp.project_id, s.every_asset_and_type
   FROM wbg.measure_findings f
@@ -64,7 +78,11 @@ u AS (
 SELECT md5(project_id || '|' || label_set || '|' || asset_id || '|' || type_id) AS commitment_id,
        u.*
 FROM u;
-COMMENT ON VIEW wbg.commitment_units IS
+CREATE INDEX ON wbg.commitment_units (commitment_id);
+CREATE INDEX ON wbg.commitment_units (label_set, project_id);
+CREATE INDEX ON wbg.commitment_units (unit_id);
+ANALYZE wbg.commitment_units;
+COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
   'Every committed unit that counts (grade 3, in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type above 0.5 has type_id ''(no type)''.';
 
 -- Each commitment's linked packages with where they stand.
@@ -159,8 +177,22 @@ FROM wbg.commitment_units u;
 COMMENT ON VIEW wbg.unit_dropped_by_restructuring IS
   'For each committed unit: true when a later restructuring paper marks its component "Marked for Deletion", false when its component is known and no later paper does, NULL when the unit sits under no known component.';
 
-DROP VIEW IF EXISTS wbg.commitments CASCADE;
-CREATE VIEW wbg.commitments AS
+-- One row per commitment: the grain every dashboard page reads. Materialised
+-- with commitment_units: built once per load, indexed, so a Metabase card
+-- returns in milliseconds (a read of the plain view ran for over ten minutes
+-- on 2026-10-20 and held the views' locks while it did).
+DO $do$
+DECLARE kind "char";
+BEGIN
+  SELECT c.relkind INTO kind FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'wbg' AND c.relname = 'commitments';
+  IF kind = 'v' THEN EXECUTE 'DROP VIEW wbg.commitments CASCADE';
+  ELSIF kind = 'm' THEN EXECUTE 'DROP MATERIALIZED VIEW wbg.commitments CASCADE';
+  END IF;
+END
+$do$;
+CREATE MATERIALIZED VIEW wbg.commitments AS
 WITH c AS (
   SELECT u.commitment_id, u.project_id, u.label_set, u.asset_id, u.type_id,
          CASE WHEN bool_or(u.asset_from = 'sentence') THEN 'sentence'
@@ -222,7 +254,10 @@ LEFT JOIN wbg.label_groups ag ON ag.label_set = 'assets' AND ag.label_id = c.ass
 LEFT JOIN (SELECT DISTINCT ON (label_set, type_id) label_set, type_id, type_name
            FROM wbg.measure_types ORDER BY label_set, type_id, label_id) t
        ON t.label_set = c.label_set AND t.type_id = c.type_id;
-COMMENT ON VIEW wbg.commitments IS
+CREATE UNIQUE INDEX ON wbg.commitments (commitment_id);
+CREATE INDEX ON wbg.commitments (label_set);
+ANALYZE wbg.commitments;
+COMMENT ON MATERIALIZED VIEW wbg.commitments IS
   'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest P(committed); share_not_conditional is the share of sentences below the conditional line; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether the project''s asset map grades a paragraph as financing this asset. status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments.';
 
 -- The commitment's sentences, one row per distinct wording (the strongest
