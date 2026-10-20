@@ -286,7 +286,7 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
     if dry_run:
         log("  --dry-run: nothing asked, nothing written")
         return None
-    calls = cost = 0.0
+    calls, cost = 0, 0.0
     if st["to_ask"]:
         if not api_key:
             raise SystemExit("link: no credential: set $WBG_OPENROUTER_KEY")

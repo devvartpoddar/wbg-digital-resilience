@@ -205,6 +205,29 @@ def test_a_failed_request_writes_nothing(store, monkeypatch):
         f.endswith("manifest.json") for _, _, fs in os.walk(os.path.join(data, "links")) for f in fs)
 
 
+def test_the_ledger_holds_whole_counts_when_the_asset_answers_are_stored(store, monkeypatch):
+    """A run whose asset questions all come from the store starts its count
+    at zero and only the pair questions add to it: the ledger must still hold
+    a whole number, or the next classify stage cannot parse the day's total
+    (a float there crashed the run on 2026-10-20)."""
+    data, _ = store
+    link.link(data, api_key="k", asset_top=2, dim=DIM, log=lambda *_: None)
+    # Revise the commitments and take a shallower measure depth: that names
+    # another run and makes every pair question new, while the packages (and
+    # so their asset questions) are unchanged and already stored.
+    units = os.path.join(data, "measures", "cra-abc", "units.csv")
+    rows = _rows(os.path.join(data, "measures", "cra-abc"), "units.csv")
+    for r in rows:
+        r["text"] = r["text"] + " Revised."
+    _csv(units, measure.UNIT_COLS, rows)
+    monkeypatch.setattr(link, "MEASURE_TOP", 2)
+    assert link.link(data, api_key="k", asset_top=2, dim=DIM, log=lambda *_: None)
+    ledger = [r for r in _rows(os.path.join(data, "reports"), "spend.csv")
+              if r["stage"] == "link"]
+    assert len(ledger) == 2                  # the first asked assets and pairs, the second pairs
+    assert all(r["calls"].isdigit() for r in ledger)
+
+
 def test_the_loader_reads_the_current_run(store):
     data, calls = store
     link.link(data, api_key="k", asset_top=2, dim=DIM, log=lambda *_: None)
