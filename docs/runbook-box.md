@@ -58,6 +58,7 @@ each prints its estimate before asking anything (`--dry-run`).
 ./wbg search ews && ./wbg measure ews
 ./wbg types cra --assign --set digital           # the approved types (analysis/labels/cra_types.csv) on the committed units
 ./wbg types ews --assign --set digital
+./wbg add <set> --set digital --set digital_contributor   # a new measure, end to end, in one command (minutes)
 ./wbg link --set digital                         # which asset each package buys, which commitments it carries out (after every measure)
 python3 src/load_pg.py --set digital             # Postgres: tables, keys, comments, views; the digital set's runs
 python3 src/run_report.py                        # the run note for the vault
@@ -130,12 +131,14 @@ Why:  <the definition, three to six sentences: what counts, what does
       <optional: one or two whole-word patterns>
 Done when: analysis/labels/<id>.csv, <id>_queries.csv, <id>_scale.csv
       (copied from cra_scale.csv with the name substituted) and, if given,
-      <id>_patterns.csv exist following ews's shape; ./wbg search <id>,
-      ./wbg measure <id> --set digital and ./wbg types <id> --set digital
-      complete with 0 failed requests; src/load_pg.py --set digital
-      completes; the summary quotes the measure report's "committed units"
-      line, the spend, and the path of the proposals
-      (data/types/<id>-<version>/proposals.md).
+      <id>_patterns.csv exist following ews's shape; one command,
+      ./wbg add <id> --set digital --set digital_contributor, completes
+      with 0 failed requests (it runs the search, the funnel, the type
+      proposals, one load and one release, and prints the time per set and
+      overall); the summary quotes the measure report's "committed units"
+      line, the spend, the path of the proposals
+      (data/types/<id>-<version>/proposals.md) and the "everything ...s"
+      line. Several measures go in one command: ./wbg add a b c.
 Stop and ask if: the measure stage's estimate is above US$1; the search
       finds under 20 candidates.
 ```

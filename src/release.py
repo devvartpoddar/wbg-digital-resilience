@@ -52,11 +52,9 @@ INDEX_COLS = ["release_id", "created_at", "commit", "code_dirty", "paragraphs", 
 
 
 def sha256_file(path):
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
+    """The file's SHA-256, remembered beside it (paths.file_sha256)."""
+    from paths import file_sha256
+    return file_sha256(path)
 
 
 def _rows(path):

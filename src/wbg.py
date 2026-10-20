@@ -216,6 +216,73 @@ def _library_versions():
         return "pdfplumber=unknown"
 
 
+ADD_WORKERS = 10   # parallel decision-model requests per set under ./wbg add
+
+
+def add(args, data):
+    """A measure (or several) from its label files to Postgres in one
+    command, timed. Per set, in its own process: search, the funnel, type
+    proposals (and --assign). Sets run side by side, up to --jobs at once:
+    the matrix is memory-mapped, so they share one copy in the page cache
+    and each takes one core. Then one load and one release for all of
+    them, not one per stage. The time is printed per set and overall; the
+    target is a measure visible in Metabase within five minutes of its
+    files landing."""
+    import time
+    from concurrent.futures import ThreadPoolExecutor
+    t_all = time.time()
+    scope = _scope(args)
+    dry = ["--dry-run"] if args.dry_run else []
+    env = dict(os.environ, WBG_DATA=data)
+    # The sentence embeddings first, once: every set reads the same matrix.
+    _run("embed.py", *dry, "--context", "none", data=data)
+
+    def one(name):
+        t0 = time.time()
+        log = []
+        for script, extra in (("search.py", [name, *dry]),
+                              ("measure.py", [name, "--workers", str(args.workers), *dry, *scope]),
+                              ("kinds.py", [name, *dry, *scope]),
+                              *((("kinds.py", [name, "--assign", *dry, *scope]),)
+                                if args.assign else ())):
+            cmd = [_python(), os.path.join(SRC, script), *extra]
+            done = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
+            log.append(f"== {script} {' '.join(extra)}\n{done.stdout.rstrip()}")
+            if done.returncode:
+                log.append(done.stderr.rstrip())
+                return name, time.time() - t0, False, "\n".join(log)
+        return name, time.time() - t0, True, "\n".join(log)
+
+    with ThreadPoolExecutor(max_workers=max(1, args.jobs)) as pool:
+        results = list(pool.map(one, args.label_set))
+    failed = []
+    for name, secs, ok, log in results:
+        print(log, flush=True)
+        print(f"-- {name}: {'done' if ok else 'FAILED'} in {secs:.0f}s", flush=True)
+        if not ok:
+            failed.append(name)
+    if failed:
+        print(f"add: {', '.join(failed)} failed; nothing loaded. Run again to resume.")
+        return 1
+    if args.dry_run:
+        print(f"add: --dry-run, nothing loaded ({time.time() - t_all:.0f}s)")
+        return 0
+    t0 = time.time()
+    _run("load_pg.py", *scope_sets(args), data=data)
+    _run("release.py", data=data)
+    print(f"add: {', '.join(args.label_set)} in Postgres; load and release {time.time() - t0:.0f}s, "
+          f"everything {time.time() - t_all:.0f}s", flush=True)
+    return 0
+
+
+def scope_sets(args):
+    """The load's scope flags: the cohort set(s) given, else --projects as
+    the stages got it."""
+    if getattr(args, "cohort_set", None):
+        return [x for st in args.cohort_set for x in ("--set", st)]
+    return _scope(args)
+
+
 def _python():
     box = "/opt/yggdrasil/venvs/work/bin/python"
     return os.environ.get("WBG_PY") or (box if os.path.exists(box) else sys.executable)
@@ -762,6 +829,18 @@ def main(argv=None):
                    help="a round yielding fewer committed units than this is the last")
     p.add_argument("--max-rounds", type=int, default=_measure.MAX_ROUNDS)
     p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("add", help="a measure from its files to Postgres in one go: search, "
+                                   "the funnel, type proposals, one load and one release; "
+                                   "several sets run side by side")
+    p.add_argument("label_set", nargs="+", help="set(s) in analysis/labels/")
+    _filters(p)
+    p.add_argument("--jobs", type=int, default=3,
+                   help="sets run at once (each is one process on one core)")
+    p.add_argument("--workers", type=int, default=ADD_WORKERS,
+                   help="parallel requests to the decision model per set")
+    p.add_argument("--assign", action="store_true",
+                   help="also assign approved types (<set>_types.csv) after the funnel")
+    p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("link", help="which asset each procurement package buys and which "
                                     "commitments it would carry out (decision model, stored; "
                                     "after ./wbg measure)")
@@ -870,6 +949,8 @@ def main(argv=None):
         if not args.dry_run:
             _run("release.py", data=data)
         return 0
+    if args.cmd == "add":
+        return add(args, data)
     if args.cmd == "link":
         _run("link_packages.py", "--asset-top", str(args.asset_top),
              *[x for st in (args.sets or []) for x in ("--label-set", st)],

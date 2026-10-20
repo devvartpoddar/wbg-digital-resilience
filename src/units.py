@@ -65,7 +65,7 @@ expert listed sits in a table.
 embed.py embeds and indexes every unit that is neither left out nor a copy.
 Nothing is deleted: search_units() still lists them all.
 """
-import csv
+import csv, json
 import hashlib
 import os
 import re
@@ -246,7 +246,36 @@ def lead_ins(para, sents, text):
 
 
 def search_units(data):
-    """Every search unit, in document and paragraph order."""
+    """Every search unit, in document and paragraph order. Computed once per
+    state of the paragraphs, the sentences, the components and this file,
+    and kept in data/appraisal/cache/search_units-<key>.json: every stage
+    that reads the corpus (the search, the candidates, the measure, the
+    load) asks for this list, and computing the template scores over
+    150,000 units was a minute of each of them."""
+    from paths import file_sha256
+    inputs = [where(data, "appraisal", f) for f in ("paragraphs.csv", "sentences.csv",
+                                                     "components.csv")]
+    inputs.append(os.path.abspath(__file__))
+    key = hashlib.sha256("\n".join(file_sha256(f) if os.path.exists(f) else "-"
+                                   for f in inputs).encode()).hexdigest()[:16]
+    cache = where(data, "cache", f"search_units-{key}.json")
+    try:
+        with open(cache, encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        pass
+    out = _search_units(data)
+    try:
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        with open(cache + ".part", "w", encoding="utf-8") as fh:
+            json.dump(out, fh, ensure_ascii=False)
+        os.replace(cache + ".part", cache)
+    except OSError:
+        pass
+    return out
+
+
+def _search_units(data):
     every = _read(where(data, "appraisal", "paragraphs.csv"))
     paras = {p["paragraph_id"]: p for p in every if p.get("for_model") == "true"}
     keys = component_keys(data)
