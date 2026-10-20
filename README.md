@@ -64,4 +64,4 @@ sudo install -m 600 -o svc-hermes /dev/stdin .secrets/wbg-openrouter-key    # pa
 
 Then copy the run note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` in the notes vault and add a line to that folder's `README.md`. An interrupted run restarts where it stopped: run the same command again.
 
-Start with `AGENTS.md`, then `docs/methodology.md`, which lists every step the pipeline takes.
+Start with `AGENTS.md`, then `docs/methodology.md`: an index to `docs/method/`, one file per stage.
