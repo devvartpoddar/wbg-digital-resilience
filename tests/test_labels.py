@@ -88,24 +88,6 @@ def test_a_merge_into_an_unknown_or_merged_type_is_refused(tmp_path):
         labels.type_resolution("cra", (str(a),))
 
 
-def test_groups_are_a_reading_layer_and_a_label_sits_in_one_group(tmp_path):
-    a = tmp_path / "inputs"
-    _set(a, "assets", "fiber,Fiber,cables,true\ntowers,Towers,masts,true\ndpi,DPI,id,true\n")
-    (a / "assets_groups.csv").write_text(
-        "x_id,group_id,group_name,active\nfiber,networks,Networks,true\n"
-        "towers,networks,Networks,true\nold,gone,Gone,false\n", encoding="utf-8")
-    assert labels.label_sets((str(a),)) == ["assets"]
-    groups = labels.load_groups("assets", (str(a),))
-    assert [(g["label_id"], g["group_id"], g["group_name"]) for g in groups] == [
-        ("fiber", "networks", "Networks"), ("towers", "networks", "Networks")]
-    (a / "assets_groups.csv").write_text(
-        "x_id,group_id,group_name,active\nfiber,networks,Networks,true\nfiber,data,Data,true\n",
-        encoding="utf-8")
-    with pytest.raises(SystemExit, match="two groups"):
-        labels.load_groups("assets", (str(a),))
-    assert labels.load_groups("nothing_here", taxonomy=str(a)) == []
-
-
 def test_definition_rows_copy_every_phrase_pattern_and_grade():
     import load_pg
     queries, patterns, scale = load_pg.definition_rows()

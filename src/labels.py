@@ -22,11 +22,6 @@ A label set is two or three CSV files, kept by people and only read here:
                       type_name, which stays the wording the model was asked
                       with). A unit is of every type whose pattern it matches
                       ("underground", "aerial").
-  <set>_groups.csv    how the set's labels are grouped for reading (optional):
-                      <x>_id, group_id, group_name, active. A presentation
-                      layer only: the labels keep their ids and answers, the
-                      views add the group beside them. A label in two active
-                      groups is an error; a label in none has no group.
 
 Two folders hold them, with one difference between them:
 
@@ -54,7 +49,7 @@ import re
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 LABEL_DIRS = (os.path.join(ROOT, "inputs", "taxonomy"), os.path.join(ROOT, "analysis", "labels"))
-_SUFFIXES = ("_queries", "_scale", "_patterns", "_types", "_groups")
+_SUFFIXES = ("_queries", "_scale", "_patterns", "_types")
 
 
 def requested_dir():
@@ -255,24 +250,3 @@ def type_resolution(name, dirs=None, taxonomy=None):
             "merged_from": [s["type_id"] for s in types
                             if s["label_id"] == t["label_id"] and s["merge_into"] == t["type_id"]]}
     return mapping, shown
-
-
-def load_groups(name, dirs=None, taxonomy=None):
-    """The set's reading groups (<set>_groups.csv), active rows only:
-    [{label_id, group_id, group_name}]. A label in two groups is an error."""
-    path, found = _optional(name, "_groups", dirs, taxonomy)
-    out, seen = [], {}
-    for r in found:
-        if not is_active(r):
-            continue
-        lid = r[_id_col(r, path)].strip()
-        gid = (r.get("group_id") or "").strip()
-        if not gid:
-            raise SystemExit(f"labels: {path}: {lid!r} has no group_id")
-        if lid in seen and seen[lid] != gid:
-            raise SystemExit(f"labels: {path}: {lid!r} is in two groups, {seen[lid]!r} and "
-                             f"{gid!r}")
-        seen[lid] = gid
-        out.append({"label_id": lid, "group_id": gid,
-                    "group_name": " ".join((r.get("group_name") or gid).split())})
-    return out

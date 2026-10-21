@@ -41,19 +41,19 @@ COMMENT ON VIEW wbg.measure_summary IS
 
 DROP VIEW IF EXISTS wbg.measure_asset_matrix CASCADE;
 CREATE VIEW wbg.measure_asset_matrix AS
-SELECT label_set, measure_name, asset_group_name, count(*) AS commitments,
+SELECT label_set, measure_name, asset_name, count(*) AS commitments,
        count(DISTINCT project_id) AS projects
-FROM wbg.commitments GROUP BY label_set, measure_name, asset_group_name;
+FROM wbg.commitments GROUP BY label_set, measure_name, asset_name;
 COMMENT ON VIEW wbg.measure_asset_matrix IS
-  'Commitments and projects by measure and asset reading group: the overview heatmap.';
+  'Commitments and projects by measure and asset: the overview heatmap.';
 
 DROP VIEW IF EXISTS wbg.measure_type_asset_flow CASCADE;
 CREATE VIEW wbg.measure_type_asset_flow AS
-SELECT label_set, measure_name, type_name, asset_group_name, count(*) AS commitments,
+SELECT label_set, measure_name, type_name, asset_name, count(*) AS commitments,
        count(DISTINCT project_id) AS projects
-FROM wbg.commitments GROUP BY label_set, measure_name, type_name, asset_group_name;
+FROM wbg.commitments GROUP BY label_set, measure_name, type_name, asset_name;
 COMMENT ON VIEW wbg.measure_type_asset_flow IS
-  'Commitments and projects by measure, type and asset reading group: the flow from what is committed to which assets it concerns.';
+  'Commitments and projects by measure, type and asset: the flow from what is committed to which assets it concerns.';
 
 DROP VIEW IF EXISTS wbg.measure_country_type CASCADE;
 CREATE VIEW wbg.measure_country_type AS

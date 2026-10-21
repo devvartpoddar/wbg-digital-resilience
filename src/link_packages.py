@@ -21,8 +21,7 @@ stored like every other decision here (docs/methodology.md, section 5e):
 
   2. Commitment <-> package, many to many. For every measure run, each
      committed unit (the top grade) is paired with the packages of its
-     project that share an asset, or an asset in the same reading group
-     (inputs/taxonomy/assets_groups.csv), with the assets the unit's own
+     project that share an asset with the assets the unit's own
      answers named (assets_yes, else its linked asset). Each pair goes to
      the decision model with one yes/no question: would carrying out this
      package be where this commitment is delivered or applied? A commitment
@@ -37,7 +36,7 @@ and the pair step uses to say which assets a package "has".
       model_served, cost
   data/links/packages-<version>/commitment_packages.csv
       label_set, run, label_id, unit_id, package_id, project_id,
-      shared_asset_ids, shared_group_ids, probability, model_served, cost
+      shared_asset_ids, probability, model_served, cost
   data/links/packages-<version>/manifest.json
   data/reports/link_packages.txt
 
@@ -59,7 +58,7 @@ import labels  # noqa: E402
 import measure  # noqa: E402
 import search  # noqa: E402
 
-LINK_VERSION = "2"
+LINK_VERSION = "3"   # 3: pairs by a shared asset only, the asset groups removed (2026-10-21)
 MODEL = measure.MODEL
 ASSET_SET = "assets"
 ASSET_TOP = 4        # assets asked per package: its best by cosine over the taxonomy's phrases
@@ -73,7 +72,7 @@ YES = 0.5            # the reading threshold: an asset at or above it is one the
 ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
               "model_served", "cost"]
 PAIR_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
-             "shared_asset_ids", "shared_group_ids", "route", "measure_rank", "measure_cosine",
+             "shared_asset_ids", "route", "measure_rank", "measure_cosine",
              "probability", "model_served", "cost"]
 
 
@@ -194,7 +193,6 @@ class Plan:
                          "measure_top": MEASURE_TOP, "link_version": LINK_VERSION}
         self.packages = load_packages(data, projects)
         self.assets = [a for a in labels.load_set(ASSET_SET) if a["active"] == "true"]
-        self.groups = {g["label_id"]: g["group_id"] for g in labels.load_groups(ASSET_SET)}
         self.queries = search.load_queries(ASSET_SET, labels.folder(ASSET_SET))
         self.asset_qs = asset_questions(self.assets)
         self.runs = committed_units(data, projects, sets)
@@ -209,7 +207,6 @@ class Plan:
             h.update(f"{q['query_id']}\t{q['text']}\n".encode())
         h.update(json.dumps(self.asset_qs, sort_keys=True).encode())
         h.update(json.dumps(PAIR_QUESTION, sort_keys=True).encode())
-        h.update(json.dumps(sorted(self.groups.items())).encode())
         for name, (run, _) in sorted(self.runs.items()):
             h.update(f"{name}\t{run}\n".encode())
         if projects:
@@ -323,20 +320,18 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
     for name, (run, units) in sorted(plan.runs.items()):
         for u in units:
             ua = unit_assets(u)
-            ug = {plan.groups[a] for a in ua if a in plan.groups}
             if not ua:
                 continue
             for pid in u["project_ids"].split("|"):
                 for p in by_project.get(pid, []):
                     pa = has.get(p["package_id"], set())
                     shared = ua & pa
-                    sg = ug & {plan.groups[a] for a in pa if a in plan.groups}
-                    if shared or sg:
-                        pairs.append((name, run, u, pid, p, shared, sg))
+                    if shared:
+                        pairs.append((name, run, u, pid, p, shared))
     # The measure route: for each committed unit, its project's packages
     # nearest the measure (not already paired by asset), MEASURE_TOP of them.
     asset_paired = {(name, u["unit_id"], pid, p["package_id"])
-                    for name, _, u, pid, p, _, _ in pairs}
+                    for name, _, u, pid, p, _ in pairs}
     pairs = [x + ("asset", "", "") for x in pairs]
     row_of = {p["package_id"]: i for i, p in enumerate(plan.packages)}
     for name, (run, units) in sorted(plan.runs.items()):
@@ -357,13 +352,13 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
                     if (name, u["unit_id"], pid, p["package_id"]) in asset_paired:
                         continue
                     n += 1
-                    pairs.append((name, run, u, pid, p, set(), set(), "measure", n,
+                    pairs.append((name, run, u, pid, p, set(), "measure", n,
                                   f"{float(best[row_of[p['package_id']]]):.4f}"))
     requests_ = [(pair_state(u, p), {"pair": PAIR_QUESTION}) for _, _, u, _, p, *_ in pairs]
     got2, st2 = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
                             dry_run=True)
-    log(f"  pairs: {len(pairs):,} commitment-package pairs (by a shared asset or group, or "
-        f"nearest the measure); "
+    log(f"  pairs: {len(pairs):,} commitment-package pairs (by a shared asset, or nearest "
+        f"the measure); "
         f"to ask: {st2['to_ask']:,} (about US${st2['estimate_usd']:.3f})")
     if st2["to_ask"]:
         got2, st2 = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers)
@@ -375,12 +370,11 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
             log(f"  {len(st2['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
     pair_rows = []
-    for (name, run, u, pid, p, shared, sg, route, mrank, mcos), g in zip(pairs, got2):
+    for (name, run, u, pid, p, shared, route, mrank, mcos), g in zip(pairs, got2):
         e = g["pair"]
         pair_rows.append({"label_set": name, "run": run, "label_id": u["label_id"],
                           "unit_id": u["unit_id"], "package_id": p["package_id"],
                           "project_id": pid, "shared_asset_ids": "|".join(sorted(shared)),
-                          "shared_group_ids": "|".join(sorted(sg)),
                           "route": route, "measure_rank": mrank, "measure_cosine": mcos,
                           "probability": f"{float(e['answer']['noul']):.3f}",
                           "model_served": e["model"],

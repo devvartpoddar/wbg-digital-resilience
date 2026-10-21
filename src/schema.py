@@ -121,7 +121,7 @@ BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_lat
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
          "matched_types", "asset_ids_above_threshold", "activity_kinds_above_threshold",
          "actor_ids_above_threshold", "type_ids_above_threshold", "component_mentions",
-         "shared_asset_ids", "shared_group_ids"}
+         "shared_asset_ids"}
 INDEXED = {"document_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
            "award_id", "unit_id", "borrower_reference_normalised", "label_id", "label_set",
            "type_id"}
@@ -460,12 +460,6 @@ TABLES = {
                  "recall": "Of the units the person graded committed, the share the model "
                            "grades committed (within the graded pool).",
                  "report_path": "The evaluation report under data/reports/."}),
-    "label_groups": dict(
-        schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
-        comment="How a set's labels are grouped for reading (<set>_groups.csv, kept by a "
-                "person): a presentation layer the views add beside the label; the labels "
-                "keep their ids and answers. The assets are grouped into about six.",
-        columns={"group_id": "The group's id.", "group_name": "The group's name."}),
     "label_queries": dict(
         schema=PUBLIC, key=("label_set", "label_id", "query_id"), foreign=[],
         comment="A copy of each set's search phrases (<set>_queries.csv, kept by a person): "
@@ -538,8 +532,8 @@ TABLES = {
                  ("unit_id", "search_units", "unit_id"),
                  ("project_id", "projects", "project_id")],
         comment="Which procurement packages would carry out a commitment: one row per "
-                "committed unit and package of the same project that share an asset or an "
-                "asset reading group, or that is among the project's packages nearest the "
+                "committed unit and package of the same project that share an asset, "
+                "or that is among the project's packages nearest the "
                 "measure itself (route), with the decision model's yes probability "
                 "(src/link_packages.py). Many to many: a commitment may link to several "
                 "packages and a package to several commitments. Filter on the probability.",
@@ -548,8 +542,7 @@ TABLES = {
             "label_id": "The measure.",
             "unit_id": "The committed unit (wbg.measure_findings).",
             "shared_asset_ids": "Assets both the unit's answers and the package's answers name at 0.5.",
-            "shared_group_ids": "Asset reading groups (wbg.label_groups) both name at 0.5.",
-            "route": "How the pair was made: asset (a shared asset or reading group) or measure (the package is among the project's nearest to the measure's phrases; no asset needed).",
+            "route": "How the pair was made: asset (a shared asset) or measure (the package is among the project's nearest to the measure's phrases; no asset needed).",
             "measure_rank": "For the measure route, the package's rank by cosine to the measure among the project's packages not paired by asset.",
             "measure_cosine": "For the measure route, the package description's best cosine to the measure's phrases and definition.",
             "probability": "The decision model's probability that carrying out the package is where the commitment is delivered or applied.",
