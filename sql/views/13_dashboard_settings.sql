@@ -5,8 +5,10 @@
 DROP VIEW IF EXISTS wbg.dashboard_settings CASCADE;
 CREATE VIEW wbg.dashboard_settings AS
 SELECT
-  -- A unit counts towards a commitment when the model's most likely grade is
-  -- 3 (committed), P(grade 3) is at least this (Dev: no floor; 0),
+  -- A unit counts towards a commitment when it is committed (its measure's
+  -- commit_floor in analysis/labels/<set>.csv, read off Dev's graded sheet of
+  -- 2026-10-21; else the most likely grade is 3), P(grade 3) is at least this
+  -- (a further floor over every measure; 0),
   0.0::numeric AS commitment_min_probability,
   -- and its asset is found at one of these levels: 'unit', the sentence's
   -- own words name it (every asset the model says yes to); 'paragraph', the
@@ -23,9 +25,10 @@ SELECT
   -- A unit is "not waiting on a later study" below this conditional
   -- probability.
   0.3::numeric AS not_conditional_below,
-  -- A package is linked to a commitment at this probability or more (the
-  -- link stage's reading threshold, link_packages.YES).
-  0.5::numeric AS package_link_min_probability,
+  -- A package is linked to a commitment at this probability or more. On Dev's
+  -- graded sheet (2026-10-21, 70 pairs) links from 0.5 to 0.7 were 3 yes, 7
+  -- no, 5 unsure; from 0.7 up, 25 yes of 26.
+  0.7::numeric AS package_link_min_probability,
   -- Another project prints a sentence near-identically when its committed
   -- sentences hold at least this share of the sentence's six-word runs.
   0.5::numeric AS near_copy_share,

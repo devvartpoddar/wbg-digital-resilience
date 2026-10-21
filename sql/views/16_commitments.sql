@@ -54,7 +54,9 @@ WITH f AS (
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
   JOIN wbg.project_info i ON i.project_id = pp.project_id
   CROSS JOIN wbg.dashboard_settings s
-  WHERE f.was_sent_to_model AND f.most_likely_grade = 3
+  -- committed: P(grade 3) at the measure's commit floor, else most likely
+  -- grade 3 (measure_findings.is_committed, src/measure.py is_committed)
+  WHERE f.was_sent_to_model AND coalesce(f.is_committed, f.most_likely_grade = 3)
     AND f.probability_grade_3 >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
@@ -100,7 +102,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (grade 3, in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not; scope is rule, investment or not_commitment (src/commit_checks.py).';
+  'Every committed unit that counts (at its measure''s commit floor, else grade 3; in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not; scope is rule, investment or not_commitment (src/commit_checks.py).';
 
 -- Each commitment's linked packages with where they stand.
 DROP VIEW IF EXISTS wbg.commitment_package_status CASCADE;
@@ -127,7 +129,7 @@ GROUP BY u.commitment_id, cp.package_id, s.project_id, s.description_clean, s.ca
          s.in_latest_plan, s.notice_date, s.notice_deadline, s.signed_date, s.supplier,
          s.package_status, s.next_date;
 COMMENT ON VIEW wbg.commitment_package_status IS
-  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings, 0.5): the package''s plan columns, latest notice, signed contract and package_status (see package_status). A sentence that is one investment (unit_scope) links to its most likely dashboard_settings.investment_package_top packages only; a rule links to every package at the threshold. A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
+  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability, 0.7): the package''s plan columns, latest notice, signed contract and package_status (see package_status). A sentence that is one investment (unit_scope) links to its most likely dashboard_settings.investment_package_top packages only; a rule links to every package at the threshold. A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
 
 -- Near-identical wording across projects. Word-for-word equality found 17
 -- of 2,150 commitments, while four operations of one programme (DRC,
@@ -143,7 +145,7 @@ WITH u AS (
   SELECT DISTINCT f.unit_id, pp.project_id, f.text
   FROM wbg.measure_findings f
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
-  WHERE f.was_sent_to_model AND f.most_likely_grade = 3
+  WHERE f.was_sent_to_model AND coalesce(f.is_committed, f.most_likely_grade = 3)
 ),
 w AS (
   SELECT unit_id, project_id,

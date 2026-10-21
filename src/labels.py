@@ -118,6 +118,17 @@ def rows(path):
         return list(csv.DictReader(fh))
 
 
+def commit_floor(name):
+    """A measure's commit floor: the P(top grade) at or above which a unit
+    counts as committed (the `commit_floor` column of the set's file, a
+    person's reading of a graded sheet), or None where none is written and
+    the most likely grade decides."""
+    for lab in load_set(name):
+        if lab["active"] == "true" and lab.get("commit_floor"):
+            return float(lab["commit_floor"])
+    return None
+
+
 def is_active(r):
     return (r.get("active") or "true").strip().lower() == "true"
 
@@ -139,6 +150,7 @@ def load_set(name, dirs=None, taxonomy=None):
         out.append({"id": r[id_col].strip(), "name": r[name_col].strip(),
                     "definition": " ".join(r["definition"].split()),
                     "active": str(is_active(r)).lower(), "version": r.get("version", ""),
+                    "commit_floor": (r.get("commit_floor") or "").strip(),
                     "folder": os.path.relpath(d, ROOT)})
     if not out:
         raise SystemExit(f"labels: {path} has no rows")

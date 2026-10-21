@@ -44,6 +44,7 @@ RENAME = {
     "raw_start": "pdf_text_start_offset", "raw_end": "pdf_text_end_offset",
     "for_model": "is_for_model", "list_item": "is_list_item", "active": "is_active",
     "code_dirty": "has_uncommitted_code", "sent": "was_sent_to_model", "asked": "was_asked",
+    "committed": "is_committed",
     "part": "part_number",
     "borrower_ref": "borrower_reference", "borrower_ref_norm": "borrower_reference_normalised",
     "description_match": "description_match_key", "description_lang": "description_language",
@@ -112,7 +113,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "p_neither", "p_rule", "p_investment", "p_not_commitment"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
-           "was_sent_to_model", "was_asked"}
+           "was_sent_to_model", "was_asked", "is_committed"}
 # Pipe-joined lists in the CSV become arrays, which Metabase renders and
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
@@ -399,6 +400,7 @@ TABLES = {
             "matched_patterns": "Pattern ids that matched.",
             "firmness": "activity, outcome or none, from wording lists.",
             "was_sent_to_model": "False when a gate kept the unit from being graded.",
+            "is_committed": "The unit counts as committed: P(grade 3) at or above the measure's commit_floor (analysis/labels/<set>.csv), or, where none is written, the most likely grade is 3.",
             "paragraph_best_asset_id": "The asset map's best asset for the paragraph.",
             "paragraph_best_asset_probability": "Its probability of grade 2 or more.",
             "component_best_asset_id": "The best asset among the component's paragraphs.",

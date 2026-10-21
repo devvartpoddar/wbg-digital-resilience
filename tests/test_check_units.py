@@ -102,3 +102,12 @@ def test_link_answers_are_stored_by_text_and_scored_by_threshold(tmp_path, monke
     assert [(r["text_sha256"], r["applies"]) for r in stored] == [("t1", "yes"), ("t2", "no")]
     report = open(out).read()
     assert "| 0.3 | 0.50" in report and "| 0.9 | 1.00" in report
+
+
+def test_the_floor_draw_sits_around_the_measures_commit_floor():
+    bands = check_units.floor_bands(0.3)
+    assert [b[0] for b in bands] == ["p0.00-0.10", "p0.10-0.20", "p0.20-0.30", "p0.30-0.40",
+                                     "p0.40-0.55", "p0.55-1.00"]
+    assert sum(b[3] for b in bands) == 20
+    assert any(lo <= 0.3 < hi for _, lo, hi, _ in bands)
+    assert sum(b[3] for b in check_units.floor_bands(None)) == 21

@@ -66,6 +66,27 @@ THRESHOLDS = [0.15, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 # read off the graded sheet. Each band is (stratum, low, high, rows).
 BANDS = [("p<0.15", 0.0, 0.15, 5), ("p0.15-0.4", 0.15, 0.4, 8), ("p0.4-0.6", 0.4, 0.6, 12),
          ("p0.6-0.8", 0.6, 0.8, 10), ("p0.8+", 0.8, 1.01, 5)]
+# The floor design (--design floor): about 20 units a measure in bands around
+# its commit floor (labels.commit_floor), to check a chosen floor; a measure
+# without one is drawn in BANDS at about half the rows.
+FLOOR_STEPS = [(-1.0, -0.2, 2), (-0.2, -0.1, 3), (-0.1, 0.0, 5), (0.0, 0.1, 5), (0.1, 0.25, 3),
+               (0.25, 1.0, 2)]
+
+
+def floor_bands(floor):
+    """[(stratum, low, high, rows)] around a commit floor, or BANDS halved."""
+    if floor is None:
+        return [(s, lo, hi, (n + 1) // 2) for s, lo, hi, n in BANDS]
+    out = []
+    for a, b, n in FLOOR_STEPS:
+        lo, hi = max(0.0, floor + a), min(1.01, floor + b)
+        if hi > lo:
+            out.append((f"p{lo:.2f}-{min(hi, 1.0):.2f}", lo, hi, n))
+    return out
+
+
+LINK_FLOOR_BANDS = [("p0.5-0.6", 0.5, 0.6, 8), ("p0.6-0.7", 0.6, 0.7, 8), ("p0.7-0.8", 0.7, 0.8, 8),
+                    ("p0.8+", 0.8, 1.01, 6)]
 LINK_BANDS = [("p<0.3", 0.0, 0.3, 10), ("p0.3-0.5", 0.3, 0.5, 15), ("p0.5-0.7", 0.5, 0.7, 15),
               ("p0.7-0.9", 0.7, 0.9, 15), ("p0.9+", 0.9, 1.01, 15)]
 HOW_TO = [
@@ -186,6 +207,9 @@ def sheet_rows(name, data, seed=1, per=PER, elusion=False, design="grade", **kw)
         picked = draw_elusion(run, units, ELUSION_PER, seed)
     elif design == "bands":
         picked = draw_bands(units, len(run.scale) - 1, seed)
+    elif design == "floor":
+        import labels
+        picked = draw_bands(units, len(run.scale) - 1, seed, floor_bands(labels.commit_floor(name)))
     else:
         picked = draw(units, per, seed)
     rng = random.Random(seed)
@@ -261,7 +285,8 @@ def build_all(data, seed, design="bands", **kw):
         tabs.append({"tab": name[:31], "rows": sheet, "scale": scale, "assets": assets,
                      "types": set_types(name, data), "measure": name})
         keys.append((base + ".key.csv", KEY_COLS, key))
-    lkey, lsheet = link_rows(data, seed, kw.get("projects"))
+    lkey, lsheet = link_rows(data, seed, kw.get("projects"),
+                             LINK_FLOOR_BANDS if design == "floor" else LINK_BANDS)
     if lsheet:
         tabs.append({"tab": "package links", "rows": lsheet})
         keys.append((where(data, "review", f"check_links_s{seed}.key.csv"), LINK_KEY_COLS, lkey))
@@ -827,9 +852,10 @@ def main():
     ap.add_argument("--elusion", action="store_true",
                     help="units the funnel never read, from just below and far below the pool")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--design", default=None, choices=("grade", "bands"),
-                    help="draw by the model's grade (30/15/20/20 and 10 feedback) or by band "
-                         "of its probability of the top grade (5/8/12/10/5; the default for all)")
+    ap.add_argument("--design", default=None, choices=("grade", "bands", "floor"),
+                    help="draw by the model's grade (30/15/20/20 and 10 feedback), by band "
+                         "of its probability of the top grade (5/8/12/10/5; the default for all), "
+                         "or around each measure's commit floor (about 20, links around 0.7)")
     ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
     ap.add_argument("--gate", default="none", choices=measure.GATES)
     ap.add_argument("--asset-min", type=float, default=0.0)

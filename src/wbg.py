@@ -981,7 +981,7 @@ def main(argv=None):
     p.add_argument("--elusion", action="store_true",
                    help="draw (or evaluate) units the funnel never read, below the pool")
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--design", choices=("grade", "bands"),
+    p.add_argument("--design", choices=("grade", "bands", "floor"),
                    help="draw by the model's grade, or by band of its probability of the top "
                         "grade (the default for `all`: every measure and the package links in "
                         "one workbook)")

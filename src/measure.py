@@ -146,6 +146,19 @@ MIN_YIELD = 10        # a round yielding fewer committed units than this is the 
 MAX_ROUNDS = 6
 NEGATIVE_WEIGHT = 0.5  # Rocchio: how much of the rejected units' centroid is subtracted
 EXTRAS_MIN_GRADE = 2   # asset and kind questions are asked of units graded at least this
+
+
+def is_committed(u, top, floor=None):
+    """A unit counts as committed: P(top grade) at or above the measure's
+    commit floor (labels.commit_floor), or, with none, the most likely grade
+    is the top one. A row that carries its own `committed` column says so."""
+    if u.get("committed") in ("true", "false"):
+        return u["committed"] == "true"
+    if u.get("sent") != "true" or u.get("grade", "") == "":
+        return False
+    if floor is not None:
+        return u.get(f"p{top}", "") != "" and float(u[f"p{top}"]) >= floor
+    return int(u["grade"]) == top
 UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
              "component_number", "subcomponent_number", "component_key", "copies", "route",
              "round", "rank", "score", "patterns", "firmness",
@@ -153,7 +166,7 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "asset_unit", "asset_p_unit", "assets_yes", "asset_link", "asset_link_level",
              "asset_link_p", "kinds_yes", "kind_best", "kind_p", "conditional_p",
              "actors_yes", "actor_best", "actor_p", "template_projects", "template_share",
-             "sent",
+             "sent", "committed",
              "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
              "p_committed_calibrated",
              "model_served", "cost", "text"]
@@ -196,7 +209,10 @@ def questions(labels, scale, context, assets, kinds=(), facets=()):
         crit[ASSET_NOT_DIGITAL] = ("Not a digital asset: the commitment is about something "
                                    "that is not digital infrastructure or a digital system "
                                    "(buildings, roads, power for health facilities, "
-                                   "streetlights, households).")
+                                   "streetlights, households). Power, cooling or climate "
+                                   "protection for a digital site (towers, data centres, "
+                                   "connected schools, user centres) concerns that digital "
+                                   "asset, not this.")
         out["asset:choice"] = {
             "type": "choice",
             "instructions": (f"Which one digital asset does the commitment in {where_x} "
@@ -334,6 +350,11 @@ class Run:
                          "extras_context": EXTRAS_CONTEXT,
                          "projects": sorted(projects) if projects else None}
         self.projects = sorted(projects) if projects else None
+        # The commit floor is a reading, not a question; it is part of the
+        # version only when written, so the folders made before it keep their names.
+        self.floor = labels_mod.commit_floor(name)
+        if self.floor is not None:
+            self.settings["commit_floor"] = self.floor
         self.search_run, _ = search.run_folder(name, data)
         if not os.path.exists(os.path.join(self.search_run, "manifest.json")):
             raise SystemExit(f"measure: {name} has no search run for the current index; "
@@ -417,7 +438,7 @@ class Run:
                 "kind_p": "", "conditional_p": "", "actors_yes": "", "actor_best": "",
                 "actor_p": "", "template_projects": r.get("template_projects", ""),
                 "template_share": r.get("template_share", ""), "p_committed_calibrated": "",
-                "sent": "false",
+                "sent": "false", "committed": "false",
                 "text": text, "_para": para}
 
     def candidate_rows(self):
@@ -479,6 +500,8 @@ class Run:
                     **{f"p{i}": (f"{probs[i]:.4f}" if i < len(probs) else "") for i in range(5)},
                     "model_served": entries[lab]["model"],
                     "cost": f"{sum(float(e.get('cost_usd') or 0) for e in entries.values()):.6f}"})
+        row["committed"] = "true" if is_committed(
+            {**row, "sent": "true", "committed": ""}, len(self.scale) - 1, self.floor) else "false"
         if self.calibration:
             import math
             p = min(max(probs[-1] / total, 1e-4), 1 - 1e-4)
@@ -561,7 +584,8 @@ class Run:
                 return calls, cost, st["failures"] or [("", "an answer is missing")]
         for row, g in zip(sent, got):
             self.grade_into(row, g)
-        need = [r for r in sent if int(r["grade"]) >= EXTRAS_MIN_GRADE] if extras else []
+        need = [r for r in sent if int(r["grade"]) >= EXTRAS_MIN_GRADE
+                or r.get("committed") == "true"] if extras else []
         if need:
             ctx = self.settings["extras_context"]
             states = [self.state_of(r, ctx) for r in need]
@@ -664,6 +688,11 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
              f"grade {top} (committed) in {len(com):,} units, "
              f"{len({p for r in com for p in r['project_ids'].split('|')})} projects; "
              f"prevalence among graded {len(com) / max(len(sent), 1):.1%}"]
+    if run.floor is not None:
+        floored = [r for r in sent if r.get("committed") == "true"]
+        lines.append(f"  committed at the commit floor P(grade {top}) >= {run.floor}: "
+                     f"{len(floored):,} units, "
+                     f"{len({p for r in floored for p in r['project_ids'].split('|')})} projects")
     by_route = defaultdict(lambda: [0, 0])
     for r in sent:
         by_route[r["route"]][0] += 1
