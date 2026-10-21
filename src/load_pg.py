@@ -440,7 +440,8 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "conditional_p", "actors_yes", "actor_best", "actor_p",
                 "template_projects", "template_share", "sent", "committed",
                 "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
-                "p_committed_calibrated", "types_yes", "best_type", "best_p", "model_served",
+                "p_committed_calibrated", "second_look", "p_sentence", "types_yes", "best_type",
+                "best_p", "model_served",
                 "cost", "text"]
 
 
