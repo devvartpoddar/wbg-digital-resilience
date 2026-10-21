@@ -121,10 +121,16 @@ def store(tmp_path, monkeypatch):
         probs = {"0": 0.05, "1": 0.05, "2": 0.1, "3": 0.8} if hit else \
             {"0": 0.9, "1": 0.1, "2": 0.0, "3": 0.0}
         answers = {"cra": {"type": "score", "confidence": 0.7, "probabilities": probs}}
-        for qid in body["questions"]:                     # every yes/no asked: assets, kinds
-            if qid != "cra":
-                yes = (qid == "asset:towers" and "tower" in body["state"]["sentence"]) or \
-                    (qid in ("kind:build", "facet:borrower") and hit)
+        for qid, q in body["questions"].items():          # the asset choice; yes/no kinds
+            if qid == "asset:choice":
+                s = body["state"]["sentence"]
+                pick = "towers" if "tower" in s else \
+                    "not_digital" if "streetlight" in s else "no_asset_named"
+                opts = list(q["criteria"])
+                answers[qid] = {"type": "choice", "choice": pick, "probabilities": {
+                    o: (0.9 if o == pick else round(0.1 / (len(opts) - 1), 4)) for o in opts}}
+            elif qid != "cra":
+                yes = qid in ("kind:build", "facet:borrower") and hit
                 answers[qid] = {"type": "noul", "noul": 0.9 if yes else 0.1}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": answers}
     monkeypatch.setattr(classify, "decide", fake)
@@ -160,7 +166,10 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert list(calls[0]["questions"]) == ["cra"]
     assert calls[1]["state"]["sentence"] == calls[0]["state"]["sentence"]
     assert "paragraph" in calls[1]["state"] and "ten towers" in calls[1]["state"]["paragraph"]
-    assert calls[1]["questions"]["asset:towers"]["type"] == "noul"
+    q = calls[1]["questions"]["asset:choice"]
+    assert q["type"] == "choice" and "towers" in q["criteria"]
+    assert {"no_asset_named", "not_digital"} <= set(q["criteria"])
+    assert not any(k.startswith("asset:") and k != "asset:choice" for k in calls[1]["questions"])
     assert "cra" not in calls[1]["questions"]
     assert calls[0]["model"] == measure.MODEL
 
@@ -203,3 +212,15 @@ def test_a_dry_run_asks_nothing(store):
     data, calls = store
     assert measure.measure("cra", data, dry_run=True, log=lambda *_: None, top=1) is None
     assert calls == []
+
+
+def test_a_unit_that_is_not_digital_takes_no_link_from_its_paragraph():
+    run = measure.Run.__new__(measure.Run)
+    base = {"asset_para": "towers", "asset_p_para": "0.9000", "asset_comp": "towers",
+            "asset_p_comp": "0.9000"}
+    row = dict(base, asset_unit="not_digital", asset_p_unit="0.800")
+    run.link_into(row)
+    assert (row["asset_link"], row["asset_link_level"]) == ("", "not_digital")
+    row = dict(base, asset_unit="", asset_p_unit="")          # no asset named: the paragraph's
+    run.link_into(row)
+    assert (row["asset_link"], row["asset_link_level"]) == ("towers", "paragraph")

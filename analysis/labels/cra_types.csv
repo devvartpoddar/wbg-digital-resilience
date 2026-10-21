@@ -1,9 +1,12 @@
 measure_id,type_id,type_name,definition,active,version
-cra,site_specific,Site-specific assessment,Assesses climate or disaster risk at an individual proposed or existing location,true,v4
-cra,route_level,Route-level assessment,Assesses hazards and vulnerabilities along a proposed or existing route,true,v4
-cra,asset_level,Asset-level assessment,Assesses climate risk affecting a defined infrastructure asset,true,v4
-cra,system_network,System or network assessment,Assesses climate risk across an interconnected system or network,true,v4
-cra,sector_wide,Sector-wide assessment,Assesses climate risk across a sector or broad investment portfolio,true,v4
+cra,site_specific,Site or asset assessment,"An assessment of climate or disaster risk to particular sites, facilities or assets the project finances or uses. Does not include assessments along routes, across whole networks, or across a sector.",true,v5
+cra,route_level,Route assessment,"An assessment of hazards along the route of a cable, road, line or other linear infrastructure. Does not include assessments of single sites or whole networks.",true,v5
+cra,system_network,Network or system assessment,"An assessment of climate risk across an interconnected network or system (a national backbone, a utility's network). Does not include single sites or routes, or a whole sector.",true,v5
+cra,sector_wide,Sector or national assessment,"An assessment of climate risk across a sector, a country's infrastructure or a portfolio of investments. Does not include assessments of one network, route or site, or hazard mapping.",true,v5
+cra,hazard_mapping,Hazard and exposure mapping,"Producing maps or spatial layers of climate hazards, exposure or climate hotspots to identify areas at risk or to place project activities. Choose this whenever the deliverable is a map, whatever its scale.",true,v5
+cra,hazard_studies,Hydrological and geohazard studies,"Technical studies that model or measure a hazard (hydrological or flood modelling, geotechnical or landslide investigations) to inform feasibility or design. Choose this whenever the deliverable is a technical hazard study rather than a risk assessment or a map.",true,v5
+cra,continuity_risk,Service continuity risk assessment,"An assessment of climate and disaster risk to the continuity of a service, institution or government function (business continuity or crisis risk analysis). Does not include assessments of physical sites, routes or networks.",true,v5
+cra,asset_level,Asset-level assessment,Assesses climate risk affecting a defined infrastructure asset,false,v4
 cra,operator_required,Operator or contractor assessment,"Requires an operator, consultant, contractor or bidder to undertake the assessment",false,v4
 cra,contractor_required,Assessment required of contractors or operators,"A requirement that contractors, bidders, operators or consultants carry out a climate or disaster risk assessment, written into tender documents, terms of reference, specifications or service agreements.",false,v1
 cra,hazard_mapping_siting,Hazard mapping and screening to choose sites,"Hazard, exposure or risk mapping, or a climate screening of candidate locations, used to decide where infrastructure goes or which areas the project targets.",false,v1

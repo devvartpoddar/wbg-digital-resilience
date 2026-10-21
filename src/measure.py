@@ -13,8 +13,9 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      unit: the best asset in its paragraph and in its component.
   3. The decision model reads each unit in two passes: the measure's graded
      question for every unit, then, for the units graded 2 or more, one
-     yes/no question per digital asset ("does this sentence concern fiber
-     networks?"), one per activity kind (govern, build, sustain, use) and
+     choice question for the asset (which one digital asset the commitment
+     concerns, or that it names none, or that it is not digital), one yes/no
+     question per activity kind (govern, build, sustain, use) and
      the facets (conditional; who carries it out), so the asset is answered
      for the sentence itself and the question tokens, which are most of the
      cost, are spent only where they matter. The second pass runs in the
@@ -28,9 +29,12 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      guarantee: what the search never reaches stays unmeasured until a
      person grades a sample.
   5. The asset link of a unit, the three levels combined (asset_link,
-     asset_link_level, asset_link_p): the unit answer when any asset is at
-     LINK_MIN or more (the sentence names it), else the paragraph map at
-     LINK_MIN, else the component map, else none.
+     asset_link_level, asset_link_p): the unit's chosen asset when it chose
+     one at LINK_MIN or more (the sentence names it), else the paragraph map
+     at LINK_MIN, else the component map, else none. A unit that chose "not
+     a digital asset" takes no link from its paragraph or component
+     (asset_link_level not_digital): the paragraph's asset would be wrong for
+     it, as with streetlights in a paragraph about towers.
 
 The measure's question names the measure and its definition and never the
 asset: the decision model reads literally, and a question about "climate
@@ -155,7 +159,14 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "model_served", "cost", "text"]
 # Asset thresholds the report tabulates (nothing is chosen here).
 REPORT_THRESHOLDS = (0.3, 0.5, 0.7, 0.9)
-ASSET_YES = 0.5       # an asset the unit answer puts at or above this is listed in assets_yes
+ASSET_YES = 0.5       # a kind or actor the unit answer puts at or above this is listed
+# The asset question is one choice over the assets and these two (2026-10-21):
+# as one yes/no question per asset the model said yes to two or more assets
+# for 70 per cent of committed units and "digital systems" to most of them;
+# as a choice, on 167 test units, digital systems fell from 50 to 4 and 49
+# chose "no asset named".
+ASSET_NONE = "no_asset_named"
+ASSET_NOT_DIGITAL = "not_digital"
 
 
 def questions(labels, scale, context, assets, kinds=(), facets=()):
@@ -178,14 +189,20 @@ def questions(labels, scale, context, assets, kinds=(), facets=()):
                              f"{lab['name']} means: {lab['definition']}"),
             "criteria": [g.replace("{name}", lab["name"]) for g in scale],
         }
-    for a in assets:
-        out[f"asset:{a['id']}"] = {
-            "type": "noul",
-            "instructions": (f"Does the sentence in {where_x} concern {a['name']}? "
-                             f"{a['name']} means: {a['definition']}"),
-            "criteria": {"true": f"The sentence is about {a['name']}, or about infrastructure "
-                                 f"or systems of that kind, named or clearly implied.",
-                         "false": f"The sentence does not concern {a['name']}."}}
+    if assets:
+        crit = {a["id"]: f"{a['name']}: {a['definition']}" for a in assets}
+        crit[ASSET_NONE] = ("No asset named: the sentence names no specific digital asset, "
+                            "or speaks of the project's digital investments in general.")
+        crit[ASSET_NOT_DIGITAL] = ("Not a digital asset: the commitment is about something "
+                                   "that is not digital infrastructure or a digital system "
+                                   "(buildings, roads, power for health facilities, "
+                                   "streetlights, households).")
+        out["asset:choice"] = {
+            "type": "choice",
+            "instructions": (f"Which one digital asset does the commitment in {where_x} "
+                             f"concern? Choose exactly one: the most specific asset it names "
+                             f"or clearly implies."),
+            "criteria": crit}
     for k in kinds:
         out[f"kind:{k['id']}"] = {
             "type": "noul",
@@ -472,10 +489,12 @@ class Run:
 
     def extras_into(self, row, entries):
         """The asset and activity-kind answers from the second pass."""
-        ps = {x["id"]: float(entries[f"asset:{x['id']}"]["answer"]["noul"]) for x in self.assets}
+        ps = {k: float(v) for k, v in entries["asset:choice"]["answer"]["probabilities"].items()}
         best = max(ps, key=ps.get) if ps else ""
-        row.update({"asset_unit": best, "asset_p_unit": f"{ps[best]:.3f}" if best else "",
-                    "assets_yes": "|".join(x for x in ps if ps[x] >= ASSET_YES)})
+        named = best not in ("", ASSET_NONE, ASSET_NOT_DIGITAL)
+        row.update({"asset_unit": best if best != ASSET_NONE else "",
+                    "asset_p_unit": f"{ps[best]:.3f}" if best and best != ASSET_NONE else "",
+                    "assets_yes": best if named else ""})
         self.link_into(row)
         ks = {k["id"]: float(entries[f"kind:{k['id']}"]["answer"]["noul"]) for k in self.kinds}
         kb = max(ks, key=ks.get) if ks else ""
@@ -493,6 +512,11 @@ class Run:
 
     def link_into(self, row):
         """asset_link, asset_link_level, asset_link_p from the three levels."""
+        if row["asset_unit"] == ASSET_NOT_DIGITAL and row["asset_p_unit"] != "" \
+                and float(row["asset_p_unit"]) >= LINK_MIN:
+            row.update({"asset_link": "", "asset_link_level": "not_digital",
+                        "asset_link_p": row["asset_p_unit"]})
+            return
         for level, a, p in (("unit", row["asset_unit"], row["asset_p_unit"]),
                             ("paragraph", row["asset_para"], row["asset_p_para"]),
                             ("component", row["asset_comp"], row["asset_p_comp"])):

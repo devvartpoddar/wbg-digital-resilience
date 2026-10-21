@@ -70,7 +70,7 @@ def _publish(conn, data, sets, projects, links, log, written):
             ("labels", ["label_set", "label_id", "name", "definition", "active", "version",
                         "folder"], load_pg.label_rows()),
             ("measure_types", ["label_set", "label_id", "type_id", "type_name", "definition",
-                               "merged_from"], load_pg.type_rows()),
+                               "merged_from"], load_pg.type_rows(data)),
             ("label_groups", ["label_set", "label_id", "group_id", "group_name"],
              load_pg.group_rows()),
             *zip(("label_queries", "label_patterns", "label_scale"),
@@ -108,6 +108,13 @@ def _publish(conn, data, sets, projects, links, log, written):
     if os.path.exists(qpath):
         written["measure_quality"] = load_pg.load_table(conn, data, "measure_quality",
                                                         "labels/measure_quality.csv")[0]
+    # The commitment checks (src/commit_checks.py) span every measure: small,
+    # written whole whenever a current run exists.
+    sha, cpairs, cscope = load_pg.check_rows(data, projects)
+    if sha is not None:
+        for table, cols, rows in (("unit_pair_checks", load_pg.CHECK_PAIR_COLS, cpairs),
+                                  ("unit_scope", load_pg.CHECK_SCOPE_COLS, cscope)):
+            written[table] = load_pg.replace_rows(conn, table, cols, rows, "unit_id", None, sha)[0]
     if links:
         sha, assets_, pairs_ = load_pg.link_rows(data, projects)
         if sha is not None:

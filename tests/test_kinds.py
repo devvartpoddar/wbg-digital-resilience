@@ -47,6 +47,11 @@ def store(tmp_path, monkeypatch):
 
     def fake_generate(body, **kw):
         gen_calls.append(body)
+        if "NEW kinds" in body["messages"][0]["content"]:
+            return {"model": "anthropic/claude-haiku-5.5", "usage": {"cost": 0.001},
+                    "choices": [{"message": {"content": '{"types": [{"type_id": "Site",'
+                                                        ' "type_name": "Site checks", "definition":'
+                                                        ' "checks of one site", "examples": [1]}]}'}}]}
         return {"model": "anthropic/claude-haiku-5.5", "usage": {"cost": 0.001},
                 "choices": [{"message": {"content": 'Here: {"types": [{"type_id": "Mapping",'
                                                     ' "type_name": "Hazard mapping", "definition":'
@@ -55,9 +60,16 @@ def store(tmp_path, monkeypatch):
     def fake_decide(body, **kw):
         dec_calls.append(body)
         s = body["state"]["sentence"]
-        return {"model": measure.MODEL, "usage": {"cost": 0.00001},
-                "answers": {"mapping": {"type": "noul", "noul": 0.9 if "map" in s else 0.1},
-                            "site": {"type": "noul", "noul": 0.9 if "site-specific" in s else 0.2}}}
+        out = {}
+        for qid, q in body["questions"].items():
+            opts = list(q["criteria"])
+            pick = next((o for o in opts if o.split(".")[-1] in ("mapping",) and "map" in s),
+                        None) or next((o for o in opts if o.split(".")[-1] == "site"
+                                       and "site-specific" in s), None) or "none"
+            out[qid] = {"type": "choice", "choice": pick,
+                        "probabilities": {o: (0.9 if o == pick else 0.1 / (len(opts) - 1))
+                                          for o in opts}}
+        return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
     monkeypatch.setattr(types_stage, "generate", fake_generate)
     monkeypatch.setattr(classify, "decide", fake_decide)
     return str(data), str(lab), gen_calls, dec_calls
@@ -96,7 +108,9 @@ def test_assignment_needs_an_approved_list_and_asks_one_yes_no_per_type(store):
            "definition": "assessment of one site", "active": "true"}])
     out = types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
     assert len(dec_calls) == 2
-    assert {q["type"] for q in dec_calls[0]["questions"].values()} == {"noul"}
+    qs = dec_calls[0]["questions"]
+    assert list(qs) == ["type"] and qs["type"]["type"] == "choice"
+    assert list(qs["type"]["criteria"]) == ["mapping", "site", "none"]
     rows = list(csv.DictReader(open(os.path.join(out, "assignments.csv"))))
     assert [(r["unit_id"], r["types_yes"]) for r in rows] == [("u1", "mapping"), ("u2", "site")]
 
@@ -114,3 +128,41 @@ def test_the_proposal_is_the_list_until_a_person_writes_one(store, monkeypatch):
     out = types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
     rows = list(csv.DictReader(open(os.path.join(out, "assignments.csv"))))
     assert {r["types_yes"] for r in rows} <= {"mapping", ""} and len(rows) == 2
+
+
+def test_a_person_list_means_no_proposals(store):
+    data, lab, gen_calls, _ = store
+    _csv(os.path.join(lab, "cra_types.csv"),
+         ["measure_id", "type_id", "type_name", "definition", "active"],
+         [{"measure_id": "cra", "type_id": "mapping", "type_name": "Hazard mapping",
+           "definition": "maps of hazards", "active": "true"}])
+    assert types_stage.propose("cra", data, api_key="k", runs=2, log=lambda *_: None)
+    assert gen_calls == []
+
+
+def test_units_no_type_claims_get_an_oth_type_from_the_gap_step(store, monkeypatch):
+    data, lab, gen_calls, dec_calls = store
+    monkeypatch.setenv("WBG_DATA", data)
+    monkeypatch.setattr(types_stage, "OTH_MIN", 1)
+    _csv(os.path.join(lab, "cra_types.csv"),
+         ["measure_id", "type_id", "type_name", "definition", "active"],
+         [{"measure_id": "cra", "type_id": "mapping", "type_name": "Hazard mapping",
+           "definition": "maps of hazards", "active": "true"}])
+    out = types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    assert len(gen_calls) == 1 and "NEW kinds" in gen_calls[0]["messages"][0]["content"]
+    assert "Hazard mapping" in gen_calls[0]["messages"][0]["content"]
+    rows = {r["unit_id"]: r for r in csv.DictReader(open(os.path.join(out, "assignments.csv")))}
+    assert rows["u1"]["types_yes"] == "mapping"
+    assert rows["u2"]["types_yes"] == "OTH.site"
+    oth = list(csv.DictReader(open(os.path.join(data, "types", "cra_oth_types.csv"))))
+    assert [(t["type_id"], t["type_name"]) for t in oth] == [("OTH.site", "OTH. Site checks")]
+    import load_pg
+    import labels
+    typ = load_pg.type_rows(data)
+    assert ("cra", "OTH.site") in {(t["label_set"], t["type_id"]) for t in typ}
+    # a re-run asks nothing again
+    n = (len(gen_calls), len(dec_calls))
+    import shutil
+    shutil.rmtree(out)
+    types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    assert (len(gen_calls), len(dec_calls)) == n

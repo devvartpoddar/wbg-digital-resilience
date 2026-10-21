@@ -1,7 +1,8 @@
 measure_id,type_id,type_name,definition,active,version
-network_redundancy,route_diversity,Route diversity,Provides independent physical communications routes,true,v4
-network_redundancy,backup_link,Backup connectivity,Provides a secondary communications link when the primary link fails,true,v4
-network_redundancy,technology_diversity,Technology diversity,Provides alternative connectivity through a different transmission technology,true,v4
-network_redundancy,provider_diversity,Provider diversity,Uses independent providers to reduce reliance on one communications provider,true,v4
-network_redundancy,node_redundancy,Network node redundancy,Provides alternative critical network nodes or interconnection points,true,v4
-network_redundancy,international_redundancy,International connectivity redundancy,Provides alternative international communications routes,true,v4
+network_redundancy,international_redundancy,International route redundancy,"Additional or diverse international links (a second submarine cable, cross-border routes, a second landing station). Choose this for any redundancy of international connectivity.",true,v5
+network_redundancy,route_diversity,Domestic route diversity,"Physically separate domestic paths, rings or loops so that one cut does not isolate a site or region. Does not include international links or a backup link by another technology.",true,v5
+network_redundancy,backup_link,Backup link by another technology,A secondary link by a different technology (satellite or microwave backing up fibre) that takes over when the main link fails. Does not include a second path of the same technology.,true,v5
+network_redundancy,provider_diversity,Provider diversity,Using more than one provider or operator so that one provider's failure does not cut service. Does not include technical route or link redundancy.,true,v5
+network_redundancy,critical_site_dual_links,Dual links to critical sites,"Two or more independent communications links to a critical facility (an emergency centre, a hospital, a data centre) so that its service continues if one fails. Does not include backbone or international routes.",true,v5
+network_redundancy,node_redundancy,Node and exchange redundancy,"Duplicate critical nodes, network operations centres, exchange points or interconnection points. Does not include links or routes.",true,v5
+network_redundancy,technology_diversity,Technology diversity,Provides alternative connectivity through a different transmission technology,false,v4

@@ -1,8 +1,13 @@
 measure_id,type_id,type_name,definition,active,version
-resilient_infrastructure_design,flood_protection,Flood protection,"Physically protects infrastructure from inundation with barriers, sealing or waterproof ducts, other than by elevation or drainage",true,v4
-resilient_infrastructure_design,elevation,Elevation,Raises equipment or structures above expected flood levels,true,v4
-resilient_infrastructure_design,drainage,Protective drainage,Uses drainage measures to reduce flood or water exposure,true,v4
-resilient_infrastructure_design,wind_hardening,Wind and storm hardening,Strengthens structures against high winds or storms,true,v4
-resilient_infrastructure_design,heat_hardening,Heat-resilient design,Protects equipment or structures against extreme temperatures,true,v4
-resilient_infrastructure_design,structural_reinforcement,Structural reinforcement,"Strengthens foundations, structures, ducts or other physical components against hazards other than wind",true,v4
-resilient_infrastructure_design,weatherproofing,Weatherproofing and protective enclosure,"Protects equipment from rain, dust, humidity or severe weather with enclosures or materials, other than against flood water",true,v4
+resilient_infrastructure_design,elevation,Elevation,"Raising equipment, floors, foundations or structures above expected flood levels. Does not include barriers, drainage or cable protection.",true,v5
+resilient_infrastructure_design,drainage,Protective drainage,"Building or enlarging drains, culverts or other drainage so that water does not reach or damage the infrastructure. Does not include elevation, barriers or cable protection.",true,v5
+resilient_infrastructure_design,flood_barriers,Flood barriers and sealing,"Barriers, walls, embankment protection, or sealed and waterproof enclosures that keep flood water out of facilities. Does not include elevation, drainage, or protection of cables.",true,v5
+resilient_infrastructure_design,protected_cabling,Protected cable installation,"Physically protecting cables against hazards with reinforced, armoured or waterproof cables, ducts and conduits, or deeper trenches. Does not include the choice to bury a cable instead of hanging it (that is climate-informed siting), or protection of buildings and equipment.",true,v5
+resilient_infrastructure_design,wind_storm,Wind and storm hardening,"Strengthening towers, masts, structures or overhead lines against high winds, cyclones and storms. Does not include flood protection or cable ducts.",true,v5
+resilient_infrastructure_design,heat,Heat protection,"Protecting equipment or structures against extreme heat (heat-tolerant components, shading, thermal design). Does not include energy-efficient cooling for its own sake.",true,v5
+resilient_infrastructure_design,ground_hazards,"Earthquake, landslide and erosion protection","Structural reinforcement, foundations or slope works against earthquakes, landslides or erosion. Does not include flood or wind protection.",true,v5
+resilient_infrastructure_design,weatherproofing,"Rain, dust and humidity protection","Enclosures, materials and coatings that protect equipment from rain, dust, humidity or corrosion in normal severe weather. Does not include protection against flood water or cable protection.",true,v5
+resilient_infrastructure_design,flood_protection,Flood protection,"Physically protects infrastructure from inundation with barriers, sealing or waterproof ducts, other than by elevation or drainage",false,v4
+resilient_infrastructure_design,wind_hardening,Wind and storm hardening,Strengthens structures against high winds or storms,false,v4
+resilient_infrastructure_design,heat_hardening,Heat-resilient design,Protects equipment or structures against extreme temperatures,false,v4
+resilient_infrastructure_design,structural_reinforcement,Structural reinforcement,"Strengthens foundations, structures, ducts or other physical components against hazards other than wind",false,v4
