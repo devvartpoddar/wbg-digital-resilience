@@ -146,14 +146,6 @@ MIN_YIELD = 10        # a round yielding fewer committed units than this is the 
 MAX_ROUNDS = 6
 NEGATIVE_WEIGHT = 0.5  # Rocchio: how much of the rejected units' centroid is subtracted
 EXTRAS_MIN_GRADE = 2   # asset and kind questions are asked of units graded at least this
-# A second look (2026-10-21): a unit whose sentence-only P(top grade) is at or
-# above this is asked the measure's question again with its paragraph, and that
-# answer is its grade. On Dev's 477 graded units the paragraph raised precision
-# at recall 0.80 from 0.78 to 0.84 (0.80 to 0.92 at 0.70), and asking it only of
-# these units kept all of that: the paragraph mostly takes false commitments
-# down (lead-ins, examples, generic claims), and units scored low on the
-# sentence stayed low. About 6 per cent of the units sent pass it.
-SECOND_LOOK = 0.3
 
 
 def is_committed(u, top, floor=None):
@@ -176,7 +168,7 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "actors_yes", "actor_best", "actor_p", "template_projects", "template_share",
              "sent", "committed",
              "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
-             "p_committed_calibrated", "second_look", "p_sentence",
+             "p_committed_calibrated",
              "model_served", "cost", "text"]
 # Asset thresholds the report tabulates (nothing is chosen here).
 REPORT_THRESHOLDS = (0.3, 0.5, 0.7, 0.9)
@@ -356,7 +348,6 @@ class Run:
                          "negative_weight": NEGATIVE_WEIGHT,
                          "extras_min_grade": EXTRAS_MIN_GRADE,
                          "extras_context": EXTRAS_CONTEXT,
-                         "second_look": SECOND_LOOK if context == "sentence" else None,
                          "projects": sorted(projects) if projects else None}
         self.projects = sorted(projects) if projects else None
         # The commit floor is a reading, not a question; it is part of the
@@ -378,9 +369,6 @@ class Run:
         self.facets = load_facets()
         self.qs = questions(self.labels, self.scale, context, self.assets, self.kinds,
                             self.facets)
-        # the measure's question with the paragraph, for the second look
-        self.qs_look = questions(self.labels, self.scale, "paragraph", []) \
-            if self.settings["second_look"] is not None else {}
         asset_folder = classify.current_run(ASSET_SET, data, projects=self.projects)
         self.asset_run = os.path.basename(asset_folder) if asset_folder else ""
         if gate in ("paragraph", "component") and not self.asset_run:
@@ -404,7 +392,6 @@ class Run:
         for pt in self.patterns:
             h.update(f"p\t{pt['label_id']}\t{pt['pattern_id']}\t{pt['pattern']}\n".encode())
         h.update(json.dumps(self.qs, sort_keys=True).encode())
-        h.update(json.dumps(self.qs_look, sort_keys=True).encode())
         h.update(json.dumps(self.calibration, sort_keys=True).encode())
         self.out = where(data, "measures", f"{name}-{h.hexdigest()[:12]}")
         # The run folder is known from the inputs' names alone. A reader
@@ -451,7 +438,6 @@ class Run:
                 "kind_p": "", "conditional_p": "", "actors_yes": "", "actor_best": "",
                 "actor_p": "", "template_projects": r.get("template_projects", ""),
                 "template_share": r.get("template_share", ""), "p_committed_calibrated": "",
-                "second_look": "", "p_sentence": "",
                 "sent": "false", "committed": "false",
                 "text": text, "_para": para}
 
@@ -587,15 +573,6 @@ class Run:
         self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} pass the gate; measure "
                  f"question: {st['to_ask']:,} to ask (about US${st['estimate_usd']:.3f})")
         if dry_run:
-            # the second look can be counted only for units whose first answer is stored
-            again = [(r, g) for r, g in zip(sent, got) if g and self.needs_look(r, g)]
-            if again:
-                _, st3 = answers.ask(model, [(self.state_of(r, "paragraph"), self.qs_look)
-                                             for r, _ in again], self.data, log=self.log,
-                                     dry_run=True)
-                self.log(f"    second look with the paragraph: {len(again):,} units, "
-                         f"{st3['to_ask']:,} to ask (about US${st3['estimate_usd']:.3f}; units "
-                         f"whose first answer is not stored yet are not counted)")
             return 0, 0.0, []
         calls, cost = 0, 0.0
         if st["to_ask"]:
@@ -608,25 +585,6 @@ class Run:
                 return calls, cost, st["failures"] or [("", "an answer is missing")]
         for row, g in zip(sent, got):
             self.grade_into(row, g)
-            row["second_look"] = "false"
-        again = [r for r, g in zip(sent, got) if self.needs_look(r, g)]
-        if again:
-            got3, st3 = answers.ask(model, [(self.state_of(r, "paragraph"), self.qs_look)
-                                            for r in again], self.data,
-                                    api_key=api_key, log=self.log, workers=workers)
-            calls += st3["calls"]
-            cost += st3["cost_usd"]
-            self.log(f"    second look with the paragraph for {len(again):,} units at "
-                     f"P >= {self.settings['second_look']}: {st3['calls']:,} asked, "
-                     f"US${st3['cost_usd']:.3f}")
-            if st3["failures"] or not all(got3):
-                return calls, cost, st3["failures"] or [("", "an answer is missing")]
-            top = len(self.scale) - 1
-            for row, g in zip(again, got3):
-                p_sentence, paid = row[f"p{top}"], float(row["cost"])
-                self.grade_into(row, g)
-                row.update({"second_look": "true", "p_sentence": p_sentence,
-                            "cost": f"{paid + float(row['cost']):.6f}"})
         need = [r for r in sent if int(r["grade"]) >= EXTRAS_MIN_GRADE
                 or r.get("committed") == "true"] if extras else []
         if need:
@@ -652,15 +610,6 @@ class Run:
             for row, g in zip(need, got2):
                 self.extras_into(row, g)
         return calls, cost, []
-
-    def needs_look(self, row, entries):
-        """True when the sentence-only answer puts P(top grade) at or above
-        the second look's floor and the unit has a paragraph of its own."""
-        floor = self.settings["second_look"]
-        if floor is None:
-            return False
-        a = entries[self.labels[0]["id"]]["answer"]["probabilities"]
-        return float(a[str(len(self.scale) - 1)]) >= floor and "paragraph" in self.state_of(row, "paragraph")
 
     def collect_extras(self):
         """Wait for the background asset, kind and facet answers and write
@@ -745,15 +694,6 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
         lines.append(f"  committed at the commit floor P(grade {top}) >= {run.floor}: "
                      f"{len(floored):,} units, "
                      f"{len({p for r in floored for p in r['project_ids'].split('|')})} projects")
-    looked = [r for r in sent if r.get("second_look") == "true"]
-    if looked:
-        floor = run.floor if run.floor is not None else 0.5
-        before = sum(1 for r in looked if float(r["p_sentence"]) >= floor)
-        lines.append(f"  second look with the paragraph (sentence-only P(grade {top}) >= "
-                     f"{run.settings['second_look']}): {len(looked):,} units; "
-                     f"{before:,} at P >= {floor} on the sentence, "
-                     f"{sum(1 for r in looked if float(r[f'p{top}']) >= floor):,} with the "
-                     f"paragraph")
     by_route = defaultdict(lambda: [0, 0])
     for r in sent:
         by_route[r["route"]][0] += 1
