@@ -13,6 +13,7 @@ Reading and model calls are what a task costs. So:
 - Read `docs/methodology.md` (a short index), then **only** the `docs/method/` file for the code you change. `docs/method/history.md` is evidence, not instructions: open it only when a choice needs its numbers.
 - Find code with a search, then read the lines around it. Do not read a whole source file over 300 lines, a whole method file you are not changing, or anything under `data/` beyond the rows you need.
 - A measure is files, not code: adding or revising one needs no reading of `src/` (`docs/runbook-box.md`, "Adding a measure from the board").
+- Why a run is new, what costs money and why `./wbg status` says "stale" or "would be new": `docs/runbook-box.md`, "How runs and caches are keyed". Read it; do not re-derive keys from `src/`.
 - Before any stage that calls a model, run it with `--dry-run` and read the estimate; report it with the spend afterwards. Stop and ask if the stage would re-ask what is already stored (a whole measure or the whole asset map). Never run the whole cohort to check a change: use `--project <id>`.
 - Report in a few lines: what changed, what was run, the spend from `data/reports/spend.csv`.
 

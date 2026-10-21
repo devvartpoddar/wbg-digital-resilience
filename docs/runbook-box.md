@@ -64,6 +64,73 @@ cohort is the default scope; give `--set` only for a deliberate subset, and
 then to every stage alike. The fetch is the long step on a new cohort and can
 be left overnight; everything else is minutes.
 
+## How runs and caches are keyed, and why status says "stale"
+
+Read this instead of re-deriving keys from `src/`. Two separate things are
+keyed: **answers** (what costs money) and **run folders** (what is current).
+
+**Answers cost money; folders do not.** Every model answer is stored under
+`sha256(model, state, question)` (`answers.key`): the exact state dict sent
+(section, sentence, component, paragraph where asked) and the exact question
+(its text, criteria and options, not its id), in
+`data/classify/answers/<model>/`. A stage asks only the keys that are
+missing. Batching does not change keys. So a new run folder is usually
+rebuilt from stored answers at no cost; money is spent only when a
+question's wording, the model, or the text sent changes, or when new units
+enter (a lower floor, a wider gate, new documents).
+
+**Run folders** are `data/<stage>/<name>-<12 hex>`, where the hex is a
+SHA-256 over the stage's inputs. A folder with `manifest.json` is complete
+and is skipped. The current run is the folder whose name the inputs hash to
+now.
+
+| Stage | Folder hash covers | Asks the model when |
+|---|---|---|
+| embed | one vector per text: `cache/<model>.<dim>/<sha of text>.f32`; `sentence_index.csv` is rebuilt every run | the text, model or dim changes |
+| search | query ids and texts (definitions and phrases), model:dim, and the **bytes of `sentence_index.csv`** | never (query vectors are cached) |
+| classify (asset map) | the gate, and every paragraph's request (model, section, passage, component, questions) | a paragraph's text or a question changes |
+| measure | the search and asset-map run names, the settings (model, context, gate, top, min_cosine, rounds, projects, `commit_floor` if written), the patterns, the questions (scale, definitions, assets, kinds, facets), the calibration | a question or state changes, or new units enter |
+| types | the measure run name, model, and every committed unit's request | a type list changes or new units are committed |
+| checks | the measure run names, model, and every pair and scope request | new committed pairs |
+| links | `LINK_VERSION`, model, `asset_top`, `MEASURE_TOP`, measure query texts, the bytes of `packages.csv`, the asset and pair questions, the measure run names, projects | new pairs or packages |
+
+Code is in no run folder's name: changing `src/` alone does not make a model
+run new (it does count in the prepare stages' fingerprints, below).
+
+**Why a run is "new" with nothing re-asked.** The names chain: anything
+that changes `sentence_index.csv` (re-embedding, re-cleaning, a component or
+copy change in the unit metadata) gives a new search version, so new measure
+folders, so new types, checks and links folders, all rebuilt from stored
+answers. A written or changed `commit_floor`, any measure setting, a pattern,
+the calibration file or the project scope does the same from the measure
+stage down.
+
+**What `./wbg status` prints.**
+
+- `code:` HEAD against origin/main as last fetched, and "(uncommitted
+  changes)" when `src`, `inputs`, `sql`, `run.sh` or `wbg` differ.
+- `data:` `r-<10 hex>` is a SHA-256 over the corpus tables (rows and bytes,
+  `sentence_index.csv` included), the cohort and every label CSV, and the
+  names of **every** run folder present under search, classify, measures
+  and links (not only the current ones). So any new run folder, or any label
+  edit, makes "r-… would be new": it means no release has been cut since,
+  not that something is out of date. A release is cut only by `./wbg
+  release` (or `prepare` when the corpus changed); the commit is not in the
+  id.
+- `stages:` only the prepare stages (projects, clean, components,
+  clean_procurement). One is out of date when it has no record in
+  `data/reports/stages.json`, or its fingerprint (its code files' bytes, its
+  inputs' bytes, the pdfplumber version) differs from the recorded one, or
+  an output is missing or changed. The model stages are not listed here;
+  each one skips by its own folder manifest, so `./wbg run --dry-run` is the
+  way to see what they would ask.
+
+**Postgres** skips a table whose source key equals the last load's
+(`wbg.loads.source_sha256`): a file's SHA-256 for corpus tables, the
+`|`-joined current run names for run tables. A publish replaces only the
+sets that have a current run; a run over named projects is not published
+(`WBG_PUBLISH_SCOPED=1` overrides, for a scratch database).
+
 ## What Metabase sees
 
 Schema `wbg` only. Start cards from the views, not the tables. The
