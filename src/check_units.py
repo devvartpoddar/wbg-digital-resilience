@@ -97,7 +97,8 @@ LINK_BANDS = [("p<0.3", 0.0, 0.3, 10), ("p0.3-0.5", 0.3, 0.5, 15), ("p0.5-0.7", 
 HOW_TO = [
     "Each measure tab: read the sentence (with its paragraph, section and component) and enter a "
     "grade on the measure's scale (tab 'grades'). Asset and type are optional (tab 'types' "
-    "defines the types). Leave a row blank to skip it.",
+    "defines the types). Asset: 'other' when the commitment is about something that is not a "
+    "digital asset, 'none' when the sentence names no asset. Leave a row blank to skip it.",
     "Rows were drawn by the model's probability that the sentence is a commitment, more of them "
     "near where a cut-off would fall; the model's answer is not shown.",
     "Tab 'package links': does carrying out the package deliver or apply the commitment? "
