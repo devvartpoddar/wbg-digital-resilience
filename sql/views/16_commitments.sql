@@ -17,6 +17,15 @@ SELECT * FROM (VALUES (1, 'Overdue'), (2, 'Planned'), (3, 'Tendered'),
 COMMENT ON VIEW wbg.package_status_order IS
   'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Not in latest plan, Cancelled.';
 
+-- The commitment checks (src/commit_checks.py), loaded by every publish;
+-- empty tables until a check run exists, so the views below always build.
+CREATE TABLE IF NOT EXISTS wbg.unit_pair_checks (unit_id text, set_a text, set_b text,
+  decision text, probability numeric, p_only_a numeric, p_only_b numeric, p_both numeric,
+  p_neither numeric, model_served text, model_cost_usd numeric);
+CREATE TABLE IF NOT EXISTS wbg.unit_scope (unit_id text, scope text, probability numeric,
+  p_rule numeric, p_investment numeric, p_not_commitment numeric, model_served text,
+  model_cost_usd numeric);
+
 -- One row per committed unit that counts, per project, asset and type: the
 -- base of the views below. The asset is the one the sentence names (its
 -- best) or, where it names none, its paragraph's; the type its best above
@@ -49,6 +58,12 @@ WITH f AS (
     AND f.probability_grade_3 >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
+    -- a pair check that says the unit is only the other measure, or neither
+    AND NOT (s.apply_measure_pair_checks AND EXISTS (
+      SELECT 1 FROM wbg.unit_pair_checks c
+      WHERE c.unit_id = f.unit_id
+        AND ((c.set_a = f.label_set AND c.decision IN ('only_b', 'neither'))
+          OR (c.set_b = f.label_set AND c.decision IN ('only_a', 'neither')))))
 ),
 u AS (
   SELECT f.label_set, f.label_id, f.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
@@ -59,6 +74,7 @@ u AS (
            WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph'
            WHEN 'component' THEN 'component' ELSE 'none' END AS asset_from,
          a.asset_id, t.type_id,
+         coalesce(sc.scope, '(not checked)') AS scope,
          -- the wording, for collapsing word-for-word copies
          regexp_replace(lower(f.text), '\s+', ' ', 'g') AS wording
   FROM f
@@ -74,6 +90,7 @@ u AS (
       CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0 THEN ARRAY['(no type)']
            WHEN f.every_asset_and_type THEN f.type_ids_above_threshold
            ELSE ARRAY[f.best_type_id] END) x) t
+  LEFT JOIN wbg.unit_scope sc ON sc.unit_id = f.unit_id
 )
 SELECT md5(project_id || '|' || label_set || '|' || asset_id || '|' || type_id) AS commitment_id,
        u.*
@@ -83,7 +100,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (grade 3, in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type above 0.5 has type_id ''(no type)''.';
+  'Every committed unit that counts (grade 3, in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not; scope is rule, investment or not_commitment (src/commit_checks.py).';
 
 -- Each commitment's linked packages with where they stand.
 DROP VIEW IF EXISTS wbg.commitment_package_status CASCADE;
@@ -94,17 +111,23 @@ SELECT u.commitment_id, cp.package_id, max(cp.probability) AS link_probability,
        s.planned_date, s.plan_status, s.in_latest_plan, s.notice_date, s.notice_deadline,
        s.signed_date, s.supplier, s.package_status, s.next_date
 FROM wbg.commitment_units u
-JOIN wbg.commitment_packages cp ON cp.label_set = u.label_set AND cp.label_id = u.label_id
-                               AND cp.unit_id = u.unit_id AND cp.project_id = u.project_id
+JOIN (SELECT cp.*, row_number() OVER (PARTITION BY cp.label_set, cp.label_id, cp.unit_id,
+                                                   cp.project_id
+                                      ORDER BY cp.probability DESC, cp.package_id) AS link_rank
+      FROM wbg.commitment_packages cp) cp
+  ON cp.label_set = u.label_set AND cp.label_id = u.label_id
+ AND cp.unit_id = u.unit_id AND cp.project_id = u.project_id
 CROSS JOIN wbg.dashboard_settings ds
 JOIN wbg.package_status s ON s.package_id = cp.package_id
 WHERE cp.probability >= ds.package_link_min_probability
+  -- one investment: its most likely few packages; a rule: every package
+  AND (u.scope <> 'investment' OR cp.link_rank <= ds.investment_package_top)
 GROUP BY u.commitment_id, cp.package_id, s.project_id, s.description_clean, s.category,
          s.method_code, s.estimated_amount_usd, s.planned_date, s.plan_status,
          s.in_latest_plan, s.notice_date, s.notice_deadline, s.signed_date, s.supplier,
          s.package_status, s.next_date;
 COMMENT ON VIEW wbg.commitment_package_status IS
-  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings, 0.5): the package''s plan columns, latest notice, signed contract and package_status (see package_status). A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
+  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings, 0.5): the package''s plan columns, latest notice, signed contract and package_status (see package_status). A sentence that is one investment (unit_scope) links to its most likely dashboard_settings.investment_package_top packages only; a rule links to every package at the threshold. A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
 
 -- Near-identical wording across projects. Word-for-word equality found 17
 -- of 2,150 commitments, while four operations of one programme (DRC,
@@ -208,7 +231,13 @@ WITH c AS (
          avg((coalesce(u.conditional_probability, 0) < ds.not_conditional_below)::int)::numeric(4, 3)
            AS share_not_conditional,
          min(d.disclosure_date) AS first_seen_date,
-         coalesce(max(wo.near_copy_projects), 0) AS same_wording_projects
+         coalesce(max(wo.near_copy_projects), 0) AS same_wording_projects,
+         -- a rule if any sentence is one, else an investment if any is, else
+         -- what the sentences are (not_commitment, or not checked)
+         CASE WHEN bool_or(u.scope = 'rule') THEN 'rule'
+              WHEN bool_or(u.scope = 'investment') THEN 'investment'
+              ELSE min(u.scope) END AS scope,
+         bool_and(u.scope = 'not_commitment') AS flagged_not_commitment
   FROM wbg.commitment_units u
   CROSS JOIN wbg.dashboard_settings ds
   LEFT JOIN wbg.documents d ON d.document_id = u.document_id
@@ -236,6 +265,7 @@ SELECT c.commitment_id,
        c.asset_from, c.components,
        c.sentences, c.paragraphs, c.documents, c.strongest_p,
        c.share_not_conditional, c.first_seen_date, c.same_wording_projects,
+       c.scope, c.flagged_not_commitment,
        c.dropped_by_restructuring,
        CASE WHEN c.asset_id = '(no asset)' THEN NULL
             ELSE EXISTS (SELECT 1 FROM wbg.project_assets pa

@@ -22,7 +22,7 @@ One command walks the pipeline, and any stretch of it:
 | embed | the sentence vectors, only what the cache lacks | four requests in flight |
 | search | every label set's phrases against the vectors: the assets and the measures; writes nothing itself (a publish rebuilds every view, so the stage leaves the write to the measure and publish stages) | sets side by side (`--jobs`) |
 | classify | the asset map: one graded question per asset per paragraph | ten requests in flight |
-| measure | each measure through the funnel (section 5c), its types proposed and assigned (5d); Postgres written once for every set at the end of the stage | sets side by side; within a set the second-pass questions run behind the next round; the three type proposals side by side |
+| measure | each measure through the funnel (section 5c), its types assigned as one choice with OTH types for the rest (5d; proposals only where no person wrote a list), then the cross-measure and scope checks over every measure (5c, `src/commit_checks.py`); Postgres written once for every set at the end of the stage | sets side by side; within a set the second-pass questions run behind the next round; the three type proposals side by side |
 | link | which asset each package buys and which commitments it carries out (5e) | ten requests in flight |
 | publish | every current run into Postgres; the stages do this themselves as they finish, this is the catch-up | |
 | audit | the parse and procurement audits, only with `--to audit` or `--only audit` | |

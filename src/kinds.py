@@ -4,25 +4,34 @@ units, approved by a person, assigned by the decision model.
 
 Two steps, each repeatable and stored:
 
-  propose   The committed units of the current measure run (src/measure.py)
-            go to a generative model in one call, which proposes named types
-            with one-line definitions. The call is made --runs times (default
-            3) with the units in a different, seeded order each time, because
-            one call over-splits or merges by chance; every response is stored
-            under the SHA-256 of its request and re-read on a re-run. The
-            proposals are written side by side for a person to merge and
-            approve into analysis/labels/<set>_types.csv (columns measure_id,
-            type_id, type_name, definition, active; a `pattern` column is
-            optional and only used by src/candidates.py). Nothing here writes
-            that file.
+  propose   Only for a measure with no list written by a person: the
+            committed units of the current measure run (src/measure.py) go to
+            a generative model, which proposes named types with one-line
+            definitions. The call is made --runs times (default 3) with the
+            units in a different, seeded order each time; every response is
+            stored under the SHA-256 of its request and re-read on a re-run.
+            Once analysis/labels/<set>_types.csv exists the list is the
+            person's and this step does nothing (the gap step below finds what
+            the list misses).
 
-  assign    Each committed unit is put to the decision model with one yes/no
-            question per approved type ("Is this sentence an instance of
-            <type>?"), never a multiple choice: the decision model shows a
-            first-option bias, and a unit may be of several types. A unit no
-            type claims at the reading threshold is 'other'; the share of
-            'other' is reported, as the signal that the list needs a new
-            version. Every response is stored as in src/classify.py.
+  assign    Each committed unit is put to the decision model with ONE choice
+            question: which of the measure's types it is, or none of them. The
+            types are written to exclude each other, so one choice per unit is
+            the reading; asked as separate yes/no questions the model said yes
+            to every plausible type (2.7 a sentence on climate-informed
+            siting, 2026-10-21). On a test of 225 committed units the choice
+            came out the same in three option orders for every unit, so it is
+            asked in one order.
+
+  gaps      The units the choice puts in "none" (at least OTH_MIN of them)
+            go to the generative model with the existing types, which proposes
+            only new kinds the list does not cover (not by asset, by scope or
+            by another measure, and within the measure's definition). Each is
+            named with the prefix "OTH." and assigned straight away by a second
+            choice question over the OTH types and none: nothing waits on an
+            approval, and a person promotes an OTH type by writing it into
+            the list. The OTH types are written to data/types/<set>_oth_types.csv
+            and loaded with the approved ones.
 
 Reads  data/measures/<set>-<version>/units.csv
        analysis/labels/<set>.csv, <set>_types.csv (assign)
@@ -30,6 +39,8 @@ Writes data/types/cache/<model>/<aa>/<sha>.json          stored generative respo
        data/types/<set>-<version>/proposals.csv          run, type_id, type_name, definition
        data/types/<set>-<version>/proposals.md           the same, to read
        data/types/<set>-assign-<version>/assignments.csv unit x type probabilities
+       data/types/<set>-assign-<version>/oth_types.csv   the gap step's OTH types
+       data/types/<set>_oth_types.csv                    the current OTH types
        data/reports/types_<set>.txt
 
   ./wbg types cra              propose (3 runs)
@@ -55,6 +66,9 @@ GEN_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 RUNS = 3
 MAX_UNITS = 400          # more than this is sampled by seed, and reported
 PROPOSAL_COLS = ["run", "type_id", "type_name", "definition", "example_units"]
+TYPE_NONE = "none"
+OTH_PREFIX = "OTH."
+OTH_MIN = 5              # fewer "none" units than this are reported, not proposed from
 ASSIGN_COLS = ["label_id", "unit_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "model_served", "cost", "types_yes", "best_type", "best_p"]
 
@@ -66,6 +80,24 @@ Propose the distinct KINDS of this measure that these sentences show. Rules:
 - A kind is defined by WHAT is done and FOR WHAT, not by which country or project.
 - Each kind: a short id (lowercase, underscores), a name of at most six words, a one-sentence definition an analyst could apply to a new sentence, and the numbers of up to three example sentences.
 - Do not invent kinds the sentences do not show. Do not add an "other" kind.
+
+Answer with JSON only, no prose: {{"types": [{{"type_id": "...", "type_name": "...", "definition": "...", "examples": [1, 2]}}]}}
+
+Sentences:
+{units}
+"""
+
+
+GAP_PROMPT = """You are helping an analyst sort sentences from World Bank project appraisal documents.
+Every sentence below was judged to commit the project to the measure "{name}", defined as: {definition}
+The measure's existing kinds are:
+{existing}
+None of these kinds fits the sentences below. Propose NEW kinds that these sentences show and the existing kinds do not cover. Rules:
+- A new kind must not restate or overlap an existing kind.
+- Define a kind by WHAT the project does. Do not define it by the asset or facility it concerns (towers, data centres, schools, clinics), by whether it is a project-wide requirement or a single investment, or by another climate measure.
+- Stay within the measure's definition; do not widen it.
+- Propose a kind only if at least {min_units} sentences show it; at most {max_types} kinds. If none qualifies, answer with an empty list.
+- Each kind: a short id (lowercase, underscores), a name of at most six words, a one-sentence definition an analyst could apply to a new sentence, and the numbers of up to three example sentences.
 
 Answer with JSON only, no prose: {{"types": [{{"type_id": "...", "type_name": "...", "definition": "...", "examples": [1, 2]}}]}}
 
@@ -104,8 +136,9 @@ def generate(body, *, api_key, endpoint=GEN_ENDPOINT, timeout=180, tries=4):
     raise last
 
 
-def parse_types(response):
-    """The proposed types from a completion, or a TransportError."""
+def parse_types(response, allow_empty=False):
+    """The proposed types from a completion, or a TransportError. The gap
+    step may be answered with an empty list (allow_empty)."""
     try:
         text = response["choices"][0]["message"]["content"]
     except (KeyError, IndexError, TypeError):
@@ -125,7 +158,7 @@ def parse_types(response):
                     "type_name": " ".join(str(t["type_name"]).split()),
                     "definition": " ".join(str(t["definition"]).split()),
                     "examples": [int(x) for x in t.get("examples", []) if str(x).isdigit()]})
-    if not out:
+    if not out and not allow_empty:
         raise classify.TransportError("no types proposed")
     return out
 
@@ -147,8 +180,19 @@ def committed_units(name, data, **kw):
     return folder, dict(out)
 
 
+def person_list(name):
+    """The type list a person wrote for the set (analysis/labels/<set>_types.csv),
+    or None."""
+    path = os.path.join(labels.folder(name), f"{name}_types.csv")
+    return path if os.path.exists(path) else None
+
+
 def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
             dry_run=False, log=print, **kw):
+    if person_list(name):
+        log(f"{name}: the type list is a person's ({person_list(name)}); no proposals "
+            f"(the gap step of --assign proposes OTH types for what it misses)")
+        return "person's list"
     run_folder, units = committed_units(name, data, **kw)
     labs = {lab["id"]: lab for lab in labels.load_set(name)}
     root = gen_cache_root(data, model)
@@ -284,13 +328,20 @@ def load_approved(name):
 
 
 def assign_questions(types):
-    return {t["type_id"]: {
-        "type": "noul",
-        "instructions": (f"Is the sentence in the 'sentence' field an instance of the kind "
-                         f"'{t['type_name']}'? {t['type_name']} means: {t['definition']}"),
-        "criteria": {"true": f"The sentence describes {t['type_name']}: {t['definition']}",
-                     "false": f"The sentence does not describe {t['type_name']}."}}
-        for t in types}
+    """One choice question: which type the unit is, or none of them."""
+    crit = {t["type_id"]: f"{t['type_name']}: {t['definition']}" for t in types}
+    crit[TYPE_NONE] = "None of these: the sentence is none of these kinds."
+    return {"type": {
+        "type": "choice",
+        "instructions": ("Which one kind best describes what the sentence in the 'sentence' "
+                         "field commits the project to? Choose exactly one; choose 'none' if "
+                         "no kind fits."),
+        "criteria": crit}}
+
+
+def choice_probs(entry):
+    """{option: probability} of a stored choice answer."""
+    return {k: float(v) for k, v in entry["answer"]["probabilities"].items()}
 
 
 def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, read_at=0.5, **kw):
@@ -329,11 +380,58 @@ def current_assign(name, data, **kw):
     return out if os.path.exists(os.path.join(out, "manifest.json")) else None
 
 
+def gaps(name, lid, label, approved, none_units, data, *, api_key, dry_run, log,
+         model=GEN_MODEL, max_types=5, min_units=None):
+    """(OTH types, spend) proposed from the units no approved type claims.
+    One call, stored like a proposal; an empty list is a valid answer."""
+    min_units = OTH_MIN if min_units is None else min_units
+    if len(none_units) < min_units:
+        return [], 0.0
+    root = gen_cache_root(data, model)
+    rng = random.Random(f"{name}:{lid}:gaps")
+    chosen = none_units if len(none_units) <= MAX_UNITS else rng.sample(none_units, MAX_UNITS)
+    chosen = sorted(chosen, key=lambda u: u["unit_id"])
+    existing = "\n".join(f"- {t['type_name']}: {t['definition']}" for t in approved)
+    listing = "\n".join(f"{i}. {' '.join(u['text'].split())}" for i, u in enumerate(chosen, 1))
+    prompt = GAP_PROMPT.format(name=label["name"], definition=label["definition"],
+                               existing=existing, min_units=min_units, max_types=max_types,
+                               units=listing)
+    body = {"model": model, "temperature": 0,
+            "messages": [{"role": "user", "content": prompt}]}
+    sha = classify.request_sha(body)
+    response = common.read_json(root, sha)
+    cost = 0.0
+    if response is None:
+        if dry_run:
+            log(f"  {lid}: {len(none_units)} unit(s) in none; one gap call to {model} to ask")
+            return [], 0.0
+        if not api_key:
+            raise SystemExit("types: no credential: set $WBG_OPENROUTER_KEY")
+        response = generate(body, api_key=api_key)
+        parse_types(response, allow_empty=True)
+        common.write_json(root, sha, response)
+        cost = float((response.get("usage") or {}).get("cost") or 0)
+    taken = {t["type_id"] for t in approved}
+    out = []
+    for t in parse_types(response, allow_empty=True):
+        tid = OTH_PREFIX + t["type_id"]
+        if tid in taken or t["type_id"] in taken:
+            continue
+        taken.add(tid)
+        out.append({"type_id": tid, "type_name": f"{OTH_PREFIX} {t['type_name']}",
+                    "definition": t["definition"]})
+    return out, cost
+
+
 def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=print,
            workers=classify.WORKERS, read_at=0.5, **kw):
+    """Each committed unit's type: one choice over the approved types and
+    none; then the gap step (OTH types from the none units, assigned by a
+    second choice). read_at is kept for the folder key of runs made before
+    the choice; the choice itself has no threshold."""
     run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log,
                                                   read_at=read_at, **kw)
-    log(f"{name}: {len(rows):,} committed units x their approved types -> {out}")
+    log(f"{name}: {len(rows):,} committed units x one type choice -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
         return out
@@ -344,6 +442,8 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     log(f"  stored already: {sum(1 for g in got if g):,}; to ask: {st['to_ask']:,} "
         f"(about US${st['estimate_usd']:.3f})")
     if dry_run:
+        if not st["to_ask"]:
+            _gap_pass(name, approved, rows, got, data, api_key, True, log, model, workers)
         log("  --dry-run: nothing asked, nothing written")
         return None
     if st["to_ask"]:
@@ -355,42 +455,61 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
         if st["failures"] or not all(got):
             log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
+    oth, oth_got = _gap_pass(name, approved, rows, got, data, api_key, False, log, model, workers)
+    if oth is None:
+        return None
     out_rows, counts, served, cost = [], defaultdict(lambda: defaultdict(int)), set(), 0.0
-    all_types = {lid: [t["type_id"] for t in ts] for lid, ts in approved.items()}
-    for (lid, u, qs), g in zip(rows, got):
-        response = {"answers": {t: e["answer"] for t, e in g.items()},
-                    "model": "|".join(sorted({e["model"] for e in g.values()})),
-                    "usage": {"cost": sum(float(e.get("cost_usd") or 0) for e in g.values())}}
-        probs = {t: float(response["answers"][t]["noul"]) for t in qs}
-        yes = [t for t in all_types[lid] if probs[t] >= read_at]
+    all_types = {lid: [t["type_id"] for t in ts] + [t["type_id"] for t in oth.get(lid, [])]
+                 for lid, ts in approved.items()}
+    for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
+        probs = choice_probs(g["type"])
         best = max(probs, key=probs.get)
-        for t in yes:
-            counts[lid][t] += 1
-        if not yes:
-            counts[lid]["other"] += 1
-        served.add(response.get("model", ""))
-        c = float((response.get("usage") or {}).get("cost") or 0)
+        entries = [g["type"]]
+        if best == TYPE_NONE and i in oth_got:
+            second = choice_probs(oth_got[i]["type"])
+            entries.append(oth_got[i]["type"])
+            b2 = max(second, key=second.get)
+            if b2 != TYPE_NONE:
+                best, probs = b2, {**{k: v for k, v in probs.items()}, **second}
+        yes = [] if best == TYPE_NONE else [best]
+        counts[lid][best if yes else "other"] += 1
+        model_served = "|".join(sorted({e["model"] for e in entries}))
+        served.add(model_served)
+        c = sum(float(e.get("cost_usd") or 0) for e in entries)
         cost += c
         out_rows.append({"label_id": lid, "unit_id": u["unit_id"], "paragraph_id": u["paragraph_id"],
                          "doc_id": u["doc_id"], "project_ids": u["project_ids"],
                          "component_number": u["component_number"],
-                         "model_served": response.get("model", ""), "cost": f"{c:.6f}",
-                         "types_yes": "|".join(yes), "best_type": best,
-                         "best_p": f"{probs[best]:.3f}",
-                         **{f"p_{t}": f"{probs[t]:.3f}" for t in all_types[lid]}})
+                         "model_served": model_served, "cost": f"{c:.6f}",
+                         "types_yes": "|".join(yes), "best_type": best if yes else "",
+                         "best_p": f"{probs[best]:.3f}" if yes else "",
+                         **{f"p_{t}": f"{probs.get(t, 0.0):.3f}" for t in all_types[lid]}})
     cols = ASSIGN_COLS + sorted({k for r in out_rows for k in r if k.startswith("p_")})
     part = out + ".part"
     os.makedirs(part, exist_ok=True)
     with open(os.path.join(part, "assignments.csv"), "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")
+        w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
         w.writerows(out_rows)
-    lines = [f"{name}: {len(out_rows):,} committed units assigned to approved types by "
-             f"{model} (read at p >= {read_at}; stored responses US${cost:.4f}; served {sorted(served)})"]
+    oth_rows = [{"measure_id": name, "label_id": lid, "type_id": t["type_id"],
+                 "type_name": t["type_name"], "definition": t["definition"], "active": "true",
+                 "source": "gap"} for lid, ts in sorted(oth.items()) for t in ts]
+    oth_cols = ["measure_id", "label_id", "type_id", "type_name", "definition", "active", "source"]
+    for path in (os.path.join(part, "oth_types.csv"), where(data, "types", f"{name}_oth_types.csv")):
+        with open(path + ".tmp", "w", newline="", encoding="utf-8") as fh:
+            w = csv.DictWriter(fh, fieldnames=oth_cols, lineterminator="\n")
+            w.writeheader()
+            w.writerows(oth_rows)
+        os.replace(path + ".tmp", path)
+    lines = [f"{name}: {len(out_rows):,} committed units, one type each by {model} (choice over "
+             f"the approved types and none; OTH types from the none units; stored responses "
+             f"US${cost:.4f}; served {sorted(served)})"]
     for lid, ts in sorted(counts.items()):
         n = sum(1 for r in out_rows if r["label_id"] == lid)
         lines.append(f"  {lid}: " + ", ".join(f"{t} {c} ({c / n:.0%})"
                                              for t, c in sorted(ts.items(), key=lambda x: -x[1])))
+        for t in oth.get(lid, []):
+            lines.append(f"    {t['type_id']}: {t['definition']}")
         for t in all_types[lid]:
             proj = defaultdict(int)
             for r in out_rows:
@@ -401,8 +520,9 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
                 f"{p} {c}" for p, c in sorted(proj.items(), key=lambda x: (-x[1], x[0]))))
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump({"label_set": name, "measure_run": os.path.basename(run_folder),
-                   "model": model, "models_served": sorted(served), "read_at": read_at,
-                   "types": all_types, "units": len(out_rows), "cost_usd": round(cost, 6),
+                   "model": model, "models_served": sorted(served), "method": "choice+oth",
+                   "types": all_types, "oth_types": oth_rows, "units": len(out_rows),
+                   "cost_usd": round(cost, 6),
                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
                   fh, indent=1, sort_keys=True)
     os.replace(part, out)
@@ -413,6 +533,48 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     for line in lines:
         log(line)
     return out
+
+
+def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, workers):
+    """({label: OTH types}, {row index: second choice entries}) for the units
+    the first choice put in none; (None, None) when a request failed."""
+    import answers
+    labs = {lab["id"]: lab for lab in labels.load_set(name)}
+    none_by = defaultdict(list)
+    for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
+        if g:
+            probs = choice_probs(g["type"])
+            if max(probs, key=probs.get) == TYPE_NONE:
+                none_by[lid].append((i, u))
+    oth, spent = {}, 0.0
+    for lid, items in sorted(none_by.items()):
+        ts, c = gaps(name, lid, labs[lid], approved[lid], [u for _, u in items], data,
+                     api_key=api_key, dry_run=dry_run, log=log)
+        spent += c
+        if ts:
+            oth[lid] = ts
+    if spent:
+        classify.record_spend(data, "types-gaps", name, GEN_MODEL, len(oth), spent, 0.0, "")
+    reqs, idx = [], []
+    for lid, ts in oth.items():
+        qs = assign_questions(ts)
+        for i, u in none_by[lid]:
+            reqs.append(({"sentence": u["text"]}, qs))
+            idx.append(i)
+    if not reqs:
+        return oth, {}
+    got2, st = answers.ask(model, reqs, data, api_key=api_key, log=log, workers=workers,
+                           dry_run=dry_run)
+    if dry_run:
+        log(f"  OTH choice: {st['to_ask']:,} to ask (about US${st['estimate_usd']:.3f})")
+        return oth, {}
+    if st["calls"]:
+        classify.record_spend(data, "types-assign", name, model, st["calls"], st["cost_usd"],
+                              st["seconds"], "oth")
+    if st["failures"] or not all(got2):
+        log(f"  {len(st['failures'])} OTH request(s) failed; nothing written. Run again to resume.")
+        return None, None
+    return oth, {i: g for i, g in zip(idx, got2)}
 
 
 def main():

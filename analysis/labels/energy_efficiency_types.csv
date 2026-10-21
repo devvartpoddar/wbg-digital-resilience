@@ -1,7 +1,9 @@
 measure_id,type_id,type_name,definition,active,version
-energy_efficiency,efficient_equipment,Energy-efficient equipment,Uses equipment selected for lower energy consumption,true,v4
-energy_efficiency,network_efficiency,Network energy efficiency,Uses network design or technology changes that explicitly reduce energy requirements,true,v4
-energy_efficiency,efficient_cooling,Energy-efficient cooling,Reduces electricity consumption associated with cooling,true,v4
-energy_efficiency,energy_management,Energy management,Uses monitoring or control systems to optimize energy consumption,true,v4
-energy_efficiency,legacy_replacement,Efficiency-driven legacy replacement,Replaces existing technology specifically to achieve energy savings,true,v4
+energy_efficiency,certified_it_equipment,Certified efficient IT and end-user equipment,"IT and end-user equipment (computers, servers, devices, network equipment) required to meet a recognised energy-efficiency standard or certification such as Energy Star. Does not include network design or technology changes, cooling, or buildings.",true,v5
+energy_efficiency,network_efficiency,Network technology or design efficiency,"Network design or technology choices made to reduce energy use (more efficient radio technologies, fibre instead of copper, power-saving network modes). Does not include certification of equipment, cooling or buildings.",true,v5
+energy_efficiency,efficient_facilities,Efficient buildings and facilities,"Buildings and facilities, including data centres, designed or certified for energy efficiency (EDGE, LEED or similar, power usage effectiveness targets). Does not include cooling systems alone or the equipment inside.",true,v5
+energy_efficiency,efficient_cooling,Efficient cooling,Cooling systems chosen to reduce electricity use. Does not include whole-building certification.,true,v5
+energy_efficiency,energy_management,Energy monitoring and management,"Systems that monitor or control energy use to reduce it (smart meters for the project's own sites, energy management systems). Does not include efficiency of the equipment itself.",true,v5
+energy_efficiency,legacy_replacement,Replacement of inefficient technology,"Replacing existing inefficient technology (2G sites, copper lines, old equipment) specifically to save energy. Does not include buying new efficient equipment where nothing is replaced.",true,v5
+energy_efficiency,efficient_equipment,Energy-efficient equipment,Uses equipment selected for lower energy consumption,false,v4
 energy_efficiency,efficiency_requirement,Energy-performance requirement,Applies a defined efficiency benchmark to project-financed equipment,false,v4

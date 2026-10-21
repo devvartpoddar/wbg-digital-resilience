@@ -28,9 +28,15 @@ SELECT
   0.5::numeric AS package_link_min_probability,
   -- Another project prints a sentence near-identically when its committed
   -- sentences hold at least this share of the sentence's six-word runs.
-  0.5::numeric AS near_copy_share;
+  0.5::numeric AS near_copy_share,
+  -- A unit two measures both commit leaves a measure the pair check says it
+  -- is not (only the other measure, or neither; src/commit_checks.py).
+  true AS apply_measure_pair_checks,
+  -- A unit whose scope is one investment links to at most this many of its
+  -- project's packages (its most likely ones); a rule links to all.
+  3 AS investment_package_top;
 COMMENT ON VIEW wbg.dashboard_settings IS
-  'The readings the dashboard views apply (one row): the floor on P(committed) for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, whether a sentence counts under every asset and type it is given or only its best, the conditional-probability line for "not waiting on a later study", the probability at which a package counts as linked, and the share of six-word runs that makes another project''s wording a near copy.';
+  'The readings the dashboard views apply (one row): the floor on P(committed) for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, whether a sentence counts under every asset and type it is given or only its best, the conditional-probability line for "not waiting on a later study", the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and how many packages one investment links to.';
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the

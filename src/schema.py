@@ -105,7 +105,8 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "paragraph_best_asset_probability", "component_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
-           "best_actor_probability", "cosine", "probability"}
+           "best_actor_probability", "cosine", "probability", "p_only_a", "p_only_b", "p_both",
+           "p_neither", "p_rule", "p_investment", "p_not_commitment"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
            "was_sent_to_model", "was_asked"}
@@ -497,6 +498,29 @@ TABLES = {
             "probability": "The decision model's probability that the package procures this asset.",
             "model_served": "The decision-model snapshot that answered.",
         }),
+    "unit_pair_checks": dict(
+        schema=PUBLIC, key=("unit_id", "set_a", "set_b"), foreign=[],
+        comment="For a unit two measures both commit: the decision model's choice of only the "
+                "first measure, only the second, both or neither, each measure stated by its "
+                "boundary (src/commit_checks.py). The commitment views drop a unit from a "
+                "measure an answer says it is not (dashboard_settings.apply_measure_pair_checks).",
+        columns={"set_a": "The first measure's set (alphabetical).",
+                 "set_b": "The second measure's set.",
+                 "decision": "only_a, only_b, both or neither: the most likely answer.",
+                 "probability": "The probability of that answer.",
+                 "p_only_a": "Probability of only the first measure.",
+                 "p_only_b": "Probability of only the second measure.",
+                 "p_both": "Probability of both.", "p_neither": "Probability of neither."}),
+    "unit_scope": dict(
+        schema=PUBLIC, key=("unit_id",), foreign=[],
+        comment="What kind of statement a committed unit is (src/commit_checks.py): a rule "
+                "that applies to everything of a kind the project buys or builds, one specific "
+                "investment or activity, or not a commitment. The views link an investment to "
+                "its best few packages and a rule to all; not_commitment is a flag, never a cut.",
+        columns={"scope": "rule, investment or not_commitment: the most likely answer.",
+                 "probability": "The probability of that answer.",
+                 "p_rule": "Probability of a rule.", "p_investment": "Probability of an investment.",
+                 "p_not_commitment": "Probability of not a commitment."}),
     "commitment_packages": dict(
         schema=PUBLIC, key=("label_set", "label_id", "unit_id", "package_id"),
         foreign=[("package_id", "packages", "package_id"),

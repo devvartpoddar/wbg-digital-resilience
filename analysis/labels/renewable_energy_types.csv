@@ -1,6 +1,8 @@
 measure_id,type_id,type_name,definition,active,version
-renewable_energy,onsite_solar,On-site solar generation,Generates solar electricity at or for a project-supported location,true,v4
-renewable_energy,solar_storage,Solar plus storage,Combines solar generation with battery storage,true,v4
-renewable_energy,offgrid_renewable,Off-grid renewable supply,Provides renewable electricity where grid supply is unavailable,true,v4
-renewable_energy,diesel_displacement,Renewable replacement of diesel,Replaces or reduces electricity generated from diesel,true,v4
-renewable_energy,renewable_procurement,Renewable electricity procurement,Procures electricity explicitly from renewable sources,true,v4
+renewable_energy,offgrid_renewable,Off-grid renewable supply,"Solar, wind or other renewable systems, with or without storage, powering sites that have no grid connection. Does not include sites connected to the grid, or replacing an existing diesel generator.",true,v5
+renewable_energy,ongrid_onsite,On-site renewables at grid-connected sites,"Solar or other renewable generation installed at sites that are also on the grid, to supply part or all of their electricity. Does not include off-grid sites or buying renewable electricity from others.",true,v5
+renewable_energy,diesel_displacement,Replacing or hybridising diesel,"Replacing existing diesel generation, or hybridising it with renewables, at sites that now run on diesel. Choose this when replacing diesel is stated, whether or not the site is on the grid.",true,v5
+renewable_energy,renewable_maintenance,Operating and maintaining renewable systems,"Maintenance, spare parts, technician training or remote monitoring of renewable systems the project installs, to keep them working over their life. Does not include installing the systems.",true,v5
+renewable_energy,renewable_procurement,Buying renewable electricity,"Buying electricity from renewable sources (power purchase agreements, green tariffs) rather than generating it on site. Does not include on-site generation.",true,v5
+renewable_energy,onsite_solar,On-site solar generation,Generates solar electricity at or for a project-supported location,false,v4
+renewable_energy,solar_storage,Solar plus storage,Combines solar generation with battery storage,false,v4

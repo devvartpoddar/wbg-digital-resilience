@@ -529,6 +529,26 @@ PAIR_LINK_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "proj
                   "measure_cosine", "probability", "model_served", "cost"]
 
 
+CHECK_PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_only_a",
+                   "p_only_b", "p_both", "p_neither", "model_served", "cost"]
+CHECK_SCOPE_COLS = ["unit_id", "scope", "probability", "p_rule", "p_investment",
+                    "p_not_commitment", "model_served", "cost"]
+
+
+def check_rows(data, projects=None):
+    """(sha, pair rows, scope rows) of the current commitment checks
+    (src/commit_checks.py), or (None, [], []) when there are none."""
+    import commit_checks
+    folder = commit_checks.current_run(data, projects=projects)
+    if not folder:
+        return None, [], []
+    out = []
+    for file in ("pairs.csv", "scope.csv"):
+        with open(os.path.join(folder, file), newline="", encoding="utf-8") as fh:
+            out.append(list(csv.DictReader(fh)))
+    return os.path.basename(folder), out[0], out[1]
+
+
 def link_rows(data, projects=None):
     """(sha, package-asset rows, commitment-package rows) of the current
     link run (src/link_packages.py), or (None, [], []) when there is none."""
@@ -565,15 +585,26 @@ def apply_type_resolution(rows, mapping):
     return rows
 
 
-def type_rows():
+def type_rows(data=None):
     """Every type shown for every set with a list (analysis/labels/<set>_types.csv):
-    a merged type is folded into its target, a display_name is the name."""
+    a merged type is folded into its target, a display_name is the name. The
+    OTH types the gap step proposed (data/types/<set>_oth_types.csv, src/kinds.py)
+    follow, named with their OTH. prefix."""
     out = []
     for name in labels.label_sets():
+        seen = set()
         for key, t in labels.type_resolution(name)[1].items():
+            seen.add((key[0], t["type_id"]))
             out.append({"label_set": name, "label_id": key[0], "type_id": t["type_id"],
                         "type_name": t["type_name"], "definition": t["definition"],
                         "merged_from": "|".join(t["merged_from"])})
+        path = where(data or data_root(), "types", f"{name}_oth_types.csv")
+        if os.path.exists(path):
+            for t in labels.rows(path):
+                if (t["label_id"], t["type_id"]) not in seen:
+                    out.append({"label_set": name, "label_id": t["label_id"],
+                                "type_id": t["type_id"], "type_name": t["type_name"],
+                                "definition": t["definition"], "merged_from": ""})
     return out
 
 
@@ -915,12 +946,15 @@ def main():
         sha, assets_, pairs_ = link_rows(args.data, projects)
         derived(conn, "package_assets", sha, ASSET_LINK_COLS, assets_)
         derived(conn, "commitment_packages", sha, PAIR_LINK_COLS, pairs_)
+        sha, cpairs, cscope = check_rows(args.data, projects)
+        derived(conn, "unit_pair_checks", sha, CHECK_PAIR_COLS, cpairs)
+        derived(conn, "unit_scope", sha, CHECK_SCOPE_COLS, cscope)
 
         lab = label_rows()
         derived(conn, "labels", hashlib.sha256(repr(lab).encode()).hexdigest(),
                 ["label_set", "label_id", "name", "definition", "active", "version", "folder"],
                 lab)
-        typ = type_rows()
+        typ = type_rows(args.data)
         derived(conn, "measure_types", hashlib.sha256(repr(typ).encode()).hexdigest(),
                 ["label_set", "label_id", "type_id", "type_name", "definition", "merged_from"],
                 typ)
