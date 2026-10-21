@@ -33,8 +33,17 @@ def connect():
 
 def publish(data, *, sets=None, projects=None, links=False, log=print, conn=None):
     """Write the named sets' current runs into Postgres. Returns the
-    tables written, with their row counts."""
+    tables written, with their row counts. A run over named projects (a
+    smoke test) is not written: its rows would replace each set's rows for
+    the whole cohort, and Metabase would show one project until the next
+    cohort run (2026-10-21, on a one-project test). $WBG_PUBLISH_SCOPED=1
+    writes it anyway, for a database that holds only those projects."""
     import psycopg.errors as pg_errors
+    if projects and os.environ.get("WBG_PUBLISH_SCOPED") != "1":
+        log(f"  postgres: not written: a run over {len(projects)} named project(s) would "
+            f"replace the cohort's rows (set WBG_PUBLISH_SCOPED=1 for a database of "
+            f"those projects alone)")
+        return {}
     t0 = time.time()
     own = conn is None
     conn = conn or connect()
