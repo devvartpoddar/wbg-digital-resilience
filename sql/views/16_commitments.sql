@@ -105,31 +105,51 @@ COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
   'Every committed unit that counts (at its measure''s commit floor, else grade 3; in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not; scope is rule, investment or not_commitment (src/commit_checks.py).';
 
 -- Each commitment's linked packages with where they stand.
-DROP VIEW IF EXISTS wbg.commitment_package_status CASCADE;
-CREATE VIEW wbg.commitment_package_status AS
-SELECT u.commitment_id, cp.package_id, max(cp.probability) AS link_probability,
-       count(DISTINCT u.unit_id) AS units_linked,
+DO $do$
+DECLARE kind "char";
+BEGIN
+  SELECT c.relkind INTO kind FROM pg_class c
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+   WHERE n.nspname = 'wbg' AND c.relname = 'commitment_package_status';
+  IF kind = 'v' THEN EXECUTE 'DROP VIEW wbg.commitment_package_status CASCADE';
+  ELSIF kind = 'm' THEN EXECUTE 'DROP MATERIALIZED VIEW wbg.commitment_package_status CASCADE';
+  END IF;
+END
+$do$;
+-- Materialized, and the unit-to-package join fixed first: the planner
+-- estimates that join at one row and otherwise rescans package_status for
+-- every link (47 s for a count).
+CREATE MATERIALIZED VIEW wbg.commitment_package_status AS
+WITH l AS MATERIALIZED (
+  SELECT u.commitment_id, u.unit_id, cp.package_id, cp.probability
+  FROM wbg.commitment_units u
+  JOIN (SELECT cp.*, row_number() OVER (PARTITION BY cp.label_set, cp.label_id, cp.unit_id,
+                                                     cp.project_id
+                                        ORDER BY cp.probability DESC, cp.package_id) AS link_rank
+        FROM wbg.commitment_packages cp) cp
+    ON cp.label_set = u.label_set AND cp.label_id = u.label_id
+   AND cp.unit_id = u.unit_id AND cp.project_id = u.project_id
+  CROSS JOIN wbg.dashboard_settings ds
+  WHERE cp.probability >= ds.package_link_min_probability
+    -- one investment: its most likely few packages; a rule: every package
+    AND (u.scope <> 'investment' OR cp.link_rank <= ds.investment_package_top)
+)
+SELECT l.commitment_id, l.package_id, max(l.probability) AS link_probability,
+       count(DISTINCT l.unit_id) AS units_linked,
        s.project_id, s.description_clean, s.category, s.method_code, s.estimated_amount_usd,
-       s.planned_date, s.plan_status, s.in_latest_plan, s.notice_date, s.notice_deadline,
-       s.signed_date, s.supplier, s.package_status, s.next_date
-FROM wbg.commitment_units u
-JOIN (SELECT cp.*, row_number() OVER (PARTITION BY cp.label_set, cp.label_id, cp.unit_id,
-                                                   cp.project_id
-                                      ORDER BY cp.probability DESC, cp.package_id) AS link_rank
-      FROM wbg.commitment_packages cp) cp
-  ON cp.label_set = u.label_set AND cp.label_id = u.label_id
- AND cp.unit_id = u.unit_id AND cp.project_id = u.project_id
-CROSS JOIN wbg.dashboard_settings ds
-JOIN wbg.package_status s ON s.package_id = cp.package_id
-WHERE cp.probability >= ds.package_link_min_probability
-  -- one investment: its most likely few packages; a rule: every package
-  AND (u.scope <> 'investment' OR cp.link_rank <= ds.investment_package_top)
-GROUP BY u.commitment_id, cp.package_id, s.project_id, s.description_clean, s.category,
-         s.method_code, s.estimated_amount_usd, s.planned_date, s.plan_status,
+       s.planned_date, s.due_date, s.plan_status, s.in_latest_plan, s.notice_date,
+       s.notice_deadline, s.signed_date, s.supplier, s.package_status, s.next_date
+FROM l
+JOIN wbg.package_status s ON s.package_id = l.package_id
+GROUP BY l.commitment_id, l.package_id, s.project_id, s.description_clean, s.category,
+         s.method_code, s.estimated_amount_usd, s.planned_date, s.due_date, s.plan_status,
          s.in_latest_plan, s.notice_date, s.notice_deadline, s.signed_date, s.supplier,
          s.package_status, s.next_date;
-COMMENT ON VIEW wbg.commitment_package_status IS
-  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability, 0.7): the package''s plan columns, latest notice, signed contract and package_status (see package_status). A sentence that is one investment (unit_scope) links to its most likely dashboard_settings.investment_package_top packages only; a rule links to every package at the threshold. A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
+CREATE UNIQUE INDEX ON wbg.commitment_package_status (commitment_id, package_id);
+CREATE INDEX ON wbg.commitment_package_status (package_id);
+ANALYZE wbg.commitment_package_status;
+COMMENT ON MATERIALIZED VIEW wbg.commitment_package_status IS
+  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability, 0.7): the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A sentence that is one investment (unit_scope) links to its most likely dashboard_settings.investment_package_top packages only; a rule links to every package at the threshold. A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
 
 -- Near-identical wording across projects. Word-for-word equality found 17
 -- of 2,150 commitments, while four operations of one programme (DRC,
