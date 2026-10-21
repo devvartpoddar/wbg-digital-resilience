@@ -117,6 +117,14 @@ def store(tmp_path, monkeypatch):
 
     def fake(body, **kw):
         calls.append(body)
+        if "measure" in body["state"]:                     # a batch of units (ASK_BATCH)
+            out = {}
+            for f in body["questions"]:
+                hit = "hazard assessment" in body["state"][f]
+                out[f] = {"type": "score", "confidence": 0.7, "probabilities":
+                          {"0": 0.05, "1": 0.05, "2": 0.1, "3": 0.8} if hit else
+                          {"0": 0.9, "1": 0.1, "2": 0.0, "3": 0.0}}
+            return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
         hit = "hazard assessment" in body["state"]["sentence"]
         probs = {"0": 0.05, "1": 0.05, "2": 0.1, "3": 0.8} if hit else \
             {"0": 0.9, "1": 0.1, "2": 0.0, "3": 0.0}
@@ -157,14 +165,18 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert r["kinds_yes"] == "build" and r["kind_best"] == "build"
     assert r["actors_yes"] == "borrower" and r["actor_best"] == "borrower"
     assert float(r["conditional_p"]) < 0.5
-    assert "paragraph" not in calls[0]["state"]              # sentence design by default
-    assert calls[0]["state"]["component"] == "1 Connectivity"
-    assert "towers" not in calls[0]["questions"]["cra"]["instructions"]
+    # The measure's question goes in a batch (measure.ASK_BATCH): the
+    # definition and grades once in the state, the unit in its own field.
+    unit = calls[0]["state"]["u01"]
+    assert "Paragraph:" not in unit                          # sentence design by default
+    assert "Component: 1 Connectivity" in unit
+    assert "towers" not in calls[0]["state"]["measure"]
+    assert "towers" not in calls[0]["questions"]["u01"]["instructions"]
     # Two passes: the measure alone on the sentence, then asset, kind and
     # facet questions for the units graded 2 or more (here the one unit),
     # with the paragraph added to the state.
-    assert list(calls[0]["questions"]) == ["cra"]
-    assert calls[1]["state"]["sentence"] == calls[0]["state"]["sentence"]
+    assert list(calls[0]["questions"]) == ["u01"]
+    assert "Sentence: " + calls[1]["state"]["sentence"] in unit
     assert "paragraph" in calls[1]["state"] and "ten towers" in calls[1]["state"]["paragraph"]
     q = calls[1]["questions"]["asset:choice"]
     assert q["type"] == "choice" and "towers" in q["criteria"]
@@ -183,7 +195,7 @@ def test_feedback_rounds_read_the_nearest_unseen_units_until_the_yield_drops(sto
     assert [(r["round"], r["route"]) for r in rows] == [("0", "both"), ("1", "feedback"),
                                                         ("1", "feedback")]
     assert [r["grade"] for r in rows] == ["3", "0", "0"]
-    assert len(calls) == 4            # round 0: measure + extras; round 1: two units, measure only
+    assert len(calls) == 3            # round 0: measure + extras; round 1: both units in one batch
 
 
 def test_a_rerun_reads_the_store_and_asks_nothing(store):
@@ -198,7 +210,7 @@ def test_the_paragraph_design_is_another_version_with_the_paragraph(store):
     data, calls = store
     a = measure.measure("cra", data, **RUN)
     b = measure.measure("cra", data, **dict(RUN, context="paragraph"))
-    assert a != b and calls[-1]["state"]["paragraph"].startswith("A site-specific")
+    assert a != b and "Paragraph: A site-specific" in calls[-1]["state"]["u01"]
 
 
 def test_a_gate_leaves_the_unit_in_the_table_but_unsent(store):
@@ -224,3 +236,14 @@ def test_a_unit_that_is_not_digital_takes_no_link_from_its_paragraph():
     row = dict(base, asset_unit="", asset_p_unit="")          # no asset named: the paragraph's
     run.link_into(row)
     assert (row["asset_link"], row["asset_link_level"]) == ("towers", "paragraph")
+
+
+def test_a_batch_holds_one_documents_units_in_order_ten_at_a_time():
+    rows = [{"unit_id": f"D{d}:p{i:03d}", "doc_id": f"D{d}", "_state": {"sentence": f"s{d}{i}"}}
+            for d in (2, 1) for i in range(12)]
+    reqs = measure.batch_requests(rows, {"name": "M", "definition": "def"}, ["a {name}", "b"])
+    assert [len(m) for _, _, m in reqs] == [10, 2, 10, 2]
+    assert [r["unit_id"] for r, _ in reqs[0][2]][:2] == ["D1:p000", "D1:p001"]
+    state, qs, members = reqs[1]
+    assert state["measure"] == "M: def" and state["grades"] == "0: a M\n1: b"
+    assert list(qs) == ["u01", "u02"] and state["u02"] == "Sentence: s111"
