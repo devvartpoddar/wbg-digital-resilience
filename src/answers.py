@@ -102,6 +102,110 @@ def split(response, questions, call_sha):
     return out
 
 
+# Questions are asked of BATCH items a request: each distinct question set
+# out once in the state, each item (a sentence, a paragraph, a package, a
+# pair) in its own field, and one short question per item and question. A
+# request costs a fixed overhead of about 300 tokens plus its state and
+# questions, and the questions are most of it, so ten items a request cost
+# about a quarter (2026-10-21, on the measure question: US$0.0053 against
+# US$0.0196 for 477 graded units, the same accuracy against Dev's grades
+# within the noise). Every answer is still stored under its own item and
+# question (key), so a re-run reads it back whatever its neighbours were:
+# an item's neighbours move its first answer about as much as a small
+# rewording does, and never a stored one. $WBG_ASK_BATCH overrides (0 asks
+# one item a request, as before 2026-10-22).
+BATCH = int(os.environ.get("WBG_ASK_BATCH", "10"))
+# A batch may pass the 30,000-character line above which the endpoint reads
+# in its long-context mode (classify.MAX_REQUEST_CHARS): on 60 paragraphs x
+# 13 asset questions, batches of ten agreed with one a request as often at
+# 80,000 characters as at 30,000 (96 per cent the same grade, mean shift in
+# P(top grade) 0.016), and cost 61 per cent less instead of 24.
+BATCH_MAX_CHARS = 80_000
+
+
+def spec(question):
+    """A question written out in full, for the shared part of a batch."""
+    c = question["criteria"]
+    if question["type"] == "score":
+        opts = [f"{i}: {t}" for i, t in enumerate(c)]
+    elif question["type"] == "noul":
+        opts = [f"true: {c.get('true', 'yes')}", f"false: {c.get('false', 'no')}"]
+    else:
+        opts = [f"{k}: {v}" for k, v in c.items()]
+    return question["instructions"] + "\nAnswers:\n" + "\n".join(opts)
+
+
+def _short(text, words=4):
+    w = str(text).split()
+    return " ".join(w[:words]) + (" ..." if len(w) > words else "")
+
+
+HOW = ("Several items follow, each in its own field ('item 01', 'item 02', ...), and each "
+       "question is set out in full in its own field ('question <id>'). Each short question "
+       "below asks one of those questions about one item: answer it for that item alone, "
+       "reading any field the question names (such as 'sentence', 'paragraph', 'package' or "
+       "'commitment') as that line of the item. The other items are separate.")
+
+
+def item_question(question, qid, field):
+    """The short question one item of a batch is asked: the full question is
+    in the state, so its options keep their keys and only a short label."""
+    c = question["criteria"]
+    if question["type"] == "score":
+        crit = [f"{i}: {_short(t)}" for i, t in enumerate(c)]
+    elif question["type"] == "noul":
+        crit = {"true": "Yes", "false": "No"}
+    else:
+        crit = {k: k.replace("_", " ") for k in c}
+    return {"type": question["type"],
+            "instructions": f"Question '{qid}' about {field}.",
+            "criteria": crit}
+
+
+def item_text(state):
+    """An item's state as one text field: one 'name: value' line a field."""
+    return "\n".join(f"{k}: {v}" for k, v in state.items())
+
+
+def batch_body(states, questions, model):
+    """(body, [(item index, qid, batch qid)]) asking every question of each state."""
+    import classify
+    shared = {"how to answer": HOW, **{f"question {qid}": spec(q) for qid, q in questions.items()}}
+    qs, members = {}, []
+    for i, s in enumerate(states, 1):
+        f = f"item {i:02d}"
+        shared[f] = item_text(s)
+        for qid, q in questions.items():
+            bq = f"{f} | {qid}"
+            qs[bq] = item_question(q, qid, f)
+            members.append((i - 1, qid, bq))
+    return classify.request_body(shared, qs, model), members
+
+
+def batches_for(items, model, size):
+    """Batched bodies for [(state, {qid: question})] items that share one
+    question set: `size` a request in the items' order, smaller where a
+    request would pass BATCH_MAX_CHARS. Returns
+    [(body, [(item, qid, batch qid)])]."""
+    import classify
+    out, k = [], 0
+    while k < len(items):
+        n = min(size, len(items) - k)
+        while True:
+            chunk = items[k:k + n]
+            body, members = batch_body([s for s, _ in chunk], chunk[0][1], model)
+            if n == 1 or len(json.dumps(body, ensure_ascii=False)) <= BATCH_MAX_CHARS:
+                break
+            n = max(1, n // 2)
+        if n == 1 and len(json.dumps(body, ensure_ascii=False)) > BATCH_MAX_CHARS:
+            out.extend((b, [(chunk[0], q, q) for q in b["questions"]])
+                       for b in bodies_for(chunk[0][0], chunk[0][1], model))
+        else:
+            out.append((body, [(chunk[i], qid, bq) for i, qid, bq in members]))
+        k += n
+    return out
+
+
 def bodies_for(state, questions, model):
     """The request bodies that ask `questions` of `state`, each under
     classify.MAX_REQUEST_CHARS: one body when they fit, else the questions
@@ -159,7 +263,7 @@ class CapReached(SystemExit):
 
 
 def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False,
-        aliases=()):
+        aliases=(), batch=None):
     """Answers for every request, asking only what is not stored.
     Returns (answers, stats): answers = [{qid: entry}] per request (None for
     a request with a missing answer when nothing could be asked), stats =
@@ -180,10 +284,33 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                     old = read(aroot, key(alias, state, q))
                     if old and old.get("model") == model:
                         write(root_, ks[qid], dict(old, migrated_from=alias))
+    batch = BATCH if batch is None else batch
+    # what each body answers: [(state, qid, the body's own qid)]
+    plan = {}
+    groups, seen = {}, set()
     for (state, qs), ks in zip(requests, keys):
         missing = {qid: q for qid, q in qs.items() if read(root_, ks[qid]) is None}
+        if not missing:
+            continue
+        if batch > 1:
+            k = json.dumps([state, missing], sort_keys=True, ensure_ascii=False)
+            if k not in seen:                                  # the same item asks once
+                seen.add(k)
+                groups.setdefault(json.dumps(missing, sort_keys=True), []).append((state, missing))
+            continue
         for body in bodies_for(state, missing, model):
-            todo.setdefault(classify.request_sha(body), body)   # the same request asks once
+            sha = classify.request_sha(body)
+            todo.setdefault(sha, body)                         # the same request asks once
+            plan.setdefault(sha, [(state, q, q) for q in body["questions"]])
+    # Items sharing a question set go together, ordered by their state (a
+    # sentence's section, component and text), so a batch holds neighbours
+    # from one part of one document where it can.
+    for _, items in sorted(groups.items()):
+        items.sort(key=lambda it: json.dumps(it[0], sort_keys=True, ensure_ascii=False))
+        for body, members in batches_for(items, model, batch):
+            sha = classify.request_sha(body)
+            todo.setdefault(sha, body)
+            plan.setdefault(sha, [(it[0], qid, bq) for it, qid, bq in members])
     chars = sum(len(json.dumps(b, ensure_ascii=False)) for b in todo.values())
     stats = {"to_ask": len(todo), "chars": chars, "calls": 0, "cost_usd": 0.0, "failures": [],
              "seconds": 0.0,
@@ -199,11 +326,18 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
             raise SystemExit("answers: no credential: set $WBG_OPENROUTER_KEY")
         t0 = time.time()
 
+        originals = {}
+        for (state, qs) in requests:
+            for qid, q in qs.items():
+                originals.setdefault((json.dumps(state, sort_keys=True, ensure_ascii=False), qid), q)
+
         def one(sha, body):
             response = classify.decide(body, api_key=api_key)
             entries = split(response, body["questions"], sha)
-            for qid, entry in entries.items():
-                write(root_, key(model, body["state"], body["questions"][qid]), entry)
+            for state, qid, bq in plan[sha]:
+                q = originals[(json.dumps(state, sort_keys=True, ensure_ascii=False), qid)]
+                entry = entries[bq] if bq == qid else dict(entries[bq], batch=bq)
+                write(root_, key(model, state, q), entry)
             return float((response.get("usage") or {}).get("cost") or 0)
 
         with ThreadPoolExecutor(max_workers=workers or classify.WORKERS) as pool:

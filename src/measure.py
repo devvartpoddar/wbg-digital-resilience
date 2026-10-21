@@ -148,64 +148,6 @@ NEGATIVE_WEIGHT = 0.5  # Rocchio: how much of the rejected units' centroid is su
 EXTRAS_MIN_GRADE = 2   # asset and kind questions are asked of units graded at least this
 
 
-# The measure's question is asked of ASK_BATCH units in one request: the
-# measure's definition and grades once in the state, one short question per
-# unit (0 asks one unit a request, as before 2026-10-22). A request carries a
-# fixed overhead of about 300 tokens and the question about 650, against about
-# 50 for a sentence, so ten a request cost about a quarter (US$0.0053 against
-# US$0.0196 for 477 graded units, 2026-10-21). Against Dev's 477 grades the
-# accuracy was the same within the noise (P(grade 3) >= 0.5: precision 0.75 to
-# 0.78 and recall 0.79 to 0.82 batched, 0.80 and 0.74 one a request). An
-# identical batch asked twice gives the same answers (96 per cent the same
-# grade, none moved by more than 0.2, as one a request: 97 per cent), but a
-# unit's neighbours move its answer about as much as a rewording does (86 to
-# 88 per cent the same grade), so a batch is fixed: units of one document, in
-# unit order, ten at a time, within a round.
-ASK_BATCH = 10
-BATCH_CRITERIA = ["0: not described", "1: background or context only",
-                  "2: planned, possible or conditional", "3: committed by this project"]
-
-
-def unit_block(state):
-    """A unit's state as one text field of a batch."""
-    parts = [f"Section: {state['section']}" if state.get("section") else "",
-             f"Component: {state['component']}" if state.get("component") else "",
-             f"Sentence: {state['sentence']}",
-             f"Paragraph: {state['paragraph']}" if state.get("paragraph") else ""]
-    return "\n".join(p for p in parts if p)
-
-
-def batch_requests(rows, label, scale, size=ASK_BATCH):
-    """[(state, questions, [(row, field)])]: rows grouped by document in unit
-    order, `size` to a request; the measure's definition and grades once in
-    the state, one short score question per unit field."""
-    by_doc = defaultdict(list)
-    for r in rows:
-        by_doc[r["doc_id"]].append(r)
-    out = []
-    for doc in sorted(by_doc):
-        units = sorted(by_doc[doc], key=lambda r: r["unit_id"])
-        for k in range(0, len(units), size):
-            chunk = units[k:k + size]
-            state = {"measure": f"{label['name']}: {label['definition']}",
-                     "grades": "\n".join(f"{i}: {g.replace('{name}', label['name'])}"
-                                         for i, g in enumerate(scale))}
-            qs, members = {}, []
-            for i, r in enumerate(chunk, 1):
-                f = f"u{i:02d}"
-                state[f] = unit_block(r["_state"])
-                qs[f] = {"type": "score",
-                         "instructions": (f"How does the sentence in field '{f}', from a World Bank "
-                                          f"project appraisal document, relate to the measure in "
-                                          f"field 'measure'? Grade it on the scale in field "
-                                          f"'grades'. Judge this sentence alone; the other unit "
-                                          f"fields are separate sentences."),
-                         "criteria": BATCH_CRITERIA}
-                members.append((r, f))
-            out.append((state, qs, members))
-    return out
-
-
 def is_committed(u, top, floor=None):
     """A unit counts as committed: P(top grade) at or above the measure's
     commit floor (labels.commit_floor), or, with none, the most likely grade
@@ -407,8 +349,6 @@ class Run:
                          "extras_min_grade": EXTRAS_MIN_GRADE,
                          "extras_context": EXTRAS_CONTEXT,
                          "projects": sorted(projects) if projects else None}
-        if ASK_BATCH:
-            self.settings["ask_batch"] = ASK_BATCH
         self.projects = sorted(projects) if projects else None
         # The commit floor is a reading, not a question; it is part of the
         # version only when written, so the folders made before it keep their names.
@@ -610,24 +550,6 @@ class Run:
 
     # ---- a batch to the model
 
-    def first_requests(self, sent, first):
-        """(requests, unpack) for the measure's question: ASK_BATCH units a
-        request (batch_requests), or one a request when batching is off or the
-        set has several labels. unpack turns the answers per request back
-        into {label_id: entry} per unit, in the order of `sent`."""
-        if not ASK_BATCH or len(first) != 1:
-            return [(r["_state"], first) for r in sent], lambda got: got
-        lab = self.labels[0]
-        reqs = batch_requests(sent, lab, self.scale)
-
-        def unpack(got):
-            by_unit = {}
-            for (_, _, members), g in zip(reqs, got):
-                for r, f in members:
-                    by_unit[r["unit_id"]] = {lab["id"]: g[f]} if g else None
-            return [by_unit[r["unit_id"]] for r in sent]
-        return [(s, q) for s, q, _ in reqs], unpack
-
     def grade(self, rows, rnd, api_key, dry_run, workers):
         """Two passes through the answer store for the rows that pass the
         gate: the measure's question for all of them, then the asset and
@@ -645,7 +567,7 @@ class Run:
                 sent.append(row)
         first = {k: v for k, v in self.qs.items() if ":" not in k}
         extras = {k: v for k, v in self.qs.items() if ":" in k}
-        requests_, unpack = self.first_requests(sent, first)
+        requests_ = [(r["_state"], first) for r in sent]
         got, st = answers.ask(model, requests_, self.data,
                               api_key=api_key, log=self.log, workers=workers, dry_run=True)
         self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} pass the gate; measure "
@@ -661,7 +583,7 @@ class Run:
             calls, cost = st["calls"], st["cost_usd"]
             if st["failures"] or not all(got):
                 return calls, cost, st["failures"] or [("", "an answer is missing")]
-        for row, g in zip(sent, unpack(got)):
+        for row, g in zip(sent, got):
             self.grade_into(row, g)
         need = [r for r in sent if int(r["grade"]) >= EXTRAS_MIN_GRADE
                 or r.get("committed") == "true"] if extras else []
