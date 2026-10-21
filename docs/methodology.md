@@ -44,7 +44,7 @@ Any model that meets all three may be used, including an external one. For an ex
 | A measure's types: proposed by a generative model, approved by a person, assigned by the decision model (section 5d) | Built (`./wbg types <set>`, `--assign`) |
 | A graded sample of a measure's units: precision and recall with confidence intervals (section 5c) | Built (`./wbg check <set>`, `--evaluate`); the first sheet of 95 units is drawn and awaits grading |
 | Every decision-model answer stored per question; what each run asked for in a spend ledger | Built (`src/answers.py`, `data/reports/spend.csv`) |
-| The dashboards' layer: commitments (project, asset, measure, type), their evidence and package status, project and measure pages, similar projects, a phrase search (section 5f) | Built 2026-10-21; checked on a 17-project slice of the live schema, not yet loaded on the box |
+| The dashboards' layer: commitments (project, asset, measure, type), their evidence and package status, project and measure pages, similar projects, a phrase search (section 5f) | Built 2026-10-21; checked on a 17-project slice of the live schema, not yet loaded on the box. `commitments`, `commitment_units` and `commitment_package_status` (now with `due_date`) are materialised at each publish, so date-based statuses are as of that publish |
 | Measures requested from the dashboard, run under a spend cap (section 5f) | Built; the box needs the role, the Metabase connection and the timer (yggdrasil) |
 | Labels for measuring it | Drawn by `src/check_units.py` (units); keyed by the SHA-256 of the text, the label and the exact question; nothing but evaluation reads them |
 
