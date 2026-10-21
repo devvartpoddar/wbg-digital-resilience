@@ -55,6 +55,17 @@ def merge(v2, v3):
     for k in V3_FIRST:
         if v3.get(k):
             rec[k] = v3[k]
+    # Both forms' figures are kept: they disagree on 30 of 131 projects
+    # (2026-10-21), v3 higher after additional financing and lower after a
+    # cancellation, but not always right (P171305: v3 US$50m, the amount
+    # cancelled, where the April 2026 restructuring paper says US$150m
+    # remains; v2 still US$200m).
+    if v2.get("curr_total_commitment"):
+        rec["commitment_v2"] = str(v2["curr_total_commitment"]).replace(",", "")
+    try:
+        rec["commitment_v3"] = f"{float(v3['curr_total_commitment']) / 1e6:g}"
+    except (KeyError, TypeError, ValueError):
+        pass
     try:
         rec["curr_total_commitment"] = f"{float(v3['curr_total_commitment']) / 1e6:g}"
         rec["commitment_source"] = "v3"

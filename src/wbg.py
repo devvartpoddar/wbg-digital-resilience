@@ -303,7 +303,8 @@ def run(args, data):
         print(f"#### {stage}", flush=True)
         failed = []
         if stage == "fetch":
-            prepare(_sel(args), update=args.update, data=data, fetch=True)
+            prepare(_sel(args), update=args.update, data=data, fetch=True,
+                    refresh_projects=getattr(args, "refresh_projects", False))
         elif stage == "prepare":
             prepare(_sel(args), data=data, fetch=False)
         elif stage == "embed":
@@ -500,7 +501,7 @@ def _record_due(pid, fetched_on, today, data, _status={}):
     return age >= PROJECT_REFRESH_DAYS
 
 
-def prepare(sel=None, update=False, data=None, fetch=True):
+def prepare(sel=None, update=False, data=None, fetch=True, refresh_projects=False):
     """Bring the store up to date for a selection.
 
     1. The data folder is put in its layout (src/paths.py).
@@ -528,7 +529,8 @@ def prepare(sel=None, update=False, data=None, fetch=True):
             # one's is not. Documents and procurement are fetched once, and
             # again with --update.
             todo = [p for p in sel.ids if update or p not in done
-                    or (kind == "projects" and _record_due(p, done[p], today, data))]
+                    or (kind == "projects" and (refresh_projects
+                                                or _record_due(p, done[p], today, data)))]
             if not todo:
                 continue
             args = ["--projects", ",".join(todo)]
@@ -929,6 +931,8 @@ def main(argv=None):
     p.add_argument("--workers", type=int, default=ADD_WORKERS,
                    help="parallel requests to the decision model per set")
     p.add_argument("--update", action="store_true", help="fetch the selected projects again")
+    p.add_argument("--refresh-projects", action="store_true",
+                   help="fetch every selected project's record again (not its documents)")
     p.add_argument("--dry-run", action="store_true",
                    help="the model stages' estimates only (fetch and prepare are skipped)")
     p.add_argument("--max-spend", type=float, default=None,

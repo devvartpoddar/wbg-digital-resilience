@@ -249,10 +249,27 @@ WITH c AS (
 p AS (
   SELECT ps.commitment_id, count(*) AS linked_packages,
          (array_agg(ps.package_status ORDER BY o.status_rank, ps.package_id))[1] AS status,
-         min(ps.next_date) AS next_date
+         min(ps.next_date) AS next_date,
+         -- the linked packages' plan estimates, where the plan gives one
+         sum(ps.estimated_amount_usd) AS linked_package_estimate_usd,
+         count(ps.estimated_amount_usd) AS linked_packages_with_estimate
   FROM wbg.commitment_package_status ps
   LEFT JOIN wbg.package_status_order o ON o.package_status = ps.package_status
   GROUP BY ps.commitment_id
+),
+-- The cost of the components a commitment's sentences sit under (the
+-- project_components figure: all funding sources), only when every one of
+-- them has a cost; NULL when no sentence sits under a known component.
+cc AS (
+  SELECT x.commitment_id,
+         CASE WHEN count(*) = count(pc.cost_usd_millions) THEN sum(pc.cost_usd_millions) END
+           AS component_cost_usd_m
+  FROM (SELECT DISTINCT commitment_id, project_id, component_number
+        FROM wbg.commitment_units WHERE coalesce(component_number, '') <> '') x
+  LEFT JOIN wbg.project_components pc
+         ON pc.project_id = x.project_id AND pc.component_number = x.component_number
+        AND pc.component_level = 'component'
+  GROUP BY x.commitment_id
 )
 SELECT c.commitment_id,
        i.project_id, i.project_name, i.cohort_set, i.country_name, i.country_code, i.region,
@@ -262,7 +279,9 @@ SELECT c.commitment_id,
        coalesce(ag.group_id, '(no asset)') AS asset_group_id,
        coalesce(ag.group_name, '(no asset)') AS asset_group_name,
        c.type_id, coalesce(t.type_name, c.type_id) AS type_name,
-       c.asset_from, c.components,
+       c.asset_from, c.asset_from AS asset_link_level, c.components,
+       i.commitment_usd_millions AS project_commitment_usd_m,
+       cc.component_cost_usd_m,
        c.sentences, c.paragraphs, c.documents, c.strongest_p,
        c.share_not_conditional, c.first_seen_date, c.same_wording_projects,
        c.scope, c.flagged_not_commitment,
@@ -272,11 +291,14 @@ SELECT c.commitment_id,
                          WHERE pa.project_id = c.project_id AND pa.asset_id = c.asset_id
                            AND pa.paragraphs_financed > 0) END AS asset_in_asset_map,
        coalesce(p.linked_packages, 0) AS linked_packages,
+       p.linked_package_estimate_usd, coalesce(p.linked_packages_with_estimate, 0)
+         AS linked_packages_with_estimate,
        coalesce(p.status, 'No package found') AS status,
        p.next_date
 FROM c
 JOIN wbg.project_info i ON i.project_id = c.project_id
 LEFT JOIN p ON p.commitment_id = c.commitment_id
+LEFT JOIN cc ON cc.commitment_id = c.commitment_id
 LEFT JOIN (SELECT DISTINCT ON (label_set) label_set, label_name FROM wbg.labels
            WHERE label_set <> 'assets' ORDER BY label_set, label_id) l ON l.label_set = c.label_set
 LEFT JOIN wbg.labels al ON al.label_set = 'assets' AND al.label_id = c.asset_id
@@ -288,7 +310,7 @@ CREATE UNIQUE INDEX ON wbg.commitments (commitment_id);
 CREATE INDEX ON wbg.commitments (label_set);
 ANALYZE wbg.commitments;
 COMMENT ON MATERIALIZED VIEW wbg.commitments IS
-  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest P(committed); share_not_conditional is the share of sentences below the conditional line; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether the project''s asset map grades a paragraph as financing this asset. status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments.';
+  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest P(committed); share_not_conditional is the share of sentences below the conditional line; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether the project''s asset map grades a paragraph as financing this asset. status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen (Dev): project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms disagree on 30 of 131 projects), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names the asset, else paragraph.';
 
 -- The commitment's sentences, one row per distinct wording (the strongest
 -- unit printing it).
