@@ -301,7 +301,7 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
         for body in bodies_for(state, missing, model):
             sha = classify.request_sha(body)
             todo.setdefault(sha, body)                         # the same request asks once
-            plan.setdefault(sha, [(state, q, q) for q in body["questions"]])
+            plan.setdefault(sha, [(state, body["questions"][q], q) for q in body["questions"]])
     # Items sharing a question set go together, ordered by their state (a
     # sentence's section, component and text), so a batch holds neighbours
     # from one part of one document where it can.
@@ -310,7 +310,7 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
         for body, members in batches_for(items, model, batch):
             sha = classify.request_sha(body)
             todo.setdefault(sha, body)
-            plan.setdefault(sha, [(it[0], qid, bq) for it, qid, bq in members])
+            plan.setdefault(sha, [(it[0], it[1][qid], bq) for it, qid, bq in members])
     chars = sum(len(json.dumps(b, ensure_ascii=False)) for b in todo.values())
     stats = {"to_ask": len(todo), "chars": chars, "calls": 0, "cost_usd": 0.0, "failures": [],
              "seconds": 0.0,
@@ -326,17 +326,15 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
             raise SystemExit("answers: no credential: set $WBG_OPENROUTER_KEY")
         t0 = time.time()
 
-        originals = {}
-        for (state, qs) in requests:
-            for qid, q in qs.items():
-                originals.setdefault((json.dumps(state, sort_keys=True, ensure_ascii=False), qid), q)
-
         def one(sha, body):
             response = classify.decide(body, api_key=api_key)
             entries = split(response, body["questions"], sha)
-            for state, qid, bq in plan[sha]:
-                q = originals[(json.dumps(state, sort_keys=True, ensure_ascii=False), qid)]
-                entry = entries[bq] if bq == qid else dict(entries[bq], batch=bq)
+            # each answer goes under its own item and its own question (the
+            # question itself, not its id: one sentence asked the "pair"
+            # question of several measure pairs has one id and several questions)
+            for state, q, bq in plan[sha]:
+                entry = dict(entries[bq], batch=bq) if "how to answer" in body["state"] \
+                    else entries[bq]
                 write(root_, key(model, state, q), entry)
             return float((response.get("usage") or {}).get("cost") or 0)
 

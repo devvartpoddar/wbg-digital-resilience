@@ -70,3 +70,24 @@ def test_one_a_request_is_the_old_form(tmp_path, monkeypatch):
     reqs = [({"sentence": f"s {i}"}, {"m": Q["m"]}) for i in range(3)]
     answers.ask("m", reqs, str(tmp_path), api_key="k", log=lambda *_: None, workers=1, batch=0)
     assert len(calls) == 3 and calls[0]["state"] == {"sentence": "s 0"}
+
+
+def test_one_sentence_asked_two_questions_with_one_id_keeps_both(tmp_path, monkeypatch):
+    """The cross-measure pair question has the id "pair" for every pair of
+    measures: one sentence, several questions, each answer kept apart."""
+    calls = []
+
+    def fake(body, **kw):
+        calls.append(body)
+        out = {}
+        for bq in body["questions"]:
+            out[bq] = {"type": "noul", "noul": 0.9 if "A or B" in body["state"]["question pair"] else 0.2}
+        return {"model": "m", "usage": {"cost": 0}, "answers": out}
+    monkeypatch.setattr(classify, "decide", fake)
+    s = {"sentence": "solar with batteries"}
+    qa = {"pair": {"type": "noul", "instructions": "A or B?", "criteria": {"true": "y", "false": "n"}}}
+    qb = {"pair": {"type": "noul", "instructions": "C or D?", "criteria": {"true": "y", "false": "n"}}}
+    got, _ = answers.ask("m", [(s, qa), (s, qb)], str(tmp_path), api_key="k",
+                         log=lambda *_: None, workers=1, batch=10)
+    assert got[0] and got[1]
+    assert got[0]["pair"]["answer"]["noul"] == 0.9 and got[1]["pair"]["answer"]["noul"] == 0.2
