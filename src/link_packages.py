@@ -270,6 +270,12 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
     model = plan.settings["model"]
     log(f"link: {len(plan.packages):,} packages, {len(plan.assets)} assets, "
         f"{len(plan.runs)} measure run(s) -> {plan.out}")
+    missing = sorted(set(kw.get("sets") or labels.label_sets()) - set(plan.runs) - {ASSET_SET})
+    if missing:
+        # A dry run writes no measure run, so after a measure changes its pairs
+        # cannot be estimated until the funnel has run: say so, not "0 pairs".
+        log(f"  no measure run at this version for {', '.join(missing)}: their pairs are "
+            f"{'not estimated (a dry run writes no measure run)' if dry_run else 'not linked'}")
     if os.path.exists(os.path.join(plan.out, "manifest.json")):
         log("  already written")
         return plan.out

@@ -238,3 +238,18 @@ def test_the_loader_reads_the_current_run(store):
     assert folder and os.path.exists(os.path.join(folder, "package_assets.csv"))
     assert set(load_pg.ASSET_LINK_COLS) == set(link.ASSET_COLS)
     assert set(load_pg.PAIR_LINK_COLS) == set(link.PAIR_COLS)
+
+
+def test_a_dry_run_names_the_measures_with_no_run_yet(store, monkeypatch):
+    """A dry run writes no measure run, so after a measure changes the link
+    finds none for it: it says so rather than reporting no pairs."""
+    data, calls = store
+    monkeypatch.setattr(labels, "label_sets", lambda dirs=None: ["assets", "cra", "ews"])
+    real = measure.current_run
+    monkeypatch.setattr(measure, "current_run",
+                        lambda name, d, **kw: None if name == "ews" else real(name, d, **kw))
+    lines = []
+    assert link.link(data, dry_run=True, asset_top=2, dim=DIM, log=lines.append) is None
+    assert any("no measure run at this version for ews" in x and "not estimated" in x
+               for x in lines)
+    assert calls == []

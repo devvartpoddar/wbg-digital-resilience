@@ -22,7 +22,7 @@ A label set's name is its file name without `.csv`, and the same name must not e
 ./wbg types cra --assign       # assign every committed unit to the approved types
 ```
 
-Changing what the dashboards show is rows too, and free: merge two types (`merge_into`), rename one (`display_name`), regroup the assets (`assets_groups.csv`), then `src/load_pg.py`; nothing is asked again. Dropping a type from the list or changing its definition re-asks the list (US$0.02 per measure on the 70-project runs), because the assignment request carries every question at once.
+Changing what the dashboards show is rows too, and free: merge two types (`merge_into`), rename one (`display_name`), regroup the assets (`assets_groups.csv`), then `./wbg publish`; nothing is asked again. Dropping a type from the list or changing its definition re-asks the list (US$0.02 per measure on the 70-project runs), because the assignment request carries every question at once.
 
 Adding a measure is rows, not code: a definition that names the measure and never the digital asset (the asset map supplies that link; the decision model reads a question literally), a few search phrases, one or two whole-word patterns (`\bunderground\b`, not `ducts?`, which also matches "conducted"), and, once the measure has been run, the approved types.
 
