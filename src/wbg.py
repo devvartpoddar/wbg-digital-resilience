@@ -981,6 +981,10 @@ def main(argv=None):
     p.add_argument("--elusion", action="store_true",
                    help="draw (or evaluate) units the funnel never read, below the pool")
     p.add_argument("--seed", type=int, default=1)
+    p.add_argument("--design", choices=("grade", "bands"),
+                   help="draw by the model's grade, or by band of its probability of the top "
+                        "grade (the default for `all`: every measure and the package links in "
+                        "one workbook)")
     p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
     p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
     p.add_argument("--asset-min", type=float, default=0.0)
@@ -1069,7 +1073,8 @@ def main(argv=None):
         return 0
     if args.cmd == "check":
         _run("check_units.py", args.label_set, *(["--evaluate"] if args.evaluate else []),
-             *(["--elusion"] if args.elusion else []), "--seed", str(args.seed), "--context", args.context, "--gate", args.gate,
+             *(["--elusion"] if args.elusion else []), "--seed", str(args.seed),
+             *(["--design", args.design] if args.design else []), "--context", args.context, "--gate", args.gate,
              "--asset-min", str(args.asset_min), data=data)
         return 0
     if args.cmd == "evaluate":
