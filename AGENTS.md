@@ -18,7 +18,7 @@ Reading and model calls are what a task costs. So:
 
 ## Where it runs
 
-Everything lives in `/ygg/projects/wbg-digital-resilience/`; do not read or write elsewhere on the box. Board cards work in `.worktrees/<task-id>`. Data is always the main checkout's `data/` (`src/paths.py` resolves it; `WBG_DATA` overrides it for tests). Python: `/opt/yggdrasil/venvs/work/bin/python`; do not pip-install, say what is missing. Postgres: schema `wbg` in `postgresql:///work` (`WBG_PG` overrides it). Hardware: four slow cores, 15 GB, no graphics card; stream large files.
+Everything lives in `/ygg/projects/wbg-digital-resilience/`; do not read or write elsewhere on the box. **Code is edited in the card's worktree, `.worktrees/<task-id>`, never in the main checkout; data is always the main checkout's `data/`**, whichever checkout runs (`src/paths.py` resolves it; `WBG_DATA` overrides it for tests). `STREAM.md` in the main checkout is untracked on purpose: it is never a reason to call a checkout dirty. Python: `/opt/yggdrasil/venvs/work/bin/python`; do not pip-install, say what is missing. It has psycopg 3 (`import psycopg`, not psycopg2), pdfplumber, pypdfium2, pikepdf, pgvector, numpy, pandas, openpyxl, xlsxwriter, matplotlib, python-docx and requests; it has no pytest. Postgres: schema `wbg` in `postgresql:///work` (`WBG_PG` overrides it). Hardware: four slow cores, 15 GB, no graphics card; stream large files.
 
 A smoke run is `./wbg run --to prepare --project <id>` then `./wbg summary --project <id>`. Every stage skips what is up to date and writes its own rows to Postgres.
 
@@ -30,12 +30,12 @@ Every decision is **repeatable** (same text, same answer), **scored** (a probabi
 
 1. Never delete data to save space, and never treat a stage's input as disposable. If disk is a problem, say so.
 2. No document text in git: tables carry identifiers, offsets and checksums. Test fixtures are invented.
-3. `inputs/config/`, `inputs/taxonomy/` and `analysis/labels/` are kept by people: read, never written by code. Changing an asset definition invalidates every label under it: stop and ask. A set in `analysis/labels/` may be added or revised freely.
+3. `inputs/config/`, `inputs/taxonomy/` and `analysis/labels/` are kept by people: read, never written by code. Changing an asset definition invalidates every label under it: stop and ask. A set in `analysis/labels/` may be added or revised freely. These files change only through a pull request that a card asks for and a person merges; the pipeline never writes them.
 4. Secrets come from the environment or `.secrets/wbg-openrouter-key` (mode 0600). Never in a committed file, a command line or a log; if you see one anywhere else, stop, say so and recommend rotation.
 5. Identifiers are deterministic: a re-run on unchanged input gives byte-identical ids and outputs.
 6. Stages are resumable and skip unchanged work, keyed on content checksums.
 7. The parse must be reproducible: pin tool versions and check `text_sha256` on re-parse.
-8. Reports go to the notes vault, never the repository: run `src/run_report.py`, copy its note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` and add a line to that folder's `README.md`.
+8. Reports go to the notes vault, never the repository: run `src/run_report.py`, copy its note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` and add a line to the "Report index" table in `Projects/WBG Digital Resilience/README.md` (there is no README inside `Reports/`).
 9. Labels are keyed by the SHA-256 of the unit's text plus the label set and question, never by position, and only evaluation reads them.
 
 ## Language in anything a person reads
@@ -44,7 +44,7 @@ Plain language; expand every abbreviation on first use. No claim beyond the data
 
 ## Done means
 
-- `python -m pytest` passes (locally; the box's venv has no pytest).
+- On the box there is no pytest: check a change with `python -m py_compile` on the files touched and a `--dry-run` of the stage, then a real run on one project. `python -m pytest` passes where pytest is installed (a laptop, a cloud session); it is not run on the box.
 - The change was run on real data (at least one project) and the output looked at.
 - A re-run on unchanged input gives identical output; an interrupted run restarts without redoing finished work.
 - Nothing under `data/` is staged.
