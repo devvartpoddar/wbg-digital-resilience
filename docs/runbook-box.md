@@ -53,7 +53,7 @@ each prints its estimate before asking anything (`--dry-run`).
 ```
 ./wbg run                                        # everything, fetch to publish; every stage skips what is up to date
 ./wbg run --from search --measures <set>         # a new or changed measure, in Postgres when it returns (./wbg add <set> is the same)
-./wbg run --from classify                        # after an asset definition changed
+./wbg run --from search                           # after an asset definition changed: a definition is a search query, so the asset search re-scores and the map follows
 ./wbg run --only link                            # the package links alone
 ./wbg status                                     # what is out of date
 ```

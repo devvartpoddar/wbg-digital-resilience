@@ -180,6 +180,20 @@ def committed_units(name, data, **kw):
     return folder, dict(out)
 
 
+def no_run_yet(name, data, dry_run, what, log, **kw):
+    """True when this is a dry run and the measure run these steps key on is
+    not there. A dry run writes nothing, so the funnel has not written it and
+    the estimate cannot be made: it needs the committed units only a real
+    measure run holds. Say so and carry on, so the stage's other sets and the
+    cross-measure checks still get their estimates; a real run keeps the
+    error of committed_units."""
+    if not dry_run or measure.current_run(name, data, **kw) is not None:
+        return False
+    log(f"{name}: no measure run at this version yet, so the {what}'s estimate needs the "
+        f"funnel's committed units; nothing asked, nothing written")
+    return True
+
+
 def person_list(name):
     """The type list a person wrote for the set (analysis/labels/<set>_types.csv),
     or None."""
@@ -193,6 +207,8 @@ def propose(name, data, *, api_key="", model=GEN_MODEL, runs=RUNS, max_types=8,
         log(f"{name}: the type list is a person's ({person_list(name)}); no proposals "
             f"(the gap step of --assign proposes OTH types for what it misses)")
         return "person's list"
+    if no_run_yet(name, data, dry_run, "proposal", log, **kw):
+        return "no measure run"
     run_folder, units = committed_units(name, data, **kw)
     labs = {lab["id"]: lab for lab in labels.load_set(name)}
     root = gen_cache_root(data, model)
@@ -429,6 +445,8 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     none; then the gap step (OTH types from the none units, assigned by a
     second choice). read_at is kept for the folder key of runs made before
     the choice; the choice itself has no threshold."""
+    if no_run_yet(name, data, dry_run, "assignment", log, **kw):
+        return "no measure run"
     run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log,
                                                   read_at=read_at, **kw)
     log(f"{name}: {len(rows):,} committed units x one type choice -> {out}")
