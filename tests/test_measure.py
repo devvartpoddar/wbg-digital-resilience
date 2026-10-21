@@ -160,21 +160,17 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]
-    # Three passes: the measure alone on the sentence; the second look, the
-    # same question with the paragraph, for the unit scored 0.8 on the
-    # sentence; then asset, kind and facet questions for the units graded 2
-    # or more (here the one unit), with the paragraph added to the state.
+    # Two passes: the measure alone on the sentence, then asset, kind and
+    # facet questions for the units graded 2 or more (here the one unit),
+    # with the paragraph added to the state.
     assert list(calls[0]["questions"]) == ["cra"]
-    assert list(calls[1]["questions"]) == ["cra"] and "ten towers" in calls[1]["state"]["paragraph"]
-    assert "read with the 'paragraph'" in calls[1]["questions"]["cra"]["instructions"]
-    assert r["second_look"] == "true" and r["p_sentence"] == "0.8000"
-    assert calls[2]["state"]["sentence"] == calls[0]["state"]["sentence"]
-    assert "paragraph" in calls[2]["state"] and "ten towers" in calls[2]["state"]["paragraph"]
-    q = calls[2]["questions"]["asset:choice"]
+    assert calls[1]["state"]["sentence"] == calls[0]["state"]["sentence"]
+    assert "paragraph" in calls[1]["state"] and "ten towers" in calls[1]["state"]["paragraph"]
+    q = calls[1]["questions"]["asset:choice"]
     assert q["type"] == "choice" and "towers" in q["criteria"]
     assert {"no_asset_named", "not_digital"} <= set(q["criteria"])
-    assert not any(k.startswith("asset:") and k != "asset:choice" for k in calls[2]["questions"])
-    assert "cra" not in calls[2]["questions"]
+    assert not any(k.startswith("asset:") and k != "asset:choice" for k in calls[1]["questions"])
+    assert "cra" not in calls[1]["questions"]
     assert calls[0]["model"] == measure.MODEL
 
 
@@ -187,8 +183,7 @@ def test_feedback_rounds_read_the_nearest_unseen_units_until_the_yield_drops(sto
     assert [(r["round"], r["route"]) for r in rows] == [("0", "both"), ("1", "feedback"),
                                                         ("1", "feedback")]
     assert [r["grade"] for r in rows] == ["3", "0", "0"]
-    assert len(calls) == 5            # round 0: measure, second look, extras; round 1: two units
-    assert [r["second_look"] for r in rows] == ["true", "false", "false"]   # 0.0 on the sentence
+    assert len(calls) == 4            # round 0: measure + extras; round 1: two units, measure only
 
 
 def test_a_rerun_reads_the_store_and_asks_nothing(store):
@@ -229,28 +224,3 @@ def test_a_unit_that_is_not_digital_takes_no_link_from_its_paragraph():
     row = dict(base, asset_unit="", asset_p_unit="")          # no asset named: the paragraph's
     run.link_into(row)
     assert (row["asset_link"], row["asset_link_level"]) == ("towers", "paragraph")
-
-
-def test_the_second_look_grade_replaces_the_sentence_grade(store, monkeypatch):
-    data, calls = store
-    fake = classify.decide
-
-    def doubtful(body, **kw):           # the paragraph shows the sentence is only planned
-        out = fake(body, **kw)
-        if "paragraph" in body["state"] and "cra" in body["questions"]:
-            out["answers"]["cra"]["probabilities"] = {"0": 0.05, "1": 0.05, "2": 0.8, "3": 0.1}
-        return out
-    monkeypatch.setattr(classify, "decide", doubtful)
-    r = _rows(measure.measure("cra", data, **RUN))[0]
-    assert r["second_look"] == "true" and r["p_sentence"] == "0.8000"
-    assert r["grade"] == "2" and r["p3"] == "0.1000" and r["committed"] == "false"
-    n = len(calls)
-    measure.measure("cra", data, **RUN)                  # a re-run asks nothing
-    assert len(calls) == n
-
-
-def test_no_second_look_in_the_paragraph_design(store):
-    data, calls = store
-    r = _rows(measure.measure("cra", data, **dict(RUN, context="paragraph")))[0]
-    assert r["second_look"] == "false"
-    assert sum(1 for c in calls if list(c["questions"]) == ["cra"]) == 1
