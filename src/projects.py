@@ -33,7 +33,8 @@ from dates import iso_date  # noqa: E402
 
 COLS = ["project_id", "cohort_set", "in_projects_interface", "project_name", "status",
         "approval_date", "approval_fy", "closing_date", "region", "country_code",
-        "country_name", "lending_instrument", "commitment_usd_m", "record_source", "practice",
+        "country_name", "lending_instrument", "commitment_usd_m", "commitment_v2_usd_m",
+        "commitment_v3_usd_m", "record_source", "practice",
         "practice_code", "sectors", "managing_unit", "unit_code", "unit_doc_id",
         "unit_as_of"]
 
@@ -124,6 +125,8 @@ def project_row(pid, rec, docs, cohort_set=""):
         "country_name": rec.get("countryshortname") or "",
         "lending_instrument": rec.get("lendinginstr") or "",
         "commitment_usd_m": rec.get("curr_total_commitment") or "",
+        "commitment_v2_usd_m": rec.get("commitment_v2") or "",
+        "commitment_v3_usd_m": rec.get("commitment_v3") or "",
         "record_source": rec.get("record_source") or ("v2" if set(rec) - {"id"} else ""),
         "practice": "|".join(names),
         "practice_code": "|".join(codes),

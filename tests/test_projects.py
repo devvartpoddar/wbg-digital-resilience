@@ -76,6 +76,9 @@ def test_the_v3_record_is_preferred_and_fills_what_v2_lacks():
     rec = F.merge(v2, v3)
     assert rec["closingdate"] == "2027-08-31" and rec["curr_total_commitment"] == "50"
     assert rec["lendinginstr"] == "Investment Project Financing" and rec["record_source"] == "v2+v3"
+    assert (rec["commitment_v2"], rec["commitment_v3"]) == ("200", "50")   # both kept
+    row = projects.project_row("P1", rec, [])
+    assert (row["commitment_v2_usd_m"], row["commitment_v3_usd_m"]) == ("200", "50")
     only3 = F.merge({}, {"id": "P5", "project_name": "X", "boardapprovaldate": "2026-07-01T00:00:00Z"})
     row = projects.project_row("P5", only3, [])
     assert row["project_name"] == "X" and row["approval_fy"] == "2027"
