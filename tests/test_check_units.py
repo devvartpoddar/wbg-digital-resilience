@@ -111,3 +111,11 @@ def test_the_floor_draw_sits_around_the_measures_commit_floor():
     assert sum(b[3] for b in bands) == 20
     assert any(lo <= 0.3 < hi for _, lo, hi, _ in bands)
     assert sum(b[3] for b in check_units.floor_bands(None)) == 21
+
+
+def test_the_tuning_draw_is_the_floor_draw_at_about_28_rows():
+    for floor in (0.3, 0.5, 0.6):
+        bands = check_units.floor_bands(floor, check_units.TUNE_SCALE)
+        assert [b[0] for b in bands] == [b[0] for b in check_units.floor_bands(floor)]
+        assert sum(b[3] for b in bands) == 28
+    assert sum(b[3] for b in check_units.floor_bands(None, check_units.TUNE_SCALE)) == 29

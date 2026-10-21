@@ -73,16 +73,21 @@ FLOOR_STEPS = [(-1.0, -0.2, 2), (-0.2, -0.1, 3), (-0.1, 0.0, 5), (0.0, 0.1, 5), 
                (0.25, 1.0, 2)]
 
 
-def floor_bands(floor):
-    """[(stratum, low, high, rows)] around a commit floor, or BANDS halved."""
+def floor_bands(floor, scale=1.0):
+    """[(stratum, low, high, rows)] around a commit floor, or BANDS halved;
+    `scale` multiplies every band's rows (the tuning draw: 1.4, about 28)."""
+    rows = lambda n: int(n * scale + 0.5)
     if floor is None:
-        return [(s, lo, hi, (n + 1) // 2) for s, lo, hi, n in BANDS]
+        return [(s, lo, hi, rows((n + 1) // 2)) for s, lo, hi, n in BANDS]
     out = []
     for a, b, n in FLOOR_STEPS:
         lo, hi = max(0.0, floor + a), min(1.01, floor + b)
         if hi > lo:
-            out.append((f"p{lo:.2f}-{min(hi, 1.0):.2f}", lo, hi, n))
+            out.append((f"p{lo:.2f}-{min(hi, 1.0):.2f}", lo, hi, rows(n)))
     return out
+
+
+TUNE_SCALE = 1.4   # the tuning draw: the floor bands at 1.4 times (about 28), links over the whole range
 
 
 LINK_FLOOR_BANDS = [("p0.5-0.6", 0.5, 0.6, 8), ("p0.6-0.7", 0.6, 0.7, 8), ("p0.7-0.8", 0.7, 0.8, 8),
@@ -207,9 +212,11 @@ def sheet_rows(name, data, seed=1, per=PER, elusion=False, design="grade", **kw)
         picked = draw_elusion(run, units, ELUSION_PER, seed)
     elif design == "bands":
         picked = draw_bands(units, len(run.scale) - 1, seed)
-    elif design == "floor":
+    elif design in ("floor", "tune"):
         import labels
-        picked = draw_bands(units, len(run.scale) - 1, seed, floor_bands(labels.commit_floor(name)))
+        picked = draw_bands(units, len(run.scale) - 1, seed,
+                            floor_bands(labels.commit_floor(name),
+                                        TUNE_SCALE if design == "tune" else 1.0))
     else:
         picked = draw(units, per, seed)
     rng = random.Random(seed)
@@ -852,10 +859,12 @@ def main():
     ap.add_argument("--elusion", action="store_true",
                     help="units the funnel never read, from just below and far below the pool")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--design", default=None, choices=("grade", "bands", "floor"),
+    ap.add_argument("--design", default=None, choices=("grade", "bands", "floor", "tune"),
                     help="draw by the model's grade (30/15/20/20 and 10 feedback), by band "
                          "of its probability of the top grade (5/8/12/10/5; the default for all), "
-                         "or around each measure's commit floor (about 20, links around 0.7)")
+                         "around each measure's commit floor (about 20, links around 0.7), "
+                         "or to tune every threshold (about 28 around each floor, 70 links "
+                         "over the whole range)")
     ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
     ap.add_argument("--gate", default="none", choices=measure.GATES)
     ap.add_argument("--asset-min", type=float, default=0.0)
