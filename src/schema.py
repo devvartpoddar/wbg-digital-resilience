@@ -45,6 +45,7 @@ RENAME = {
     "for_model": "is_for_model", "list_item": "is_list_item", "active": "is_active",
     "code_dirty": "has_uncommitted_code", "sent": "was_sent_to_model", "asked": "was_asked",
     "committed": "is_committed",
+    "second_look": "was_asked_with_paragraph", "p_sentence": "probability_grade_3_sentence_only",
     "part": "part_number",
     "borrower_ref": "borrower_reference", "borrower_ref_norm": "borrower_reference_normalised",
     "description_match": "description_match_key", "description_lang": "description_language",
@@ -110,10 +111,11 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "unit_best_asset_probability", "linked_asset_probability",
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
            "best_actor_probability", "cosine", "probability", "p_only_a", "p_only_b", "p_both",
-           "p_neither", "p_rule", "p_investment", "p_not_commitment"}
+           "p_neither", "p_rule", "p_investment", "p_not_commitment",
+           "probability_grade_3_sentence_only"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
-           "was_sent_to_model", "was_asked", "is_committed"}
+           "was_sent_to_model", "was_asked", "is_committed", "was_asked_with_paragraph"}
 # Pipe-joined lists in the CSV become arrays, which Metabase renders and
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
@@ -401,6 +403,8 @@ TABLES = {
             "firmness": "activity, outcome or none, from wording lists.",
             "was_sent_to_model": "False when a gate kept the unit from being graded.",
             "is_committed": "The unit counts as committed: P(grade 3) at or above the measure's commit_floor (analysis/labels/<set>.csv), or, where none is written, the most likely grade is 3.",
+            "was_asked_with_paragraph": "The second look: the sentence alone scored P(grade 3) of 0.3 or more, so the measure's question was asked again with the paragraph, and the grade and probabilities are that answer.",
+            "probability_grade_3_sentence_only": "P(grade 3) from the sentence alone, for a unit given the second look.",
             "paragraph_best_asset_id": "The asset map's best asset for the paragraph.",
             "paragraph_best_asset_probability": "Its probability of grade 2 or more.",
             "component_best_asset_id": "The best asset among the component's paragraphs.",
