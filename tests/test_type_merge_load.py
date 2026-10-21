@@ -25,16 +25,12 @@ def test_assignments_are_folded_in_place_and_best_type_follows():
     assert rows[2]["types_yes"] == "alerts"
 
 
-def test_type_and_group_rows_come_from_the_label_files(tmp_path, monkeypatch):
+def test_type_rows_come_from_the_label_files(tmp_path, monkeypatch):
     a = tmp_path / "labels"
     a.mkdir()
     (a / "assets.csv").write_text("asset_id,asset_name,definition,active\n"
                                   "fiber,Fiber,cables,true\ntowers,Towers,masts,true\n",
                                   encoding="utf-8")
-    (a / "assets_groups.csv").write_text("asset_id,group_id,group_name,active\n"
-                                         "fiber,networks,Networks and connectivity,true\n"
-                                         "towers,networks,Networks and connectivity,true\n",
-                                         encoding="utf-8")
     (a / "cra.csv").write_text("measure_id,measure_name,definition,active\n"
                                "cra,Climate risk assessment,an assessment,true\n",
                                encoding="utf-8")
@@ -47,16 +43,3 @@ def test_type_and_group_rows_come_from_the_label_files(tmp_path, monkeypatch):
     assert L.type_rows() == [{"label_set": "cra", "label_id": "cra", "type_id": "site",
                               "type_name": "Site assessment", "definition": "of one site",
                               "merged_from": "contractor"}]
-    assert L.group_rows() == [
-        {"label_set": "assets", "label_id": "fiber", "group_id": "networks",
-         "group_name": "Networks and connectivity"},
-        {"label_set": "assets", "label_id": "towers", "group_id": "networks",
-         "group_name": "Networks and connectivity"}]
-
-
-def test_the_repository_groups_cover_every_active_asset_once():
-    assets = {r["id"] for r in labels.load_set("assets") if r["active"] == "true"}
-    groups = labels.load_groups("assets")
-    assert {g["label_id"] for g in groups} == assets
-    assert len(groups) == len(assets)
-    assert len({g["group_id"] for g in groups}) == 6

@@ -141,7 +141,6 @@ COMMENT ON VIEW wbg.project_components IS
 DROP VIEW IF EXISTS wbg.project_assets CASCADE;
 CREATE VIEW wbg.project_assets AS
 SELECT pp.project_id, g.label_id AS asset_id, l.label_name AS asset_name,
-       ag.group_id AS asset_group_id, ag.group_name AS asset_group_name,
        count(DISTINCT g.paragraph_id) FILTER (WHERE g.most_likely_grade = 3)
          AS paragraphs_financed,
        count(DISTINCT g.paragraph_id) FILTER (WHERE g.most_likely_grade = 2)
@@ -151,8 +150,7 @@ SELECT pp.project_id, g.label_id AS asset_id, l.label_name AS asset_name,
 FROM wbg.paragraph_grades g
 JOIN wbg.paragraph_projects pp ON pp.paragraph_id = g.paragraph_id
 LEFT JOIN wbg.labels l ON l.label_set = 'assets' AND l.label_id = g.label_id
-LEFT JOIN wbg.label_groups ag ON ag.label_set = 'assets' AND ag.label_id = g.label_id
 WHERE g.label_set = 'assets' AND g.most_likely_grade >= 2
-GROUP BY pp.project_id, g.label_id, l.label_name, ag.group_id, ag.group_name;
+GROUP BY pp.project_id, g.label_id, l.label_name;
 COMMENT ON VIEW wbg.project_assets IS
   'One row per project and digital asset the asset map finds there: paragraphs the decision model grades financed (built, bought, installed, connected or operated) and paragraphs graded supported without paying for the asset (technical assistance, policy, studies). how is Financed if any paragraph is graded financed. The model''s grades; documented is not done.';

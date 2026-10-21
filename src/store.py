@@ -6,7 +6,7 @@ returns, not when someone runs a load with the right flags.
 publish(data, sets=[...]) replaces, for the label sets named, their rows
 in search_paragraphs, paragraph_grades and measure_findings (from each
 set's current run folder), and the small whole tables the views join on
-(labels, measure_types, label_groups), keeping every view; with
+(labels, measure_types), keeping every view; with
 links=True the two package-link tables too. src/load_pg.py remains the
 full rebuild for the corpus tables (./wbg prepare runs it) and for a
 fresh database.
@@ -80,8 +80,6 @@ def _publish(conn, data, sets, projects, links, log, written):
                         "folder"], load_pg.label_rows()),
             ("measure_types", ["label_set", "label_id", "type_id", "type_name", "definition",
                                "merged_from"], load_pg.type_rows(data)),
-            ("label_groups", ["label_set", "label_id", "group_id", "group_name"],
-             load_pg.group_rows()),
             *zip(("label_queries", "label_patterns", "label_scale"),
                  (load_pg.QUERY_COLS, load_pg.PATTERN_COLS, load_pg.SCALE_COLS),
                  load_pg.definition_rows())):

@@ -10,7 +10,7 @@
 --         'sentence or paragraph', or anything else for every link level.
 --   months: a project with a pending package due (planned date past) or
 --         planned within this many months.
---   asset: an asset id, an asset name, a reading-group name, or '(no asset)'.
+--   asset: an asset id, an asset name, or '(no asset)'.
 --   type_: a type id or name, or 'No type (other)'.
 DROP FUNCTION IF EXISTS wbg.findings_under(text, double precision, text, text, text, text, text,
                                             double precision, text, text, text, text);
@@ -29,7 +29,7 @@ CREATE FUNCTION wbg.findings_under(
     actor text DEFAULT NULL)
 -- The columns of wbg.measure_findings_in_context, spelled out: a function returning
 -- the view's row type would be dropped with the view on every reload.
-RETURNS TABLE (label_set text, label_id text, measure_name text, project_id text, cohort_set text, project_name text, country_name text, document_id text, document_title text, document_kind text, component_number text, component_name text, unit_id text, unit_kind text, feedback_round integer, route text, most_likely_grade integer, expected_grade numeric, grade_confidence numeric, probability_grade_3 numeric, committed_probability_calibrated numeric, firmness text, linked_asset_id text, linked_asset_level text, linked_asset_probability numeric, linked_asset_group_id text, linked_asset_group_name text, asset_ids_above_threshold text[], activity_kinds_above_threshold text[], best_activity_kind text, conditional_probability numeric, actor_ids_above_threshold text[], best_actor_id text, type_ids_above_threshold text[], best_type_id text, best_type_name text, best_type_probability numeric, template_project_count integer, template_wording_share numeric, text text, paragraph_text text, section_title text)
+RETURNS TABLE (label_set text, label_id text, measure_name text, project_id text, cohort_set text, project_name text, country_name text, document_id text, document_title text, document_kind text, component_number text, component_name text, unit_id text, unit_kind text, feedback_round integer, route text, most_likely_grade integer, expected_grade numeric, grade_confidence numeric, probability_grade_3 numeric, committed_probability_calibrated numeric, firmness text, linked_asset_id text, linked_asset_level text, linked_asset_probability numeric, asset_ids_above_threshold text[], activity_kinds_above_threshold text[], best_activity_kind text, conditional_probability numeric, actor_ids_above_threshold text[], best_actor_id text, type_ids_above_threshold text[], best_type_id text, best_type_name text, best_type_probability numeric, template_project_count integer, template_wording_share numeric, text text, paragraph_text text, section_title text)
 LANGUAGE sql STABLE AS $$
   SELECT f.*
   FROM wbg.measure_findings_in_context f
@@ -52,10 +52,9 @@ LANGUAGE sql STABLE AS $$
          OR (findings_under.asset = '(no asset)' AND f.linked_asset_id IS NULL)
          OR EXISTS (SELECT 1 FROM wbg.measure_finding_lists x
                     LEFT JOIN wbg.labels a ON a.label_set = 'assets' AND a.label_id = x.member
-                    LEFT JOIN wbg.label_groups g ON g.label_set = 'assets' AND g.group_id = x.member
                     WHERE x.unit_id = f.unit_id AND x.project_id = f.project_id
-                      AND x.kind IN ('asset', 'linked_asset', 'asset_group')
-                      AND (x.member = findings_under.asset OR a.label_name = findings_under.asset OR g.group_name = findings_under.asset)))
+                      AND x.kind IN ('asset', 'linked_asset')
+                      AND (x.member = findings_under.asset OR a.label_name = findings_under.asset)))
     AND (findings_under.type_ IS NULL
          OR (findings_under.type_ = 'No type (other)' AND coalesce(cardinality(f.type_ids_above_threshold), 0) = 0)
          OR EXISTS (SELECT 1 FROM wbg.measure_finding_lists x

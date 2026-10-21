@@ -71,12 +71,6 @@ def store(tmp_path, monkeypatch):
     _csv(str(lab / "assets_queries.csv"), ["asset_id", "query_id", "query", "active"],
          [{"asset_id": a, "query_id": "q", "query": f"{a} phrase", "active": "true"}
           for a in AXIS])
-    _csv(str(lab / "assets_groups.csv"), ["asset_id", "group_id", "group_name", "active"],
-         [{"asset_id": "fiber", "group_id": "networks", "group_name": "Networks", "active": "true"},
-          {"asset_id": "towers", "group_id": "networks", "group_name": "Networks", "active": "true"},
-          {"asset_id": "data_hosting", "group_id": "data", "group_name": "Data", "active": "true"},
-          {"asset_id": "digital_systems", "group_id": "systems", "group_name": "Systems",
-           "active": "true"}])
     # The measure: its phrase points at data hosting (axis 1).
     _csv(str(lab / "cra.csv"), ["measure_id", "measure_name", "definition", "active"],
          [{"measure_id": "cra", "measure_name": "Climate risk", "definition": "risk to sites",
@@ -143,7 +137,7 @@ def test_each_package_is_asked_its_best_assets_by_cosine(store):
     assert all(float(r["cosine"]) <= 1.0 for r in rows)
 
 
-def test_pairs_need_a_shared_asset_or_group_and_the_same_project(store):
+def test_pairs_need_a_shared_asset_and_the_same_project(store):
     data, calls = store
     out = link.link(data, api_key="k", asset_top=2, dim=DIM, log=lambda *_: None)
     pairs = {(r["unit_id"], r["package_id"]): r for r in _rows(out, "commitment_packages.csv")
@@ -153,8 +147,9 @@ def test_pairs_need_a_shared_asset_or_group_and_the_same_project(store):
     assert ("U1", "P1:A") in pairs and pairs[("U1", "P1:A")]["shared_asset_ids"] == "fiber"
     assert ("U1", "P1:B") not in pairs
     assert ("U3", "P2:D") in pairs
-    assert ("U1", "P2:D") not in pairs           # another project, though the same group
-    assert ("U2", "P1:B") in pairs and pairs[("U2", "P1:B")]["shared_group_ids"] == "data"
+    assert ("U1", "P2:D") not in pairs           # another project
+    assert ("U2", "P1:B") in pairs and pairs[("U2", "P1:B")]["shared_asset_ids"] == "data_hosting"
+    assert "shared_group_ids" not in pairs[("U2", "P1:B")]
     assert float(pairs[("U1", "P1:A")]["probability"]) == 0.9
     assert float(pairs[("U2", "P1:B")]["probability"]) == 0.9
     assert not any(u == "U4" for u, _ in pairs)   # not the top grade

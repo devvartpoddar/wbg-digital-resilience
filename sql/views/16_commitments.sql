@@ -278,8 +278,6 @@ SELECT c.commitment_id,
        i.is_regional,
        c.label_set, l.label_name AS measure_name,
        c.asset_id, coalesce(al.label_name, c.asset_id) AS asset_name,
-       coalesce(ag.group_id, '(no asset)') AS asset_group_id,
-       coalesce(ag.group_name, '(no asset)') AS asset_group_name,
        c.type_id, coalesce(t.type_name, c.type_id) AS type_name,
        c.asset_from, c.asset_from AS asset_link_level, c.components,
        i.commitment_usd_millions AS project_commitment_usd_m,
@@ -304,7 +302,6 @@ LEFT JOIN cc ON cc.commitment_id = c.commitment_id
 LEFT JOIN (SELECT DISTINCT ON (label_set) label_set, label_name FROM wbg.labels
            WHERE label_set <> 'assets' ORDER BY label_set, label_id) l ON l.label_set = c.label_set
 LEFT JOIN wbg.labels al ON al.label_set = 'assets' AND al.label_id = c.asset_id
-LEFT JOIN wbg.label_groups ag ON ag.label_set = 'assets' AND ag.label_id = c.asset_id
 LEFT JOIN (SELECT DISTINCT ON (label_set, type_id) label_set, type_id, type_name
            FROM wbg.measure_types ORDER BY label_set, type_id, label_id) t
        ON t.label_set = c.label_set AND t.type_id = c.type_id;

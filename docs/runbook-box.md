@@ -101,7 +101,7 @@ model's grade, not a person's: the graded sheet's precision and recall
 
 ## Changing what the dashboards show, without a model call
 
-A person decides the clusters and the grouping; the files carry the
+A person decides the clusters; the files carry the
 decision and a reload applies it. None of these asks the model anything.
 
 - **Merge two types**: in `analysis/labels/<set>_types.csv` set
@@ -109,12 +109,9 @@ decision and a reload applies it. None of these asks the model anything.
   yes answers count as the target's from the next load.
 - **Rename a type**: set `display_name`. `type_name` stays as the model was
   asked, which is what keeps the stored answers valid.
-- **Regroup the assets**: edit `inputs/taxonomy/assets_groups.csv`
-  (`asset_id, group_id, group_name`). The views show the group beside the
-  asset; the asset ids underneath do not move.
 - Then `./wbg publish` (the stages write Postgres themselves; this is the catch-up)
   (or the sets the runs were made over). The load is keyed on the file, so
-  it reloads `measure_findings`, `measure_types` and `label_groups` and
+  it reloads `measure_findings` and `measure_types` and
   nothing else.
 
 What does cost a call: a new type or a changed definition (`./wbg types

@@ -127,7 +127,8 @@ TABLES = [
 # once so nothing stale lingers. The earlier wbg_internal schema is folded
 # into wbg by prepare().
 OLD_NAMES = ["taxonomy", "classify_scores", "measures", "releases", "rejected",
-             "superseded_packages", "search_best", "sentences", "document_parts", "candidates"]
+             "superseded_packages", "search_best", "sentences", "document_parts", "candidates",
+             "label_groups"]
 OLD_VIEWS = ["v_packages", "v_paragraphs", "v_notices", "v_awards", "v_classified_paragraphs",
              "v_search_paragraphs"]
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -526,7 +527,7 @@ def measure_rows(data, projects=None, sets=None):
 ASSET_LINK_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
                    "model_served", "cost"]
 PAIR_LINK_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
-                  "shared_asset_ids", "shared_group_ids", "route", "measure_rank",
+                  "shared_asset_ids", "route", "measure_rank",
                   "measure_cosine", "probability", "model_served", "cost"]
 
 
@@ -607,16 +608,6 @@ def type_rows(data=None):
                                 "type_id": t["type_id"], "type_name": t["type_name"],
                                 "definition": t["definition"], "merged_from": ""})
     return out
-
-
-def group_rows():
-    """Every label's reading group, for every set with a <set>_groups.csv."""
-    rows = []
-    for name in labels.label_sets():
-        for g in labels.load_groups(name):
-            rows.append({"label_set": name, "label_id": g["label_id"], "group_id": g["group_id"],
-                         "group_name": g["group_name"]})
-    return rows
 
 
 def label_rows():
@@ -959,9 +950,6 @@ def main():
         derived(conn, "measure_types", hashlib.sha256(repr(typ).encode()).hexdigest(),
                 ["label_set", "label_id", "type_id", "type_name", "definition", "merged_from"],
                 typ)
-        grp = group_rows()
-        derived(conn, "label_groups", hashlib.sha256(repr(grp).encode()).hexdigest(),
-                ["label_set", "label_id", "group_id", "group_name"], grp)
         for table, cols, rows_ in zip(("label_queries", "label_patterns", "label_scale"),
                                       (QUERY_COLS, PATTERN_COLS, SCALE_COLS), definition_rows()):
             derived(conn, table, hashlib.sha256(repr(rows_).encode()).hexdigest(), cols, rows_)

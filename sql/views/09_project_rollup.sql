@@ -15,13 +15,10 @@ lists AS (
   SELECT u.label_set, u.label_id, u.project_id,
          ARRAY_AGG(DISTINCT linked_asset_id ORDER BY linked_asset_id)
            FILTER (WHERE linked_asset_id IS NOT NULL) AS linked_asset_ids,
-         ARRAY_AGG(DISTINCT ag.group_id ORDER BY ag.group_id)
-           FILTER (WHERE ag.group_id IS NOT NULL) AS linked_asset_group_ids,
          ARRAY_AGG(DISTINCT k ORDER BY k) FILTER (WHERE k IS NOT NULL) AS activity_kinds,
          ARRAY_AGG(DISTINCT a ORDER BY a) FILTER (WHERE a IS NOT NULL) AS actors,
          ARRAY_AGG(DISTINCT t ORDER BY t) FILTER (WHERE t IS NOT NULL) AS type_ids
   FROM u
-  LEFT JOIN wbg.label_groups ag ON ag.label_set = 'assets' AND ag.label_id = u.linked_asset_id
   LEFT JOIN LATERAL UNNEST(u.activity_kinds_above_threshold) k ON true
   LEFT JOIN LATERAL UNNEST(u.actor_ids_above_threshold) a ON true
   LEFT JOIN LATERAL UNNEST(u.type_ids_above_threshold) t ON true
@@ -41,7 +38,6 @@ SELECT u.label_set, u.label_id, l.label_name AS measure_name, u.project_id, pr.c
        MAX(u.committed_probability_calibrated) FILTER (WHERE coalesce(u.is_committed, u.most_likely_grade = 3))
          AS best_committed_probability_calibrated,
        MAX(li.linked_asset_ids) AS linked_asset_ids,
-       MAX(li.linked_asset_group_ids) AS linked_asset_group_ids,
        MAX(li.activity_kinds) AS activity_kinds,
        MAX(li.actors) AS actors,
        MAX(li.type_ids) AS type_ids,
