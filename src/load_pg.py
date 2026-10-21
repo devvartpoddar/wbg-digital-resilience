@@ -438,7 +438,7 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "asset_p_comp", "asset_unit", "asset_p_unit", "assets_yes", "asset_link",
                 "asset_link_level", "asset_link_p", "kinds_yes", "kind_best", "kind_p",
                 "conditional_p", "actors_yes", "actor_best", "actor_p",
-                "template_projects", "template_share", "sent",
+                "template_projects", "template_share", "sent", "committed",
                 "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
                 "p_committed_calibrated", "types_yes", "best_type", "best_p", "model_served",
                 "cost", "text"]

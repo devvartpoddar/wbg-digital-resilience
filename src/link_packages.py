@@ -150,8 +150,8 @@ def pair_state(unit, p):
 
 
 def committed_units(data, projects=None, sets=None):
-    """{label_set: (run folder name, [unit rows of the top grade])} for every
-    measure set with a current run over the scope."""
+    """{label_set: (run folder name, [committed unit rows])} for every
+    measure set with a current run over the scope (measure.is_committed)."""
     out = {}
     for name in sorted(sets or labels.label_sets()):
         if name == ASSET_SET:
@@ -164,10 +164,11 @@ def committed_units(data, projects=None, sets=None):
             continue
         with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
             top = len(json.load(fh)["scale"]) - 1
+        floor = labels.commit_floor(name)
         rows = []
         with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
             for u in csv.DictReader(fh):
-                if u["sent"] == "true" and u["grade"] != "" and int(u["grade"]) == top:
+                if measure.is_committed(u, top, floor):
                     rows.append(u)
         out[name] = (os.path.basename(folder), rows)
     return out
