@@ -38,7 +38,7 @@ import prior  # noqa: E402
 ASSET_SET = "assets"
 PAIR_OPTIONS = ("only_a", "only_b", "both", "neither")
 PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_only_a", "p_only_b",
-             "p_both", "p_neither", "model_served", "cost",
+             "p_both", "p_neither", "p_drop_a", "p_drop_b", "model_served", "cost",
              "prior_probability_a", "prior_phrase_cosine_a", "prior_probability_b",
              "prior_phrase_cosine_b"]
 
@@ -98,11 +98,20 @@ def plan(data, projects=None, model=classify.MODEL):
     for uid in sorted(by_unit):
         for a, b in combinations(sorted(by_unit[uid]), 2):
             pairs.append((uid, a, b, ({"sentence": text[uid]}, pair_question(bound[a], bound[b]))))
-    h = hashlib.sha256(f"{model}\t{sorted(runs)}\nprior={prior.VERSION}\n".encode())
+    import judged
+    h = hashlib.sha256(f"{model}\t{sorted(runs)}\nprior={prior.VERSION}\n"
+                       f"layers={judged.digest(data, 'pairs', drop_shas(sets))}\n".encode())
     for _, _, _, (state, qs) in pairs:
         h.update(classify.request_sha(classify.request_body(state, qs, model)).encode())
     known = {(name, uid): u for name, us in sets.items() for uid, u in us.items()}
     return pairs, where(data, "checks", f"checks-{h.hexdigest()[:12]}"), known
+
+
+def drop_shas(sets):
+    """{drop:<set>: SHA-256 of the set's boundary}: a pair layer for a
+    measure applies while its boundary reads the same."""
+    import judged
+    return {f"drop:{s}": judged.sha(boundary_of(s)) for s in sets}
 
 
 def current_run(data, projects=None):
@@ -156,13 +165,22 @@ def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=cl
         if st["failures"] or not all(got):
             log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
+    # The pair layers (src/judged.py): for each side, the probability that
+    # the sentence is not that measure (only the other, or neither), through
+    # the side's layer when fitted; the views drop at floor.pair_check.
+    import judged
+    lays = judged.layers(data, "pairs", drop_shas({s for _, a, b, _ in pairs for s in (a, b)}))
     pair_rows = []
     for (uid, a, b, _), g in zip(pairs, got):
         p = _probs(g["pair"])
         best = max(p, key=p.get)
+        item = f"{uid}#{a}|{b}"
+        drop_a = judged.calibrated(lays, f"drop:{a}", item, p.get("only_b", 0) + p.get("neither", 0))
+        drop_b = judged.calibrated(lays, f"drop:{b}", item, p.get("only_a", 0) + p.get("neither", 0))
         pair_rows.append({"unit_id": uid, "set_a": a, "set_b": b, "decision": best,
                           "probability": f"{p[best]:.3f}",
                           **{f"p_{k}": f"{p.get(k, 0.0):.3f}" for k in PAIR_OPTIONS},
+                          "p_drop_a": f"{drop_a:.3f}", "p_drop_b": f"{drop_b:.3f}",
                           "model_served": g["pair"]["model"],
                           "cost": f"{float(g['pair'].get('cost_usd') or 0):.6f}",
                           **prior_of(known, uid, a, "a"), **prior_of(known, uid, b, "b")})

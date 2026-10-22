@@ -109,11 +109,16 @@ HOW_TO = [
     "Each measure tab: read the sentence (with its paragraph, section and component) and enter a "
     "grade on the measure's scale (tab 'grades'). Asset and type are optional (tab 'types' "
     "defines the types). Asset: 'other' when the commitment is about something that is not a "
-    "digital asset, 'none' when the sentence names no asset. Leave a row blank to skip it.",
+    "digital asset, 'none' when the sentence names no asset; for several, type them joined by "
+    "| (fiber|data_hosting). Type: the same, | for several. Leave a row blank to skip it.",
     "Rows were drawn by the model's probability that the sentence is a commitment, more of them "
     "near where a cut-off would fall; the model's answer is not shown.",
     "Tab 'package links': does carrying out the package deliver or apply the commitment? "
     "Enter yes, no or unsure.",
+    "Tab 'pair checks': two measures both count the sentence; which does it commit the project "
+    "to? only A, only B, both, neither, or unsure.",
+    "Tab 'package assets': does the package buy, build, install, connect, operate or design "
+    "the asset named? yes, no or unsure.",
     "Do not reorder, insert or delete rows or columns: row_id joins each row to its key file.",
 ]
 ALL = "all"              # ./wbg check all: every measure, one workbook, plus the package links
@@ -124,7 +129,7 @@ LINK_SHEET_COLS = [("row_id", 8), ("project", 10), ("measure", 20), ("commitment
                    ("commitment component", 14), ("package", 60), ("package component", 18),
                    ("applies", 10), ("note", 24)]
 LINK_LABEL_COLS = ["label_set", "unit_id", "package_id", "text_sha256", "package_sha256",
-                   "question_sha256", "applies", "source", "graded_on"]
+                   "question_sha256", "applies", "weight", "source", "graded_on"]
 
 
 def wilson(k, n, z=1.96):
@@ -324,6 +329,17 @@ def build_all(data, seed, design="train", **kw):
     if lsheet:
         tabs.append({"tab": "package links", "rows": lsheet})
         keys.append((where(data, "review", f"check_links_s{seed}.key.csv"), LINK_KEY_COLS, lkey))
+    # The decisions after the measures, each with its own tab (src/judged.py).
+    import judged
+    for tab, fname, rows_of, kcols, cols, answers in (
+            ("pair checks", "check_pairs", judged.pair_rows, judged.PAIR_KEY_COLS,
+             judged.PAIR_SHEET, judged.PAIR_ANSWERS),
+            ("package assets", "check_package_assets", judged.package_asset_rows,
+             judged.ASSET_KEY_COLS, judged.ASSET_SHEET, ["yes", "no", "unsure"])):
+        k, sheet = rows_of(data, seed, kw.get("projects"))
+        if sheet:
+            tabs.append({"tab": tab, "rows": sheet, "cols": cols, "drops": [("answer", answers)]})
+            keys.append((where(data, "review", f"{fname}_s{seed}.key.csv"), kcols, k))
     os.makedirs(os.path.dirname(xlsx), exist_ok=True)
     for path, cols, rows in keys:
         _write_key(path, cols, rows)
@@ -359,6 +375,8 @@ def link_rows(data, seed, projects=None, bands=LINK_BANDS):
             names[name] = name
     pairs = [p for p in pairs if (p["label_set"], p["unit_id"]) in units
              and p["package_id"] in packages and p.get("probability", "") != ""]
+    for p in pairs:                  # the decision reads the posterior (src/judged.py)
+        p["probability"] = p.get("p_calibrated") or p["probability"]
     picked = draw_links(pairs, seed, bands)
     random.Random(seed).shuffle(picked)
     qsha = link_question_sha()
@@ -425,7 +443,7 @@ def _write_xlsx(path, tabs):
 
     wrap = Alignment(wrap_text=True, vertical="top")
     for t in tabs:
-        spec = LINK_SHEET_COLS if "scale" not in t else SHEET_COLS
+        spec = t.get("cols") or (LINK_SHEET_COLS if "scale" not in t else SHEET_COLS)
         ws = wb.create_sheet(t["tab"])
         cols = [c for c, _ in spec]
         ws.append(cols)
@@ -439,7 +457,9 @@ def _write_xlsx(path, tabs):
             for cell in row:
                 cell.alignment = wrap
         n = len(t["rows"]) + 1
-        if "scale" in t:
+        if t.get("drops"):
+            drops = t["drops"]
+        elif "scale" in t:
             drops = [("grade", [str(i) for i in range(len(t["scale"]))]),
                      ("asset", t["assets"] + ["none", "other"]),
                      ("type", [x[0] for x in t["types"]] + ["none", "other"])]
@@ -447,6 +467,8 @@ def _write_xlsx(path, tabs):
             drops = [("applies", ["yes", "no", "unsure"])]
         for col, values in drops:
             dv = DataValidation(type="list", formula1=listed(values), allow_blank=True)
+            if col in ("asset", "type"):
+                dv.showErrorMessage = False     # several may be typed, joined by |
             ws.add_data_validation(dv)
             c = ws.cell(1, cols.index(col) + 1).column_letter
             dv.add(f"{c}2:{c}{n}")
@@ -817,7 +839,7 @@ def fit_asset_layers(data):
         for u, (_, asset, w) in graded_labels(name, data, fitting=True,
                                               units_by_text=by_text).items():
             if asset:
-                named[u] = asset          # the asset a person gave the sentence
+                named[u] = set(asset.split("|")) - {""}   # the assets a person gave it
                 weight[u] = w
     scores = {}
     with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
@@ -830,7 +852,7 @@ def fit_asset_layers(data):
     vecs = {u: v for u, v in vecs.items() if v is not None}
     out, lines = {}, ["## Asset probability layers", ""]
     for asset, sc in sorted(scores.items()):
-        ys = [(u, 1 if named[u] == asset else 0, weight[u], projects_of(u)) for u in sc]
+        ys = [(u, 1 if asset in named[u] else 0, weight[u], projects_of(u)) for u in sc]
         layer = posterior.fit(ys, sc, vecs, man["question_sha256"].get(asset, ""), asset)
         if layer:
             out[asset] = layer
@@ -854,7 +876,7 @@ def fit_asset_layers(data):
     for asset in sorted(scores):
         mine = [p["regex"] for p in pats if p["label_id"] == asset]
         pos = [(cos[(asset, u)], any(rx.search(texts.get(u, "")) for rx in mine), weight[u])
-               for u in named if named[u] == asset and (asset, u) in cos]
+               for u in named if asset in named[u] and (asset, u) in cos]
         got = skip.fit(pos)
         if got:
             bound = skip.loss_bound(got[1], [p[2] for p in pos])
@@ -973,8 +995,9 @@ def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
     lines.append("")
     withasset = [r for r in rows if r["asset"] and r["yes"]]
     if withasset:
-        agree = sum(1 for r in withasset if r["asset"] in r["links"])
-        extra = sum(len(r["links"] - {r["asset"]}) for r in withasset)
+        given = lambda r: set(r["asset"].split("|")) - {""}
+        agree = sum(1 for r in withasset if given(r) & r["links"])
+        extra = sum(len(r["links"] - given(r)) for r in withasset)
         lines += [f"## Asset on units the person graded yes and gave an asset: "
                   f"{agree} of {len(withasset)} have it among the pipeline's assets "
                   f"({extra} further assets the pipeline gave them)", ""]
@@ -1043,6 +1066,13 @@ def evaluate_all(data, seed, **kw):
             n += k
         except SystemExit as exc:
             print(f"  package links: {exc}")
+    # The decisions after the measures: their tabs' answers, layers and
+    # floors (src/judged.py).
+    import judged
+    try:
+        outs.append(judged.evaluate(data, seed))
+    except SystemExit as exc:
+        print(f"  after the measures: {exc}")
     # What the grades say every tunable setting should be (src/tune.py).
     outs.append(tune.report(data))
     return ", ".join(outs) or "nothing", n
@@ -1071,8 +1101,9 @@ def evaluate_links(data, seed):
             current[(k["text_sha256"], k["package_sha256"], k["question_sha256"])] = {
                 **{c: k[c] for c in ("label_set", "unit_id", "package_id", "text_sha256",
                                       "package_sha256", "question_sha256")},
-                "applies": answered[k["row_id"]], "source": os.path.basename(kpath)[:-8],
-                "graded_on": today}
+                "applies": answered[k["row_id"]],
+                "weight": f"{int(k['stratum_size']) / int(k['stratum_drawn']):.6g}",
+                "source": os.path.basename(kpath)[:-8], "graded_on": today}
     os.makedirs(os.path.dirname(lpath), exist_ok=True)
     with open(lpath + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=LINK_LABEL_COLS, lineterminator="\n")

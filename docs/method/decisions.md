@@ -14,12 +14,21 @@ Every question the pipeline puts to the decision model (TypeSafe's Jev) is handl
 |---|---|---|
 | Asset map | fitted gate, else `asset.gate_cosine`; word patterns; `asset_feedback.*` | `asset.floor`; `asset.decay` and `asset.paragraph_floor` for the paragraph rule |
 | Measure | fitted gate, else `measure.gate_cosine`; `measure.top`; `feedback.*` | `floor.<set>`, else `floor.default` |
-| Type | none: every committed sentence | `floor.types` |
+| Type | none: every committed sentence | `floor.types`, `floor.types_also` (`types.multiple`) |
 | Package to asset | `link.asset_top` | `link.asset_yes` |
 | Commitment to package | `link.measure_top` and a shared asset | `dashboard.package_link_min_probability` |
-| Pair check | none: every sentence two measures commit | `floor.pair_check` |
+| Pair check | none: every sentence two measures commit | `floor.pair_check` (the posterior that the sentence is not the measure) |
 
-Types, packages and pair checks have no graded sheet yet, so their floors read the model's answer; the layer applies to assets and measures.
+Every row has the whole loop: a graded source, a probability layer, a floor read on the posterior, and a suggested floor. Assets and measures have theirs here and in the tuning report; types, pair checks and both package links have theirs in `src/judged.py` and `data/reports/evaluate_after_measures.md`:
+
+| Decision | Graded on | Layer (one pooled fit per decision, one intercept per label) |
+|---|---|---|
+| Type | the type column of each measure tab (several joined by \|) | one label per measure and type, on the sentence's vector |
+| Pair check | tab `pair checks` (only A, only B, both, neither) | one label per measure (`drop:<set>`), on the sentence's vector |
+| Package to asset | tab `package assets` (yes, no) | one label per asset, on the package's vector |
+| Commitment to package | tab `package links` (yes, no) | one label, on the pair's vector (sentence and package averaged) |
+
+Each layer is keyed on the exact question its label asks (a type list, a measure's boundary, an asset or link question), so a changed wording starts without one, and each stage's run key holds the layers it read. With no grades the posterior is the model's answer. Several winners are allowed everywhere: a sentence may count for several measures, several assets (`asset.multiple`) and several types (`types.multiple`); a package may have several assets.
 
 ## The probability layer
 

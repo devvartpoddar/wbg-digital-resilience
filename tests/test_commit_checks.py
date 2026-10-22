@@ -68,6 +68,11 @@ def test_a_unit_two_measures_commit_gets_one_pair_answer_and_nothing_else_is_ask
     pairs = list(csv.DictReader(open(os.path.join(out, "pairs.csv"))))
     assert [(p["unit_id"], p["set_a"], p["set_b"], p["decision"]) for p in pairs] == [
         ("u1", "backup_power", "renewable_energy", "only_b")]
+    # With no pair layer, each side's drop posterior is the model's answer:
+    # only the other measure plus neither.
+    p = pairs[0]
+    assert abs(float(p["p_drop_a"]) - float(p["p_only_b"]) - float(p["p_neither"])) < 0.002
+    assert abs(float(p["p_drop_b"]) - float(p["p_only_a"]) - float(p["p_neither"])) < 0.002
     q = next(c for c in calls if "pair" in c["questions"])["questions"]["pair"]
     assert q["type"] == "choice" and set(q["criteria"]) == set(commit_checks.PAIR_OPTIONS)
     assert "main supply fails" in q["instructions"] and "renewable electricity" in q["instructions"]

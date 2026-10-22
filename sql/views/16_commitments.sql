@@ -56,13 +56,13 @@ WITH f AS (
     AND f.posterior_probability >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
-    -- a pair check that says the unit is only the other measure, or neither,
-    -- at the pair check's floor (control panel floor.pair_check)
+    -- a pair check whose posterior that the unit is not this measure (only
+    -- the other, or neither) reaches the pair check's floor (floor.pair_check)
     AND NOT (s.apply_measure_pair_checks AND EXISTS (
       SELECT 1 FROM wbg.unit_pair_checks c
-      WHERE c.unit_id = f.unit_id AND c.probability >= s.pair_check_floor
-        AND ((c.set_a = f.label_set AND c.decision IN ('only_b', 'neither'))
-          OR (c.set_b = f.label_set AND c.decision IN ('only_a', 'neither')))))
+      WHERE c.unit_id = f.unit_id
+        AND ((c.set_a = f.label_set AND c.p_drop_a >= s.pair_check_floor)
+          OR (c.set_b = f.label_set AND c.p_drop_b >= s.pair_check_floor))))
 ),
 u AS (
   SELECT f.label_set, f.label_id, f.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
@@ -112,13 +112,13 @@ $do$;
 -- every link (47 s for a count).
 CREATE MATERIALIZED VIEW wbg.commitment_package_status AS
 WITH l AS MATERIALIZED (
-  SELECT u.commitment_id, u.unit_id, cp.package_id, cp.probability
+  SELECT u.commitment_id, u.unit_id, cp.package_id, cp.posterior_probability AS probability
   FROM wbg.commitment_units u
   JOIN wbg.commitment_packages cp
     ON cp.label_set = u.label_set AND cp.label_id = u.label_id
    AND cp.unit_id = u.unit_id AND cp.project_id = u.project_id
   CROSS JOIN wbg.dashboard_settings ds
-  WHERE cp.probability >= ds.package_link_min_probability
+  WHERE cp.posterior_probability >= ds.package_link_min_probability
 )
 SELECT l.commitment_id, l.package_id, max(l.probability) AS link_probability,
        count(DISTINCT l.unit_id) AS units_linked,

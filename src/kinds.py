@@ -390,8 +390,10 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
             rows.append((lid, u, qs))
     h = hashlib.sha256()
     h.update(f"{os.path.basename(run_folder)}\t{model}\n".encode())
+    import judged
     h.update(f"prior={prior.VERSION}\nfloor={TYPE_FLOOR}\nmultiple={TYPE_MULTIPLE}\n"
-             f"also={TYPE_ALSO}\n".encode())
+             f"also={TYPE_ALSO}\nlayers={judged.digest(data, 'types', judged.type_question_shas(name, data))}\n"
+             .encode())
     for (lid, u, _), sha in zip(rows, shas):
         h.update(f"{u['unit_id']}:{sha}\n".encode())
     return run_folder, approved, rows, where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
@@ -487,6 +489,11 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     if oth is None:
         return None
     out_rows, counts, served, cost = [], defaultdict(lambda: defaultdict(int)), set(), 0.0
+    # The types' probability layers (src/judged.py), fitted on the types
+    # people gave: each type's probability through its layer before the
+    # winners are read; 'none' keeps the model's.
+    import judged
+    lays = judged.layers(data, "types", judged.type_question_shas(name, data))
     all_types = {lid: [t["type_id"] for t in ts] + [t["type_id"] for t in oth.get(lid, [])]
                  for lid, ts in approved.items()}
     # The prior inputs (src/prior.py): each type's name and definition matched
@@ -505,6 +512,12 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
             b2 = max(second, key=second.get)
             if b2 != TYPE_NONE:
                 best, probs = b2, {**{k: v for k, v in probs.items()}, **second}
+        raw = probs                # the model's answer, kept for the next fit
+        if lays:
+            probs = {t: (q if t == TYPE_NONE else
+                         judged.calibrated(lays, f"{name}:{t}", u["unit_id"], q))
+                     for t, q in probs.items()}
+            best = max(probs, key=probs.get)
         yes = [] if best == TYPE_NONE or probs[best] < TYPE_FLOOR else [best]
         if yes and TYPE_MULTIPLE:
             yes += sorted((t for t, q in probs.items()
@@ -521,7 +534,7 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
                          "model_served": model_served, "cost": f"{c:.6f}",
                          "types_yes": "|".join(yes), "best_type": best if yes else "",
                          "best_p": f"{probs[best]:.3f}" if yes else "",
-                         **{f"p_{t}": f"{probs.get(t, 0.0):.3f}" for t in all_types[lid]},
+                         **{f"p_{t}": f"{raw.get(t, 0.0):.3f}" for t in all_types[lid]},
                          **{f"prior_phrase_match_{t}": prior.fmt(prior.phrase_match(
                              set(prior.words(u["text"])), type_phrases[lid].get(t, [])))
                             for t in all_types[lid]}})

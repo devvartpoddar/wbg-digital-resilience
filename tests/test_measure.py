@@ -298,7 +298,12 @@ def test_a_graded_training_sheet_fits_the_layer_and_the_gate_for_the_next_run(st
     monkeypatch.setattr(tune, "GRID", {"sharpness": [20.0], "near_copy": ["off"], "ridge": [1.0],
                                        "centroid": [True], "pool": [False, True]})
     report = open(tune.report(data, log=lambda *_: None)).read()
-    assert "## Probability layer settings" in report and "cannot set yet" in report
+    assert "## Probability layer settings" in report and "Settings set elsewhere" in report
+    # The decisions after the measures run their loop on the same store: no
+    # tab graded yet, so no layer, and a report that says so.
+    import judged
+    after = open(judged.evaluate(data, 1)).read()
+    assert "types" in after and not os.path.exists(judged.layer_path(data, "types"))
 
 
 def test_a_run_publishes_its_findings_assets_and_record_to_postgres(store, monkeypatch):
