@@ -33,7 +33,9 @@ def test_the_files_have_the_shape_analysis_labels_keeps(tmp_path):
                      "solar_backup_queries.csv", "solar_backup_scale.csv"]
     q = list(csv.DictReader(open(tmp_path / "solar_backup_queries.csv")))
     assert [r["query"] for r in q] == GOOD["phrases"].splitlines()
-    assert "{name}" in open(tmp_path / "solar_backup_scale.csv").read()
+    # a requested measure takes the common grade scale every measure uses
+    assert open(tmp_path / "solar_backup_scale.csv").read() == \
+        open(R.SCALE_TEMPLATE).read()
 
 
 def test_the_spend_cap_stops_before_asking(monkeypatch, tmp_path):

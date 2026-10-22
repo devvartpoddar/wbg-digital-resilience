@@ -1,17 +1,8 @@
-measure_id,query_id,query,active
-energy_efficiency,v4_project_procure_equipment_meeting_specified,the project will procure equipment meeting specified energy-efficiency requirements,true
-energy_efficiency,v4_technical_specifications_establish_minimum_energy,technical specifications will establish minimum energy-performance requirements for the equipment,true
-energy_efficiency,v4_network_upgrade_reduce_energy_consumption,the network upgrade will reduce energy consumption compared with the existing technology,true
-energy_efficiency,v4_energy_efficient_cooling_systems_installed,energy-efficient cooling systems will be installed to reduce electricity consumption,true
-energy_efficiency,v4_project_replace_energy_intensive_legacy,the project will replace energy-intensive legacy equipment with more efficient technology,true
-energy_efficiency,v4_energy_management_systems_introduced_monitor,energy management systems will be introduced to monitor and optimize electricity consumption,true
-energy_efficiency,v4_proposed_technology_reduce_energy_requirements,the proposed technology will reduce energy requirements compared with the existing system,true
-energy_efficiency,v4_equipment_selected_based_defined_energy,equipment will be selected based on defined energy-performance criteria,true
-energy_efficiency,v4_high_efficiency_power_cooling_equipment,high-efficiency power and cooling equipment will be required under the technical specifications,true
-energy_efficiency,v4_investment_reduce_electricity_consumption_through,the investment will reduce electricity consumption through improved equipment efficiency,true
-energy_efficiency,upgrade,the project will upgrade equipment to improve energy efficiency,false
-energy_efficiency,fibre_copper,fibre networks will replace legacy copper infrastructure to reduce energy use,false
-energy_efficiency,reduce,energy consumption will be reduced through modernization,false
-energy_efficiency,cooling,efficient cooling technologies will be deployed,false
-energy_efficiency,ems,energy management systems will be adopted,false
-energy_efficiency,demand,network upgrades will lower electricity demand,false
+measure_id,query_id,query,type_id,active
+energy_efficiency,search_certified_it_equipment,Computers and servers will meet recognised energy-efficiency standards such as Energy Star.,certified_it_equipment,true
+energy_efficiency,search_network_efficiency,Network upgrades and power-saving modes will reduce electricity use.,network_efficiency,true
+energy_efficiency,search_efficient_facilities,Data centres will meet defined energy-performance and power usage effectiveness targets.,efficient_facilities,true
+energy_efficiency,search_efficient_cooling,Energy-efficient cooling will reduce electricity consumption at digital facilities.,efficient_cooling,true
+energy_efficiency,search_energy_management,Energy management systems will monitor and control electricity consumption to reduce use.,energy_management,true
+energy_efficiency,search_legacy_replacement,Legacy equipment and copper networks will be replaced explicitly to save energy.,legacy_replacement,true
+energy_efficiency,search_parent,Equipment and infrastructure will meet explicit energy-efficiency requirements.,,true

@@ -1,7 +1,10 @@
-measure_id,pattern_id,pattern,active
-resilient_infrastructure_design,v4_flood_proof,\bflood[- ]proof\w*\b,true
-resilient_infrastructure_design,v4_weatherproof,\bweatherproof\w*\b,true
-resilient_infrastructure_design,flood_protection,\bflood[- ]?(?:protection|proof\w*)\b,false
-resilient_infrastructure_design,elevate_harden,"\b(?:elevat\w*|harden\w*|reinforc\w*|wind[- ]resist\w*)\b[^.;]{0,60}?\b(?:flood|climate|storm|cyclone|hazard|wind|heat)\w*",false
-resilient_infrastructure_design,resilient_design,\b(?:climate[- ]resilient|resilient) (?:design|engineering|standards?|specifications?)\b,false
-resilient_infrastructure_design,design_standards_climate,"\bdesign standards?\b[^.;]{0,60}?\b(?:climate|flood|hazard|resilien)\w*",false
+measure_id,pattern_id,pattern,flags,type_id,active
+resilient_infrastructure_design,search_elevation,"\b(?:elevat\w*|rais\w*)[^.;]{0,60}(?:flood|inundation)",IGNORECASE,elevation,true
+resilient_infrastructure_design,search_drainage,"\b(?:drainage|culverts?)[^.;]{0,65}(?:protect\w*|flood|facilit\w*)",IGNORECASE,drainage,true
+resilient_infrastructure_design,search_flood_barriers,\bflood[- ](?:barriers?|protection|proof\w*)\b|\bwaterproof (?:enclosures?|sealing)\b,IGNORECASE,flood_barriers,true
+resilient_infrastructure_design,search_protected_cabling,\b(?:armou?red|waterproof|reinforced|protective) (?:cables?|ducts?|conduits?|trenches)\b,IGNORECASE,protected_cabling,true
+resilient_infrastructure_design,search_wind_storm,"\b(?:wind[- ]resistant|storm[- ]resistant|wind[- ]hardening)\b|\breinforc\w*[^.;]{0,65}(?:wind|storm|cyclone)",IGNORECASE,wind_storm,true
+resilient_infrastructure_design,search_heat,"\bheat[- ](?:tolerant|resistant)\b|(?:\b(?:extreme heat|high temperatures?)\b[^.;]{0,80}\b(?:cooling|shading|thermal protection|protect\w*)\b|\b(?:cooling|shading|thermal protection|protect\w*)\b[^.;]{0,80}\b(?:extreme heat|high temperatures?)\b)",IGNORECASE,heat,true
+resilient_infrastructure_design,search_ground_hazards,"\b(?:reinforc\w*|foundations?|slope protection)[^.;]{0,65}(?:earthquake|seismic|landslide|erosion)",IGNORECASE,ground_hazards,true
+resilient_infrastructure_design,search_weatherproofing,"\b(?:enclosures?|coatings?|weatherproof\w*)[^.;]{0,65}(?:rain|dust|humidity|corrosion)|\bweatherproof\w*",IGNORECASE,weatherproofing,true
+resilient_infrastructure_design,search_parent,\b(?:physical hardening|hazard protection|flood[- ]proof\w*|weatherproof\w*)\b,IGNORECASE,,true

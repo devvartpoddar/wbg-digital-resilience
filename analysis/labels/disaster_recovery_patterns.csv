@@ -1,8 +1,9 @@
-measure_id,pattern_id,pattern,active
-disaster_recovery,v4_disaster_recovery_site_center,\bdisaster recovery (?:site|center|centre)\b,true
-disaster_recovery,v4_recovery_time_point_objective,\brecovery (?:time|point) objective\b,true
-disaster_recovery,disaster_recovery,\bdisaster recovery\b,false
-disaster_recovery,continuity,\bbusiness continuity\b,false
-disaster_recovery,backup,\bdata back-?ups?\b|\bbackup (?:site|system|cent(?:re|er))s?\b,false
-disaster_recovery,failover,\bfail-?over\b,false
-disaster_recovery,replication,\b(?:data|site|cloud) replication\b,false
+measure_id,pattern_id,pattern,flags,type_id,active
+disaster_recovery,search_backup,\bdata back[- ]?ups?\b|\b(?:off[- ]site|cloud)[- ]back[- ]?ups?\b,IGNORECASE,backup,true
+disaster_recovery,search_replication_failover,\b(?:data|system|application)[- ]replication\b|\bfail[- ]?over\b,IGNORECASE,replication_failover,true
+disaster_recovery,search_recovery_site,\bdisaster recovery (?:sites?|centres?|centers?|environments?|facilities)\b,IGNORECASE,recovery_site,true
+disaster_recovery,search_recovery_objectives,\brecovery (?:time|point) objectives?\b|\bdisaster recovery (?:plans?|procedures?|tests?|testing)\b,IGNORECASE,recovery_objectives,true
+disaster_recovery,search_records_digitisation,"\b(?:digiti[sz]\w*|paper records)[^.;]{0,80}(?:disaster|flood|fire|back[- ]?up)",IGNORECASE,records_digitisation,true
+disaster_recovery,search_parent,\bdisaster recovery\b,IGNORECASE,,true
+disaster_recovery,search_backup_generic,\bback[- ]?up (?:sites?|systems?|cent(?:re|er)s?)\b,IGNORECASE,,true
+disaster_recovery,search_business_continuity,"(?:\bbusiness continuity\b[^.;]{0,100}\b(?:recovery|back[- ]?up|data)\b|\b(?:recovery|back[- ]?up|data)\b[^.;]{0,100}\bbusiness continuity\b)",IGNORECASE,,true

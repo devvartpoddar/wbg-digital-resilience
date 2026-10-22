@@ -1,7 +1,10 @@
-measure_id,pattern_id,pattern,active
-renewable_energy,v4_solar_photovoltaic,\bsolar photovoltaic\b,true
-renewable_energy,v4_renewable_energy,\brenewable energy\b,true
-renewable_energy,solar_power,"\bsolar\b[^.;]{0,30}?\b(?:power\w*|panels?|energy|PV|photovoltaic|systems?|hybrid|home systems?)\b|\bphotovoltaic\b",false
-renewable_energy,renewable,\b(?:renewable|clean|green) (?:energy|power|electricity)\b,false
-renewable_energy,wind_power,\bwind (?:power|energy|turbines?|farms?)\b,false
-renewable_energy,off_grid,\boff-?grid\b,false
+measure_id,pattern_id,pattern,flags,type_id,active
+renewable_energy,search_offgrid_renewable,"(?:\b(?:digital|telecom\w*|ICT|data[- ]cent(?:re|er)s?|towers?|base stations?|servers?|networks?)\b[^.;]{0,120}(?:\boff[- ]grid\b[^.;]{0,70}\b(?:solar|renewable|wind)\b|\b(?:solar|renewable|wind)\b[^.;]{0,70}\boff[- ]grid\b)|(?:\boff[- ]grid\b[^.;]{0,70}\b(?:solar|renewable|wind)\b|\b(?:solar|renewable|wind)\b[^.;]{0,70}\boff[- ]grid\b)[^.;]{0,120}\b(?:digital|telecom\w*|ICT|data[- ]cent(?:re|er)s?|towers?|base stations?|servers?|networks?)\b)",IGNORECASE,offgrid_renewable,true
+renewable_energy,search_ongrid_onsite,"\b(?:on[- ]site|grid[- ]connected)[^.;]{0,65}(?:solar|renewable|wind)",IGNORECASE,ongrid_onsite,true
+renewable_energy,search_diesel_displacement,"\b(?:solar|renewable)[^.;]{0,70}(?:diesel|hybridi[sz]\w*)|\bdiesel[^.;]{0,70}(?:solar|renewable)",IGNORECASE,diesel_displacement,true
+renewable_energy,search_renewable_maintenance,"(?:\b(?:digital|telecom\w*|ICT|data[- ]cent(?:re|er)s?|towers?|base stations?|servers?|networks?)\b[^.;]{0,120}(?:\b(?:solar|renewable)\b[^.;]{0,70}\b(?:maintenance|spare parts|remote monitoring)\b|\b(?:maintenance|spare parts|remote monitoring)\b[^.;]{0,70}\b(?:solar|renewable)\b)|(?:\b(?:solar|renewable)\b[^.;]{0,70}\b(?:maintenance|spare parts|remote monitoring)\b|\b(?:maintenance|spare parts|remote monitoring)\b[^.;]{0,70}\b(?:solar|renewable)\b)[^.;]{0,120}\b(?:digital|telecom\w*|ICT|data[- ]cent(?:re|er)s?|towers?|base stations?|servers?|networks?)\b)",IGNORECASE,renewable_maintenance,true
+renewable_energy,search_renewable_procurement,"\b(?:renewable electricity|green tariffs?)\b|\b(?:renewable|solar|wind)[^.;]{0,60}power purchase agreements?\b",IGNORECASE,renewable_procurement,true
+renewable_energy,search_parent,\b(?:renewable (?:energy|electricity|power)|solar[- ]powered)\b,IGNORECASE,,true
+renewable_energy,search_solar_generic,\bsolar (?:panels?|PV|photovoltaic|power|systems?)\b,IGNORECASE,,true
+renewable_energy,search_mini_grid_generic,\bmini[- ]?grids?\b,IGNORECASE,,true
+renewable_energy,search_wind_generic,\bwind (?:power|energy|turbines?)\b,IGNORECASE,,true

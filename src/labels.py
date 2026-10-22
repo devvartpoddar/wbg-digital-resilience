@@ -164,14 +164,21 @@ def _id_col(r, path):
 
 def load_patterns(name, dirs=None, taxonomy=None):
     """Active word patterns: [{label_id, pattern_id, pattern, regex}]. A
-    pattern that does not compile is an error, not a silent skip."""
+    pattern matches regardless of case unless its row's flags say
+    CASE_SENSITIVE (a bare acronym such as UPS); a blank or IGNORECASE flag
+    ignores case. A pattern that does not compile, or an unknown flag, is an
+    error, not a silent skip."""
     path, found = _optional(name, "_patterns", dirs, taxonomy)
     out = []
     for r in found:
         if not is_active(r):
             continue
+        flag = (r.get("flags") or "IGNORECASE").strip().upper()
+        if flag not in ("IGNORECASE", "CASE_SENSITIVE"):
+            raise SystemExit(f"labels: {path}: pattern {r['pattern_id']!r} has flags {flag!r}; "
+                             f"use IGNORECASE or CASE_SENSITIVE")
         try:
-            rx = re.compile(r["pattern"], re.I)
+            rx = re.compile(r["pattern"], 0 if flag == "CASE_SENSITIVE" else re.I)
         except re.error as e:
             raise SystemExit(f"labels: {path}: pattern {r['pattern_id']!r} does not "
                              f"compile: {e}")

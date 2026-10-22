@@ -1,5 +1,7 @@
-measure_id,pattern_id,pattern,active
-adaptation_applications,climate_advisory,\bclimate[- ]?(?:advisory|advisories|information) (?:services?|tools?|apps?|applications?|platforms?)\b,false
-adaptation_applications,climate_smart,"\bclimate[- ]smart\b[^.;]{0,50}?\b(?:digital|apps?|applications?|platforms?|advisory|advisories|information|mobile|ICT|e-|SMS|data)\b",false
-adaptation_applications,drought,\bdrought (?:management|advisory|early)\b,false
-adaptation_applications,adaptation_app,"\badaptation\b[^.;]{0,40}?\b(?:applications?|apps?|platforms?|tools?|services?)\b",false
+measure_id,pattern_id,pattern,flags,type_id,active
+adaptation_applications,search_climate_smart_agriculture,"\b(?:digital|mobile|SMS|app\w*)[^.;]{0,80}(?:farm|crop|livestock|fish\w*)[^.;]{0,80}(?:advi\w*|recommend\w*)",IGNORECASE,climate_smart_agriculture,true
+adaptation_applications,search_drought_water_management,"(?:\b(?:digital|mobile|decision[- ]support|applications?|platforms?)\b[^.;]{0,100}\b(?:drought|water allocation|irrigation)\b|\b(?:drought|water allocation|irrigation)\b[^.;]{0,100}\b(?:digital|mobile|decision[- ]support|applications?|platforms?)\b)",IGNORECASE,drought_water_management,true
+adaptation_applications,search_adaptation_decision_support,"\b(?:climate|hazard)[^.;]{0,60}(?:digital|decision[- ]support|asset management)[^.;]{0,60}(?:prioriti\w*|investment|maintenance)",IGNORECASE,adaptation_decision_support,true
+adaptation_applications,search_shock_response_targeting,"\b(?:climate|drought|flood|hazard)[^.;]{0,70}(?:social registr\w*|household data|target\w* (?:support|transfer\w*))",IGNORECASE,shock_response_targeting,true
+adaptation_applications,search_climate_advisory,"(?:\b(?:mobile|digital|SMS|applications?)\b[^.;]{0,120}(?:\b(?:advi\w*|recommend\w*)\b[^.;]{0,100}\b(?:weather|climate|flood|drought)\b|\b(?:weather|climate|flood|drought)\b[^.;]{0,100}\b(?:advi\w*|recommend\w*)\b)|(?:\b(?:advi\w*|recommend\w*)\b[^.;]{0,100}\b(?:weather|climate|flood|drought)\b|\b(?:weather|climate|flood|drought)\b[^.;]{0,100}\b(?:advi\w*|recommend\w*)\b)[^.;]{0,120}\b(?:mobile|digital|SMS|applications?)\b)",IGNORECASE,climate_advisory,true
+adaptation_applications,search_parent,"\b(?:digital|application|decision[- ]support)[^.;]{0,65}(?:climate adaptation|adaptation decisions?|climate[- ]informed)",IGNORECASE,,true

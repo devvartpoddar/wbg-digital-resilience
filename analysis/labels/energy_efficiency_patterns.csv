@@ -1,5 +1,8 @@
-measure_id,pattern_id,pattern,active
-energy_efficiency,energy_efficiency,\benergy[- ]efficien\w*,false
-energy_efficiency,consumption,"\b(?:energy|electricity|power) (?:consumption|use|demand|savings?)\b[^.;]{0,40}?\b(?:reduc\w*|lower\w*|cut\w*|sav\w*)|\b(?:reduc\w*|lower\w*|cut\w*)\b[^.;]{0,40}?\b(?:energy|electricity|power) (?:consumption|use|demand)\b",false
-energy_efficiency,efficient_cooling,\b(?:efficient|free|liquid) cooling\b,false
-energy_efficiency,energy_management,\benergy management systems?\b,false
+measure_id,pattern_id,pattern,flags,type_id,active
+energy_efficiency,search_certified_it_equipment,\bEnergy Star\b|\benergy[- ](?:efficiency|performance) (?:standards?|certification|requirements?)\b,IGNORECASE,certified_it_equipment,true
+energy_efficiency,search_network_efficiency,"\b(?:network|radio|fibre|fiber)[^.;]{0,70}(?:energy[- ]efficien\w*|power[- ]saving|reduce energy|reduce electricity)",IGNORECASE,network_efficiency,true
+energy_efficiency,search_efficient_facilities,"\bpower usage effectiveness\b|(?:\bPUE\b[^.;]{0,80}\bdata[- ]cent(?:re|er)s?\b|\bdata[- ]cent(?:re|er)s?\b[^.;]{0,80}\bPUE\b)|(?:\b(?:buildings?|facilities|data[- ]cent(?:re|er)s?)\b[^.;]{0,70}\benergy[- ]efficien\w*|\benergy[- ]efficien\w*[^.;]{0,70}\b(?:buildings?|facilities|data[- ]cent(?:re|er)s?)\b)",IGNORECASE,efficient_facilities,true
+energy_efficiency,search_efficient_cooling,\b(?:energy[- ]efficient|high[- ]efficiency|efficient) cooling\b,IGNORECASE,efficient_cooling,true
+energy_efficiency,search_energy_management,\benergy (?:management|monitoring) systems?\b|\bpower management\b,IGNORECASE,energy_management,true
+energy_efficiency,search_legacy_replacement,"\b(?:replac\w*|moderni[sz]\w*)[^.;]{0,80}(?:energy[- ]efficien\w*|save energy|reduce energy|reduce electricity)",IGNORECASE,legacy_replacement,true
+energy_efficiency,search_parent,\benergy[- ]efficien\w*\b,IGNORECASE,,true

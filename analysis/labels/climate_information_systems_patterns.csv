@@ -1,5 +1,7 @@
-measure_id,pattern_id,pattern,active
-climate_information_systems,v4_hydrometeorological_information_system,\bhydrometeorological information system\b,true
-climate_information_systems,climate_info,"\b(?:climate|weather|hydro(?:logical|met\w*)|meteorolog\w*|agro-?met\w*)\b[^.;]{0,40}?\b(?:information|data|forecast\w*|observation|monitoring|services?) (?:systems?|platforms?|services?|networks?|stations?)\b",false
-climate_information_systems,forecasting_climate,\b(?:weather|climate|flood|seasonal|hydrolog\w*) forecast\w*,false
-climate_information_systems,met_service,\b(?:meteorolog\w*|hydrolog\w*) (?:services?|agenc\w*|stations?|networks?)\b,false
+measure_id,pattern_id,pattern,flags,type_id,active
+climate_information_systems,search_observation_monitoring,\b(?:weather|meteorological|hydrological|hydrometeorological|hazard) (?:stations?|gauges?|sensors?|monitoring networks?)\b,IGNORECASE,observation_monitoring,true
+climate_information_systems,search_forecasting,\b(?:weather|climate|flood|drought|hydrological)[- ](?:forecast\w*|prediction\w*|model\w*|projection\w*),IGNORECASE,forecasting,true
+climate_information_systems,search_data_management,\b(?:climate|hazard|weather|hydromet\w*|exposure)[- ](?:data|information)[- ](?:platforms?|systems?|portals?|databases?)\b,IGNORECASE,data_management,true
+climate_information_systems,search_health_climate_surveillance,(?=[^.;]*\b(?:climate|weather)\b)(?=[^.;]*\b(?:health|disease)\b)(?=[^.;]*\b(?:surveillance|warning\w*|forecast\w*)\b)[^.;]+,IGNORECASE,health_climate_surveillance,true
+climate_information_systems,search_climate_services,\b(?:climate|weather)[- ](?:information services?|bulletins?|portals?)\b,IGNORECASE,climate_services,true
+climate_information_systems,search_parent,\b(?:climate|hazard|hydrometeorological) information systems?\b,IGNORECASE,,true

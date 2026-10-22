@@ -1,17 +1,9 @@
-measure_id,query_id,query,active
-ews,v4_project_establish_multi_hazard_early,the project will establish a multi-hazard early warning system,true
-ews,v4_cell_broadcast_deployed_disseminate_emergency,cell broadcast will be deployed to disseminate emergency alerts to mobile subscribers,true
-ews,v4_platform_issue_timely_warnings_populations,the platform will issue timely warnings to populations exposed to floods and other hazards,true
-ews,v4_project_strengthen_dissemination_early_warning,the project will strengthen dissemination of early warning messages through multiple communication channels,true
-ews,v4_public_warning_capabilities_integrated_national,public warning capabilities will be integrated with the national emergency management system,true
-ews,v4_system_automatically_generate_alerts_when,the system will automatically generate alerts when predefined hazard thresholds are reached,true
-ews,v4_emergency_alerts_transmitted_affected_populations,emergency alerts will be transmitted to affected populations through mobile networks,true
-ews,v4_activity_upgrade_warning_dissemination_systems,the activity will upgrade warning dissemination systems to improve last-mile delivery,true
-ews,v4_platform_enable_authorized_agencies_issue,the platform will enable authorized agencies to issue location-based public warnings,true
-ews,v4_warning_messages_disseminated_through_cell,warning messages will be disseminated through cell broadcast SMS radio and other channels,true
-ews,national_ews,a national early warning system will be deployed,false
-ews,mobile_alerts,emergency alerts will be transmitted through mobile networks,false
-ews,cell_broadcast,cell broadcast capabilities will support disaster warnings,false
-ews,crisis_comms,crisis communication systems will be strengthened,false
-ews,notifications,disaster notifications will be delivered to affected populations,false
-ews,response_comms,emergency response communications will be upgraded,false
+measure_id,query_id,query,type_id,active
+ews,search_warning_generation,Warning systems will detect imminent hazards and issue protective alerts.,warning_generation,true
+ews,search_cell_broadcast,The mobile network will implement cell broadcast to send location-based hazard warnings to all compatible phones in an affected area.,cell_broadcast,true
+ews,search_emergency_messaging,"Hazard warnings will reach communities through SMS, sirens, radio and mobile applications.",emergency_messaging,true
+ews,search_institutional_alerting,Flood warnings will be sent to schools and emergency responders so they can evacuate exposed locations.,institutional_alerting,true
+ews,search_sector_warning,Climate-sensitive disease and pest surveillance will trigger sector-specific early warnings.,sector_warning,true
+ews,search_parent,Public warning capabilities will issue timely natural-hazard alerts.,,true
+ews,search_emergency_messaging_extra_18,SMS blasts and mass messaging will send hazard warnings to people in affected locations.,emergency_messaging,true
+ews,search_emergency_messaging_extra_19,Location-based messaging will warn mobile subscribers in hazard-exposed areas.,emergency_messaging,true

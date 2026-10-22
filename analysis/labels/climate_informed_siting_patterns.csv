@@ -1,5 +1,8 @@
-measure_id,pattern_id,pattern,active
-climate_informed_siting,hazard_prone,\b(?:flood|hazard|risk|erosion|landslide)[- ]?(?:prone|exposed)\b,false
-climate_informed_siting,risk_zone,\b(?:high[- ]risk|hazard|flood) zones?\b,false
-climate_informed_siting,siting_climate,"\b(?:sit(?:e selection|ing)|locat(?:ion|ed)|rout(?:e|ing))\b[^.;]{0,60}?\b(?:climate|flood|hazard|disaster|sea[- ]level)\w*",false
-climate_informed_siting,climate_siting,"\b(?:climate|flood|hazard|disaster)\w*\b[^.;]{0,60}?\b(?:sit(?:e selection|ing)|location of|rout(?:e|ing) of)\b",false
+measure_id,pattern_id,pattern,flags,type_id,active
+climate_informed_siting,search_site_selection,"\b(?:site selection|siting|sites? selected|located outside)[^.;]{0,80}(?:climate|flood|hazard|landslide)|\b(?:climate|flood|hazard)[^.;]{0,70}(?:site selection|siting)",IGNORECASE,site_selection,true
+climate_informed_siting,search_route_selection,"\b(?:routes?|routing|alignments?)[^.;]{0,70}(?:flood|landslide|erosion|hazard|climate)",IGNORECASE,route_selection,true
+climate_informed_siting,search_relocation,"\brelocat\w*[^.;]{0,70}(?:hazard|flood|landslide|erosion|climate)",IGNORECASE,relocation,true
+climate_informed_siting,search_site_dispersal,\b(?:geographic\w* separat\w*|different hazard zones?|site dispersal|common[- ](?:event|hazard) failure),IGNORECASE,site_dispersal,true
+climate_informed_siting,search_deployment_configuration,"\b(?:buried|underground|aerial|satellite)[^.;]{0,75}(?:storm|wind|fire|hazard|flood)|\b(?:storm|wind|fire|hazard)[^.;]{0,75}(?:buried|underground|aerial|satellite)",IGNORECASE,deployment_configuration,true
+climate_informed_siting,search_parent,\b(?:hazard[- ]informed|climate[- ]informed) (?:siting|routing|deployment)\b,IGNORECASE,,true
+climate_informed_siting,search_hazard_zones,\b(?:flood|hazard|landslide)[- ]?prone\b|\bhigh[- ]risk zones?\b,IGNORECASE,,true

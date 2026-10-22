@@ -1,17 +1,8 @@
-measure_id,query_id,query,active
-network_redundancy,v4_network_include_redundant_routes_maintain,the network will include redundant routes to maintain connectivity in the event of a failure,true
-network_redundancy,v4_alternative_fibre_paths_established_eliminate,alternative fibre paths will be established to eliminate single points of failure,true
-network_redundancy,v4_project_finance_backup_communications_link,the project will finance a backup communications link if the primary connection is disrupted,true
-network_redundancy,v4_route_diversity_incorporated_network_architecture,route diversity will be incorporated into the network architecture,true
-network_redundancy,v4_critical_locations_connected_through_two,critical locations will be connected through two independent transmission paths,true
-network_redundancy,v4_redundant_network_architecture_required_critical,redundant network architecture will be required for critical connectivity,true
-network_redundancy,v4_alternative_international_connection_reduce_dependence,an alternative international connection will reduce dependence on a single route,true
-network_redundancy,v4_network_design_provide_geographically_diverse,the network design will provide geographically diverse paths for critical traffic,true
-network_redundancy,v4_satellite_connectivity_provide_alternative_path,satellite connectivity will provide an alternative path when terrestrial links are unavailable,true
-network_redundancy,v4_additional_interconnection_points_provide_alternative,additional interconnection points will provide alternative routing in the event of network disruption,true
-network_redundancy,redundant_fibre,redundant fibre routes will be established,false
-network_redundancy,diverse_paths,the network will include diverse transmission paths,false
-network_redundancy,backup_links,backup connectivity links will ensure continuity of service,false
-network_redundancy,duplicated_ixp,interconnection points will be duplicated,false
-network_redundancy,route_diversity,route diversity requirements will be included in network design,false
-network_redundancy,alternative,alternative communication pathways will be provided,false
+measure_id,query_id,query,type_id,active
+network_redundancy,search_international_redundancy,A second independent international cable route will preserve connectivity after failure.,international_redundancy,true
+network_redundancy,search_route_diversity,Geographically diverse domestic fibre routes will eliminate single points of communications failure.,route_diversity,true
+network_redundancy,search_backup_link,Satellite or microwave backup links will maintain connectivity when fibre fails.,backup_link,true
+network_redundancy,search_provider_diversity,A second international telecommunications operator will provide an alternative connection if the primary provider fails.,provider_diversity,true
+network_redundancy,search_critical_site_dual_links,Critical facilities will receive two independent communications links for service continuity.,critical_site_dual_links,true
+network_redundancy,search_node_redundancy,Redundant network nodes and exchanges will maintain communications after node failure.,node_redundancy,true
+network_redundancy,search_parent,Redundant network architecture will maintain connectivity after communications failure.,,true

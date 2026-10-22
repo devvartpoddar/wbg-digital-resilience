@@ -22,7 +22,7 @@ with what is stored, as status 'stopped'.
   python3 src/measure_requests.py --schema   create the schema and table only
 
 Reads  wbg_requests.measure_requests; analysis/labels/backup_power_scale.csv
-       (the grade wording, with the measure's name put in)
+       (the common grade scale every measure uses)
 Writes data/requested_labels/<set>.csv, <set>_queries.csv, <set>_scale.csv,
        <set>_patterns.csv; the request row's status, stage, spend and result
 """

@@ -1,17 +1,7 @@
-measure_id,query_id,query,active
-disaster_recovery,v4_project_establish_disaster_recovery_site,the project will establish a disaster recovery site for critical systems and applications,true
-disaster_recovery,v4_data_replicated_geographically_separate_backup,data will be replicated to a geographically separate backup location,true
-disaster_recovery,v4_system_include_automated_backup_recovery,the system will include automated backup and recovery capabilities,true
-disaster_recovery,v4_secondary_environment_provide_failover_if,a secondary environment will provide failover if the primary environment becomes unavailable,true
-disaster_recovery,v4_technical_architecture_include_data_replication,the technical architecture will include data replication and disaster recovery arrangements,true
-disaster_recovery,v4_backup_copies_maintained_off_site,backup copies will be maintained off site to support restoration following a disruption,true
-disaster_recovery,v4_system_define_recovery_time_recovery,the system will define recovery time and recovery point objectives for critical services,true
-disaster_recovery,v4_disaster_recovery_arrangements_tested_periodically,disaster recovery arrangements will be tested periodically to verify restoration capability,true
-disaster_recovery,v4_critical_applications_replicated_across_separate,critical applications will be replicated across separate locations,true
-disaster_recovery,v4_cloud_based_backup_established_critical,cloud-based backup will be established for critical data and applications,true
-disaster_recovery,dr_site,disaster recovery facilities will be established,false
-disaster_recovery,replication,critical data will be replicated across multiple locations,false
-disaster_recovery,bcp,business continuity plans will be developed,false
-disaster_recovery,restoration,backup systems will support service restoration,false
-disaster_recovery,tested,recovery procedures will be tested regularly,false
-disaster_recovery,cloud_dr,cloud-based disaster recovery solutions will be deployed,false
+measure_id,query_id,query,type_id,active
+disaster_recovery,search_backup,Recoverable data backups will be maintained off site and in the cloud.,backup,true
+disaster_recovery,search_replication_failover,Systems will replicate data and fail over to a secondary environment after failure.,replication_failover,true
+disaster_recovery,search_recovery_site,A secondary data centre will provide a disaster recovery environment.,recovery_site,true
+disaster_recovery,search_recovery_objectives,Technical recovery plans will define recovery time and recovery point objectives and test restoration.,recovery_objectives,true
+disaster_recovery,search_records_digitisation,Paper records will be digitised and backed up to prevent loss during disasters.,records_digitisation,true
+disaster_recovery,search_parent,Technical disaster recovery arrangements will restore digital systems after disruption.,,true

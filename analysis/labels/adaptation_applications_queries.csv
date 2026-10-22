@@ -1,16 +1,7 @@
-measure_id,query_id,query,active
-adaptation_applications,v4_advise_farmers_plant_irrigate_harvest,the application will advise farmers when to plant irrigate or harvest based on weather and climate forecasts,true
-adaptation_applications,v4_project_develop_digital_advisory_services,the project will develop digital advisory services to help farmers respond to increasing climate variability,true
-adaptation_applications,v4_platform_provide_climate_informed_recommendations,the platform will provide climate-informed recommendations to farmers and extension agents,true
-adaptation_applications,v4_digital_decision_support_tools_developed,digital decision-support tools will be developed for drought preparedness and water management,true
-adaptation_applications,v4_project_deploy_digital_tools_support,the project will deploy digital tools to support climate-resilient agricultural practices,true
-adaptation_applications,v4_application_provide_location_specific_recommendations,the application will provide location-specific recommendations based on climate conditions,true
-adaptation_applications,v4_digital_advisory_services_support_users,digital advisory services will support users in selecting appropriate adaptation measures,true
-adaptation_applications,v4_platform_support_climate_informed_planning,the platform will support climate-informed planning and investment decisions,false
-adaptation_applications,v4_project_finance_digital_tools_managing,the project will finance digital tools for managing climate-related risks to agricultural production,true
-adaptation_applications,advisory,farmers will receive digital climate advisory services,false
-adaptation_applications,communities,adaptation applications will support vulnerable communities,false
-adaptation_applications,climate_smart,climate-smart digital services will be deployed,false
-adaptation_applications,drought,mobile tools will provide drought management advice,false
-adaptation_applications,decision_support,decision-support applications will improve resilience,false
-adaptation_applications,platforms,digital platforms will help users adapt to climate risks,false
+measure_id,query_id,query,type_id,active
+adaptation_applications,search_climate_smart_agriculture,A mobile agricultural advisory service will tell farmers when to plant and irrigate using weather forecasts.,climate_smart_agriculture,true
+adaptation_applications,search_drought_water_management,A digital irrigation scheduling tool will advise water managers how much water to release during drought.,drought_water_management,true
+adaptation_applications,search_adaptation_decision_support,A digital planning tool will use flood-risk data to rank investments and schedule protective maintenance.,adaptation_decision_support,true
+adaptation_applications,search_shock_response_targeting,A digital tool will combine climate-shock data with social registries to target support.,shock_response_targeting,true
+adaptation_applications,search_climate_advisory,A mobile application will advise households and businesses how to adapt to climate risks.,climate_advisory,true
+adaptation_applications,search_parent,A mobile advisory tool will use weather forecasts to recommend protective actions to farmers and businesses.,,true

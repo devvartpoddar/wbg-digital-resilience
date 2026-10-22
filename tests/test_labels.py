@@ -98,3 +98,21 @@ def test_definition_rows_copy_every_phrase_pattern_and_grade():
     assert all(r["label_set"] in sets and r["pattern_id"] for r in patterns)
     ews = [r for r in scale if r["label_set"] == "ews"]
     assert [r["grade"] for r in ews] == ["0", "1", "2", "3"]
+
+
+def test_a_pattern_row_may_ask_for_case(tmp_path):
+    import labels
+    d = tmp_path / "labels"
+    d.mkdir()
+    (d / "m.csv").write_text("measure_id,measure_name,definition,active\nm,M,a measure,true\n")
+    (d / "m_patterns.csv").write_text(
+        "measure_id,pattern_id,pattern,flags,active\n"
+        "m,ups,\\bUPS\\b,CASE_SENSITIVE,true\nm,gen,\\bgenerators?\\b,IGNORECASE,true\n"
+        "m,old,\\bbattery\\b,,true\n")
+    got = {p["pattern_id"]: p["regex"] for p in labels.load_patterns("m", dirs=(str(d),))}
+    assert got["ups"].search("UPS units") and not got["ups"].search("ups and downs")
+    assert got["gen"].search("Generators") and got["old"].search("BATTERY")
+    (d / "m_patterns.csv").write_text("measure_id,pattern_id,pattern,flags,active\nm,x,a,MULTILINE,true\n")
+    import pytest
+    with pytest.raises(SystemExit):
+        labels.load_patterns("m", dirs=(str(d),))
