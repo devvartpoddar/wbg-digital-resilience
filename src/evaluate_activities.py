@@ -151,13 +151,13 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
              "  its paragraphs has a unit that passes the level):",
              f"    1 candidate (pattern or embedding top-N):     {share(pos_m, 'candidates')}",
              f"    2 graded by the decision model:               {share(pos_m, 'graded')}",
-             f"    3 grade {top_grade} (committed):                      {share(pos_m, 'committed')}",
+             f"    3 committed (posterior at the floor):          {share(pos_m, 'committed')}",
              "    3 + asset gate on the combined link, at threshold " + ", ".join(
                  f"{t}: {share(pos_m, f'gate_link_{t}')}" for t in THRESHOLDS),
              "    3 + asset gate on the unit answer, at threshold " + ", ".join(
                  f"{t}: {share(pos_m, f'gate_unit_{t}')}" for t in THRESHOLDS),
              "",
-             f"  false positives among matched negatives (grade {top_grade} somewhere in the activity):",
+             "  false positives among matched negatives (committed somewhere in the activity):",
              f"    {share(neg_m, 'committed')}; with link gate "
              + ", ".join(f"{t}: {share(neg_m, f'gate_link_{t}')}" for t in THRESHOLDS),
              "",

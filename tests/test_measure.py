@@ -243,3 +243,48 @@ def test_the_pool_reads_the_gate_the_skip_rule_fitted_for_its_question(store):
     skip.write(data, "cra", {"cra": {"gate": 0.31, "question_sha256": "another wording",
                                      "search_run": os.path.basename(run.search_run)}})
     assert measure.Run("cra", data, build=False, log=lambda *_: None).out == run.out
+
+
+def test_a_graded_training_sheet_fits_the_layer_and_the_gate_for_the_next_run(store, tmp_path,
+                                                                             monkeypatch):
+    """The whole loop on the invented store: run, draw a training sheet, grade
+    it, evaluate (labels stored with weights; layer and gate fitted under the
+    current question), and the next run reads both."""
+    openpyxl = pytest.importorskip("openpyxl")
+    import check_units
+    import skip
+    data, _ = store
+    p = tmp_path / "panel.csv"
+    p.write_text("setting,value\nfloor.default,0.5\nread.grades,2|3\nmeasure.gate_cosine,0.45\n"
+                 "posterior.min_graded,2\nposterior.min_each,1\nposterior.near_copy,1.01\n"
+                 "posterior.folds,2\nskip.min_positives,1\nskip.max_loss,0.01\n")
+    monkeypatch.setenv("WBG_PANEL", str(p))
+    kw = dict(top=1, max_rounds=1, batch=3, min_yield=0)
+    first = measure.measure("cra", data, **dict(RUN, **kw))
+    assert len([r for r in _rows(first) if r["sent"] == "true"]) == 4
+    path, n = check_units.build("cra", data, seed=1, design="train", **kw)
+    assert n == 4
+    key = list(csv.DictReader(open(path.replace(".xlsx", ".key.csv"))))
+    texts = {r["unit_id"]: r["text"] for r in _rows(first)}
+    grades = {int(k["row_id"]): (3 if "hazard" in texts[k["unit_id"]] or
+                                 "ten towers" in texts[k["unit_id"]] else 0) for k in key}
+    wb = openpyxl.load_workbook(path)
+    ws = wb["grade these"]
+    head = [c.value for c in ws[1]]
+    for r, g in grades.items():
+        ws.cell(r + 1, head.index("grade") + 1, g)
+    wb.save(path)
+    out, rows = check_units.evaluate("cra", data, seed=1, **kw)
+    assert rows == 4
+    report = open(out).read()
+    assert "A training sheet" in report and "posterior >= 0.5 (the floor)" in report
+    labels = list(csv.DictReader(open(os.path.join(data, "labels", "cra_units.csv"))))
+    assert {r["stratum"] for r in labels} <= {"train:near", "train:far"}
+    assert all(float(r["weight"]) >= 1 for r in labels)
+    gate = json.load(open(skip.path(data, "cra")))["cra"]
+    assert gate["positives"] == 2
+    assert os.path.exists(os.path.join(data, "labels", "cra_posterior.json"))
+    nxt = measure.Run("cra", data, build=False, log=lambda *_: None, **{
+        k: v for k, v in kw.items() if k != "min_cosine"})
+    assert nxt.gate_fitted == gate["gate"] and nxt.calibration
+    assert nxt.out != first

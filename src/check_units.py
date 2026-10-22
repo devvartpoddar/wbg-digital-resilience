@@ -41,6 +41,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import classify  # noqa: E402
 import measure  # noqa: E402
+import panel  # noqa: E402
 
 CELL_MAX = 32_000   # Excel's limit on a cell's characters
 
