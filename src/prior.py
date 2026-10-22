@@ -9,26 +9,22 @@ answers, so one fit can later read them all:
                         text: each word weighted by its inverse document
                         frequency over every search unit (a rare word counts
                         for more than a common one)
-  prior_table_row       the unit is a prose table row
-  prior_position        the sentence's place in its paragraph (0: a table
-                        row or a whole unit)
-  prior_words           its length in words
-  prior_has_component   it sits under a known component
-  prior_para_assets_mean, prior_para_assets_max
-                        among the other sentences of the paragraph, the
-                        average and the highest of their best cosine over
-                        every asset's phrases: how asset-dense the paragraph
-                        is, and whether one neighbour is clearly an asset
-  prior_para_measures_mean, prior_para_measures_max
-                        the same over every measure's phrases
 
-No cut-off goes into these: the fit decides later what level counts.
-A paragraph about data centres with two measure sentences raises every one of
-its sentences, whichever measure or asset is asked about; a measure added to
-analysis/labels/ counts in the paragraphs from its first search.
+Two more are made once every stage has run, from what the pipeline
+classified (paragraph_classified, loaded as wbg.unit_paragraph_context):
 
-Only text, structure and embeddings go in: never a model answer, so no item
-depends on the order others were asked. Nothing reads these yet; the weights
+  prior_para_assets     other sentences in the paragraph the asset map gives
+                        an asset (its best asset at asset.floor or more)
+  prior_para_measures   other sentences in the paragraph committed for any
+                        measure (each measure's floor)
+
+They move when the classification is tuned, as they should: a paragraph
+about data centres with two committed measure sentences raises each of its
+sentences, whichever asset or measure is asked about.
+
+The first two read only the text and its embedding; the paragraph counts read
+the finished classification of the other sentences, so no item depends on the
+order the others were asked. Nothing reads these yet; the weights
 and cut-offs that use them are fitted after a sheet is graded.
 """
 import hashlib
@@ -42,15 +38,11 @@ from paths import where
 
 # Part of every run key that stores these columns: a change here is a new run
 # (its answers come from the store).
-VERSION = "1"
-PARA_COLS = ["prior_para_assets_mean", "prior_para_assets_max", "prior_para_measures_mean",
-             "prior_para_measures_max"]
-COLS = ["prior_phrase_cosine", "prior_phrase_match", "prior_table_row", "prior_position",
-        "prior_words", "prior_has_component", *PARA_COLS]
+VERSION = "2"     # 2: structure dropped, paragraph counts from the classification
+COLS = ["prior_phrase_cosine", "prior_phrase_match"]
+PARA_COLS = ["prior_para_assets", "prior_para_measures"]
 ASSET_SET = "assets"
 WORD = re.compile(r"[a-z]{2,}")
-TABLE_ROW = re.compile(r":t\d+$")
-SENTENCE = re.compile(r":s(\d+)$")
 
 
 def words(text):
@@ -126,108 +118,56 @@ def phrase_match(text_words, prepared):
     return best
 
 
-# ---------------------------------------------------------------- structure
+# ------------------------------------------- paragraph counts (classified)
 
-def structure(unit_id, text, component_number):
-    """{prior_table_row, prior_position, prior_words, prior_has_component}."""
-    m = SENTENCE.search(unit_id or "")
-    return {"prior_table_row": "true" if TABLE_ROW.search(unit_id or "") else "false",
-            "prior_position": int(m.group(1)) if m else 0,
-            "prior_words": len((text or "").split()),
-            "prior_has_component": "true" if component_number else "false"}
-
-
-# --------------------------------------------------------- paragraph context
-
-def paragraph_key(data, sets=None):
-    """(key, [(set, search run folder)]): what the paragraph context is made
-    from, without computing it (a run key needs only this)."""
-    import labels
-    import search
-    from paths import file_sha256
-    index_path = where(data, "embeddings", "sentence_index.csv")
-    if not os.path.exists(index_path):          # nothing embedded: no context
-        return "", []
-    runs = []
-    for name in sorted(sets or labels.label_sets()):
-        try:
-            folder, _ = search.run_folder(name, data)
-        except SystemExit:
-            continue
-        if os.path.exists(os.path.join(folder, "manifest.json")):
-            runs.append((name, folder))
-    key = hashlib.sha256(json.dumps([VERSION, file_sha256(index_path),
-                                     [os.path.basename(f) for _, f in runs]]).encode()
-                         ).hexdigest()[:16]
-    return key, runs
-
-
-def paragraph_context(data, sets=None):
-    """(key, {unit_id: (assets mean, assets max, measures mean, measures max)})
-    over every embedded unit: among the OTHER sentences of its paragraph, the
-    average and the highest of their best cosine over every asset's phrases,
-    and over every measure's phrases (None for a sentence alone in its
-    paragraph). No cut-off: the fit decides what level counts. From every
-    label set's current search run (or `sets`); kept in
-    data/prior/paragraphs-<key>.json, the key covering the search runs and the
-    sentence index, so a new phrase or measure is a new context."""
+def paragraph_classified(data, projects=None):
+    """(key, [{unit_id, paragraph_id, prior_para_assets, prior_para_measures}])
+    for every embedded unit in scope: how many OTHER sentences of its
+    paragraph the current asset map gives an asset (the best asset's
+    probability at the control panel's asset.floor or more) and how many are
+    committed for any measure (each measure run's `committed`). key names the
+    runs read; (None, []) with no run at all."""
     import csv
-    import numpy
-    import search
-    key, runs = paragraph_key(data, sets)
-    if not key:
-        return "", {}
+    import labels
+    import measure
+    import panel
+    floor = float(panel.get("asset.floor", 0.3))
     index_path = where(data, "embeddings", "sentence_index.csv")
-    cache = where(data, "prior", f"paragraphs-{key}.json")
-    try:
-        with open(cache, encoding="utf-8") as fh:
-            return key, {u: tuple(v) for u, v in json.load(fh).items()}
-    except (OSError, ValueError):
-        pass
+    if not os.path.exists(index_path):            # nothing embedded: nothing classified
+        return None, []
+    unit_assets, asset_run = measure.asset_map(data, projects)
+    with_asset = {u for u, ps in unit_assets.items() if ps and max(ps.values()) >= floor}
+    committed, runs = set(), [asset_run] if asset_run else []
+    for name in labels.label_sets():
+        if name == ASSET_SET:
+            continue
+        try:
+            folder = measure.current_run(name, data, projects=projects)
+        except SystemExit:                         # no search run for the set yet
+            continue
+        if not folder:
+            continue
+        runs.append(os.path.basename(folder))
+        with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
+            committed |= {u["unit_id"] for u in csv.DictReader(fh) if u.get("committed") == "true"}
+    if not runs:
+        return None, []
     with open(index_path, newline="", encoding="utf-8") as fh:
-        index = [(r["unit_id"], r["paragraph_id"]) for r in csv.DictReader(fh)]
-    best = {"asset": numpy.full(len(index), numpy.nan), "measure": numpy.full(len(index), numpy.nan)}
-    for name, folder in runs:
-        kind = "asset" if name == ASSET_SET else "measure"
-        _, scores, _ = search.load_run(folder, data)
-        for s in range(0, len(index), search.BLOCK):
-            block = numpy.asarray(scores[s:s + search.BLOCK], dtype="float64").max(axis=1)
-            best[kind][s:s + len(block)] = numpy.fmax(best[kind][s:s + len(block)], block)
-    rows = defaultdict(list)
-    for i, (_, pid) in enumerate(index):
-        rows[pid].append(i)
-    out = {}
-    for pid, members in rows.items():
-        stats = {}
-        for kind, b in best.items():
-            vals = [(b[i], i) for i in members if not numpy.isnan(b[i])]
-            total = sum(v for v, _ in vals)
-            top = sorted(vals, reverse=True)[:2]
-            stats[kind] = (total, len(vals), top)
-        for i in members:
-            row = []
-            for kind in ("asset", "measure"):
-                total, n, top = stats[kind]
-                own = best[kind][i]
-                has = not numpy.isnan(own)
-                others = n - has
-                mean = (total - (own if has else 0.0)) / others if others else None
-                high = next((v for v, j in top if j != i), None)
-                row += [None if mean is None else round(float(mean), 4),
-                        None if high is None else round(float(high), 4)]
-            out[index[i][0]] = tuple(row)
-    os.makedirs(os.path.dirname(cache), exist_ok=True)
-    with open(cache + ".part", "w", encoding="utf-8") as fh:
-        json.dump(out, fh, sort_keys=True)
-    os.replace(cache + ".part", cache)
+        index = [(r["unit_id"], r["paragraph_id"], r.get("project_ids", ""))
+                 for r in csv.DictReader(fh)]
+    per = defaultdict(lambda: [0, 0])
+    for uid, pid, _ in index:
+        per[pid][0] += uid in with_asset
+        per[pid][1] += uid in committed
+    out = []
+    for uid, pid, proj in index:
+        if projects and not set(proj.split("|")) & set(projects):
+            continue
+        out.append({"unit_id": uid, "paragraph_id": pid,
+                    "prior_para_assets": per[pid][0] - (uid in with_asset),
+                    "prior_para_measures": per[pid][1] - (uid in committed)})
+    key = f"{VERSION}:{floor}:" + "|".join(sorted(runs))
     return key, out
-
-
-def paragraph_inputs(context, unit_id):
-    """The four paragraph inputs of a unit (blank when it is alone in its
-    paragraph or not in the index)."""
-    v = context.get(unit_id, (None, None, None, None))
-    return dict(zip(PARA_COLS, (fmt(x) for x in v)))
 
 
 def fmt(x):

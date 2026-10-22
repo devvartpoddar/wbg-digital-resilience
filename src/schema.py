@@ -97,7 +97,7 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
            "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
-           "prior_position", "prior_words"}
+           "prior_para_assets", "prior_para_measures"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "commitment_v2_usd_millions", "commitment_v3_usd_millions",
@@ -112,14 +112,11 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
            "best_actor_probability", "cosine", "probability", "p_only_a", "p_only_b", "p_both",
            "p_neither", "p_rule", "p_investment", "p_not_commitment",
-           "prior_phrase_cosine", "prior_phrase_match", "prior_para_assets_mean",
-           "prior_para_assets_max", "prior_para_measures_mean", "prior_para_measures_max",
-           "prior_probability_a",
+           "prior_phrase_cosine", "prior_phrase_match", "prior_probability_a",
            "prior_probability_b", "prior_phrase_cosine_a", "prior_phrase_cosine_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
-           "was_sent_to_model", "was_asked", "is_committed", "prior_table_row",
-           "prior_has_component"}
+           "was_sent_to_model", "was_asked", "is_committed"}
 # Pipe-joined lists in the CSV become arrays, which Metabase renders and
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
@@ -162,14 +159,6 @@ def rename(table, csv_name):
 PRIOR_INPUTS = {
     "prior_phrase_cosine": "Prior input: best embedding cosine to the label's search phrases.",
     "prior_phrase_match": "Prior input: the best phrase's share of information found in the text, each word weighted by how rare it is in the corpus (0 to 1).",
-    "prior_table_row": "Prior input: the unit is a prose table row.",
-    "prior_position": "Prior input: the sentence's place in its paragraph (0 for a table row or a whole unit).",
-    "prior_words": "Prior input: length in words.",
-    "prior_has_component": "Prior input: the unit sits under a known component.",
-    "prior_para_assets_mean": "Prior input: among the other sentences of the paragraph, the average of their best cosine over every asset's phrases (how asset-dense the paragraph is); empty for a sentence alone in its paragraph.",
-    "prior_para_assets_max": "Prior input: the highest of those cosines (whether one neighbour is clearly about an asset).",
-    "prior_para_measures_mean": "Prior input: the same average over every measure's phrases.",
-    "prior_para_measures_max": "Prior input: the highest of those."
 }
 PROBABILITY_GRADES = {
     "most_likely_grade": "The grade with the highest probability, on the label set's scale "
@@ -526,6 +515,17 @@ TABLES = {
             "prior_phrase_cosine": "Prior input: the cosine above, under the name every question's prior uses.",
             "prior_phrase_match": "Prior input: the best asset phrase's share of information found in the package description, words weighted by rarity.",
         }),
+    "unit_paragraph_context": dict(
+        schema=PUBLIC, key=("unit_id",),
+        foreign=[("unit_id", "search_units", "unit_id"),
+                 ("paragraph_id", "paragraphs", "paragraph_id")],
+        comment="Prior inputs made once every stage has run (src/prior.py, "
+                "docs/method/decisions.md): for each sentence, how many other sentences of its "
+                "paragraph the pipeline classified as having an asset and as committed for any "
+                "measure. They move when the classification is tuned. Rebuilt whole at every "
+                "publish; read by nothing until a graded sheet fits the weights that use them.",
+        columns={"prior_para_assets": "Other sentences of the paragraph whose best asset in the asset map reaches the control panel's asset.floor.",
+                 "prior_para_measures": "Other sentences of the paragraph committed for any measure (each measure's floor)."}),
     "unit_pair_checks": dict(
         schema=PUBLIC, key=("unit_id", "set_a", "set_b"), foreign=[],
         comment="For a unit two measures both commit: the decision model's choice of only the "

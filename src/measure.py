@@ -303,10 +303,8 @@ class Run:
                          "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
-                         # the prior inputs stored with every unit (src/prior.py),
-                         # and the paragraph context they read (every label set)
+                         # the prior inputs stored with every unit (src/prior.py)
                          "prior": prior.VERSION,
-                         "prior_paragraphs": prior.paragraph_key(data)[0],
                          "projects": sorted(projects) if projects else None,
                          # the control panel's readings this run applies
                          "panel": {**panel.items("read."), **panel.items("asset."),
@@ -383,15 +381,14 @@ class Run:
 
     def load_prior(self):
         """What the prior inputs read (src/prior.py): each unit's best cosine
-        over the measure's phrases, how asset-like and measure-like the other
-        sentences of its paragraph are, and the phrases weighted by how rare
-        their words are."""
+        over the measure's phrases, and the phrases weighted by how rare their
+        words are. (The paragraph counts are made after every stage, from the
+        classification.)"""
         lid = self.labels[0]["id"]
         cols = [j for j, q in enumerate(self.queries) if q["label_id"] == lid]
         best = numpy.asarray(self.scores[:, cols]).max(axis=1) if cols else \
             numpy.zeros(len(self.index), dtype="float32")
         self.best_cosine = {r["unit_id"]: float(b) for r, b in zip(self.index, best)}
-        _, self.para_context = prior.paragraph_context(self.data)
         weight = prior.Weights(*prior.word_df(self.data))
         self.phrases = prior.phrases([q["text"] for q in self.queries
                                       if q["label_id"] == lid and q["kind"] == "phrase"], weight)
@@ -401,9 +398,7 @@ class Run:
         uid = r["unit_id"]
         return {"prior_phrase_cosine": prior.fmt(self.best_cosine.get(uid)),
                 "prior_phrase_match": prior.fmt(prior.phrase_match(set(prior.words(text)),
-                                                                   self.phrases)),
-                **prior.structure(uid, text, r.get("component_number")),
-                **prior.paragraph_inputs(self.para_context, uid)}
+                                                                   self.phrases))}
 
     # ---- units
 

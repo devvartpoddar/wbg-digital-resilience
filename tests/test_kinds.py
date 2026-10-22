@@ -117,7 +117,7 @@ def test_assignment_needs_an_approved_list_and_asks_one_yes_no_per_type(store):
     rows = list(csv.DictReader(open(os.path.join(out, "assignments.csv"))))
     assert [(r["unit_id"], r["types_yes"]) for r in rows] == [("u1", "mapping"), ("u2", "site")]
     # The prior inputs: each type's name and definition matched against the sentence.
-    assert {"prior_phrase_match_mapping", "prior_phrase_match_site", "prior_words"} <= set(rows[0])
+    assert {"prior_phrase_match_mapping", "prior_phrase_match_site"} <= set(rows[0])
     assert float(rows[0]["prior_phrase_match_mapping"]) > float(rows[0]["prior_phrase_match_site"])
 
 

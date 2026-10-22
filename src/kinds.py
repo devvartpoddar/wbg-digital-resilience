@@ -72,10 +72,6 @@ OTH_PREFIX = "OTH."
 OTH_MIN = 5              # fewer "none" units than this are reported, not proposed from
 ASSIGN_COLS = ["label_id", "unit_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "model_served", "cost", "types_yes", "best_type", "best_p"]
-# The sentence's prior inputs that do not depend on the label (src/prior.py),
-# copied from the measure's units.csv; the per-type phrase match is added.
-PRIOR_UNIT_COLS = ["prior_table_row", "prior_position", "prior_words", "prior_has_component",
-                   *prior.PARA_COLS]
 
 PROMPT = """You are helping an analyst sort sentences from World Bank project appraisal documents.
 Every sentence below was judged to commit the project to the measure "{name}", defined as: {definition}
@@ -488,9 +484,8 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     all_types = {lid: [t["type_id"] for t in ts] + [t["type_id"] for t in oth.get(lid, [])]
                  for lid, ts in approved.items()}
     # The prior inputs (src/prior.py): each type's name and definition matched
-    # against the sentence, words weighted by rarity; the sentence's own
-    # structure and paragraph count as the measure stored them. Types have no
-    # embedded phrases, so there is no phrase cosine.
+    # against the sentence, words weighted by rarity. Types have no embedded
+    # phrases, so there is no phrase cosine.
     weight = prior.Weights(*prior.word_df(data))
     type_phrases = {lid: {t["type_id"]: prior.phrases([t["type_name"], t["definition"]], weight)
                           for t in ts + oth.get(lid, [])} for lid, ts in approved.items()}
@@ -517,13 +512,11 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
                          "types_yes": "|".join(yes), "best_type": best if yes else "",
                          "best_p": f"{probs[best]:.3f}" if yes else "",
                          **{f"p_{t}": f"{probs.get(t, 0.0):.3f}" for t in all_types[lid]},
-                         **{c: u.get(c, "") for c in PRIOR_UNIT_COLS},
                          **{f"prior_phrase_match_{t}": prior.fmt(prior.phrase_match(
                              set(prior.words(u["text"])), type_phrases[lid].get(t, [])))
                             for t in all_types[lid]}})
     cols = ASSIGN_COLS + sorted({k for r in out_rows for k in r if k.startswith("p_")}) + \
-        PRIOR_UNIT_COLS + sorted({k for r in out_rows for k in r
-                                  if k.startswith("prior_phrase_match_")})
+        sorted({k for r in out_rows for k in r if k.startswith("prior_phrase_match_")})
     part = out + ".part"
     os.makedirs(part, exist_ok=True)
     with open(os.path.join(part, "assignments.csv"), "w", newline="", encoding="utf-8") as fh:

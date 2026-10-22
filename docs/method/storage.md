@@ -15,7 +15,7 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
   - `types/`: stored generative-model proposals and the decision model's type assignments, one folder per label set and version (section 5d);
   - `links/`: which asset each package buys and which commitments it would carry out, one folder per version (section 5e);
   - `classify/`: every decision-model answer, one file per model, state and question (`answers/`; the earlier per-request store in `cache/` is read and split on demand), and one folder per label set and version for the asset map (section 5b);
-  - `prior/`: what the prior inputs read (section 5g): the corpus word frequencies they weigh words by (`word_df-<key>.json`, one per state of the sentence index) and how asset-dense and measure-dense each sentence's paragraph is (`paragraphs-<key>.json`, one per state of the search runs);
+  - `prior/`: what the prior inputs read (section 5g): the corpus word frequencies they weigh words by (`word_df-<key>.json`, one per state of the sentence index);
   - `labels/`: grades a person gave: `<set>.csv` for paragraphs, `<set>_units.csv` for a measure's units (sections 5b, 5c); `measure_quality.csv`, each evaluation's headline numbers (section 5f); `activities.xlsx`, the hand-labelled workbook of activities (never in git);
   - `requested_labels/`: the files of measures requested from the dashboard (section 5f), read as a third label folder;
   - `archive/`: tables an earlier version wrote and nothing reads (`document_projects.csv`, `package_changes.csv`), moved there by `src/paths.py`, never deleted;

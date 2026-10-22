@@ -543,6 +543,15 @@ CHECK_SCOPE_COLS = ["unit_id", "scope", "probability", "p_rule", "p_investment",
                     "p_not_commitment", "model_served", "cost"]
 
 
+CONTEXT_COLS = ["unit_id", "paragraph_id", *prior.PARA_COLS]
+
+
+def context_rows(data, projects=None):
+    """(key, rows) of the paragraph counts made from the classification
+    (src/prior.py), or (None, []) before any model stage has run."""
+    return prior.paragraph_classified(data, projects)
+
+
 def check_rows(data, projects=None):
     """(sha, pair rows, scope rows) of the current commitment checks
     (src/commit_checks.py), or (None, [], []) when there are none. The scope
@@ -954,6 +963,8 @@ def main():
         sha, assets_, pairs_ = link_rows(args.data, projects)
         derived(conn, "package_assets", sha, ASSET_LINK_COLS, assets_)
         derived(conn, "commitment_packages", sha, PAIR_LINK_COLS, pairs_)
+        sha, ctx = context_rows(args.data, projects)
+        derived(conn, "unit_paragraph_context", sha, CONTEXT_COLS, ctx)
         sha, cpairs, cscope = check_rows(args.data, projects)
         derived(conn, "unit_pair_checks", sha, CHECK_PAIR_COLS, cpairs)
         derived(conn, "unit_scope", sha, CHECK_SCOPE_COLS, cscope)

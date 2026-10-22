@@ -74,7 +74,7 @@ MEASURE_TOP = int(panel.get("link.measure_top", 3))  # control panel
 YES = float(panel.get("link.asset_yes", 0.5))  # an asset at or above it is one the package "has"
 # The prior inputs (src/prior.py) a package has: the cosine to the label's
 # phrases and the phrase match weighted by word rarity. A package is no
-# sentence, so the structure and paragraph inputs do not apply.
+# sentence, so the paragraph counts do not apply.
 PRIOR_COLS = ["prior_phrase_cosine", "prior_phrase_match"]
 ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
               "model_served", "cost", *PRIOR_COLS]
