@@ -1,10 +1,10 @@
 measure_id,type_id,type_name,definition,active,version
-disaster_recovery,backup,Data backup,"Making recoverable copies of data, on site, off site or in the cloud. Does not include live replication with failover, or a secondary site for running services.",true,v5
-disaster_recovery,replication_failover,Replication and failover,Continuously replicating data or systems so that services switch to another environment when the primary one fails. Does not include periodic backups or a separate recovery site for restoring services later.,true,v5
-disaster_recovery,recovery_site,Recovery site,A secondary data centre or environment from which critical services are restored after a disruption. Does not include backups of data alone.,true,v5
-disaster_recovery,recovery_objectives,Recovery plans and objectives,"Defined recovery time or recovery point objectives, disaster recovery plans, or tested recovery procedures. Does not include the backup, replication or recovery site itself.",true,v5
-disaster_recovery,records_digitisation,Digitising records against loss,"Converting paper records to electronic form, stored and backed up, so that they survive damage to the physical copies in a disaster. Does not include backup of data that is already digital.",true,v5
-disaster_recovery,data_backup,Data backup,Creates recoverable copies of data at the same location,false,v4
-disaster_recovery,offsite_backup,Off-site backup,Stores backup copies of data at a separate location or in the cloud,false,v4
-disaster_recovery,replication,Data or system replication,"Replicates data, applications or systems across environments",false,v4
-disaster_recovery,failover,Failover,Transfers services to an alternative environment following failure,false,v4
+disaster_recovery,backup,Data backup,"Making recoverable copies of data, on site, off site or in the cloud. Does not include live replication with failover, or a secondary site for running services.",true,v1.0
+disaster_recovery,replication_failover,Replication and failover,Continuously replicating data or systems so that services switch to another environment when the primary one fails. Does not include periodic backups or a separate recovery site for restoring services later.,true,v1.0
+disaster_recovery,recovery_site,Recovery site,A secondary data centre or environment from which critical services are restored after a disruption. Does not include backups of data alone.,true,v1.0
+disaster_recovery,recovery_objectives,Recovery plans and objectives,"Defined recovery time or recovery point objectives, disaster recovery plans, or tested recovery procedures. Does not include the backup, replication or recovery site itself.",true,v1.0
+disaster_recovery,records_digitisation,Digitising records against loss,"Converting paper records to electronic form, stored and backed up, so that they survive damage to the physical copies in a disaster. Does not include backup of data that is already digital.",true,v1.0
+disaster_recovery,data_backup,Data backup,Creates recoverable copies of data at the same location,false,v1.0
+disaster_recovery,offsite_backup,Off-site backup,Stores backup copies of data at a separate location or in the cloud,false,v1.0
+disaster_recovery,replication,Data or system replication,"Replicates data, applications or systems across environments",false,v1.0
+disaster_recovery,failover,Failover,Transfers services to an alternative environment following failure,false,v1.0

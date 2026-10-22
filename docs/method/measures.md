@@ -2,6 +2,8 @@
 
 Part of the method (`docs/methodology.md` is the index). Measured results and trials: `docs/method/history.md`.
 
+**Versions (from 2026-10-22).** Every file in `analysis/labels/` carries `v1.0` in its `version` column; the earlier numbering (v1 to v7) is retired and appears below only as history. A revision of a set's wording (definition, boundary, scale, types, patterns, queries, floor) raises the minor number of the rows it changes: v1.1, v1.2, and so on. The major number changes only when the decision model that grades the sentences changes (v2.0 for the first set graded by another model). The column is a label for people: runs and stored answers are keyed on the exact questions, never on it, so changing it alone asks nothing again and leaves no run stale.
+
 ## 5c. A measure through the funnel (`src/measure.py`, `./wbg measure <set>`)
 
 At 70 projects the decision model could read every sentence for every measure (about US$0.80 a measure); at the 500 projects the study is heading for, it could not for every measure. So a measure is read through a funnel, each level cheaper than the next and each one's loss measurable:
