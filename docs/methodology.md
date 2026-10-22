@@ -65,6 +65,7 @@ The method is split by stage so a change reads only its part. **When you change 
 | 5c, 5d | `docs/method/measures.md` | the funnel, checks against graded sheets, types (`measure.py`, `check_units.py`, `evaluate_activities.py`, `kinds.py`) |
 | 5e | `docs/method/links.md` | packages to assets and commitments (`link_packages.py`) |
 | 5f | `docs/method/dashboards.md` | the dashboards' views, package status, requested measures (`sql/views/13-19`, `measure_requests.py`) |
+| 5g | `docs/method/decisions.md` | one decision system for every question to the decision model: prior, skip, answer, posterior, decision; the prior inputs that need no grading (`prior.py`) |
 | 6 | `docs/method/storage.md` | `data/` layout, joins, the cohort (`paths.py`, `cohort_build.py`) |
 | 7 | `docs/method/limits.md` | known limits |
 | - | `docs/method/history.md` | dated results and trials the method was tuned on; read only when a choice needs its evidence |

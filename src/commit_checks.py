@@ -37,11 +37,14 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import classify  # noqa: E402
 import labels  # noqa: E402
+import prior  # noqa: E402
 
 ASSET_SET = "assets"
 PAIR_OPTIONS = ("only_a", "only_b", "both", "neither")
 PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_only_a", "p_only_b",
-             "p_both", "p_neither", "model_served", "cost"]
+             "p_both", "p_neither", "model_served", "cost",
+             "prior_probability_a", "prior_phrase_cosine_a", "prior_probability_b",
+             "prior_phrase_cosine_b"]
 
 
 def boundary_of(name):
@@ -85,9 +88,9 @@ def committed(data, projects=None):
 
 
 def plan(data, projects=None, model=classify.MODEL):
-    """(pairs [(unit_id, set_a, set_b, request)], out folder). The folder
-    is keyed on the measure runs, the model and every request, so a changed
-    boundary or a new run is a new folder."""
+    """(pairs [(unit_id, set_a, set_b, request)], out folder, {(set, unit_id):
+    unit row}). The folder is keyed on the measure runs, the model and every
+    request, so a changed boundary or a new run is a new folder."""
     sets, runs = committed(data, projects)
     by_unit, text = defaultdict(set), {}
     for name, us in sets.items():
@@ -99,10 +102,11 @@ def plan(data, projects=None, model=classify.MODEL):
     for uid in sorted(by_unit):
         for a, b in combinations(sorted(by_unit[uid]), 2):
             pairs.append((uid, a, b, ({"sentence": text[uid]}, pair_question(bound[a], bound[b]))))
-    h = hashlib.sha256(f"{model}\t{sorted(runs)}\n".encode())
+    h = hashlib.sha256(f"{model}\t{sorted(runs)}\nprior={prior.VERSION}\n".encode())
     for _, _, _, (state, qs) in pairs:
         h.update(classify.request_sha(classify.request_body(state, qs, model)).encode())
-    return pairs, where(data, "checks", f"checks-{h.hexdigest()[:12]}")
+    known = {(name, uid): u for name, us in sets.items() for uid, u in us.items()}
+    return pairs, where(data, "checks", f"checks-{h.hexdigest()[:12]}"), known
 
 
 def current_run(data, projects=None):
@@ -114,6 +118,19 @@ def current_run(data, projects=None):
     return out if os.path.exists(os.path.join(out, "manifest.json")) else None
 
 
+def prior_of(known, uid, name, side):
+    """What is known about the unit for one measure before the pair is asked
+    (src/prior.py): the measure's probability for it (the probability layer's,
+    else the model's score) and its cosine to the measure's phrases. Unlike
+    the other questions' priors this one holds an earlier answer: the pair
+    question is asked only because both measures already committed the unit."""
+    import measure
+    u = known.get((name, uid), {})
+    p = u.get("p_committed_calibrated") or (f"{measure.score_of(u):.4f}" if u else "")
+    return {f"prior_probability_{side}": p,
+            f"prior_phrase_cosine_{side}": u.get("prior_phrase_cosine", "")}
+
+
 def _probs(entry):
     return {k: float(v) for k, v in entry["answer"]["probabilities"].items()}
 
@@ -121,7 +138,7 @@ def _probs(entry):
 def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=classify.WORKERS,
         model=classify.MODEL):
     import answers
-    pairs, out = plan(data, projects, model)
+    pairs, out, known = plan(data, projects, model)
     log(f"checks: {len(pairs):,} unit pair(s) two measures both commit -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
@@ -151,7 +168,8 @@ def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=cl
                           "probability": f"{p[best]:.3f}",
                           **{f"p_{k}": f"{p.get(k, 0.0):.3f}" for k in PAIR_OPTIONS},
                           "model_served": g["pair"]["model"],
-                          "cost": f"{float(g['pair'].get('cost_usd') or 0):.6f}"})
+                          "cost": f"{float(g['pair'].get('cost_usd') or 0):.6f}",
+                          **prior_of(known, uid, a, "a"), **prior_of(known, uid, b, "b")})
     part = out + ".part"
     os.makedirs(part, exist_ok=True)
     with open(os.path.join(part, "pairs.csv"), "w", newline="", encoding="utf-8") as fh:

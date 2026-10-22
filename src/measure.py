@@ -82,6 +82,7 @@ import classify  # noqa: E402
 import labels as labels_mod  # noqa: E402
 import panel  # noqa: E402
 import posterior  # noqa: E402
+import prior  # noqa: E402
 import search  # noqa: E402
 
 # The dated snapshot, not the alias: the alias moves when the vendor ships a
@@ -169,7 +170,7 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "asset_unit", "asset_p_unit", "assets_yes", "asset_link", "asset_link_level",
              "asset_link_p", "kinds_yes", "kind_best", "kind_p", "conditional_p",
              "actors_yes", "actor_best", "actor_p", "template_projects", "template_share",
-             "sent", "committed",
+             *prior.COLS, "sent", "committed",
              "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
              "p_committed_calibrated",
              "model_served", "cost", "text"]
@@ -302,6 +303,8 @@ class Run:
                          "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
+                         # the prior inputs stored with every unit (src/prior.py)
+                         "prior": prior.VERSION,
                          "projects": sorted(projects) if projects else None,
                          # the control panel's readings this run applies
                          "panel": {**panel.items("read."), **panel.items("asset."),
@@ -372,8 +375,36 @@ class Run:
             prior.append(r["unit_id"])
         self.layer = posterior.load(self.layer_path, self.question_sha, self.vector_of)
         self.texts = unit_texts(data, self.index)
+        self.load_prior()
         self.doc_texts = {}
         self._loaded = True
+
+    def load_prior(self):
+        """What the prior inputs read (src/prior.py): each unit's best cosine
+        over the measure's phrases, its paragraph's other units, and the
+        phrases weighted by how rare their words are."""
+        lid = self.labels[0]["id"]
+        cols = [j for j, q in enumerate(self.queries) if q["label_id"] == lid]
+        best = numpy.asarray(self.scores[:, cols]).max(axis=1) if cols else \
+            numpy.zeros(len(self.index), dtype="float32")
+        self.best_cosine = {r["unit_id"]: float(b) for r, b in zip(self.index, best)}
+        pairs = [(r["unit_id"], r["paragraph_id"]) for r in self.index]
+        self.para_likely = prior.paragraph_likely(pairs, self.best_cosine,
+                                                  self.settings["min_cosine"])
+        self.para_best = prior.paragraph_best(pairs, self.best_cosine)
+        weight = prior.Weights(*prior.word_df(self.data))
+        self.phrases = prior.phrases([q["text"] for q in self.queries
+                                      if q["label_id"] == lid and q["kind"] == "phrase"], weight)
+
+    def prior_of(self, r, text):
+        """The unit's prior inputs (src/prior.py)."""
+        uid = r["unit_id"]
+        return {"prior_phrase_cosine": prior.fmt(self.best_cosine.get(uid)),
+                "prior_phrase_match": prior.fmt(prior.phrase_match(set(prior.words(text)),
+                                                                   self.phrases)),
+                **prior.structure(uid, text, r.get("component_number")),
+                "prior_para_likely": self.para_likely.get(uid, 0),
+                "prior_para_best": prior.fmt(self.para_best.get(uid))}
 
     # ---- units
 
@@ -391,6 +422,7 @@ class Run:
                 "actor_p": "", "template_projects": r.get("template_projects", ""),
                 "template_share": r.get("template_share", ""), "p_committed_calibrated": "",
                 "sent": "false", "committed": "false",
+                **self.prior_of(r, text),
                 "text": text, "_para": para}
         self.link_into(row)
         return row

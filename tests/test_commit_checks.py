@@ -73,6 +73,8 @@ def test_a_unit_two_measures_commit_gets_one_pair_answer_and_nothing_else_is_ask
     assert "main supply fails" in q["instructions"] and "renewable electricity" in q["instructions"]
     assert all(list(c["questions"]) == ["pair"] for c in calls)
     assert not os.path.exists(os.path.join(out, "scope.csv"))
+    # The prior inputs: each measure's probability for the unit, known before the pair is asked.
+    assert pairs[0]["prior_probability_a"] == "0.0000" and "prior_phrase_cosine_b" in pairs[0]
 
 
 def test_a_rerun_asks_nothing_and_finds_the_same_folder(store):

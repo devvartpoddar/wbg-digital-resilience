@@ -47,6 +47,7 @@ from paths import data_root, where  # noqa: E402
 import embed  # noqa: E402
 import labels  # noqa: E402
 import panel  # noqa: E402
+import prior  # noqa: E402
 from search import TAXONOMY, _active, _rows  # noqa: E402
 
 # The dated snapshot, as the measure stage uses (measure.MODEL): the alias
@@ -87,7 +88,7 @@ UNIT = panel.get("asset.unit", "sentence")
 WORKERS = 10
 SCORE_COLS = ["unit_id", "paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
               "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
-              "p3", "p4", "model_served"]
+              "p3", "p4", "model_served", *prior.COLS]
 
 
 # What each run actually asked for is appended to data/reports/spend.csv, so
@@ -347,6 +348,51 @@ def best_cosines(name, data, taxonomy=TAXONOMY, unit=None):
     return out
 
 
+def prior_inputs(name, data, taxonomy, items_, cosines, gate):
+    """of(label_id, unit_id) -> the prior inputs (src/prior.py) of a
+    sentence of the map for a label: its best cosine over the label's
+    phrases, the phrase match weighted by word rarity, its structure, and
+    its paragraph's other sentences (those whose best cosine over any label
+    reaches the gate, and the best cosine to this label among them).
+    Computed per row as it is written: the map has a row per sentence and
+    label, and a second table of them would double the stage's memory."""
+    import search
+    cosines = cosines or best_cosines(name, data, taxonomy)
+    weight = prior.Weights(*prior.word_df(data))
+    phrases = {}
+    for q in search.load_queries(name, taxonomy):
+        if q["kind"] == "phrase":
+            phrases.setdefault(q["label_id"], []).append(q["text"])
+    phrases = {lid: prior.phrases(ts, weight) for lid, ts in phrases.items()}
+    labs = [lab["id"] for lab in load_labels(name, taxonomy)[0]]
+    pairs = [(p["row"]["unit_id"], p["row"]["paragraph_id"]) for p in items_]
+    best_any, by_label = {}, {lid: {} for lid in labs}
+    for (lid, uid), c in cosines.items():
+        best_any[uid] = max(best_any.get(uid, -2.0), c)
+        if lid in by_label:
+            by_label[lid][uid] = c
+    likely = prior.paragraph_likely(pairs, best_any, gate or MIN_COSINE)
+    para_best = {lid: prior.paragraph_best(pairs, by_label[lid]) for lid in labs}
+    item = {p["row"]["unit_id"]: p for p in items_}
+    last = {}                   # the rows of one sentence are written together
+
+    def of(lid, uid):
+        p = item.get(uid)
+        if p is None or lid not in para_best:
+            return {}
+        if last.get("uid") != uid:
+            text = p["state"]["sentence"]
+            last.update(uid=uid, words=set(prior.words(text)),
+                        common={**prior.structure(uid, text, p["row"].get("component_number")),
+                                "prior_para_likely": likely.get(uid, 0)})
+        return {"prior_phrase_cosine": prior.fmt(cosines.get((lid, uid))),
+                "prior_phrase_match": prior.fmt(prior.phrase_match(last["words"],
+                                                                   phrases.get(lid, []))),
+                **last["common"],
+                "prior_para_best": prior.fmt(para_best[lid].get(uid))}
+    return of
+
+
 def score_rows(p, response, labels, cosines=None, asked=None):
     out = []
     for lab in labels:
@@ -417,7 +463,8 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
     h = hashlib.sha256(f"min_cosine={min_cosine}\n".encode() +
-                       (b"unit=sentence\n" if UNIT == "sentence" else b""))
+                       (f"unit=sentence\nprior={prior.VERSION}\n".encode()
+                        if UNIT == "sentence" else b""))
     for p, sha in zip(paras, shas):
         h.update(f"{p['row']['unit_id']}:{sha}\n".encode())
     out = where(data, "classify", f"{prefix}{name}-{h.hexdigest()[:12]}")
@@ -585,6 +632,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         return None
 
     rows, served = [], {}
+    prior_of = prior_inputs(name, data, taxonomy, [p for p, _ in bodies], cosines, min_cosine) \
+        if UNIT == "sentence" else (lambda lid, uid: {})
     it = iter(got)
     for p, b in bodies:
         if not b["questions"]:
@@ -596,6 +645,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         served[response["model"]] = served.get(response["model"], 0) + 1
         rows += score_rows(p, response, labels, cosines,
                            asked=set(b["questions"]) if min_cosine else None)
+    for r in rows:
+        r.update(prior_of(r["label_id"], r["unit_id"]))
     part = out + ".part"
     os.makedirs(part, exist_ok=True)
     with open(os.path.join(part, "scores.csv"), "w", newline="", encoding="utf-8") as fh:

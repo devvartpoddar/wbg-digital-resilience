@@ -38,6 +38,8 @@ def store(tmp_path, monkeypatch):
         for u, t, g in UNITS])
     (run / "manifest.json").write_text(json.dumps({"scale": ["a", "b", "c", "d"]}))
     monkeypatch.setattr(measure, "current_run", lambda name, d, **kw: str(run))
+    import prior
+    monkeypatch.setattr(prior, "word_df", lambda d: (10, {"hazards": 4, "maps": 2}))
     lab = tmp_path / "labels"
     _csv(str(lab / "cra.csv"), ["measure_id", "measure_name", "definition", "active"],
          [{"measure_id": "cra", "measure_name": "Climate risk assessment",
@@ -114,6 +116,9 @@ def test_assignment_needs_an_approved_list_and_asks_one_yes_no_per_type(store):
     assert list(qs["type"]["criteria"]) == ["mapping", "site", "none"]
     rows = list(csv.DictReader(open(os.path.join(out, "assignments.csv"))))
     assert [(r["unit_id"], r["types_yes"]) for r in rows] == [("u1", "mapping"), ("u2", "site")]
+    # The prior inputs: each type's name and definition matched against the sentence.
+    assert {"prior_phrase_match_mapping", "prior_phrase_match_site", "prior_words"} <= set(rows[0])
+    assert float(rows[0]["prior_phrase_match_mapping"]) > float(rows[0]["prior_phrase_match_site"])
 
 
 def test_a_completion_without_the_json_is_not_stored():

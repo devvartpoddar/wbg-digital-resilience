@@ -88,11 +88,18 @@ now.
 |---|---|---|
 | embed | one vector per text: `cache/<model>.<dim>/<sha of text>.f32`; `sentence_index.csv` is rebuilt every run | the text, model or dim changes |
 | search | query ids and texts (definitions and phrases), model:dim, and the **bytes of `sentence_index.csv`** | never (query vectors are cached) |
-| classify (asset map) | the gate, and every paragraph's request (model, section, passage, component, questions) | a paragraph's text or a question changes |
-| measure | the search and asset-map run names, the settings (model, context, gate, top, min_cosine, rounds, projects, `commit_floor` if written), the patterns, the question (scale, definitions), the probability layer | a question or state changes, or new units enter |
-| types | the measure run name, model, and every committed unit's request | a type list changes or new units are committed |
-| checks | the measure run names, model, and every pair request | new committed pairs |
+| classify (asset map) | the gate, the prior-input version (`prior.VERSION`), and every sentence's request (model, section, sentence, component, questions) | a paragraph's text or a question changes |
+| measure | the search and asset-map run names, the settings (model, context, gate, top, min_cosine, rounds, projects, `commit_floor` if written, the prior-input version), the patterns, the question (scale, definitions), the probability layer | a question or state changes, or new units enter |
+| types | the measure run name, model, the prior-input version, and every committed unit's request | a type list changes or new units are committed |
+| checks | the measure run names, model, the prior-input version, and every pair request | new committed pairs |
 | links | `LINK_VERSION`, model, `asset_top`, `MEASURE_TOP`, measure query texts, the bytes of `packages.csv`, the asset and pair questions, the measure run names, projects | new pairs or packages |
+
+The prior inputs (section 5g, `src/prior.py`) are stored with every stage's
+answers; their version is in each stage's key (`prior.VERSION`, and
+`LINK_VERSION` 4 for the links), so the first run after they were added is a
+new folder at every stage, rebuilt from the store at no cost. The word
+frequencies they weigh words by are counted once per sentence index
+(`data/prior/word_df-<key>.json`: a pass over the corpus text, no model call).
 
 Code is in no run folder's name: changing `src/` alone does not make a model
 run new (it does count in the prepare stages' fingerprints, below).

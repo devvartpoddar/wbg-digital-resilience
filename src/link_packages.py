@@ -57,9 +57,11 @@ import embed  # noqa: E402
 import labels  # noqa: E402
 import measure  # noqa: E402
 import panel  # noqa: E402
+import prior  # noqa: E402
 import search  # noqa: E402
 
-LINK_VERSION = "3"   # 3: pairs by a shared asset only, the asset groups removed (2026-10-21)
+LINK_VERSION = "4"   # 3: pairs by a shared asset only, the asset groups removed (2026-10-21);
+                     # 4: the prior inputs stored (src/prior.py, 2026-10-22)
 MODEL = measure.MODEL
 ASSET_SET = "assets"
 ASSET_TOP = int(panel.get("link.asset_top", 4))  # assets asked per package: its best by cosine
@@ -70,11 +72,15 @@ ASSET_TOP = int(panel.get("link.asset_top", 4))  # assets asked per package: its
 # over the stored embeddings), not already paired by asset, up to this many.
 MEASURE_TOP = int(panel.get("link.measure_top", 3))  # control panel
 YES = float(panel.get("link.asset_yes", 0.5))  # an asset at or above it is one the package "has"
+# The prior inputs (src/prior.py) a package has: the cosine to the label's
+# phrases and the phrase match weighted by word rarity. A package is no
+# sentence, so the structure and paragraph inputs do not apply.
+PRIOR_COLS = ["prior_phrase_cosine", "prior_phrase_match"]
 ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
-              "model_served", "cost"]
+              "model_served", "cost", *PRIOR_COLS]
 PAIR_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
              "shared_asset_ids", "route", "measure_rank", "measure_cosine",
-             "probability", "model_served", "cost"]
+             "probability", "model_served", "cost", *PRIOR_COLS]
 
 
 # ------------------------------------------------------------------ questions
@@ -302,15 +308,25 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
                                   time.time() - t0, "failed")
             log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
+    weight = prior.Weights(*prior.word_df(data))
+    asset_phrases = defaultdict(list)
+    for q in plan.queries:
+        if q["kind"] == "phrase":
+            asset_phrases[q["label_id"]].append(q["text"])
+    asset_phrases = {a: prior.phrases(ts, weight) for a, ts in asset_phrases.items()}
     asset_rows, has = [], defaultdict(set)
     for (p, top), g in zip(cands, got):
+        pw = set(prior.words(p["text"]))
         for a, cos, rank in top:
             e = g[a]
             prob = float(e["answer"]["noul"])
             asset_rows.append({"package_id": p["package_id"], "project_id": p["project_id"],
                                "label_id": a, "cosine": f"{cos:.4f}", "cosine_rank": rank,
                                "probability": f"{prob:.3f}", "model_served": e["model"],
-                               "cost": f"{float(e.get('cost_usd') or 0):.6f}"})
+                               "cost": f"{float(e.get('cost_usd') or 0):.6f}",
+                               "prior_phrase_cosine": f"{cos:.4f}",
+                               "prior_phrase_match": prior.fmt(prior.phrase_match(
+                                   pw, asset_phrases.get(a, [])))})
             if prob >= YES:
                 has[p["package_id"]].add(a)
     # Step 2: commitment <-> package.
@@ -335,13 +351,16 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
                     for name, _, u, pid, p, _ in pairs}
     pairs = [x + ("asset", "", "") for x in pairs]
     row_of = {p["package_id"]: i for i, p in enumerate(plan.packages)}
+    mbest = {}                       # each package's best cosine to each measure's phrases
     for name, (run, units) in sorted(plan.runs.items()):
-        if not units or not plan.settings["measure_top"]:
+        if not units:
             continue
         mq = search.query_vectors(search.load_queries(name, labels.folder(name)), plan.data,
                                   embed.DEFAULT_MODEL, plan.dim, embed.DEFAULT_BASE, api_key,
                                   log=log)
-        best = (plan.vecs @ mq.T).max(axis=1)              # package x measure
+        best = mbest[name] = (plan.vecs @ mq.T).max(axis=1)     # package x measure
+        if not plan.settings["measure_top"]:
+            continue
         for u in units:
             for pid in u["project_ids"].split("|"):
                 cands = sorted(by_project.get(pid, []),
@@ -373,13 +392,21 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
     pair_rows = []
     for (name, run, u, pid, p, shared, route, mrank, mcos), g in zip(pairs, got2):
         e = g["pair"]
+        # The prior inputs: the package's cosine to the measure's phrases, and
+        # how much of the package description the commitment sentence holds.
+        own = prior.phrases([p["text"]], weight)
         pair_rows.append({"label_set": name, "run": run, "label_id": u["label_id"],
                           "unit_id": u["unit_id"], "package_id": p["package_id"],
                           "project_id": pid, "shared_asset_ids": "|".join(sorted(shared)),
                           "route": route, "measure_rank": mrank, "measure_cosine": mcos,
                           "probability": f"{float(e['answer']['noul']):.3f}",
                           "model_served": e["model"],
-                          "cost": f"{float(e.get('cost_usd') or 0):.6f}"})
+                          "cost": f"{float(e.get('cost_usd') or 0):.6f}",
+                          "prior_phrase_cosine": prior.fmt(
+                              float(mbest[name][row_of[p["package_id"]]]) if name in mbest
+                              else None),
+                          "prior_phrase_match": prior.fmt(prior.phrase_match(
+                              set(prior.words(u["text"])), own))})
     seconds = time.time() - t0
     classify.record_spend(data, "link", "packages", model, calls, cost, seconds,
                           os.path.basename(plan.out))

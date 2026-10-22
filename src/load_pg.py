@@ -42,6 +42,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import labels  # noqa: E402
+import prior  # noqa: E402
 import schema as S  # noqa: E402
 
 DEFAULT_DSN = "postgresql:///work"
@@ -431,7 +432,7 @@ ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "projec
                "best_unit_id", "best_query_id", "units_hit"]
 CLASSIFY_COLS = ["label_set", "run", "unit_id", "paragraph_id", "doc_id", "project_ids",
                  "component_number", "label_id", "asked", "best_cosine", "grade", "expected",
-                 "confidence", "p0", "p1", "p2", "p3", "p4", "model_served"]
+                 "confidence", "p0", "p1", "p2", "p3", "p4", "model_served", *prior.COLS]
 MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
                 "project_ids", "component_number", "subcomponent_number", "component_key",
                 "copies", "route", "round", "rank", "score", "patterns",
@@ -439,7 +440,7 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "asset_p_comp", "asset_unit", "asset_p_unit", "assets_yes", "asset_link",
                 "asset_link_level", "asset_link_p", "kinds_yes", "kind_best", "kind_p",
                 "conditional_p", "actors_yes", "actor_best", "actor_p",
-                "template_projects", "template_share", "sent", "committed",
+                "template_projects", "template_share", *prior.COLS, "sent", "committed",
                 "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
                 "p_committed_calibrated", "types_yes", "best_type", "best_p", "model_served",
                 "cost", "text"]
@@ -527,14 +528,17 @@ def measure_rows(data, projects=None, sets=None):
 
 
 ASSET_LINK_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
-                   "model_served", "cost"]
+                   "model_served", "cost", "prior_phrase_cosine", "prior_phrase_match"]
 PAIR_LINK_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
                   "shared_asset_ids", "route", "measure_rank",
-                  "measure_cosine", "probability", "model_served", "cost"]
+                  "measure_cosine", "probability", "model_served", "cost",
+                  "prior_phrase_cosine", "prior_phrase_match"]
 
 
 CHECK_PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_only_a",
-                   "p_only_b", "p_both", "p_neither", "model_served", "cost"]
+                   "p_only_b", "p_both", "p_neither", "model_served", "cost",
+                   "prior_probability_a", "prior_phrase_cosine_a", "prior_probability_b",
+                   "prior_phrase_cosine_b"]
 CHECK_SCOPE_COLS = ["unit_id", "scope", "probability", "p_rule", "p_investment",
                     "p_not_commitment", "model_served", "cost"]
 

@@ -96,7 +96,8 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
-           "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade"}
+           "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
+           "prior_position", "prior_words", "prior_para_likely"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "commitment_v2_usd_millions", "commitment_v3_usd_millions",
@@ -110,10 +111,13 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "unit_best_asset_probability", "linked_asset_probability",
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
            "best_actor_probability", "cosine", "probability", "p_only_a", "p_only_b", "p_both",
-           "p_neither", "p_rule", "p_investment", "p_not_commitment"}
+           "p_neither", "p_rule", "p_investment", "p_not_commitment",
+           "prior_phrase_cosine", "prior_phrase_match", "prior_para_best", "prior_probability_a",
+           "prior_probability_b", "prior_phrase_cosine_a", "prior_phrase_cosine_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
-           "was_sent_to_model", "was_asked", "is_committed"}
+           "was_sent_to_model", "was_asked", "is_committed", "prior_table_row",
+           "prior_has_component"}
 # Pipe-joined lists in the CSV become arrays, which Metabase renders and
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
@@ -150,6 +154,19 @@ def rename(table, csv_name):
 # schema, primary key, foreign keys [(column, table, column)], comments.
 # Table names are the ones a person sees; the loader maps its sources to them.
 
+# The prior inputs that need no grading (src/prior.py, docs/method/decisions.md):
+# stored next to the decision model's answers, read by nothing until a graded
+# sheet fits the weights and cut-offs that use them.
+PRIOR_INPUTS = {
+    "prior_phrase_cosine": "Prior input: best embedding cosine to the label's search phrases.",
+    "prior_phrase_match": "Prior input: the best phrase's share of information found in the text, each word weighted by how rare it is in the corpus (0 to 1).",
+    "prior_table_row": "Prior input: the unit is a prose table row.",
+    "prior_position": "Prior input: the sentence's place in its paragraph (0 for a table row or a whole unit).",
+    "prior_words": "Prior input: length in words.",
+    "prior_has_component": "Prior input: the unit sits under a known component.",
+    "prior_para_likely": "Prior input: other sentences in the paragraph whose best phrase cosine over the label set reaches the set's cosine gate.",
+    "prior_para_best": "Prior input: the best cosine to this label among the other sentences of the paragraph.",
+}
 PROBABILITY_GRADES = {
     "most_likely_grade": "The grade with the highest probability, on the label set's scale "
                          "(0 not about it, up to 3 financed or committed). Unmeasured until a "
@@ -386,6 +403,7 @@ TABLES = {
             "unit_id": "The sentence graded (search_units.unit_id); for a paragraph map, the paragraph's id.",
             "was_asked": "False when a cosine gate (control panel asset.gate_cosine) kept the question from being asked of this sentence; the grades are then NULL.",
             "best_cosine": "The sentence's cosine against the label's phrases, when a cosine gate was used.",
+            **PRIOR_INPUTS,
         })),
     "measure_findings": dict(
         schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
@@ -429,6 +447,7 @@ TABLES = {
             "template_wording_share": "As in search_units: share of six-word runs shared with two or more other projects.",
             "copy_unit_ids": "Units in other documents that print the same text.",
             "text": "The unit's text with its list lead-in.",
+            **PRIOR_INPUTS,
         })),
     "measure_types": dict(
         schema=PUBLIC, key=("label_set", "label_id", "type_id"), foreign=[],
@@ -500,6 +519,8 @@ TABLES = {
             "cosine_rank": "The asset's rank among the package's assets by that cosine; 1 is the best.",
             "probability": "The decision model's probability that the package procures this asset.",
             "model_served": "The decision-model snapshot that answered.",
+            "prior_phrase_cosine": "Prior input: the cosine above, under the name every question's prior uses.",
+            "prior_phrase_match": "Prior input: the best asset phrase's share of information found in the package description, words weighted by rarity.",
         }),
     "unit_pair_checks": dict(
         schema=PUBLIC, key=("unit_id", "set_a", "set_b"), foreign=[],
@@ -513,7 +534,11 @@ TABLES = {
                  "probability": "The probability of that answer.",
                  "p_only_a": "Probability of only the first measure.",
                  "p_only_b": "Probability of only the second measure.",
-                 "p_both": "Probability of both.", "p_neither": "Probability of neither."}),
+                 "p_both": "Probability of both.", "p_neither": "Probability of neither.",
+                 "prior_probability_a": "Prior input: the first measure's probability for the unit (its probability layer's, else the model's score).",
+                 "prior_phrase_cosine_a": "Prior input: the unit's cosine to the first measure's phrases.",
+                 "prior_probability_b": "Prior input: the second measure's probability for the unit.",
+                 "prior_phrase_cosine_b": "Prior input: the unit's cosine to the second measure's phrases."}),
     "unit_scope": dict(
         schema=PUBLIC, key=("unit_id",), foreign=[],
         comment="Empty since 2026-10-22: the scope question (a rule, one investment or not a "
@@ -544,6 +569,8 @@ TABLES = {
             "measure_cosine": "For the measure route, the package description's best cosine to the measure's phrases and definition.",
             "probability": "The decision model's probability that carrying out the package is where the commitment is delivered or applied.",
             "model_served": "The decision-model snapshot that answered.",
+            "prior_phrase_cosine": "Prior input: the package description's best cosine to the measure's phrases.",
+            "prior_phrase_match": "Prior input: the share of the package description's information found in the commitment sentence, words weighted by rarity.",
         }),
     "sentence_vectors": dict(
         schema=INTERNAL, key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],

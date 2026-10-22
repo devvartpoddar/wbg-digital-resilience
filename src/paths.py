@@ -105,6 +105,7 @@ LAYOUT = {
     "types": "types",
     "links": "links",
     "checks": "checks",
+    "prior": "prior",
     "classify": "classify",
     "labels": "labels",
     "requested_labels": "requested_labels",
