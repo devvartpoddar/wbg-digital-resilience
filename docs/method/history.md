@@ -37,3 +37,52 @@ On the current run (local copy): paragraph joining is stable (a tighter line gap
 ## From: Packages to assets and commitments
 
 *The first full run (2026-10-20/21):* 13,713 packages, 4,530 with an asset at 0.5 (Digital systems and applications 3,218 of them; 479 yes answers at rank 4, the last asked, so a deeper rank would find more); 98,539 commitment-package pairs asked across the 13 measures, of which about one in sixteen links at 0.5, and a committed unit links to as many as 49 packages. That run is most of the 221,000 decision-model requests of that week and is missing from the spend ledger (the stage logged nothing when it failed part-way; it does now). Pairing on a shared asset group rather than a shared asset is what makes the pairs many: narrowing it is the lever if the link is run again at scale.
+
+## The paragraph asset map (until 2026-10-22)
+
+The asset map graded every model paragraph (18,834 on the 70-project corpus; US$1.88 for nine assets, 12 minutes at six requests in flight), with each paragraph's best asset and each component's best of its paragraphs as columns on every measure unit. A cosine gate of 0.25 on the paragraph's best sentence asked 58 per cent of the questions and lost 5.8 per cent of the links at 0.5 (0.30: 39 per cent asked, 9.0 per cent lost); on by default from 2026-10-21. Replaced by the sentence map on 2026-10-22: on 615 graded sentences, the last-asset rule with decay 0.4 and floor 0.3 moved agreement with the person's asset from 0.64 to 0.66. A one-choice asset question (which asset, or none) agreed as often (0.66 against 0.65) at 42 per cent of the cost but gives no grade, so it was not taken. Asset definition notes: early warning v5 and access v5 (2026-10-21: disease surveillance and advisory services are digital systems; access includes the power and climate protection of connected sites); digital systems v3 (named systems only; generic IT equipment is not this asset).
+
+## Measure definitions v4 to v7 (2026-10-20 to 2026-10-21)
+
+- **v4**: each measure defined by the intervention, never the asset, with boundaries between neighbours (assessing a risk is risk assessment, choosing where to build is siting, changing how it is built is hardening). Grade 1 lists context only; grade 3 counts a named intervention wherever printed, since real commitments sit in Paris Alignment paragraphs as list items. Before it, climate governance graded 1,300 units committed and about 262 of 680 renewable-energy units were energy-access programmes.
+- **v5**: grade 1 adds existing systems, results indicators, economic-analysis assumptions and other World Bank projects; type lists rewritten to exclude each other; a `boundary` column per measure.
+- **v6** (from 477 graded units, sheet s2): grade 2 takes wording the sentence itself makes optional; measure lines for backup power (solar as main supply excluded; precision was about 0.2), adaptation applications (precision about 0.45), early warning, network redundancy, siting and governance.
+- **v7** (from the s4 tuning sheet, 331 units and 70 links): how examples, technical assistance and hedges grade; measure lines for every measure (physical hardening needs a named engineering measure on a named asset: s4 precision 0.40). The v7 run (US$1.06) raised committed units from 1,164 to 2,100, mostly generic sentences; the tightened lines that followed tested on 807 graded units at precision 0.65 / 0.70 / 0.74 at recall 0.90 / 0.80 / 0.70 (Gemma 4 31B: 0.70 / 0.74 / 0.78 at about eight times the price). Splitting the question into three yes/no questions gave no gain (0.67 / 0.69 / 0.74).
+
+## Per-measure commit floors (until 2026-10-22)
+
+A unit counted at P(grade 3) at or above `commit_floor` in `analysis/labels/<set>.csv`, else at the most likely grade. Floors read off the v5 sheet: governance, climate information and siting 0.3; risk assessment, disaster recovery, network redundancy and early warning 0.4; energy efficiency, renewable energy and resilient design 0.6; re-read on v6 answers, disaster recovery 0.3, energy efficiency 0.5, network redundancy 0.5. Replaced by one decision on the posterior of grades 2 and 3 (`floor.*` in the control panel). Stored per-measure figures from those floors (grade 3 against grade 3): sheet s2 mean precision 0.64 and recall 0.81 (0.21 to 0.92 by measure); s4 mean 0.61 and 0.69 (0.33 to 0.86).
+
+## Questions removed on 2026-10-22
+
+- **The second pass**: units graded 2 or more were also asked the asset (one choice), how the commitment is delivered (governing, building, sustaining, using, requiring in procurement), whether it is conditional and who carries it out. Nothing decided on them; on the full v7 run they cost US$1.23 against US$0.65 for the other 57,827 units.
+- **A paragraph second look** (PR #48, 2026-10-21): on the next independent sheet the sentence alone ranked better (0.76 against 0.69). With the paragraph as context the model graded the paragraph and doubled the false positives on the activities workbook.
+- **The scope question** (a rule, one investment, or not a commitment), which capped an investment at its three likeliest packages: US$0.06 a full run, nothing else decided on it.
+- **Platt calibration** (`<set>_calibration.json`), read by nothing once the probability layer came in.
+- **Measure options** `--context`, `--gate`, `--asset-min`: a measure is asked one way.
+
+## Many items a request (2026-10-21 and 2026-10-22)
+
+Ten items a request against one: the measure question cost 74 per cent less with the same accuracy against the person (precision / recall at the most likely grade 0.77 / 0.80 against 0.77 / 0.83); asset map 61 per cent less, 96 per cent the same grade. Filled requests (up to 80,000 characters) against ten: 90 per cent the same yes/no at 0.5 on the measure question, mean average precision 0.882 against 0.888. An item's neighbours move its first answer about as much as a small rewording (86 to 88 per cent the same grade); the store makes re-runs repeatable. Short per-item questions with grade numbers only saved 44 per cent of an asset request's characters with no measurable change.
+
+## The decision system, exploratory evidence (2026-10-22)
+
+On the graded sentences (742 measure, 555 asset), held-out halves, before the fixes below:
+
+| Measures | ranking (0.5 = chance) | recall at 0.85 precision | at floor 0.5: precision / recall |
+|---|---|---|---|
+| The model's score alone | 0.874 | 0.78 | 0.75 / 0.92 |
+| Score, vote, centroid | 0.885 | 0.81 | 0.82 / 0.86 |
+| Prior alone | 0.765 | 0.32 | 0.73 / 0.81 |
+| Prior + answer, logistic | 0.890 | 0.83 | 0.82 / 0.87 |
+| Prior + answer, strict Bayes | 0.886 | 0.82 | 0.83 / 0.86 |
+
+The pair answer raised recall at 0.90 precision from 0.78 to 0.87 on the 249 sentences it applied to; a softmax across measures added nothing. These figures pool measures, count grade 2 as yes and were fitted on band-drawn sheets without weights, so they overstate the dashboards' precision.
+
+## The method review (2026-10-22)
+
+A review found: the layer was fitted without design weights, chose floors on the rows it was fitted on, let near-copies and same-project sentences vote, and pooled grades from superseded definitions; the skip rule was stated three ways; `./wbg check` failed (a call with removed arguments); `link.asset_yes` and the asset layers were missing from run keys; `./wbg measure` passed `--min-cosine` explicitly, so a fitted gate could never apply; views still read grade 3. On 327 graded sentences of six measures, precision at 0.5 was flat by sentence length (0.83 to 0.88) and recall fell only above 50 words (0.86). All of these were fixed the same day; the sentence splitter gained every enumerator form, comma-separated lists, consecutive footnotes and cell-level splits of long table rows (section 2.5).
+
+## The architecture proposal (2026-10-19)
+
+`docs/architecture-next.md` proposed the measure stages as built in sections 5a to 5d (pool, asset map, funnel, check sheets, types); it was removed on 2026-10-22, the method files being the record of what was built.

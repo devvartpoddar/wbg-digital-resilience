@@ -11,17 +11,17 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
   - `projects/`: `projects.csv`;
   - `embeddings/`: the vector cache, `sentence_emb.npy` and `sentence_index.csv`;
   - `search/`: one folder per label set and version (section 5);
-  - `measures/`: a measure's graded pool with the asset map's columns, one folder per label set and version (section 5c);
+  - `measures/`: a measure's graded pool, one folder per label set and version (section 5c);
   - `types/`: stored generative-model proposals and the decision model's type assignments, one folder per label set and version (section 5d);
   - `links/`: which asset each package buys and which commitments it would carry out, one folder per version (section 5e);
-  - `classify/`: every decision-model answer, one file per model, state and question (`answers/`; the earlier per-request store in `cache/` is read and split on demand), and one folder per label set and version for the asset map (section 5b);
+  - `classify/`: every decision-model answer, one file per model, state and question (`answers/`), and one folder per label set and version for the asset map (section 5b);
   - `prior/`: what the prior inputs read (section 5g): the corpus word frequencies they weigh words by (`word_df-<key>.json`, one per state of the sentence index);
-  - `labels/`: grades a person gave: `<set>.csv` for paragraphs, `<set>_units.csv` for a measure's units (sections 5b, 5c); `measure_quality.csv`, each evaluation's headline numbers (section 5f); `activities.xlsx`, the hand-labelled workbook of activities (never in git);
+  - `labels/`: what a person graded and what was fitted on it: `<set>_units.csv` (a measure's graded units, with stratum and design weight), `package_links.csv` (graded links), `measure_quality.csv` (each evaluation's headline figures), `<set>_posterior.json` and `assets_posterior.json` (the probability layers), `<set>_gate.json` and `assets_gate.json` (the skip rule's gates), `activities.xlsx` (the hand-labelled workbook of activities, never in git). All but the workbook are also in Postgres (section 4);
   - `requested_labels/`: the files of measures requested from the dashboard (section 5f), read as a third label folder;
   - `archive/`: tables an earlier version wrote and nothing reads (`document_projects.csv`, `package_changes.csv`), moved there by `src/paths.py`, never deleted;
   - `releases/`: one folder per data release with its manifest and a copy of the cleaned tables, and `index.csv`;
   - `reports/`: every stage's report, the run notes, and `spend.csv`, one line per model run with calls, cost and seconds (a run that failed part-way is recorded too, with `run` = `failed`, since its answers were paid for; the calls column is a whole number, and the reader also accepts the float a link run wrote before 2026-10-20, since the ledger is never rewritten);
-  - `review/`: the review spreadsheets;
+  - `review/`: the grading workbooks and their key files (each row's stratum and the stratum's size);
   - `runs/`: exports for a selection, one folder per selection and date (`./wbg export`).
 
   `python src/paths.py` moves an older layout into this one. It only moves files, never overwrites, and does nothing the second time; `./wbg prepare` and `run.sh` run it first.
