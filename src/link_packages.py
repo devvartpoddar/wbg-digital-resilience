@@ -204,7 +204,7 @@ class Plan:
         self.asset_qs = asset_questions(self.assets)
         self.runs = committed_units(data, projects, sets)
         h = hashlib.sha256()
-        h.update(f"{LINK_VERSION}\t{model}\t{asset_top}\t{MEASURE_TOP}\n".encode())
+        h.update(f"{LINK_VERSION}\t{model}\t{asset_top}\t{MEASURE_TOP}\t{YES}\n".encode())
         for name in sorted(self.runs):
             for q in search.load_queries(name, labels.folder(name)):
                 h.update(f"{name}\t{q['query_id']}\t{q['text']}\n".encode())

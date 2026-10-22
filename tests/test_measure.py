@@ -215,3 +215,16 @@ def test_the_asset_map_grades_each_sentence_with_the_measure_questions_form(stor
     q = classify.graded_question(lab, ["Not {name}.", "{name}."])
     m = measure.questions([dict(lab, id="cra")], ["Not {name}.", "{name}."])["cra"]
     assert q["instructions"] == m["instructions"] and q["criteria"] == m["criteria"]
+
+
+def test_a_check_sheet_is_drawn_from_a_run_with_the_sentence_and_its_paragraph(store):
+    import check_units
+    data, _ = store
+    measure.measure("cra", data, **RUN)
+    kw = {k: v for k, v in RUN.items() if k in ("top", "max_rounds")}
+    key, sheet, scale, assets = check_units.sheet_rows("cra", data, design="bands", **kw)
+    assert len(key) == len(sheet) == 1
+    row = sheet[0]
+    assert row["sentence"].startswith("A site-specific hazard assessment")
+    assert row["paragraph"] == PARAS[0] and row["component"] == "1 Connectivity"
+    assert key[0]["stratum_size"] == 1

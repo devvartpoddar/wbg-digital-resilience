@@ -616,6 +616,21 @@ def asset_layers(data, folder, vector_of):
             if spec.get("question_sha256") == shas.get(a)}
 
 
+def asset_layers_digest(data, folder):
+    """A short hash of the asset layers that apply to the map at `folder`
+    ('' for none): part of every reader's run key, so a refit gives a new run."""
+    import posterior
+    path = layers_path(data)
+    if not folder or not panel.get("posterior.on", True) or not os.path.exists(path):
+        return ""
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
+        shas = json.load(fh).get("question_sha256", {})
+    with open(path, encoding="utf-8") as fh:
+        specs = json.load(fh)
+    return posterior.digest({a: spec for a, spec in sorted(specs.items())
+                             if spec.get("question_sha256") == shas.get(a)})
+
+
 def question_shas(qs):
     """{label_id: SHA-256 of the exact question asked}: a grade a person gave
     under one wording of a label is not a grade under another."""

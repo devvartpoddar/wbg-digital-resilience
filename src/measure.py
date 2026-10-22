@@ -310,6 +310,8 @@ class Run:
         self.qs = questions(self.labels, self.scale)
         asset_folder = classify.current_run(ASSET_SET, data, projects=self.projects)
         self.asset_run = os.path.basename(asset_folder) if asset_folder else ""
+        # The asset layers change each sentence's asset, so they are part of the key.
+        self.asset_layers = classify.asset_layers_digest(data, asset_folder)
         # The probability layer (src/posterior.py) fitted by the evaluation of a
         # graded sheet (./wbg check <set> --evaluate) on the same question:
         # applied to every score as p_committed_calibrated, which the floor
@@ -320,7 +322,7 @@ class Run:
         self.layer_path = where(data, "labels", f"{name}_posterior.json")
         self.calibration = posterior.digest(posterior.read_spec(self.layer_path, self.question_sha))
         h = hashlib.sha256()
-        h.update(f"{os.path.basename(self.search_run)}\t{self.asset_run}\t"
+        h.update(f"{os.path.basename(self.search_run)}\t{self.asset_run}\t{self.asset_layers}\t"
                  f"{json.dumps(self.settings, sort_keys=True)}\n".encode())
         for pt in self.patterns:
             h.update(f"p\t{pt['label_id']}\t{pt['pattern_id']}\t{pt['pattern']}\n".encode())

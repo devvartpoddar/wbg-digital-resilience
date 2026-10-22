@@ -229,9 +229,8 @@ def sheet_rows(name, data, seed=1, per=PER, elusion=False, design="grade", **kw)
     for i, (u, stratum, size, drawn) in enumerate(picked, 1):
         para = run.paras[u["paragraph_id"]]
         doc = measure._text(texts, data, u["doc_id"])
-        state = measure.state_for(idx[u["unit_id"]], para, u["text"],
-                                  doc[int(para["char_start"]):int(para["char_end"])],
-                                  run.names, "paragraph")
+        state = measure.state_for(idx[u["unit_id"]], para, u["text"], run.names)
+        paragraph = doc[int(para["char_start"]):int(para["char_end"])]
         key.append({"row_id": i, "label_id": u["label_id"], "unit_id": u["unit_id"],
                     "paragraph_id": u["paragraph_id"],
                     "text_sha256": hashlib.sha256(u["text"].encode("utf-8")).hexdigest(),
@@ -241,7 +240,7 @@ def sheet_rows(name, data, seed=1, per=PER, elusion=False, design="grade", **kw)
         sheet.append({"row_id": i, "measure": lab["name"], "measure means": lab["definition"],
                       "project": u["project_ids"], "section": state.get("section", ""),
                       "component": state.get("component", ""), "sentence": u["text"],
-                      "paragraph": state.get("paragraph", "")})
+                      "paragraph": paragraph})
     return key, sheet, run.scale, [a["id"] for a in run.assets]
 
 
