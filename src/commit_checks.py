@@ -2,10 +2,10 @@
 """One question about the committed units of every measure, asked once the
 measures have run.
 
-  pairs  A unit two measures both commit is asked, for each side, the form
-         every decision asks (classify.graded_question) on that measure's
-         scale: how the sentence relates to the measure, with the other
-         measure's boundary beside it (the `boundary` column of
+  pairs  A unit two measures both commit is asked, for each side, the
+         question every check asks (classify.fit_question: yes, unsure or
+         no): does the measure apply, with the other measure's boundary
+         beside it (the `boundary` column of
          analysis/labels/<set>.csv, else its definition). Each measure is
          graded on its own, so nothing else holds the boundaries between
          neighbours. Each side's score goes through the measure's pair layer
@@ -16,7 +16,7 @@ measures have run.
          that choice raised recall at 0.90 precision from 0.78 to 0.87 over
          the probability layer alone, untested in the graded form.
 
-Graded questions to the decision model, stored like every answer
+Fit questions to the decision model, stored like every answer
 (src/answers.py) and re-read on a re-run.
 
 Reads  data/measures/<set>-<version>/units.csv (via src/kinds.py)
@@ -57,19 +57,21 @@ def boundary_of(name):
 
 
 def pair_question(a, b):
-    """The form every decision asks (classify.graded_question), once per side
-    on the side's own scale: how the sentence relates to the measure, with
-    its definition and the other measure's boundary beside it. keep_a and
-    keep_b."""
+    """The question every check after a classification asks
+    (classify.fit_question: yes, unsure or no), once per side: does the
+    measure apply to the sentence, the other measure's boundary beside it.
+    The sentence is already counted for both, so it asks only whether each
+    holds. keep_a and keep_b."""
     out = {}
     for key, s, o in (("keep_a", a, b), ("keep_b", b, a)):
-        labs, scale = classify.load_labels(s, labels.folder(s))
+        labs, _ = classify.load_labels(s, labels.folder(s))
         on, ob = boundary_of(o)
         lab = labs[0]
-        out[key] = classify.graded_question(
-            {"id": lab["id"], "name": lab["name"],
-             "definition": f"{lab['definition']} The sentence is also counted for {on}: {ob} "
-                           f"Grade only {lab['name']}."}, scale)
+        out[key] = classify.fit_question(
+            {"id": lab["id"], "name": lab["name"], "definition": lab["definition"]},
+            given=(f"The sentence is counted for both {lab['name']} and {on} ({ob}); this asks "
+                   f"only whether it commits the project to {lab['name']}, whatever it does "
+                   f"for {on}. "))
     return out
 
 
@@ -115,13 +117,13 @@ def plan(data, projects=None, model=classify.MODEL):
 
 
 def keep_shas(sets):
-    """{keep:<set>: SHA-256 of the set's own graded question}: a pair layer
-    for a measure applies while its definition and scale read the same."""
+    """{keep:<set>: SHA-256 of the set's fit question}: a pair layer
+    for a measure applies while its definition reads the same."""
     import judged
     out = {}
     for s in sets:
-        labs, scale = classify.load_labels(s, labels.folder(s))
-        out[f"keep:{s}"] = judged.sha(classify.graded_question(labs[0], scale))
+        labs, _ = classify.load_labels(s, labels.folder(s))
+        out[f"keep:{s}"] = judged.sha(classify.fit_question(labs[0]))
     return out
 
 
@@ -191,7 +193,7 @@ def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=cl
     lays = judged.layers(data, "pairs", keep_shas({s for _, a, b, _ in pairs for s in (a, b)}))
     pair_rows = []
     for (uid, a, b, _), g in zip(pairs, got):
-        sa, sb = classify.graded_score(g["keep_a"]), classify.graded_score(g["keep_b"])
+        sa, sb = classify.fit_score(g["keep_a"]), classify.fit_score(g["keep_b"])
         item = f"{uid}#{a}|{b}"
         ka = judged.calibrated(lays, f"keep:{a}", item, sa)
         kb = judged.calibrated(lays, f"keep:{b}", item, sb)

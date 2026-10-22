@@ -57,7 +57,7 @@ def store(tmp_path, monkeypatch):
             # off-grid solar is renewable energy, not backup power (side a)
             yes = not (qid == "keep_a" and "off-grid" in s)
             out[qid] = {"type": "score", "score": 3 if yes else 0, "confidence": 0.9,
-                        "probabilities": {"0": 0.05, "1": 0.05, "2": 0.0, "3": 0.9} if yes else {"0": 0.95, "1": 0.0, "2": 0.0, "3": 0.05}}
+                        "probabilities": {"0": 0.05, "1": 0.05, "2": 0.9} if yes else {"0": 0.9, "1": 0.05, "2": 0.05}}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
     monkeypatch.setattr(classify, "decide", fake_decide)
     return str(tmp_path / "data"), calls
@@ -71,7 +71,7 @@ def test_a_unit_two_measures_commit_gets_one_pair_answer_and_nothing_else_is_ask
         ("u1", "backup_power", "renewable_energy", "only_b")]
     # With no pair layer, each side's posterior is the model's score.
     p = pairs[0]
-    assert p["p_keep_a"] == p["score_a"] == "0.050" and p["p_keep_b"] == "0.900"
+    assert p["p_keep_a"] == p["score_a"] == "0.050" and p["p_keep_b"] == "0.900"   # P(yes)
     qs = next(c for c in calls if "keep_a" in c["questions"])["questions"]
     assert all(q["type"] == "score" for q in qs.values())
     # each side is the measure's own question, the other's boundary beside it

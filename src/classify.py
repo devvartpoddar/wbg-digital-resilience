@@ -156,11 +156,10 @@ SUBJECT = "the sentence from a World Bank project appraisal document in the 'sen
 
 
 def graded_question(lab, scale, subject=SUBJECT):
-    """The one form of question every decision asks (assets, measures,
-    types, pair checks, packages to assets, commitments to packages): how
-    the item relates to the label, with the label's name and definition and
-    a 0-3 scale; its score is the probability of the grades the panel
-    counts (graded_score). The question id is never shown to the model, so
+    """The question a classification asks (assets, measures): how the item
+    relates to the label, with the label's name and definition and its 0-3
+    scale; its score is the probability of the grades the panel counts
+    (read.grades). The checks after it ask fit_question. The question id is never shown to the model, so
     the name and definition go in the wording. subject names the item and
     its field (a package, a commitment and a package)."""
     # Word for word the measure question since 2026-10-20 for a sentence,
@@ -171,12 +170,32 @@ def graded_question(lab, scale, subject=SUBJECT):
             "criteria": [g.replace("{name}", lab["name"]) for g in scale]}
 
 
-def graded_score(entry):
-    """The score of a stored answer to a graded question: the sum of its
-    probabilities for the grades the control panel counts (read.grades)."""
+# The checks made after a classification (types, pair checks, packages to
+# assets, commitments to packages) ask whether something applies, not how
+# firmly a project commits, so they share this scale; the score is P(yes)
+# (fit_score). Tested on 43 committed risk-assessment sentences and 7 draft
+# types (2026-10-22): 1.8 types a sentence at 0.5, against 6.1 on the
+# commitment scale.
+FIT_SCALE = ["No: {name} does not apply.",
+             "Unsure: the text does not say enough to tell whether {name} applies.",
+             "Yes: {name} clearly applies."]
+
+
+def fit_question(lab, subject=SUBJECT, given=""):
+    """The question every check after a classification asks: does the label
+    apply to the item, yes, unsure or no (FIT_SCALE). given says what is
+    already decided (the sentence is a commitment to a measure), so the
+    question asks only what is left."""
+    return {"type": "score",
+            "instructions": f"Does {lab['name']} apply to {subject}? {given}"
+                            f"{lab['name']} means: {lab['definition']}",
+            "criteria": [g.replace("{name}", lab["name"]) for g in FIT_SCALE]}
+
+
+def fit_score(entry):
+    """The score of a stored answer to a fit question: P(yes)."""
     a = entry.get("answer", entry)
-    probs = a["probabilities"]
-    return sum(float(probs.get(str(g), 0)) for g in panel.grades())
+    return float(a["probabilities"].get(str(len(FIT_SCALE) - 1), 0))
 
 
 def questions(labels, scale):

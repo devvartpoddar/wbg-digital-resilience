@@ -14,22 +14,25 @@ Two steps, each repeatable and stored:
             person's and this step does nothing (the gap step below finds what
             the list misses).
 
-  assign    Each committed unit is asked the form every decision asks
-            (classify.graded_question), once per type, on the types' scale
-            (TYPE_SCALE, or the set's own); a type counts at floor.types (through the types' layer
-            once fitted), several with types.multiple. From 2026-10-22; until
+  assign    Each committed unit is asked the question every check after a
+            classification asks (classify.fit_question: yes, unsure or no), once per
+            type, the sentence already counted for the measure; a type
+            counts at floor.types (through the types' layer once fitted),
+            several with types.multiple. From 2026-10-22; until
             then one choice over the types and none, because asked as
             separate yes/no questions the model said yes to every plausible
-            type (2.7 a sentence on climate-informed siting, 2026-10-21): the
-            floor, the layer and types.multiple are what hold that now, and
-            the types report counts types per sentence.
+            type (2.7 a sentence on climate-informed siting, 2026-10-21). On
+            the fit question, told the sentence is already committed, 43
+            committed risk-assessment sentences and 7 draft types gave 1.8
+            types a sentence at 0.5 and 1.3 at 0.7 (2026-10-22; the
+            commitment scale had given 6.1).
 
   gaps      The units no type reaches (at least types.gap_min_units of them)
             go to the generative model with the existing types, which proposes
             only new kinds the list does not cover (not by asset, by scope or
             by another measure, and within the measure's definition). Each is
             named with the prefix "OTH." and assigned straight away by their own
-            graded questions: nothing waits on an
+            fit questions: nothing waits on an
             approval, and a person promotes an OTH type by writing it into
             the list. The OTH types are written to data/types/<set>_oth_types.csv
             and loaded with the approved ones.
@@ -72,12 +75,12 @@ PROPOSAL_COLS = ["run", "type_id", "type_name", "definition", "example_units"]
 OTH_PREFIX = "OTH."
 # fewer "none" units than this are reported, not proposed from (control panel)
 OTH_MIN = int(panel.get("types.gap_min_units", 5))
-# A type counts for a sentence when its score (P(2)+P(3) of its own graded
+# A type counts for a sentence when its score (P(yes) of its own fit
 # question, through the types' layer once fitted, src/judged.py) reaches
 # floor.types, as a measure counts at its floor: every such type with
 # types.multiple, the likeliest only without. A sentence no type reaches
 # has none.
-TYPE_FLOOR = float(panel.get("floor.types", 0.9))
+TYPE_FLOOR = float(panel.get("floor.types", 0.5))
 TYPE_MULTIPLE = bool(panel.get("types.multiple", True))
 
 
@@ -363,46 +366,25 @@ def load_approved(name):
     return dict(out)
 
 
-def assign_questions(types, scale, measure_name=""):
-    """One graded question per type, the form every decision asks
-    (classify.graded_question) on the types' scale (measure_scale): how the
-    sentence relates to the type. Each type is its own question, as each measure and
-    each asset is, so several may count."""
-    kind = f" It is a kind of {measure_name}." if measure_name else ""
-    return {t["type_id"]: classify.graded_question(
-        {"id": t["type_id"], "name": t["type_name"], "definition": t["definition"] + kind}, scale)
-        for t in types}
+def assign_questions(types, measure_name=""):
+    """One fit question per type (classify.fit_question: yes, unsure or no),
+    the sentence already counted for the measure, so it asks only which kind
+    it is. Each type is its own question, so several may count."""
+    given = (f"The sentence is already counted as a commitment to {measure_name}; this asks "
+             f"only which kind it is. ") if measure_name else ""
+    return {t["type_id"]: classify.fit_question(
+        {"id": t["type_id"], "name": t["type_name"], "definition": t["definition"]},
+        given=given) for t in types}
 
 
 def type_scores(got, types):
-    """{type_id: score} of a unit's stored answers (classify.graded_score)."""
-    return {t: classify.graded_score(got[t]) for t in types if t in got}
+    """{type_id: P(yes)} of a unit's stored answers (classify.fit_score)."""
+    return {t: classify.fit_score(got[t]) for t in types if t in got}
 
 
-# The scale a type is graded on: whether the commitment is of that kind (the
-# sentence is already committed for the measure, so the measure's own scale,
-# which grades commitment, put 6 of 7 risk-assessment types on almost every
-# committed sentence at 0.5 in a test of 43 sentences, 2026-10-22; this one
-# about 4 at 0.5 and 1 at 0.9). A person's judgement, kept here until a set
-# writes its own in analysis/labels/<set>_types_scale.csv (grade,description).
-TYPE_SCALE = [
-    "The sentence's commitment is not of this kind.",
-    "The sentence does not say the commitment takes this form: it is another kind, or its "
-    "form is not stated.",
-    "Among the things the sentence commits the project to, one is explicitly of this kind.",
-    "What the sentence commits the project to is explicitly and mainly of this kind.",
-]
-
-
-def measure_scale(name):
-    """(measure name, the scale its types are graded on): the set's own
-    analysis/labels/<set>_types_scale.csv when written, else TYPE_SCALE."""
+def measure_name(name):
     labs, _ = classify.load_labels(name, labels.folder(name))
-    path = os.path.join(labels.folder(name), f"{name}_types_scale.csv")
-    if os.path.exists(path):
-        rows_ = sorted(labels.rows(path), key=lambda r: int(r["grade"]))
-        return labs[0]["name"], [r["description"] for r in rows_]
-    return labs[0]["name"], TYPE_SCALE
+    return labs[0]["name"]
 
 
 def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
@@ -412,13 +394,13 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
     type list or a new measure run is a new folder."""
     run_folder, units = committed_units(name, data, **kw)
     approved = load_approved(name)
-    mname, scale = measure_scale(name)
+    mname = measure_name(name)
     shas, rows = [], []
     for lid, us in sorted(units.items()):
         if lid not in approved:
             log(f"  {lid}: no approved types; skipped")
             continue
-        qs = assign_questions(approved[lid], scale, mname)
+        qs = assign_questions(approved[lid], mname)
         for u in us:
             body = classify.request_body({"sentence": u["text"]}, qs, model)
             shas.append(classify.request_sha(body))
@@ -490,14 +472,14 @@ def gaps(name, lid, label, approved, none_units, data, *, api_key, dry_run, log,
 
 def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=print,
            workers=classify.WORKERS, **kw):
-    """Each committed unit's types: one graded question per approved type,
+    """Each committed unit's types: one fit question per approved type,
     every type at floor.types counting; then the gap step (OTH types from
     the units no type reaches, asked the same way)."""
     if no_run_yet(name, data, dry_run, "assignment", log, **kw):
         return "no measure run"
     run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log,
                                                   **kw)
-    log(f"{name}: {len(rows):,} committed units x one graded question per type -> {out}")
+    log(f"{name}: {len(rows):,} committed units x one fit question per type -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
         return out
@@ -582,8 +564,8 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
             w.writeheader()
             w.writerows(oth_rows)
         os.replace(path + ".tmp", path)
-    lines = [f"{name}: {len(out_rows):,} committed units, their types by {model} (one graded "
-             f"question per type, each at floor.types; OTH types from the units no type "
+    lines = [f"{name}: {len(out_rows):,} committed units, their types by {model} (one fit "
+             f"question per type, yes at floor.types; OTH types from the units no type "
              f"reaches; stored responses "
              f"US${cost:.4f}; served {sorted(served)})"]
     for lid, ts in sorted(counts.items()):
@@ -648,9 +630,9 @@ def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, wor
     if spent:
         classify.record_spend(data, "types-gaps", name, GEN_MODEL, len(oth), spent, 0.0, "")
     reqs, idx = [], []
-    mname, scale = measure_scale(name)
+    mname = measure_name(name)
     for lid, ts in oth.items():
-        qs = assign_questions(ts, scale, mname)
+        qs = assign_questions(ts, mname)
         for i, u in none_by[lid]:
             reqs.append(({"sentence": u["text"]}, qs))
             idx.append(i)
