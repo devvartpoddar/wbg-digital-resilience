@@ -22,6 +22,7 @@ below it.
 """
 import hashlib
 import json
+import math
 import os
 
 import panel
@@ -55,6 +56,28 @@ def fit(positives, s=None):
         gate, lost = c, below / total
         below += w
     return round(gate, 6), round(lost, 6), len(positives)
+
+
+def loss_bound(lost, weights, conf=0.95):
+    """How much of the graded yes the gate could lose, at most, given what
+    the grades show: the one-sided Clopper-Pearson upper bound on the share
+    lost, on the effective sample size of the yes (Kish). With n yes and
+    none lost it is about 3/n (the rule of three), so 30 yes bound the loss
+    at about 10 per cent and 300 at 1: a fitted gate meets skip.max_loss on
+    the grades, and the bound says how far the grades can vouch for that."""
+    s, s2 = sum(weights), sum(w * w for w in weights)
+    n = round(s * s / s2) if s2 else 0
+    if not n:
+        return None
+    k = min(n, round(lost * n))
+    if k >= n:
+        return 1.0
+    cdf = lambda p: sum(math.comb(n, i) * p ** i * (1 - p) ** (n - i) for i in range(k + 1))
+    lo, hi = k / n, 1.0
+    for _ in range(60):
+        mid = (lo + hi) / 2
+        lo, hi = (mid, hi) if cdf(mid) > 1 - conf else (lo, mid)
+    return round(hi, 4)
 
 
 def path(data, name):

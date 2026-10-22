@@ -611,51 +611,45 @@ def latest_run(name, data):
     return None, sha
 
 
-def fit_layer(name, data):
-    """Fit the measure's probability layer (src/posterior.py) on the
-    sentences a person graded under the question the set asks now, write it
-    for the next run, and report how it does out of sample (folds by
-    project, every row at its design weight) and the floor the panel's
-    target precision suggests on those out-of-fold probabilities. Returns
-    report lines."""
+def layer_block(name, data):
+    """What the measure's probability layer is fitted on: (graded rows
+    [(unit_id, 0/1, design weight, projects)], {unit_id: model score},
+    {unit_id: vector}, question SHA-256, {unit_id: [P(0)..P(3)]}) from the
+    sentences a person graded under the question the set asks now and the
+    newest run asking it; None with no such run."""
     import panel, posterior
     lo = min(panel.grades())
     units, sha = latest_run(name, data)
-    lines = ["## Probability layer and suggested floor", ""]
     if not units:
-        return lines + ["- no run asks the current question yet: run the measure, then evaluate again", ""]
+        return None
     graded = graded_labels(name, data, sha, fitting=True,
                            units_by_text={text_key(u.get("text")): uid for uid, u in units.items()})
     vector_of, projects_of = posterior.lookups(data)
-    score = {u: sum(float(units[u].get(f"p{g}") or 0) for g in panel.grades())
-             for u in graded if u in units and units[u].get("sent") == "true"}
+    asked = [u for u in graded if u in units and units[u].get("sent") == "true"]
+    score = {u: sum(float(units[u].get(f"p{g}") or 0) for g in panel.grades()) for u in asked}
+    probs = {u: [float(units[u].get(f"p{g}") or 0) for g in range(4)] for u in asked}
     vecs = {u: vector_of(u) for u in score}
     vecs = {u: v for u, v in vecs.items() if v is not None}
     rows = [(u, 1 if graded[u][0] >= lo else 0, graded[u][2], projects_of(u)) for u in score]
-    layer = posterior.fit(rows, score, vecs, sha, name)
+    return rows, score, vecs, sha, probs
+
+
+def layer_lines(name, rows, score, probs, head):
+    """The report on one measure's layer: precision and recall out of sample
+    against the model's score alone, and the floor the panel's target
+    precision suggests."""
+    import panel, posterior
     target = float(panel.get("floor.target_precision", 0.8))
     floor = panel.floor(name)
     ys, ws = [r[1] for r in rows], [r[2] for r in rows]
-    if layer is None:
-        if os.path.exists(posterior_path(name, data)):
-            os.remove(posterior_path(name, data))
-        probs = [score[u] for u, *_ in rows]
-        lines.append(f"- too few sentences graded under the current question ({len(rows)}, "
-                     f"{sum(ys)} yes) for a layer: the model's score stands")
-    else:
-        posterior.write(posterior_path(name, data), layer)
-        oof = posterior.out_of_fold(rows, score, vecs)
-        probs = [oof[u] for u, *_ in rows]
-        lines.append(f"- layer fitted on {layer['n_yes']} graded yes and {layer['n_no']} no "
-                     f"(grade {lo} or more = yes; current question only), written to "
-                     f"{os.path.basename(posterior_path(name, data))}")
     raw = [score[u] for u, *_ in rows]
+    probs = [probs[u] for u, *_ in rows]
     neff = posterior.effective_n(ws)
     f = lambda x: "-" if x is None else f"{x:.2f}"
-    lines += ["", f"Out of sample (folds by project), weighted; effective sample size {neff:.0f} "
-              f"of {len(rows)} rows.", "",
-              "| floor | precision, model's score | recall | precision, layer | recall |",
-              "|---|---|---|---|---|"]
+    lines = head + ["", f"Out of sample (folds by project), weighted; effective sample size "
+                    f"{neff:.0f} of {len(rows)} rows.", "",
+                    "| floor | precision, model's score | recall | precision, layer | recall |",
+                    "|---|---|---|---|---|"]
     for t in sorted({0.3, 0.4, 0.5, 0.6, 0.7, 0.8, floor or 0.5}):
         p1, r1, _ = posterior.weighted_pr(raw, ys, ws, t)
         p2, r2, _ = posterior.weighted_pr(probs, ys, ws, t)
@@ -666,6 +660,92 @@ def fit_layer(name, data):
                   f"{t[1]:.2f}, recall {t[2]:.2f} out of sample (target precision {target}); "
                   f"the panel now reads {floor}"]
     return lines + [""]
+
+
+def fit_layer(name, data):
+    """Fit the measure's probability layer (src/posterior.py) on the
+    sentences a person graded under the question the set asks now, write it
+    for the next run, and report how it does out of sample (folds by
+    project, every row at its design weight) and the floor the panel's
+    target precision suggests on those out-of-fold probabilities. With
+    posterior.pool the layer is fitted with every measure's grades
+    (fit_pooled_layers). Returns report lines."""
+    import panel, posterior
+    if posterior.settings()["pool"]:
+        return fit_pooled_layers(data).get(name, ["## Probability layer and suggested floor", "",
+                                                  "- no layer in the pool: the model's score "
+                                                  "stands", ""])
+    lo = min(panel.grades())
+    lines = ["## Probability layer and suggested floor", ""]
+    block = layer_block(name, data)
+    if not block:
+        return lines + ["- no run asks the current question yet: run the measure, then evaluate again", ""]
+    rows, score, vecs, sha, _ = block
+    layer = posterior.fit(rows, score, vecs, sha, name)
+    if layer is None:
+        if os.path.exists(posterior_path(name, data)):
+            os.remove(posterior_path(name, data))
+        probs = score
+        lines.append(f"- too few sentences graded under the current question ({len(rows)}, "
+                     f"{sum(r[1] for r in rows)} yes) for a layer: the model's score stands")
+    else:
+        posterior.write(posterior_path(name, data), layer)
+        probs = posterior.out_of_fold(rows, score, vecs)
+        lines.append(f"- layer fitted on {layer['n_yes']} graded yes and {layer['n_no']} no "
+                     f"(grade {lo} or more = yes; current question only), written to "
+                     f"{os.path.basename(posterior_path(name, data))}")
+    return layer_lines(name, rows, score, probs, lines)
+
+
+def layer_blocks(data):
+    """{set: layer_block} for every measure with a run asking its current
+    question."""
+    import labels
+    out = {}
+    for name in labels.label_sets():
+        if name == measure.ASSET_SET:
+            continue
+        try:
+            b = layer_block(name, data)
+        except SystemExit:            # a set the measure stage cannot run
+            continue
+        if b:
+            out[name] = b
+    return out
+
+
+def fit_pooled_layers(data, blocks=None):
+    """The pooled layer (posterior.pool): every measure's grades fitted at
+    once, one intercept per measure and the weights shared; each measure's
+    layer written to its file (a measure that cannot join loses its file)
+    and checked out of sample with the same project folds. Returns {set:
+    report lines}."""
+    import panel, posterior
+    lo = min(panel.grades())
+    blocks = layer_blocks(data) if blocks is None else blocks
+    four = {n: b[:4] for n, b in blocks.items()}
+    specs = posterior.fit_pooled(four)
+    oof = posterior.out_of_fold_all(four, dict(posterior.settings(), pool=True)) if specs else {}
+    out = {}
+    for name, (rows, score, vecs, sha, _) in sorted(blocks.items()):
+        path = posterior_path(name, data)
+        lines = ["## Probability layer and suggested floor", ""]
+        if name in specs:
+            posterior.write(path, specs[name])
+            lines.append(f"- pooled layer: this measure's {specs[name]['n_yes']} graded yes and "
+                         f"{specs[name]['n_no']} no (grade {lo} or more = yes; current question "
+                         f"only) with {len(specs) - 1} other measures, its own intercept and "
+                         f"the shared weights; written to {os.path.basename(path)}")
+            probs = oof[name]
+        else:
+            if os.path.exists(path):
+                os.remove(path)
+            lines.append(f"- too few sentences graded under the current question ({len(rows)}, "
+                         f"{sum(r[1] for r in rows)} yes) to join the pooled layer: the model's "
+                         f"score stands")
+            probs = score
+        out[name] = layer_lines(name, rows, score, probs, lines)
+    return out
 
 
 def fit_gate(name, data):
@@ -701,14 +781,18 @@ def fit_gate(name, data):
         return lines + [f"- {len(pos)} graded yes, too few or all matched by a pattern: the "
                         f"panel's gate ({measure.MIN_COSINE}) stands", ""]
     gate, lost, n = got
-    skip.write(data, name, {lid: {"gate": gate, "lost": lost, "positives": n,
-                                  "question_sha256": run.question_sha,
+    bound = skip.loss_bound(lost, [p[2] for p in pos])
+    skip.write(data, name, {lid: {"gate": gate, "lost": lost, "lost_upper_95": bound,
+                                  "positives": n, "question_sha256": run.question_sha,
                                   "search_run": os.path.basename(run.search_run)}})
     return lines + [f"- gate {gate:.4f} on the best cosine to the phrases: of {n} graded yes "
                     f"({sum(1 for p in pos if p[1])} matched by a pattern, always asked), "
                     f"{lost:.1%} of their weight falls below it (rule: at most "
                     f"{skip.settings()['max_loss']:.0%}); the panel's starting gate was "
-                    f"{measure.MIN_COSINE}. The next run's pool uses it.", ""]
+                    f"{measure.MIN_COSINE}. The next run's pool uses it.",
+                    f"- what the grades can vouch for: the loss is at most {bound:.0%} "
+                    f"(95 per cent upper bound on {n} yes); the elusion sheet checks below the "
+                    f"gate.", ""]
 
 
 def fit_asset_layers(data):
@@ -769,11 +853,13 @@ def fit_asset_layers(data):
                if named[u] == asset and (asset, u) in cos]
         got = skip.fit(pos)
         if got:
-            gates[asset] = {"gate": got[0], "lost": got[1], "positives": got[2],
+            bound = skip.loss_bound(got[1], [p[2] for p in pos])
+            gates[asset] = {"gate": got[0], "lost": got[1], "lost_upper_95": bound,
+                            "positives": got[2],
                             "question_sha256": man["question_sha256"].get(asset, ""),
                             "search_run": os.path.basename(folder_s)}
             lines.append(f"- {asset}: skip-rule gate {got[0]:.4f} ({got[2]} graded yes, "
-                         f"{got[1]:.1%} below)")
+                         f"{got[1]:.1%} below, at most {bound:.0%} at 95 per cent)")
     gpath = skip.path(data, "assets")
     if gates:
         skip.write(data, "assets", gates)
@@ -821,7 +907,7 @@ def assigned_types(name, data):
         return {r["unit_id"]: r.get("best_type") or "none" for r in csv.DictReader(fh)}
 
 
-def evaluate(name, data, seed=1, elusion=False, **kw):
+def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
     if name == ALL:
         return evaluate_all(data, seed, **kw)
     if elusion:
@@ -900,7 +986,7 @@ def evaluate(name, data, seed=1, elusion=False, **kw):
         lines.append(f"- {st}: {len(rs)} rows, graded yes {sum(1 for r in rs if r['yes'])}")
     lines.append("")
     write_quality(data, name, key[0], rows, floor)
-    lines += fit_layer(name, data)
+    lines += fit_layer(name, data) if layer else []
     lines += fit_gate(name, data)
     out = where(data, "reports", f"evaluate_units_{name}.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -916,17 +1002,27 @@ def evaluate_all(data, seed, **kw):
     xlsx = all_path(data, seed)
     if not os.path.exists(xlsx):
         raise SystemExit(f"check: {xlsx} not found; draw it with ./wbg check all --seed {seed}")
-    outs, n = [], 0
+    import posterior, tune
+    pool = posterior.settings()["pool"]
+    outs, n, report = [], 0, {}
     for name in labels.label_sets():
         if not os.path.exists(where(data, "review", f"check_units_{name}_s{seed}.key.csv")):
             continue
         try:
-            out, k = evaluate(name, data, seed, **kw)
+            out, k = evaluate(name, data, seed, layer=not pool, **kw)
         except SystemExit as exc:
             print(f"  {name}: {exc}")
             continue
         outs.append(out)
+        report[name] = out
         n += k
+    # Pooled, the layer is fitted once every sheet's grades are stored, and
+    # its section is added to each measure's report.
+    if pool:
+        for name, lines in fit_pooled_layers(data).items():
+            if name in report:
+                with open(report[name], "a", encoding="utf-8") as fh:
+                    fh.write("\n".join(lines) + "\n")
     try:
         lines = fit_asset_layers(data)
         print("\n".join(lines))
@@ -939,6 +1035,8 @@ def evaluate_all(data, seed, **kw):
             n += k
         except SystemExit as exc:
             print(f"  package links: {exc}")
+    # What the grades say every tunable setting should be (src/tune.py).
+    outs.append(tune.report(data))
     return ", ".join(outs) or "nothing", n
 
 

@@ -95,8 +95,10 @@ def test_a_near_copy_does_not_vote_but_a_sentence_of_the_same_project_does():
     assert layer.probability("near_yes", 0.5, "A") == layer.probability("near_yes", 0.5, "C") > 0.8
     # A near-copy of a graded yes is not informed by it.
     vecs["copy"] = vecs["u1"].copy()
-    keep = posterior._keep(posterior._unit(vecs["copy"]), layer.G, frozenset(), layer.P, 0.999)
-    assert not keep[layer.ids["u1"]]
+    sims = layer.G @ posterior._unit(vecs["copy"])
+    assert layer.ids["u1"] in layer.graded.drop(sims, 0.999)
+    # Off (the default), only the sentence itself is left out.
+    assert list(layer.graded.drop(sims, posterior._near("off"))) == []
 
 
 def test_design_weights_move_the_fit_towards_the_heavier_rows():
@@ -121,3 +123,38 @@ def test_out_of_fold_scores_each_project_with_a_layer_fitted_without_it():
     for u, _, _, p in graded:
         by_project.setdefault(p, set()).add(folds[u])
     assert all(len(f) == 1 for f in by_project.values())   # a project sits in one fold
+
+
+def test_the_gram_shortcut_gives_the_centroids_summed_directly():
+    graded, scores, vecs = _graded()
+    rows = posterior._rows(graded, scores, vecs, None)
+    y = numpy.array([r[1] for r in rows], dtype="float64")
+    w = numpy.linspace(0.5, 2.0, len(rows))
+    G = numpy.array([posterior._unit(vecs[r[0]]) for r in rows])
+    gr = posterior._Graded(G, y, w)
+    v = posterior._unit(numpy.array([0.7, 0.3, 0.1]))
+    s = G @ v
+    drop = numpy.array([0, 3, 7])
+    keep = numpy.ones(len(rows), dtype=bool)
+    keep[drop] = False
+    pos, neg = keep & (y > 0), keep & (y == 0)
+    cp = posterior._unit((G[pos] * w[pos, None]).sum(axis=0)) @ v
+    cn = posterior._unit((G[neg] * w[neg, None]).sum(axis=0)) @ v
+    assert abs(gr.features(s, drop, 20.0, True)[1] - (cp - cn)) < 1e-9
+
+
+def test_pooled_labels_share_slopes_and_keep_their_own_intercepts():
+    a, sa, va = _graded(seed=1)
+    b, sb, vb = _graded(seed=2)
+    b = [(f"b{u}", y) for u, y in b] + [(f"bx{i}", 0) for i in range(20)]   # a lower base rate
+    vb = {f"b{u}": v for u, v in vb.items()}
+    rng = numpy.random.default_rng(3)
+    vb.update({f"bx{i}": numpy.array([0.0, 1.0, 0.0]) + 0.1 * rng.normal(size=3) for i in range(20)})
+    sb = {u: 0.5 for u, _ in b}
+    specs = posterior.fit_pooled({"A": (a, sa, va, "qa"), "B": (b, sb, vb, "qb")}, S)
+    assert set(specs) == {"A", "B"} and specs["A"]["coef"][1:] == specs["B"]["coef"][1:]
+    assert specs["B"]["coef"][0] < specs["A"]["coef"][0]
+    assert specs["A"]["question_sha256"] == "qa" and specs["A"]["pooled"] == ["A", "B"]
+    oof = posterior.out_of_fold_all({"A": ([(u, y, 1.0, f"P{i % 7}") for i, (u, y) in enumerate(a)],
+                                           sa, va, "qa")}, dict(S, pool=True))
+    assert len(oof["A"]) == len(a)
