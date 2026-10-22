@@ -1,7 +1,8 @@
 -- The few readings the dashboard views apply, in one place. Each value is a
 -- control-panel setting (inputs/config/control_panel.csv, dashboard.*),
--- filled in at publish: a change is one edit there and a publish. Nothing
--- upstream reads these: the files and the model's answers do not depend on them.
+-- filled in at publish: a change is one edit there and a publish. Upstream,
+-- only dashboard.commitment_link_levels is also read (by the package links,
+-- src/link_packages.py, keyed on it); the model's answers depend on none.
 DROP VIEW IF EXISTS wbg.dashboard_settings CASCADE;
 CREATE VIEW wbg.dashboard_settings AS
 SELECT
@@ -26,11 +27,11 @@ SELECT
   -- A unit two measures both commit leaves a measure the pair check says it
   -- is not (only the other measure, or neither; src/commit_checks.py).
   {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks,
-  -- and only when the check's chosen answer has at least this probability
-  -- (control panel floor.pair_check: the posterior that a unit is not the measure).
+  -- when the posterior that the unit is not the measure (p_drop_a or
+  -- p_drop_b: only the other, or neither) reaches this (floor.pair_check).
   {{panel:floor.pair_check}}::numeric AS pair_check_floor;
 COMMENT ON VIEW wbg.dashboard_settings IS
-  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and the probability a pair check''s answer needs to do so.';
+  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and the posterior of not-this-measure at which they do.';
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the

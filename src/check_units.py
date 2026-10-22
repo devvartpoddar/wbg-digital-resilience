@@ -929,13 +929,15 @@ def store_labels(name, data, key, graded, source):
 
 
 def assigned_types(name, data):
-    """{unit_id: best type} of the set's current type assignment, or {}."""
+    """{unit_id: set of types that count} of the set's current type
+    assignment ({'none'} for a unit with none), or {}."""
     import kinds
     folder = kinds.current_assign(name, data)
     if not folder:
         return {}
     with open(os.path.join(folder, "assignments.csv"), newline="", encoding="utf-8") as fh:
-        return {r["unit_id"]: r.get("best_type") or "none" for r in csv.DictReader(fh)}
+        return {r["unit_id"]: set((r.get("types_yes") or "").split("|")) - {""} or {"none"}
+                for r in csv.DictReader(fh)}
 
 
 def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
@@ -1010,10 +1012,13 @@ def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
     if withtype:
         best = assigned_types(name, data)
         typed = [r for r in withtype if r["unit_id"] in best]
-        agree = sum(1 for r in typed if r["type"] == best[r["unit_id"]])
+        given = lambda r: set(r["type"].split("|")) - {""}
+        agree = sum(1 for r in typed if given(r) & best[r["unit_id"]])
+        extra = sum(len(best[r["unit_id"]] - given(r) - {"none"}) for r in typed)
         lines += [f"## Type on units the person graded yes and gave a type: {agree} of "
-                  f"{len(typed)} agree with the assigned type ({len(withtype) - len(typed)} "
-                  f"not committed by the pipeline, so not typed)", ""]
+                  f"{len(typed)} share a type with the pipeline's ({extra} further types the "
+                  f"pipeline gave them; {len(withtype) - len(typed)} not committed by the "
+                  f"pipeline, so not typed)", ""]
     by = {}
     for r in rows:
         by.setdefault(r["stratum"], []).append(r)

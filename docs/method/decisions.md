@@ -14,7 +14,7 @@ Every question the pipeline puts to the decision model (TypeSafe's Jev) is handl
 |---|---|---|
 | Asset map | fitted gate, else `asset.gate_cosine`; word patterns; `asset_feedback.*` | `asset.floor`; `asset.decay` and `asset.paragraph_floor` for the paragraph rule |
 | Measure | fitted gate, else `measure.gate_cosine`; `measure.top`; `feedback.*` | `floor.<set>`, else `floor.default` |
-| Type | none: every committed sentence | `floor.types`, `floor.types_also` (`types.multiple`) |
+| Type | none: every committed sentence | `floor.types` (every type at it with `types.multiple`) |
 | Package to asset | `link.asset_top` | `link.asset_yes` |
 | Commitment to package | `link.measure_top` and a shared asset | `dashboard.package_link_min_probability` |
 | Pair check | none: every sentence two measures commit | `floor.pair_check` (the posterior that the sentence is not the measure) |

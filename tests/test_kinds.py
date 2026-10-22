@@ -174,7 +174,7 @@ def test_units_no_type_claims_get_an_oth_type_from_the_gap_step(store, monkeypat
     assert (len(gen_calls), len(dec_calls)) == n
 
 
-def test_a_second_type_counts_at_floor_types_also(store, monkeypatch):
+def test_every_type_at_the_floor_counts(store, monkeypatch):
     data, lab, _, _ = store
     _csv(os.path.join(lab, "cra_types.csv"),
          ["measure_id", "type_id", "type_name", "definition", "active"],
@@ -182,7 +182,7 @@ def test_a_second_type_counts_at_floor_types_also(store, monkeypatch):
            "definition": "maps of hazards", "active": "true"},
           {"measure_id": "cra", "type_id": "site", "type_name": "Site assessment",
            "definition": "assessment of one site", "active": "true"}])
-    monkeypatch.setattr(types_stage, "TYPE_ALSO", 0.04)      # the others answer 0.05
+    monkeypatch.setattr(types_stage, "TYPE_FLOOR", 0.04)     # the others answer 0.05
     out = types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
     rows = {r["unit_id"]: r for r in csv.DictReader(open(os.path.join(out, "assignments.csv")))}
     assert rows["u1"]["types_yes"] == "mapping|site" and rows["u1"]["best_type"] == "mapping"

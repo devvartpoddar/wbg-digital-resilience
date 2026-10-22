@@ -70,16 +70,25 @@ MAX_UNITS = 400          # more than this is sampled by seed, and reported
 PROPOSAL_COLS = ["run", "type_id", "type_name", "definition", "example_units"]
 TYPE_NONE = "none"
 OTH_PREFIX = "OTH."
-OTH_MIN = 5              # fewer "none" units than this are reported, not proposed from
-# A sentence takes its most likely type when that type's probability reaches
-# this (control panel floor.types; 0 = always), else no type.
-TYPE_FLOOR = float(panel.get("floor.types", 0) or 0)
-# Several types may win (control panel types.multiple): beside the likeliest,
-# every other type whose probability reaches floor.types_also. The answer is
-# one choice whose probabilities sum to 1, so a second type that high means
-# the sentence reads as both.
+# fewer "none" units than this are reported, not proposed from (control panel)
+OTH_MIN = int(panel.get("types.gap_min_units", 5))
+# A type counts for a sentence when its probability (through the types'
+# layer once fitted, src/judged.py) reaches floor.types, as an asset counts
+# at asset.floor: every such type with types.multiple, the likeliest only
+# without. The answer is one choice whose probabilities sum to 1, so 'none'
+# needs no floor of its own: it wins when no type reaches the floor.
+TYPE_FLOOR = float(panel.get("floor.types", 0.3))
 TYPE_MULTIPLE = bool(panel.get("types.multiple", True))
-TYPE_ALSO = float(panel.get("floor.types_also", 0.3) or 0.3)
+
+
+def type_winners(probs, floor=None, multiple=None):
+    """The types that count, likeliest first: every type (never 'none')
+    whose probability reaches the floor; the first only without multiple."""
+    floor = TYPE_FLOOR if floor is None else floor
+    multiple = TYPE_MULTIPLE if multiple is None else multiple
+    win = sorted((t for t, q in probs.items() if t != TYPE_NONE and q >= floor),
+                 key=lambda t: (-probs[t], t))
+    return win if multiple else win[:1]
 ASSIGN_COLS = ["label_id", "unit_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "model_served", "cost", "types_yes", "best_type", "best_p"]
 
@@ -392,7 +401,8 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
     h.update(f"{os.path.basename(run_folder)}\t{model}\n".encode())
     import judged
     h.update(f"prior={prior.VERSION}\nfloor={TYPE_FLOOR}\nmultiple={TYPE_MULTIPLE}\n"
-             f"also={TYPE_ALSO}\nlayers={judged.digest(data, 'types', judged.type_question_shas(name, data))}\n"
+             f"gap_min={OTH_MIN}\n"
+             f"layers={judged.digest(data, 'types', judged.type_question_shas(name, data))}\n"
              .encode())
     for (lid, u, _), sha in zip(rows, shas):
         h.update(f"{u['unit_id']}:{sha}\n".encode())
@@ -485,15 +495,13 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
         if st["failures"] or not all(got):
             log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
-    oth, oth_got = _gap_pass(name, approved, rows, got, data, api_key, False, log, model, workers)
+    import judged
+    lays = judged.layers(data, "types", judged.type_question_shas(name, data))
+    oth, oth_got = _gap_pass(name, approved, rows, got, data, api_key, False, log, model, workers,
+                             lays)
     if oth is None:
         return None
     out_rows, counts, served, cost = [], defaultdict(lambda: defaultdict(int)), set(), 0.0
-    # The types' probability layers (src/judged.py), fitted on the types
-    # people gave: each type's probability through its layer before the
-    # winners are read; 'none' keeps the model's.
-    import judged
-    lays = judged.layers(data, "types", judged.type_question_shas(name, data))
     all_types = {lid: [t["type_id"] for t in ts] + [t["type_id"] for t in oth.get(lid, [])]
                  for lid, ts in approved.items()}
     # The prior inputs (src/prior.py): each type's name and definition matched
@@ -503,26 +511,18 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     type_phrases = {lid: {t["type_id"]: prior.phrases([t["type_name"], t["definition"]], weight)
                           for t in ts + oth.get(lid, [])} for lid, ts in approved.items()}
     for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
-        probs = choice_probs(g["type"])
-        best = max(probs, key=probs.get)
+        raw = choice_probs(g["type"])       # the model's answer, kept for the next fit
+        probs = calibrate(lays, name, u["unit_id"], raw)
+        yes = type_winners(probs)
         entries = [g["type"]]
-        if best == TYPE_NONE and i in oth_got:
+        if not yes and i in oth_got:
+            # no approved type counts: the gap types' choice (no layer yet)
             second = choice_probs(oth_got[i]["type"])
             entries.append(oth_got[i]["type"])
-            b2 = max(second, key=second.get)
-            if b2 != TYPE_NONE:
-                best, probs = b2, {**{k: v for k, v in probs.items()}, **second}
-        raw = probs                # the model's answer, kept for the next fit
-        if lays:
-            probs = {t: (q if t == TYPE_NONE else
-                         judged.calibrated(lays, f"{name}:{t}", u["unit_id"], q))
-                     for t, q in probs.items()}
-            best = max(probs, key=probs.get)
-        yes = [] if best == TYPE_NONE or probs[best] < TYPE_FLOOR else [best]
-        if yes and TYPE_MULTIPLE:
-            yes += sorted((t for t, q in probs.items()
-                           if t not in (best, TYPE_NONE) and q >= max(TYPE_ALSO, TYPE_FLOOR)),
-                          key=lambda t: (-probs[t], t))
+            raw = {**raw, **second}
+            probs = {**probs, **second}
+            yes = type_winners(second)
+        best = yes[0] if yes else max(probs, key=probs.get)
         counts[lid][best if yes else "other"] += 1
         model_served = "|".join(sorted({e["model"] for e in entries}))
         served.add(model_served)
@@ -590,16 +590,28 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     return out
 
 
-def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, workers):
+def calibrate(lays, name, unit_id, probs):
+    """Each type's probability through its layer (src/judged.py), when one
+    is fitted; 'none' as the model gave it (it has no floor: it wins when no
+    type reaches floor.types)."""
+    if not lays:
+        return dict(probs)
+    import judged
+    return {t: (q if t == TYPE_NONE else judged.calibrated(lays, f"{name}:{t}", unit_id, q))
+            for t, q in probs.items()}
+
+
+def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, workers,
+              lays=None):
     """({label: OTH types}, {row index: second choice entries}) for the units
-    the first choice put in none; (None, None) when a request failed."""
+    no approved type counts for (type_winners on the calibrated answer);
+    (None, None) when a request failed."""
     import answers
     labs = {lab["id"]: lab for lab in labels.load_set(name)}
     none_by = defaultdict(list)
     for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
         if g:
-            probs = choice_probs(g["type"])
-            if max(probs, key=probs.get) == TYPE_NONE:
+            if not type_winners(calibrate(lays, name, u["unit_id"], choice_probs(g["type"]))):
                 none_by[lid].append((i, u))
     oth, spent = {}, 0.0
     for lid, items in sorted(none_by.items()):

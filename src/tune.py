@@ -232,7 +232,7 @@ def asset_grid(data):
 
 
 NOT_YET = [
-    ("floor.types, floor.types_also, floor.pair_check, link.asset_yes, "
+    ("floor.types, floor.pair_check, link.asset_yes, "
      "dashboard.package_link_min_probability", "data/reports/evaluate_after_measures.md, from "
      "the type column and the pair checks, package assets and package links tabs "
      "(src/judged.py)"),

@@ -7,9 +7,11 @@ measures have run.
          neither, each measure stated by its one-line boundary (the
          `boundary` column of analysis/labels/<set>.csv). Each measure is
          graded on its own, so nothing else holds the boundaries between
-         neighbours. The views drop a unit from a measure a pair answer says
-         it is not (only the other, or neither; control panel
-         dashboard.apply_measure_pair_checks). On Dev's graded sentences
+         neighbours. For each side the posterior that the unit is not that
+         measure (only the other, or neither, through the measure's pair
+         layer once fitted, src/judged.py) is written as p_drop_a and
+         p_drop_b; the views drop the unit from a measure when it reaches
+         floor.pair_check (dashboard.apply_measure_pair_checks). On Dev's graded sentences
          (2026-10-22, 249 with a pair answer) the answer raised recall at 0.90
          precision on those sentences from 0.78 to 0.87 over the probability
          layer alone, where the other measures' scores and the rank among

@@ -333,11 +333,13 @@ def type_blocks(data):
         for r in read_type_grades(data, name):
             uid = by_text.get(r.get("text_sha256", ""))
             if uid in assigned and int(r["grade"]) >= lo:
-                given[uid] = (r["type"], float(r.get("weight") or 1.0))
+                ts = set(r["type"].split("|")) - {"", "other"}
+                if ts:
+                    given[uid] = (ts, float(r.get("weight") or 1.0))
         for label, qsha in shas.items():
             t = label.split(":", 1)[1]
-            rows = [(u, int(given[u][0] == t), given[u][1], projects_of(u)) for u in given
-                    if given[u][0] not in ("", "other") and f"p_{t}" in assigned[u]]
+            rows = [(u, int(t in given[u][0]), given[u][1], projects_of(u)) for u in given
+                    if f"p_{t}" in assigned[u]]
             score = {u: float(assigned[u][f"p_{t}"] or 0) for u, *_ in rows}
             vecs = {u: vector_of(u) for u in score}
             vecs = {u: v for u, v in vecs.items() if v is not None}

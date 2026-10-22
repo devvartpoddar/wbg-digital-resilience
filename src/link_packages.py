@@ -470,10 +470,12 @@ def report_lines(plan, asset_rows, pair_rows):
     for a, n in sorted(per_asset.items(), key=lambda x: -x[1]):
         lines.append(f"    {names.get(a, a):<50} {n:>6,}")
     lines.append(f"  commitment-package pairs asked: {len(pair_rows):,}")
+    # A link counts at the dashboards' floor, not the package-asset one.
+    LINK = float(panel.get("dashboard.package_link_min_probability", 0.7))
     for route in ("asset", "measure"):
         rs = [r for r in pair_rows if r.get("route", "asset") == route]
-        ys = [r for r in rs if float(r.get("p_calibrated") or r["probability"]) >= YES]
-        line = f"    by {route}: {len(rs):,} pairs, {len(ys):,} at {YES}"
+        ys = [r for r in rs if float(r.get("p_calibrated") or r["probability"]) >= LINK]
+        line = f"    by {route}: {len(rs):,} pairs, {len(ys):,} at {LINK}"
         if route == "measure" and ys:
             by = defaultdict(int)
             for r in ys:
@@ -483,10 +485,10 @@ def report_lines(plan, asset_rows, pair_rows):
         lines.append(line)
     for name, (run, units) in sorted(plan.runs.items()):
         ps = [r for r in pair_rows if r["label_set"] == name]
-        linked = {r["unit_id"] for r in ps if float(r.get("p_calibrated") or r["probability"]) >= YES}
-        pks = {r["package_id"] for r in ps if float(r.get("p_calibrated") or r["probability"]) >= YES}
+        linked = {r["unit_id"] for r in ps if float(r.get("p_calibrated") or r["probability"]) >= LINK}
+        pks = {r["package_id"] for r in ps if float(r.get("p_calibrated") or r["probability"]) >= LINK}
         lines.append(f"    {name:<28} committed units {len(units):>5,}; pairs {len(ps):>6,}; "
-                     f"at {YES}: {len(linked):>5,} units linked to {len(pks):,} packages")
+                     f"at {LINK}: {len(linked):>5,} units linked to {len(pks):,} packages")
     return lines
 
 
