@@ -288,3 +288,32 @@ def test_a_graded_training_sheet_fits_the_layer_and_the_gate_for_the_next_run(st
         k: v for k, v in kw.items() if k != "min_cosine"})
     assert nxt.gate_fitted == gate["gate"] and nxt.calibration
     assert nxt.out != first
+
+
+def test_a_run_publishes_its_findings_assets_and_record_to_postgres(store, monkeypatch):
+    """With a scratch database (WBG_PG_TEST): the measure run, every
+    sentence's asset and the record of judgement land in Postgres."""
+    dsn = os.environ.get("WBG_PG_TEST")
+    if not dsn:
+        pytest.skip("set WBG_PG_TEST to a scratch database")
+    import psycopg
+    import load_pg
+    import store as st
+    data, _ = store
+    measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    monkeypatch.setattr(load_pg, "found_sets", lambda sha: ["cra", "assets"])
+    amap = os.path.join(data, "classify", "assets-abc")
+    monkeypatch.setattr(classify, "current_run",
+                        lambda name, d, **kw: amap if name == "assets" else None)
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("DROP SCHEMA IF EXISTS wbg CASCADE")
+        st.publish(data, sets=["cra", "assets"], log=lambda *_: None, conn=conn)
+        got = conn.execute("SELECT unit_id, is_committed, posterior_probability, linked_asset_id "
+                           "FROM wbg.measure_findings ORDER BY unit_id").fetchall()
+        assert (got[0][1], float(got[0][2]), got[0][3]) == (True, 0.9, "towers")
+        assert not any(r[1] for r in got[1:])
+        assets = dict(conn.execute("SELECT unit_id, asset_level FROM wbg.unit_assets").fetchall())
+        assert assets[got[0][0]] == "unit" and assets[got[1][0]] == "paragraph"
+        assert conn.execute("SELECT count(*) FROM wbg.answers").fetchone()[0] == len(got)
+        stages = {r[0] for r in conn.execute("SELECT stage FROM wbg.runs")}
+        assert {"measures", "classify"} <= stages

@@ -149,6 +149,8 @@ def convert(name, value, bad, kind=None):
     a pipe-joined list becomes a Postgres array. `name` is the CSV name."""
     if value is None or value == "":
         return None
+    if not isinstance(value, str):      # a number or a flag read from JSON
+        value = str(value).lower() if isinstance(value, bool) else str(value)
     kind = kind or col_type(name)
     try:
         if kind == "integer":

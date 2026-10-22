@@ -259,7 +259,7 @@ def sheet_rows(name, data, seed=1, elusion=False, design="train", **kw):
         paragraph = doc[int(para["char_start"]):int(para["char_end"])]
         key.append({"row_id": i, "label_id": u["label_id"], "unit_id": u["unit_id"],
                     "paragraph_id": u["paragraph_id"],
-                    "text_sha256": hashlib.sha256(u["text"].encode("utf-8")).hexdigest(),
+                    "text_sha256": text_key(u["text"]),
                     "question_sha256": qsha[u["label_id"]], "stratum": stratum,
                     "stratum_size": size, "stratum_drawn": drawn,
                     "measure_dir": os.path.basename(folder)})
@@ -368,7 +368,7 @@ def link_rows(data, seed, projects=None, bands=LINK_BANDS):
         state = link_packages.pair_state(u, pk)
         key.append({"row_id": i, "label_set": p["label_set"], "unit_id": p["unit_id"],
                     "package_id": p["package_id"],
-                    "text_sha256": hashlib.sha256(u["text"].encode("utf-8")).hexdigest(),
+                    "text_sha256": text_key(u["text"]),
                     "package_sha256": pk["sha"], "question_sha256": qsha,
                     "probability": p["probability"], "stratum": stratum, "stratum_size": size,
                     "stratum_drawn": drawn, "link_run": os.path.basename(folder)})
@@ -556,7 +556,13 @@ def posterior_path(name, data):
     return where(data, "labels", f"{name}_posterior.json")
 
 
-def graded_labels(name, data, question_sha256=None, fitting=False):
+def text_key(text):
+    """The SHA-256 a label is keyed by: of the unit's text as the sheet showed
+    it (with its lead-in)."""
+    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
+
+
+def graded_labels(name, data, question_sha256=None, fitting=False, units_by_text=None):
     """{unit_id: (grade, asset, weight)} of every sentence a person graded for
     the set under the exact question given (every question when None; the
     latest grade wins). A grade given under another wording of the label is
@@ -564,7 +570,10 @@ def graded_labels(name, data, question_sha256=None, fitting=False):
     skip rule read only the current one. weight is the row's design weight
     (stratum size over rows drawn; 1 where the sheet did not record it).
     fitting=True leaves out the rows of evaluation sheets: what fits a layer
-    or a gate never grades it."""
+    or a gate never grades it. units_by_text ({text SHA-256: unit_id} of the
+    corpus as it stands) finds each grade's sentence by its text, never by
+    the stored position: a re-parse moves unit ids (AGENTS.md rule 9), and a
+    grade whose text is no longer in the corpus is left out."""
     lpath = where(data, "labels", f"{name}_units.csv")
     out = {}
     if os.path.exists(lpath):
@@ -576,8 +585,11 @@ def graded_labels(name, data, question_sha256=None, fitting=False):
                     continue
                 if fitting and (r.get("stratum") or "").startswith(EVAL):
                     continue
-                out[r["unit_id"]] = (int(r["grade"]), r.get("asset", ""),
-                                     float(r.get("weight") or 1.0))
+                uid = r["unit_id"] if units_by_text is None else \
+                    units_by_text.get(r.get("text_sha256", ""))
+                if uid is None:
+                    continue
+                out[uid] = (int(r["grade"]), r.get("asset", ""), float(r.get("weight") or 1.0))
     return out
 
 
@@ -612,7 +624,8 @@ def fit_layer(name, data):
     lines = ["## Probability layer and suggested floor", ""]
     if not units:
         return lines + ["- no run asks the current question yet: run the measure, then evaluate again", ""]
-    graded = graded_labels(name, data, sha, fitting=True)
+    graded = graded_labels(name, data, sha, fitting=True,
+                           units_by_text={text_key(u.get("text")): uid for uid, u in units.items()})
     vector_of, projects_of = posterior.lookups(data)
     score = {u: sum(float(units[u].get(f"p{g}") or 0) for g in panel.grades())
              for u in graded if u in units and units[u].get("sent") == "true"}
@@ -664,13 +677,14 @@ def fit_gate(name, data):
     import panel, skip
     lo = min(panel.grades())
     run = measure.Run(name, data, build=False, log=lambda *_: None)
-    graded = graded_labels(name, data, run.question_sha, fitting=True)
+    run.load_corpus()
+    graded = graded_labels(name, data, run.question_sha, fitting=True,
+                           units_by_text={text_key(t): u for u, t in run.texts.items()})
     lines = ["## Skip rule (what the pool leaves out)", ""]
     yes = {u: w for u, (g, _, w) in graded.items() if g >= lo}
     if not yes:
         return lines + ["- no sentence graded yes under the current question: the panel's "
                         f"gate ({measure.MIN_COSINE}) stands", ""]
-    run.load_corpus()
     lid = run.labels[0]["id"]
     mine = [p for p in run.patterns if p["label_id"] == lid]
     pos = []
@@ -710,9 +724,13 @@ def fit_asset_layers(data):
         return ["- asset layers: no sentence asset map yet"]
     with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
         man = json.load(fh)
+    import csv as _csv
+    with open(where(data, "embeddings", "sentence_index.csv"), newline="", encoding="utf-8") as fh:
+        by_text = {text_key(t): u for u, t in measure.unit_texts(data, list(_csv.DictReader(fh))).items()}
     named, weight = {}, {}
     for name in labels.label_sets():
-        for u, (_, asset, w) in graded_labels(name, data, fitting=True).items():
+        for u, (_, asset, w) in graded_labels(name, data, fitting=True,
+                                              units_by_text=by_text).items():
             if asset:
                 named[u] = asset          # the asset a person gave the sentence
                 weight[u] = w

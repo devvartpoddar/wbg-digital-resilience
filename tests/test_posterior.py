@@ -84,17 +84,15 @@ def test_the_suggested_floor_keeps_the_most_recall_at_the_target():
     assert posterior.suggest_floor([0.9, 0.8], [0, 0], 0.8)[1] == 0.0   # none reaches: the most precise
 
 
-def test_a_graded_sentence_of_the_same_project_or_a_near_copy_does_not_vote():
+def test_a_near_copy_does_not_vote_but_a_sentence_of_the_same_project_does():
     graded, scores, vecs = _graded()
-    # Each graded sentence in a project of its own.
-    graded = [(u, y, 1.0, f"G{i}") for i, (u, y) in enumerate(graded)]
-    yes_projects = "|".join(p for _, y, _, p in graded if y)
+    graded = [(u, y, 1.0, "A" if y else "B") for u, y in graded]   # every yes in project A
     s = dict(S, near_copy=0.999)
     spec = posterior.fit(graded, scores, vecs, "q1", "cra", s)
     layer = posterior.Layer(spec, vecs.get)
-    vecs["near_yes"] = numpy.array([1.0, 0.0, 0.0])
-    # From another project the yes neighbours vote; from theirs they do not.
-    assert layer.probability("near_yes", 0.5, "C") > layer.probability("near_yes", 0.5, yes_projects)
+    vecs["near_yes"] = numpy.array([0.95, 0.05, 0.0])
+    # The yes of project A still vote for a new sentence of project A.
+    assert layer.probability("near_yes", 0.5, "A") == layer.probability("near_yes", 0.5, "C") > 0.8
     # A near-copy of a graded yes is not informed by it.
     vecs["copy"] = vecs["u1"].copy()
     keep = posterior._keep(posterior._unit(vecs["copy"]), layer.G, frozenset(), layer.P, 0.999)

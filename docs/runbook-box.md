@@ -39,12 +39,18 @@ each prints its estimate before asking anything (`--dry-run`).
    | Fetch PDFs, plans, notices, awards, records | hours | overnight (the interface is rate-limited; `./wbg prepare` resumes) | a day or more |
    | Read PDFs (0.3 s a page on a fast core; three workers) | minutes | about 3 hours on the N150 | about 15 hours |
    | Embed the units | US$0.30 | about US$1 | about US$6 |
-   | Asset map, 13 assets, every sentence (starting gate) | about US$2 to 3 (estimate) | about US$8 to 11 | about US$45 to 60 |
-   | One measure (pool plus feedback) | about US$0.10 | about US$0.40 | about US$2 |
+   | Asset map, 13 assets, every sentence (starting gate 0.2) | about US$1 to 1.5 | about US$3 to 5 | about US$20 to 30 |
+   | One measure (pool plus feedback; starting gate 0.2) | about US$0.35 | about US$1.2 to 1.5 | about US$7 to 9 |
 
-   The asset-map row is an estimate from the test rate on graded sentences;
-   the dry run gives the figure. At 250 projects the whole run fits well
-   inside the key's cap of US$50.
+   Estimates (2026-10-22) for the starting gates of 0.2: on the current corpus
+   (251 projects, about 150,000 searched sentences) about four in five sentences
+   reach 0.2 for each measure (at 0.45, 2 to 8 per cent did), at about
+   US$0.00001 a sentence (the v7 runs' rate); the asset map at about US$0.0000026 a
+   question. A clean run's model stages therefore cost about US$18 to 22, against
+   about US$3 to 4 at the old gates of 0.25 and 0.45. Raising a gate later asks
+   nothing (the answers are stored); lowering it asks again, so the first run pays
+   once for the whole range above 0.2. The dry run gives the figure; it fits inside
+   the key's cap of US$50.
 
 ## The run
 
@@ -208,7 +214,9 @@ current questions:
 2. `./wbg run --from classify --dry-run`, read the estimates, then without
    `--dry-run`. The first run has **no probability layer and no fitted gate**: the
    floors read the model's score and the pools use the panel's starting gates
-   (`asset.gate_cosine`, `measure.gate_cosine`). Stored answers are reused wherever
+   (`asset.gate_cosine`, `measure.gate_cosine`, both 0.2: about four in five
+   sentences are asked about each measure, so the skip rule is later fitted on
+   graded yes from the whole range). Stored answers are reused wherever
    the exact question and state were asked before.
 3. Grade a training sheet: `./wbg check all --design train --seed <n>`
    (about 40 rows a measure, near each floor), then `./wbg check all --seed <n>

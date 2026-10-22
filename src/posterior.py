@@ -17,12 +17,16 @@ Two similarity numbers, both from the graded sentences of the label:
   centroid  similarity to the (weighted) average graded yes minus
             similarity to the average graded no.
 
-A graded sentence never informs a sentence of its own project, nor one it
-nearly copies (similarity at posterior.near_copy or more): appraisal
-documents reuse wording across projects and between a project and its
-additional financing, and a near-copy's grade would otherwise decide the
-vote. The same rule holds when fitting, when checking and when applying, so
-the weights learned are the weights used.
+A graded sentence never informs a sentence it nearly copies (similarity at
+posterior.near_copy or more): appraisal documents reuse wording across
+projects and between a project and its additional financing, and a
+near-copy's grade would otherwise decide the vote, so the fit would learn to
+trust the vote more than it deserves. The same rule holds when fitting, when
+checking and when applying, so the weights learned are the weights used.
+Sentences of the same project do vote: they are different sentences, and
+leaving them out starves the vote of a measure whose graded yes sit in a few
+projects. Leakage between projects is the out-of-fold check's job (folds by
+whole project), not the vote's.
 
 The grades come from sheets drawn by band, not at random, so each graded
 sentence carries its design weight (the stratum's size over the rows drawn
@@ -92,11 +96,9 @@ def features(vec, G, y, w, sharpness, centroid, keep):
 
 
 def _keep(vec, G, projects, P, near_copy, skip=None):
-    """Which graded rows may inform a sentence: not itself, not one of its
-    projects, not a near-copy of it."""
+    """Which graded rows may inform a sentence: not itself, not a near-copy
+    of it. (projects and P are kept for the out-of-fold split.)"""
     keep = (G @ vec) < near_copy
-    if projects:
-        keep &= numpy.array([not (projects & p) for p in P], dtype=bool)
     if skip is not None:
         keep[skip] = False
     return keep
@@ -220,9 +222,7 @@ def digest(layer):
 
 
 class Layer:
-    """A fitted layer ready to apply: probability(unit_id, score, projects).
-    projects_of(unit_id) gives a sentence's projects when the caller does not
-    pass them, so a graded sentence of the same project is left out."""
+    """A fitted layer ready to apply: probability(unit_id, score)."""
 
     def __init__(self, spec, vector_of, projects_of=None):
         self.spec = spec
