@@ -150,8 +150,8 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert r["p_committed_calibrated"] == "0.9000" and r["committed"] == "true"
     # The prior inputs (src/prior.py): stored, read by nothing yet.
     assert r["prior_phrase_cosine"] == "0.9000" and float(r["prior_phrase_match"]) >= 0
-    # No delivery, conditional or actor question: their columns stay empty.
-    assert r["kinds_yes"] == r["kind_best"] == r["actors_yes"] == r["conditional_p"] == ""
+    # No delivery, conditional or actor question, and no column for one.
+    assert not {"kinds_yes", "kind_best", "actors_yes", "conditional_p", "p4"} & set(r)
     assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]

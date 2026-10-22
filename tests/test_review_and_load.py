@@ -130,11 +130,12 @@ def test_an_evaluation_writes_its_headline_numbers(tmp_path):
     data/labels/measure_quality.csv; a later evaluation replaces it."""
     import check_units
     key = {"question_sha256": "q1", "measure_dir": "cra-abc"}
-    rows = [{"grade": 3, "model_grade": 3}, {"grade": 3, "model_grade": 2},
-            {"grade": 0, "model_grade": 3}, {"grade": 3, "model_grade": 3}]
-    check_units.write_quality(str(tmp_path), "cra", key, rows, 3)
-    check_units.write_quality(str(tmp_path), "cra", key, rows[:2], 3)
+    r = lambda yes, p, w=1.0: {"yes": yes, "p": p, "w": w, "stratum": "train:near"}
+    rows = [r(True, 0.9), r(True, 0.3), r(False, 0.8), r(True, 0.7)]
+    check_units.write_quality(str(tmp_path), "cra", key, rows, 0.5)
+    check_units.write_quality(str(tmp_path), "cra", key, rows[:2], 0.5)
     got = list(csv.DictReader(open(tmp_path / "labels" / "measure_quality.csv")))
     assert len(got) == 1 and got[0]["graded_units"] == "2"
     assert got[0]["precision"] == "1.000" and got[0]["recall"] == "0.500"
     assert got[0]["version"]                     # the measure file's version column
+    assert got[0]["sheet"] == "training"

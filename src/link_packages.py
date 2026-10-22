@@ -168,13 +168,11 @@ def committed_units(data, projects=None, sets=None):
             continue
         if not folder:
             continue
-        with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
-            top = len(json.load(fh)["scale"]) - 1
-        floor = labels.commit_floor(name)
+        floor = panel.floor(name)
         rows = []
         with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
             for u in csv.DictReader(fh):
-                if measure.is_committed(u, top, floor):
+                if measure.is_committed(u, floor):
                     rows.append(u)
         out[name] = (os.path.basename(folder), rows)
     return out

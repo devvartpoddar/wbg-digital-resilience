@@ -135,3 +135,35 @@ def test_only_grades_given_under_the_current_question_are_read(tmp_path):
         w.writerows(rows)
     assert check_units.graded_labels("cra", str(tmp_path), "new") == {"u2": (1, "", 2.5)}
     assert set(check_units.graded_labels("cra", str(tmp_path))) == {"u1", "u2"}
+
+
+def test_training_draws_near_the_floor_and_evaluation_draws_by_the_decision():
+    import check_units
+    units = [{"unit_id": f"u{i:03d}", "sent": "true", "p_committed_calibrated": f"{i / 200:.3f}"}
+             for i in range(200)]
+    train = check_units.draw(units, 0.5, 1, "train")
+    near = [u for u, s, *_ in train if s == "train:near"]
+    assert len(near) == 30 and all(abs(float(u["p_committed_calibrated"]) - 0.5) <= 0.2
+                                   for u in near)
+    ev = check_units.draw(units, 0.5, 1, "eval")
+    by = {}
+    for u, s, size, drawn in ev:
+        by[s] = (size, drawn)
+    assert by == {"eval:committed": (100, 60), "eval:not_committed": (100, 30)}
+    assert check_units.draw(units, 0.5, 1, "eval") == ev            # repeatable
+
+
+def test_evaluation_rows_never_fit_a_layer_or_a_gate(tmp_path):
+    import check_units
+    lab = tmp_path / "labels"
+    lab.mkdir()
+    rows = [dict(label_set="cra", label_id="cra", unit_id="u1", text_sha256="t1",
+                 question_sha256="q", grade="3", stratum="train:near", weight="2"),
+            dict(label_set="cra", label_id="cra", unit_id="u2", text_sha256="t2",
+                 question_sha256="q", grade="3", stratum="eval:committed", weight="5")]
+    with open(lab / "cra_units.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=check_units.LABEL_COLS, restval="")
+        w.writeheader()
+        w.writerows(rows)
+    assert set(check_units.graded_labels("cra", str(tmp_path), "q", fitting=True)) == {"u1"}
+    assert set(check_units.graded_labels("cra", str(tmp_path), "q")) == {"u1", "u2"}

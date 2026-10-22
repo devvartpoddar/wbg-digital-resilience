@@ -49,7 +49,16 @@ def cell_text(value):
     text = str(value if value is not None else "").replace("\f", "\n[page break]\n")
     return ILLEGAL_CHARACTERS_RE.sub("", text)[:CELL_MAX]
 
-PER = {"3": 30, "2": 15, "1": 20, "0": 20, "feedback": 10}
+# The two sheets the method grades on (docs/method/measures.md, "Training and
+# evaluation sheets"). A training sheet (--design train) is drawn where a
+# grade teaches most: near the floor, plus a few far from it. An evaluation
+# sheet (--design eval) is a random draw of the pool by the decision, so its
+# weighted precision and recall are the dashboards'; its grades are never
+# used to fit a layer or a gate, nor to edit a definition.
+TRAIN_PER = {"train:near": 30, "train:far": 10}
+TRAIN_NEAR = 0.2         # "near": the posterior within this of the floor
+EVAL_PER = {"eval:committed": 60, "eval:not_committed": 30}
+EVAL = "eval:"           # the stratum prefix of an evaluation sheet's rows
 ELUSION_PER = {"near": 25, "far": 25}
 ELUSION_BAND = 0.10      # "near": best cosine within this much below the pool threshold
 KEY_COLS = ["row_id", "label_id", "unit_id", "paragraph_id", "text_sha256", "question_sha256",
@@ -66,7 +75,7 @@ THRESHOLDS = [0.15, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 BANDS = [("p<0.15", 0.0, 0.15, 5), ("p0.15-0.4", 0.15, 0.4, 8), ("p0.4-0.6", 0.4, 0.6, 12),
          ("p0.6-0.8", 0.6, 0.8, 10), ("p0.8+", 0.8, 1.01, 5)]
 # The floor design (--design floor): about 20 units a measure in bands around
-# its commit floor (labels.commit_floor), to check a chosen floor; a measure
+# its floor (control panel floor.<set>), to check a chosen floor; a measure
 # without one is drawn in BANDS at about half the rows.
 FLOOR_STEPS = [(-1.0, -0.2, 2), (-0.2, -0.1, 3), (-0.1, 0.0, 5), (0.0, 0.1, 5), (0.1, 0.25, 3),
                (0.25, 1.0, 2)]
@@ -125,18 +134,30 @@ def wilson(k, n, z=1.96):
     return (max(0.0, c - h), min(1.0, c + h))
 
 
-def draw(units, per, seed):
+def _posterior(u):
+    p = u.get("p_committed_calibrated", "")
+    return float(p) if p != "" else measure.score_of(u)
+
+
+def draw(units, floor, seed, design="train"):
+    """A training or evaluation draw of the units the model read, by the
+    decision: (unit, stratum, stratum size, rows drawn)."""
     rng = random.Random(seed)
     strata = {}
     for u in units:
         if u["sent"] != "true":
             continue
-        s = "feedback" if u["route"] == "feedback" else u["grade"]
+        p = _posterior(u)
+        if design == "eval":
+            s = "eval:committed" if p >= floor else "eval:not_committed"
+        else:
+            s = "train:near" if abs(p - floor) <= TRAIN_NEAR else "train:far"
         strata.setdefault(s, []).append(u)
+    per = EVAL_PER if design == "eval" else TRAIN_PER
     picked = []
-    for s in sorted(strata):
-        pool = sorted(strata[s], key=lambda u: u["unit_id"])
-        n = min(per.get(s, 0), len(pool))
+    for s in sorted(per):
+        pool = sorted(strata.get(s, []), key=lambda u: u["unit_id"])
+        n = min(per[s], len(pool))
         for u in rng.sample(pool, n):
             picked.append((u, s, len(pool), n))
     return picked
@@ -200,7 +221,7 @@ def set_types(name, data):
             if t["label_set"] == name]
 
 
-def sheet_rows(name, data, seed=1, per=PER, elusion=False, design="grade", **kw):
+def sheet_rows(name, data, seed=1, elusion=False, design="train", **kw):
     """(key rows, sheet rows, scale, asset ids) of one measure's draw."""
     folder = measure.current_run(name, data, **kw)
     if not folder:
@@ -217,10 +238,12 @@ def sheet_rows(name, data, seed=1, per=PER, elusion=False, design="grade", **kw)
     elif design in ("floor", "tune"):
         import labels
         picked = draw_bands(units, len(run.scale) - 1, seed,
-                            floor_bands(labels.commit_floor(name),
+                            floor_bands(panel.floor(name),
                                         TUNE_SCALE if design == "tune" else 1.0))
+    elif design in ("train", "eval"):
+        picked = draw(units, run.floor, seed, design)
     else:
-        picked = draw(units, per, seed)
+        raise SystemExit(f"check: unknown design {design}")
     rng = random.Random(seed)
     rng.shuffle(picked)
     idx = {r["unit_id"]: r for r in run.index}
@@ -251,10 +274,10 @@ def _write_key(path, cols, rows):
         w.writerows(rows)
 
 
-def build(name, data, seed=1, per=PER, elusion=False, design="grade", **kw):
+def build(name, data, seed=1, elusion=False, design="train", **kw):
     if name == ALL:
         return build_all(data, seed, design=design, **kw)
-    key, sheet, scale, assets = sheet_rows(name, data, seed, per, elusion, design, **kw)
+    key, sheet, scale, assets = sheet_rows(name, data, seed, elusion, design, **kw)
     base = where(data, "review", f"check_units_{name}{'_elusion' if elusion else ''}_s{seed}")
     if os.path.exists(base + ".xlsx"):
         raise SystemExit(f"check: {base}.xlsx exists and may hold grades; use another --seed")
@@ -270,7 +293,7 @@ def all_path(data, seed):
     return where(data, "review", f"check_units_{ALL}_s{seed}.xlsx")
 
 
-def build_all(data, seed, design="bands", **kw):
+def build_all(data, seed, design="train", **kw):
     """One workbook for a person to grade: a tab per measure (drawn by
     `design`), and a tab of package links. Each tab has its own key file,
     check_units_<set>_s<seed>.key.csv and check_links_s<seed>.key.csv, so
@@ -489,34 +512,38 @@ def graded_sheet(name, data, seed, elusion=False):
     raise SystemExit(f"check: no sheet for {name} at seed {seed} ({base}.xlsx or {xlsx})")
 
 
-QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "graded_units",
+QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "sheet", "graded_units",
                 "precision", "recall", "evaluated_at", "report_path"]
 
 
-def write_quality(data, name, key, rows, top):
+def write_quality(data, name, key, rows, floor):
     """The headline numbers of an evaluation, one row per measure and exact
     question in data/labels/measure_quality.csv (loaded as
-    wbg.measure_quality): precision and recall of the model's most likely
-    grade at the top of the scale against the person's grade."""
-    tp = sum(1 for r in rows if r["model_grade"] >= top and r["grade"] >= top)
-    pp = sum(1 for r in rows if r["model_grade"] >= top)
-    ap = sum(1 for r in rows if r["grade"] >= top)
+    wbg.measure_quality): the weighted precision and recall of the
+    pipeline's decision (posterior at the floor) against the person's grade
+    (2 or more), and which kind of sheet they come from."""
+    import posterior
+    ys, ws = [r["yes"] for r in rows], [r["w"] for r in rows]
+    prec, rec, _ = posterior.weighted_pr([r["p"] for r in rows], ys, ws, floor)
     path = where(data, "labels", "measure_quality.csv")
     current = {}
     if os.path.exists(path):
         with open(path, newline="", encoding="utf-8") as fh:
-            current = {(r["label_set"], r["question_sha256"]): r for r in csv.DictReader(fh)}
+            current = {(r["label_set"], r["question_sha256"], r.get("sheet", "")): r
+                       for r in csv.DictReader(fh)}
     import labels
     version = next((lab.get("version") or "" for lab in labels.load_set(name)), "")
-    current[(name, key["question_sha256"])] = {
+    sheet = "evaluation" if all(r["stratum"].startswith(EVAL) for r in rows) else "training"
+    current[(name, key["question_sha256"], sheet)] = {
         "label_set": name, "version": version, "question_sha256": key["question_sha256"],
-        "run_id": key["measure_dir"], "graded_units": len(rows),
-        "precision": f"{tp / pp:.3f}" if pp else "", "recall": f"{tp / ap:.3f}" if ap else "",
+        "run_id": key["measure_dir"], "sheet": sheet, "graded_units": len(rows),
+        "precision": f"{prec:.3f}" if prec is not None else "",
+        "recall": f"{rec:.3f}" if rec is not None else "",
         "evaluated_at": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "report_path": f"reports/evaluate_units_{name}.md"}
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=QUALITY_COLS, lineterminator="\n")
+        w = csv.DictWriter(fh, fieldnames=QUALITY_COLS, lineterminator="\n", restval="")
         w.writeheader()
         w.writerows(sorted(current.values(), key=lambda r: (r["label_set"], r["evaluated_at"])))
     os.replace(path + ".part", path)
@@ -526,13 +553,15 @@ def posterior_path(name, data):
     return where(data, "labels", f"{name}_posterior.json")
 
 
-def graded_labels(name, data, question_sha256=None):
+def graded_labels(name, data, question_sha256=None, fitting=False):
     """{unit_id: (grade, asset, weight)} of every sentence a person graded for
     the set under the exact question given (every question when None; the
     latest grade wins). A grade given under another wording of the label is
     a grade of another question (AGENTS.md rule 9), so the layer and the
     skip rule read only the current one. weight is the row's design weight
-    (stratum size over rows drawn; 1 where the sheet did not record it)."""
+    (stratum size over rows drawn; 1 where the sheet did not record it).
+    fitting=True leaves out the rows of evaluation sheets: what fits a layer
+    or a gate never grades it."""
     lpath = where(data, "labels", f"{name}_units.csv")
     out = {}
     if os.path.exists(lpath):
@@ -541,6 +570,8 @@ def graded_labels(name, data, question_sha256=None):
                 if r.get("grade", "") == "":
                     continue
                 if question_sha256 is not None and r.get("question_sha256") != question_sha256:
+                    continue
+                if fitting and (r.get("stratum") or "").startswith(EVAL):
                     continue
                 out[r["unit_id"]] = (int(r["grade"]), r.get("asset", ""),
                                      float(r.get("weight") or 1.0))
@@ -578,7 +609,7 @@ def fit_layer(name, data):
     lines = ["## Probability layer and suggested floor", ""]
     if not units:
         return lines + ["- no run asks the current question yet: run the measure, then evaluate again", ""]
-    graded = graded_labels(name, data, sha)
+    graded = graded_labels(name, data, sha, fitting=True)
     vector_of, projects_of = posterior.lookups(data)
     score = {u: sum(float(units[u].get(f"p{g}") or 0) for g in panel.grades())
              for u in graded if u in units and units[u].get("sent") == "true"}
@@ -630,7 +661,7 @@ def fit_gate(name, data):
     import panel, skip
     lo = min(panel.grades())
     run = measure.Run(name, data, build=False, log=lambda *_: None)
-    graded = graded_labels(name, data, run.question_sha)
+    graded = graded_labels(name, data, run.question_sha, fitting=True)
     lines = ["## Skip rule (what the pool leaves out)", ""]
     yes = {u: w for u, (g, _, w) in graded.items() if g >= lo}
     if not yes:
@@ -678,7 +709,7 @@ def fit_asset_layers(data):
         man = json.load(fh)
     named, weight = {}, {}
     for name in labels.label_sets():
-        for u, (_, asset, w) in graded_labels(name, data).items():
+        for u, (_, asset, w) in graded_labels(name, data, fitting=True).items():
             if asset:
                 named[u] = asset          # the asset a person gave the sentence
                 weight[u] = w
@@ -784,69 +815,70 @@ def evaluate(name, data, seed=1, elusion=False, **kw):
     mdir = where(data, "measures", key[0]["measure_dir"])
     with open(os.path.join(mdir, "units.csv"), newline="", encoding="utf-8") as fh:
         units = {u["unit_id"]: u for u in csv.DictReader(fh)}
-    with open(os.path.join(mdir, "manifest.json"), encoding="utf-8") as fh:
-        scale = json.load(fh)["scale"]
-    top = len(scale) - 1
+    import panel, posterior
+    lo = min(panel.grades())
+    floor = panel.floor(name)
     rows = []
     for k in key:
         if k["row_id"] not in graded:
             continue
         u = units[k["unit_id"]]
         g, a, t = graded[k["row_id"]]
-        rows.append({"grade": g, "asset": a, "type": t, "unit_id": k["unit_id"], "w": int(k["stratum_size"]) / int(k["stratum_drawn"]),
-                     "p": [float(u[f"p{i}"]) for i in range(len(scale))],
-                     "model_grade": int(u["grade"]), "link": u.get("asset_link", ""),
-                     "stratum": k["stratum"]})
-    lines = [f"# {name}: the decision model against {len(rows)} graded units", "",
+        rows.append({"grade": g, "yes": g >= lo, "asset": a, "type": t, "unit_id": k["unit_id"],
+                     "w": int(k["stratum_size"]) / int(k["stratum_drawn"]),
+                     "p": _posterior(u), "model": measure.score_of(u),
+                     "committed": u.get("committed") == "true",
+                     "link": u.get("asset_link", ""), "stratum": k["stratum"]})
+    is_eval = all(r["stratum"].startswith(EVAL) for r in rows)
+    lines = [f"# {name}: the pipeline's decision against {len(rows)} graded units", "",
              f"Drawn from {key[0]['measure_dir']} by stratum "
-             f"({', '.join(sorted({k['stratum'] for k in key}))}); weighted "
-             f"point estimates use stratum size over rows drawn; intervals are 95 per cent "
-             f"Wilson on the raw counts. Recall is within the graded pool (candidates and "
-             f"feedback units), not the corpus.", ""]
-    for k in (top, top - 1):
-        pos = [r for r in rows if r["grade"] >= k]
-        lines += [f"## Positive = person graded {k} or above ({len(pos)} of {len(rows)} rows)", "",
-                  "| model says | precision (95% CI) | recall (95% CI) | weighted precision | "
-                  "weighted recall | n predicted |", "|---|---|---|---|---|---|"]
-        for label, pred in [(f"most likely grade >= {k}", lambda r, k=k: r["model_grade"] >= k)] + \
-                [(f"P(grade >= {k}) >= {t}", lambda r, t=t, k=k: sum(r["p"][k:]) >= t)
-                 for t in THRESHOLDS]:
-            tp = sum(1 for r in rows if pred(r) and r["grade"] >= k)
-            pp = sum(1 for r in rows if pred(r))
-            ap = len(pos)
-            wtp = sum(r["w"] for r in rows if pred(r) and r["grade"] >= k)
-            wpp = sum(r["w"] for r in rows if pred(r))
-            wap = sum(r["w"] for r in pos)
-            pl, ph = wilson(tp, pp)
-            rl, rh = wilson(tp, ap)
-            f = lambda x: "-" if x is None else f"{x:.2f}"
-            lines.append(f"| {label} | {f(tp / pp if pp else None)} ({f(pl)}-{f(ph)}) | "
-                         f"{f(tp / ap if ap else None)} ({f(rl)}-{f(rh)}) | "
-                         f"{f(wtp / wpp if wpp else None)} | {f(wtp / wap if wap else None)} | {pp} |")
-        lines.append("")
-    withasset = [r for r in rows if r["asset"] and r["grade"] >= top]
+             f"({', '.join(sorted({k['stratum'] for k in key}))}). Yes = the person graded "
+             f"{lo} or more; the pipeline says yes when the posterior reaches the floor "
+             f"({floor}). Weighted estimates use each stratum's size over rows drawn; "
+             f"intervals are 95 per cent Wilson on the effective sample size. Recall is "
+             f"within the graded pool (candidates and feedback units), not the corpus.",
+             "", ("An evaluation sheet: a random draw by the decision, never used to fit; "
+                  "its weighted figures are the dashboards' precision and recall within the pool."
+                  if is_eval else
+                  "A training sheet: drawn where grades teach most, so its figures describe the "
+                  "hard cases, not the dashboards (an evaluation sheet measures those)."), "",
+             "| pipeline says yes at | weighted precision (95% CI) | weighted recall (95% CI) "
+             "| precision, model score alone | recall | rows kept |", "|---|---|---|---|---|---|"]
+    ys, ws = [r["yes"] for r in rows], [r["w"] for r in rows]
+    f = lambda x: "-" if x is None else f"{x:.2f}"
+    for t in sorted(set(THRESHOLDS) | {floor}):
+        p1, r1, kept = posterior.weighted_pr([r["p"] for r in rows], ys, ws, t)
+        p2, r2, _ = posterior.weighted_pr([r["model"] for r in rows], ys, ws, t)
+        nk = posterior.effective_n([r["w"] for r in rows if r["p"] >= t])
+        npos = posterior.effective_n([r["w"] for r in rows if r["yes"]])
+        pl, ph = wilson(round(p1 * nk), round(nk)) if p1 is not None and nk else (None, None)
+        rl, rh = wilson(round(r1 * npos), round(npos)) if r1 is not None and npos else (None, None)
+        mark = " (the floor)" if t == floor else ""
+        lines.append(f"| posterior >= {t}{mark} | {f(p1)} ({f(pl)}-{f(ph)}) | {f(r1)} "
+                     f"({f(rl)}-{f(rh)}) | {f(p2)} | {f(r2)} | "
+                     f"{sum(1 for r in rows if r['p'] >= t)} |")
+    lines.append("")
+    withasset = [r for r in rows if r["asset"] and r["yes"]]
     if withasset:
         agree = sum(1 for r in withasset if r["asset"] == r["link"])
-        lines += [f"## Asset link on committed units the person also gave an asset: "
-                  f"{agree} of {len(withasset)} agree with the pipeline's link", ""]
-    withtype = [r for r in rows if r["type"] and r["grade"] >= top]
+        lines += [f"## Asset on units the person graded yes and gave an asset: "
+                  f"{agree} of {len(withasset)} agree with the pipeline's asset", ""]
+    withtype = [r for r in rows if r["type"] and r["yes"]]
     if withtype:
         best = assigned_types(name, data)
         typed = [r for r in withtype if r["unit_id"] in best]
         agree = sum(1 for r in typed if r["type"] == best[r["unit_id"]])
-        lines += [f"## Type on committed units the person also gave a type: {agree} of "
+        lines += [f"## Type on units the person graded yes and gave a type: {agree} of "
                   f"{len(typed)} agree with the assigned type ({len(withtype) - len(typed)} "
-                  f"not committed by the model, so not typed)", ""]
+                  f"not committed by the pipeline, so not typed)", ""]
     by = {}
     for r in rows:
         by.setdefault(r["stratum"], []).append(r)
-    lines += ["## By stratum: rows, person's mean grade", ""]
-    for s, rs in sorted(by.items()):
-        lines.append(f"- model {s}: {len(rs)} rows, person's mean grade "
-                     f"{sum(r['grade'] for r in rs) / len(rs):.2f}, graded committed "
-                     f"{sum(1 for r in rs if r['grade'] >= top)}")
+    lines += ["## By stratum: rows, graded yes", ""]
+    for st, rs in sorted(by.items()):
+        lines.append(f"- {st}: {len(rs)} rows, graded yes {sum(1 for r in rs if r['yes'])}")
     lines.append("")
-    write_quality(data, name, key[0], rows, top)
+    write_quality(data, name, key[0], rows, floor)
     lines += fit_layer(name, data)
     lines += fit_gate(name, data)
     out = where(data, "reports", f"evaluate_units_{name}.md")
@@ -967,31 +999,32 @@ def evaluate_elusion(name, data, seed=1, **kw):
     mdir = where(data, "measures", key[0]["measure_dir"])
     with open(os.path.join(mdir, "manifest.json"), encoding="utf-8") as fh:
         man = json.load(fh)
-    top = len(man["scale"]) - 1
+    import panel
+    yes_from = min(panel.grades())
     with open(os.path.join(mdir, "units.csv"), newline="", encoding="utf-8") as fh:
-        in_pool = sum(1 for u in csv.DictReader(fh) if u["sent"] == "true" and u["grade"] == str(top))
+        in_pool = sum(1 for u in csv.DictReader(fh) if u["sent"] == "true"
+                      and u.get("committed") == "true")
     lines = [f"# {name}: what the pool missed, from {len(graded)} graded units it never read", "",
              f"Drawn from the units outside {key[0]['measure_dir']} (pool: cosine >= "
              f"{man['min_cosine']}), in two strata: near (within {ELUSION_BAND} below the "
              f"threshold) and far (the rest). Each stratum's count is weighted by its size "
              f"over rows drawn; intervals are 95 per cent Wilson on the raw counts.", "",
-             "| stratum | units | graded | committed | planned or more | committed share (95% CI) "
-             "| estimated committed units in stratum |", "|---|---|---|---|---|---|---|"]
+             "| stratum | units | graded | graded yes | yes share (95% CI) "
+             "| estimated yes units in stratum |", "|---|---|---|---|---|---|"]
     est_total = 0.0
     for s in sorted({k["stratum"] for k in key}):
         ks = [k for k in key if k["stratum"] == s and k["row_id"] in graded]
         if not ks:
             continue
         size, n = int(ks[0]["stratum_size"]), len(ks)
-        c = sum(1 for k in ks if graded[k["row_id"]][0] >= top)
-        pl = sum(1 for k in ks if graded[k["row_id"]][0] >= top - 1)
+        c = sum(1 for k in ks if graded[k["row_id"]][0] >= yes_from)
         lo, hi = wilson(c, n)
         est = size * c / n
         est_total += est
-        lines.append(f"| {s} | {size:,} | {n} | {c} | {pl} | {c / n:.2f} ({lo:.2f}-{hi:.2f}) | "
+        lines.append(f"| {s} | {size:,} | {n} | {c} | {c / n:.2f} ({lo:.2f}-{hi:.2f}) | "
                      f"{est:,.0f} (up to {size * hi:,.0f}) |")
-    lines += ["", f"The model found {in_pool} committed units inside the pool (its own grade, not "
-                  f"a person's). The strata estimate {est_total:,.0f} committed units outside it, "
+    lines += ["", f"The pipeline found {in_pool} committed units inside the pool (its decision, "
+                  f"not a person's). The strata estimate {est_total:,.0f} committed units outside it, "
                   f"so the pool's recall of the corpus is about "
                   f"{in_pool / (in_pool + est_total):.0%} if the model's count inside is right; "
                   f"a zero count in a stratum bounds it only by the interval's upper end.", ""]
@@ -1010,12 +1043,13 @@ def main():
     ap.add_argument("--elusion", action="store_true",
                     help="units the funnel never read, from just below and far below the pool")
     ap.add_argument("--seed", type=int, default=1)
-    ap.add_argument("--design", default=None, choices=("grade", "bands", "floor", "tune"),
-                    help="draw by the model's grade (30/15/20/20 and 10 feedback), by band "
-                         "of its probability of the top grade (5/8/12/10/5; the default for all), "
-                         "around each measure's commit floor (about 20, links around 0.7), "
-                         "or to tune every threshold (about 28 around each floor, 70 links "
-                         "over the whole range)")
+    ap.add_argument("--design", default="train",
+                    choices=("train", "eval", "bands", "floor", "tune"),
+                    help="train (the default): 30 near the floor, 10 far from it; eval: a "
+                         "random draw by the decision (60 committed, 30 not), kept out of "
+                         "every fit; bands: by band of the posterior (5/8/12/10/5); floor or "
+                         "tune: around each measure's floor (about 20 or 28; links around "
+                         "0.7 or over the whole range)")
     ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
@@ -1024,9 +1058,8 @@ def main():
         out, n = evaluate(args.label_set, args.data, args.seed, elusion=args.elusion, **kw)
         print(f"{n} graded rows; wrote {out}")
     else:
-        design = args.design or ("bands" if args.label_set == ALL else "grade")
         path, n = build(args.label_set, args.data, args.seed, elusion=args.elusion,
-                        design=design, **kw)
+                        design=args.design, **kw)
         print(f"wrote {path}: {n} rows to grade")
     return 0
 

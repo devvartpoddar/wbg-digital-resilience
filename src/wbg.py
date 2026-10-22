@@ -974,10 +974,10 @@ def main(argv=None):
     p.add_argument("--elusion", action="store_true",
                    help="draw (or evaluate) units the funnel never read, below the pool")
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--design", choices=("grade", "bands", "floor", "tune"),
-                   help="draw by the model's grade, or by band of its probability of the top "
-                        "grade (the default for `all`: every measure and the package links in "
-                        "one workbook)")
+    p.add_argument("--design", choices=("train", "eval", "bands", "floor", "tune"),
+                   help="train (the default): near each floor; eval: a random draw by the "
+                        "decision, kept out of every fit; bands, floor, tune: by band of the "
+                        "posterior or around the floor")
     p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
                                         "hand-labelled activities workbook")
     p.add_argument("label_set")

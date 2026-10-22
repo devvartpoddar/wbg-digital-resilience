@@ -104,7 +104,6 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
     with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
         for u in csv.DictReader(fh):
             units[u["paragraph_id"]].append(u)
-    top_grade = max(int(u["grade"]) for us in units.values() for u in us if u["grade"] != "")
     rows = []
     for a in activities:
         flag = a["flags"].get(column, "")
@@ -113,7 +112,7 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
         paras = matched[a["row"]]
         mine = [u for p in paras for u in units.get(p, [])]
         sent = [u for u in mine if u["sent"] == "true"]
-        committed = [u for u in sent if int(u["grade"]) == top_grade]
+        committed = [u for u in sent if u.get("committed") == "true"]
         gate_link = {t: any(u["asset_link_p"] and float(u["asset_link_p"]) >= t for u in committed)
                      for t in THRESHOLDS}
         gate_unit = {t: any(u["asset_p_unit"] and float(u["asset_p_unit"]) >= t for u in committed)

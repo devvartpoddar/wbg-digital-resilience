@@ -142,31 +142,33 @@ def score_of(u):
     return sum(float(u.get(f"p{g}") or 0) for g in panel.grades())
 
 
-def is_committed(u, top=None, floor=None):
-    """A unit counts as committed (or planned): its probability (the
-    probability layer's, p_committed_calibrated, else the model's score) is
-    at or above the measure's floor (control panel; labels.commit_floor).
-    With no floor, the most likely grade is one the panel counts. A row that
-    carries its own `committed` column says so."""
+def is_committed(u, floor=None):
+    """The one decision: a unit counts for the measure when its posterior
+    probability (p_committed_calibrated: the probability layer's reading of
+    the model's score for grades 2 and 3, or that score itself before a layer
+    is fitted) is at or above the measure's floor (control panel floor.<set>,
+    else floor.default). A row that carries its own `committed` column says
+    so."""
     if u.get("committed") in ("true", "false"):
         return u["committed"] == "true"
-    if u.get("sent") != "true" or u.get("grade", "") == "":
+    if u.get("sent") != "true":
         return False
-    if floor is not None:
-        p = u.get("p_committed_calibrated", "")
-        return (float(p) if p != "" else score_of(u)) >= floor
-    return int(u["grade"]) in panel.grades()
-# The kind, conditional and actor columns stay, empty, so the tables and
-# views that read them keep their shape.
+    floor = DEFAULT_FLOOR if floor is None else floor
+    p = u.get("p_committed_calibrated", "")
+    return (float(p) if p != "" else score_of(u)) >= floor
+
+
+DEFAULT_FLOOR = float(panel.get("floor.default", 0.5))
+# grade, expected and p0-p3 are the model's raw answer, kept as the record;
+# no decision reads them (is_committed reads the posterior).
 UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
              "component_number", "subcomponent_number", "component_key", "copies", "route",
              "round", "rank", "score", "patterns", "firmness",
-             "asset_para", "asset_p_para", "asset_comp", "asset_p_comp",
+             "asset_para", "asset_p_para",
              "asset_unit", "asset_p_unit", "assets_yes", "asset_link", "asset_link_level",
-             "asset_link_p", "kinds_yes", "kind_best", "kind_p", "conditional_p",
-             "actors_yes", "actor_best", "actor_p", "template_projects", "template_share",
+             "asset_link_p", "template_projects", "template_share",
              *prior.COLS, "sent", "committed",
-             "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
+             "grade", "expected", "confidence", "p0", "p1", "p2", "p3",
              "p_committed_calibrated",
              "model_served", "cost", "text"]
 # Asset thresholds the report tabulates (nothing is chosen here).
@@ -309,9 +311,10 @@ class Run:
                                    **panel.items("posterior.")}}
         self.projects = sorted(projects) if projects else None
         # The floor is a reading, not a question (control panel, floor.*).
-        self.floor = labels_mod.commit_floor(name)
-        if self.floor is not None:
-            self.settings["commit_floor"] = self.floor
+        self.floor = panel.floor(name)
+        if self.floor is None:
+            self.floor = DEFAULT_FLOOR
+        self.settings["floor"] = self.floor
         if not os.path.exists(os.path.join(self.search_run, "manifest.json")):
             raise SystemExit(f"measure: {name} has no search run for the current index; "
                              f"run ./wbg search {name} first")
@@ -404,11 +407,10 @@ class Run:
         row = {**{c: r.get(c, "") for c in search.CONTEXT}, "label_id": self.labels[0]["id"],
                 "route": route, "round": rnd, "rank": rank, "score": score,
                 "patterns": patterns, "firmness": firmness(text),
-                "asset_para": "", "asset_p_para": "", "asset_comp": "", "asset_p_comp": "",
+                "asset_para": "", "asset_p_para": "",
                 "asset_unit": "", "asset_p_unit": "", "assets_yes": "", "asset_link": "",
-                "asset_link_level": "", "asset_link_p": "", "kinds_yes": "", "kind_best": "",
-                "kind_p": "", "conditional_p": "", "actors_yes": "", "actor_best": "",
-                "actor_p": "", "template_projects": r.get("template_projects", ""),
+                "asset_link_level": "", "asset_link_p": "",
+                "template_projects": r.get("template_projects", ""),
                 "template_share": r.get("template_share", ""), "p_committed_calibrated": "",
                 "sent": "false", "committed": "false",
                 **self.prior_of(r, text),
@@ -456,7 +458,7 @@ class Run:
         row.update({"grade": max(range(len(probs)), key=lambda i: probs[i]),
                     "expected": f"{sum(i * q for i, q in enumerate(probs)) / total:.3f}",
                     "confidence": f"{float(a.get('confidence', 0)):.3f}",
-                    **{f"p{i}": (f"{probs[i]:.4f}" if i < len(probs) else "") for i in range(5)},
+                    **{f"p{i}": (f"{probs[i]:.4f}" if i < len(probs) else "") for i in range(4)},
                     "model_served": entries[lab]["model"],
                     "cost": f"{sum(float(e.get('cost_usd') or 0) for e in entries.values()):.6f}"})
         # The score (read.grades) through the probability layer, when one is
@@ -466,7 +468,7 @@ class Run:
             sc = self.layer.probability(row["unit_id"], sc)
         row["p_committed_calibrated"] = f"{sc:.4f}"
         row["committed"] = "true" if is_committed(
-            {**row, "sent": "true", "committed": ""}, len(self.scale) - 1, self.floor) else "false"
+            {**row, "sent": "true", "committed": ""}, self.floor) else "false"
 
     def link_into(self, row):
         """The sentence's asset from the sentence asset map: its own best
@@ -482,7 +484,6 @@ class Run:
                     "assets_yes": best if level == "unit" else "",
                     "asset_para": a if level == "paragraph" else "",
                     "asset_p_para": f"{p:.4f}" if level == "paragraph" else "",
-                    "asset_comp": "", "asset_p_comp": "",
                     "asset_link": a, "asset_link_level": level,
                     "asset_link_p": f"{p:.4f}" if a else ""})
 
@@ -527,11 +528,10 @@ class Run:
         graded 0: the first run showed the raw centroid pulls in the
         measure's neighbourhood ("resilient infrastructure" in general), and
         the rejected units are exactly what that neighbourhood looks like."""
-        top = len(self.scale) - 1
         pos = [self.row_of[r["unit_id"]] for r in graded
-               if r["sent"] == "true" and int(r["grade"]) == top]
+               if r["sent"] == "true" and r["committed"] == "true"]
         neg = [self.row_of[r["unit_id"]] for r in graded
-               if r["sent"] == "true" and int(r["grade"]) == 0]
+               if r["sent"] == "true" and r["committed"] != "true"]
         if not pos:
             return []
         centroid = numpy.asarray(self.matrix[sorted(pos)], dtype="float32").mean(axis=0)
@@ -562,31 +562,34 @@ class Run:
 
 
 def report_lines(run, rows, rounds, calls, cost, seconds, served):
-    s, scale = run.settings, run.scale
-    top = len(scale) - 1
+    s = run.settings
     sent = [r for r in rows if r["sent"] == "true"]
-    com = [r for r in sent if int(r["grade"]) == top]
+    com = [r for r in sent if r["committed"] == "true"]
+    floor = run.floor if run.floor is not None else DEFAULT_FLOOR
+    bands = [0.0, 0.1, 0.3, 0.5, 0.7, 0.9, 1.01]
+    post = [float(r["p_committed_calibrated"] or 0) for r in sent]
     lines = [f"{run.name}: {len(rows):,} units seen, {len(sent):,} graded by {s['model']} "
-             f"(pool: cosine >= {s['min_cosine']}" + (f" or top {s['top']}" if s["top"] else "")
+             f"(pool: cosine >= {s['min_cosine']}"
+             + (" (fitted by the skip rule)" if run.gate_fitted is not None else
+                " (the panel's starting gate)")
+             + (f" or top {s['top']}" if s["top"] else "")
              + f", batch {s['batch']}, min yield {s['min_yield']})",
              f"  search run {os.path.basename(run.search_run)}; {len(run.patterns)} pattern(s); "
-             f"asset map {run.asset_run or 'none'}",
+             f"asset map {run.asset_run or 'none'}; probability layer "
+             f"{'fitted' if run.calibration else 'none (the model score stands)'}",
              f"  this run: {calls:,} calls, US${cost:.4f}, {seconds:.0f}s; models served: {served}",
              "  rounds (units graded / committed): " + ", ".join(
                  f"{k}: {v['graded']}/{v['committed']}" for k, v in rounds.items()),
-             f"\n  graded units by most likely grade {[sum(1 for r in sent if int(r['grade']) == g) for g in range(len(scale))]}; "
-             f"grade {top} (committed) in {len(com):,} units, "
+             "\n  graded units by posterior probability: " + ", ".join(
+                 f"{lo:.1f}-{min(hi, 1):.1f} {sum(1 for p in post if lo <= p < hi)}"
+                 for lo, hi in zip(bands, bands[1:])),
+             f"  committed (posterior >= {floor}): {len(com):,} units, "
              f"{len({p for r in com for p in r['project_ids'].split('|')})} projects; "
              f"prevalence among graded {len(com) / max(len(sent), 1):.1%}"]
-    if run.floor is not None:
-        floored = [r for r in sent if r.get("committed") == "true"]
-        lines.append(f"  committed at the commit floor P(grade {top}) >= {run.floor}: "
-                     f"{len(floored):,} units, "
-                     f"{len({p for r in floored for p in r['project_ids'].split('|')})} projects")
     by_route = defaultdict(lambda: [0, 0])
     for r in sent:
         by_route[r["route"]][0] += 1
-        by_route[r["route"]][1] += int(r["grade"]) == top
+        by_route[r["route"]][1] += r["committed"] == "true"
     lines.append("  by route (graded / committed): " + ", ".join(
         f"{k} {v[0]:,}/{v[1]:,}" for k, v in sorted(by_route.items())))
     lines.append("  committed units by the unit-level asset answer (best asset at >= " +
@@ -655,7 +658,7 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
             log("  --dry-run: round 0 only; no request made, nothing written")
             return None
         this = rows if rnd == 0 else batch
-        got = sum(1 for r in this if r["sent"] == "true" and int(r["grade"]) == top)
+        got = sum(1 for r in this if r["sent"] == "true" and r["committed"] == "true")
         rounds[str(rnd)] = {"graded": sum(1 for r in this if r["sent"] == "true"),
                             "committed": got}
         log(f"    committed this round: {got}")
@@ -677,7 +680,7 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
             served[r["model_served"]] += 1
         else:
             r.update({"grade": "", "expected": "", "confidence": "", "model_served": "",
-                      "cost": "", **{f"p{i}": "" for i in range(5)}})
+                      "cost": "", **{f"p{i}": "" for i in range(4)}})
     part = run.out + ".part"
     os.makedirs(part, exist_ok=True)
     with open(os.path.join(part, "units.csv"), "w", newline="", encoding="utf-8") as fh:
