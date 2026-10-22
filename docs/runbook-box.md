@@ -220,7 +220,9 @@ current questions:
    floors read the model's score and the pools use the panel's starting gates
    (`measure.gate_cosine` and `asset.gate_cosine`, both 0.3: one to four in ten
    sentences are asked about each measure; measures and assets alike then get
-   word patterns and feedback rounds below the gate). Stored answers are reused wherever
+   word patterns and feedback rounds below the gate, each with its own round
+   settings: `feedback.*` and `asset_feedback.*`; `asset_feedback.max_rounds` 0
+   is the comparison without them). Stored answers are reused wherever
    the exact question and state were asked before.
 3. Grade a training sheet: `./wbg check all --design train --seed <n>`
    (about 40 rows a measure, near each floor), then `./wbg check all --seed <n>

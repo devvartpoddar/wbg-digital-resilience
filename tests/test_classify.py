@@ -295,3 +295,9 @@ def test_assets_get_the_measures_routes_patterns_and_feedback_rounds(store, monk
     import shutil
     shutil.rmtree(out)
     assert _run(store, min_cosine=0.3) == out and len(calls) == n
+    # The asset map's rounds have their own setting: off, the map is the
+    # gate and the patterns alone (a different run).
+    p.write_text(p.read_text() + "asset_feedback.max_rounds,0\n")
+    off = _run(store, min_cosine=0.3)
+    rows = {r["unit_id"]: r for r in csv.DictReader(open(os.path.join(off, "scores.csv")))}
+    assert off != out and rows[ids[1]]["asked"] == "false" and rows[ids[4]]["asked"] == "true"

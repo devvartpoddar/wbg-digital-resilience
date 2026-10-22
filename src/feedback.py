@@ -1,7 +1,9 @@
 """Relevance feedback: the second look below the gate, the same for a
 measure and for an asset (docs/method/decisions.md).
 
-After a pass of answers, the sentences that count (a measure's committed
+The method is the same for both; the numbers are not shared: measures
+read feedback.*, the asset map asset_feedback.* (asset_feedback.max_rounds
+0 turns the asset map's rounds off). After a pass of answers, the sentences that count (a measure's committed
 sentences; an asset's sentences whose own posterior reaches asset.floor) are
 averaged into a centroid, minus feedback.negative_weight times the centroid
 of the sentences asked that do not count (Rocchio, with no query term); the
@@ -18,11 +20,20 @@ import panel
 BLOCK = 20_000
 
 
-def settings():
-    return {"batch": int(panel.get("feedback.batch", 500)),
-            "min_yield": int(panel.get("feedback.min_yield", 10)),
-            "max_rounds": int(panel.get("feedback.max_rounds", 6)),
-            "negative_weight": float(panel.get("feedback.negative_weight", 0.5))}
+def settings(prefix="feedback."):
+    """The round settings: feedback.* for the measures, asset_feedback.* for
+    the asset map. Each has its own lines on the control panel, so the two
+    are tuned apart; a line the panel lacks falls back to the measures'."""
+    def get(k, default):
+        v = panel.get(prefix + k)
+        return panel.get("feedback." + k, default) if v is None else v
+    return {"batch": int(get("batch", 500)),
+            "min_yield": int(get("min_yield", 10)),
+            "max_rounds": int(get("max_rounds", 6)),
+            "negative_weight": float(get("negative_weight", 0.5))}
+
+
+ASSET = "asset_feedback."
 
 
 def query(matrix, pos, neg, negative_weight):
