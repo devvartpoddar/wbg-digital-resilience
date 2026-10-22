@@ -1,7 +1,6 @@
 """Classification with a decision model (src/classify.py), on an invented store
 and a fake endpoint. No document text is committed."""
 import csv
-import hashlib
 import json
 import os
 import sys
@@ -12,7 +11,6 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
 import classify  # noqa: E402
-from clean import PARA_COLS  # noqa: E402
 
 TEXTS = ["The project will finance towers on raised plinths.",
          "Background on the economy.",
@@ -30,27 +28,32 @@ def _csv(path, cols, rows):
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
+    # The sentence map's items come from the embedded search units; here an
+    # invented list of sentences, the component's name read from
+    # components.csv as sentences() does.
     monkeypatch.setattr(classify, "MIN_COSINE", 0.0)
     data = tmp_path / "data"
-    text = "\n\n".join(TEXTS)
-    (data / "appraisal" / "text").mkdir(parents=True)
-    (data / "appraisal" / "text" / "D.txt").write_text(text, encoding="utf-8")
-    rows, at = [], 0
-    for i, t in enumerate(TEXTS, 1):
-        rows.append({"paragraph_id": f"D:p{i:05d}", "doc_id": "D", "project_ids": "P1",
-                     "block": "narrative", "for_model": "true", "char_start": at,
-                     "char_end": at + len(t), "section_title": "Components",
-                     "component_number": "1" if i != 2 else "",
-                     "text_sha256": hashlib.sha256(t.encode()).hexdigest()})
-        at += len(t) + 2
-    # A footnote given to the model is graded too (the asset map covers them).
-    rows.append({"paragraph_id": "D:p00004", "doc_id": "D", "project_ids": "P1",
-                 "block": "footnote", "for_model": "true", "char_start": 0, "char_end": 3,
-                 "section_title": "Components",
-                 "text_sha256": hashlib.sha256(text[:3].encode()).hexdigest()})
-    _csv(str(data / "appraisal" / "paragraphs.csv"), PARA_COLS, rows)
     _csv(str(data / "appraisal" / "components.csv"), ["doc_id", "source", "number", "name"],
          [{"doc_id": "D", "source": "datasheet", "number": "1", "name": "Connectivity"}])
+
+    def sentences(data_):
+        names = {(r["doc_id"], r["number"]): r["name"] for r in csv.DictReader(
+            open(os.path.join(data_, "appraisal", "components.csv")))}
+        out = []
+        for i, t in enumerate(TEXTS, 1):
+            comp = "1" if i != 2 else ""
+            state = {"section": "Components", "sentence": t}
+            if comp:
+                state["component"] = f"{comp} {names[('D', comp)]}"
+            out.append({"row": {"unit_id": f"D:p{i:05d}:s001", "paragraph_id": f"D:p{i:05d}",
+                                "doc_id": "D", "project_ids": "P1", "component_number": comp},
+                        "state": state})
+        return out
+    monkeypatch.setattr(classify, "sentences", sentences)
+    import prior
+    import search
+    monkeypatch.setattr(prior, "word_df", lambda data_: (10, {}))
+    monkeypatch.setattr(search, "load_queries", lambda name, taxonomy=None: [])
     tax = tmp_path / "taxonomy"
     _csv(str(tax / "assets.csv"), ["asset_id", "asset_name", "definition", "active"], [
         {"asset_id": "towers", "asset_name": "Mobile networks", "definition": "masts",
@@ -64,7 +67,7 @@ def store(tmp_path, monkeypatch):
 
     def fake(body, **kw):
         calls.append(body)
-        hit = "towers" in body["state"]["passage"]
+        hit = "towers" in body["state"]["sentence"]
         probs = {"0": 0.1, "1": 0.1, "2": 0.8} if hit else {"0": 0.9, "1": 0.1, "2": 0.0}
         return {"model": "typesafe/jev-1.13-20260917", "usage": {"cost": 0.00001},
                 "answers": {"towers": {"type": "score", "score": 1.7, "confidence": 0.8,
@@ -88,14 +91,15 @@ def test_each_label_is_one_graded_question_naming_it():
     assert q["towers"]["criteria"] == ["Not about Mobile networks.", "Mobile networks financed."]
 
 
-def test_every_narrative_paragraph_is_graded_and_a_repeat_asked_once(store):
+def test_every_sentence_is_graded_and_a_repeat_asked_once(store):
     out = _run(store)
     _, _, calls = store
-    assert len(calls) == 3                     # three paragraphs (one repeat) and a footnote
+    assert len(calls) == 2                     # three sentences, one a repeat
     assert calls[0]["state"]["component"] == "1 Connectivity"
     rows = list(csv.DictReader(open(os.path.join(out, "scores.csv"))))
-    assert [(r["paragraph_id"], r["grade"]) for r in rows] == [
-        ("D:p00001", "2"), ("D:p00002", "0"), ("D:p00003", "2"), ("D:p00004", "0")]
+    assert [(r["unit_id"], r["grade"]) for r in rows] == [
+        ("D:p00001:s001", "2"), ("D:p00002:s001", "0"), ("D:p00003:s001", "2")]
+    assert set(classify.SCORE_COLS) <= set(rows[0])
 
 
 def test_a_rerun_reads_the_store_and_asks_nothing(store):
@@ -158,7 +162,7 @@ def test_spend_is_recorded_per_run_and_summed_for_today(store):
     data, _, _ = store
     _run(store)
     calls, cost = classify.spend_today(data)
-    assert calls == 3 and cost == 0.0        # the ledger keeps four decimals; US$0.00003 rounds away
+    assert calls == 2 and cost == 0.0        # the ledger keeps four decimals; US$0.00003 rounds away
 
 
 def test_a_ledger_row_holding_a_float_count_still_reads(store):

@@ -42,6 +42,7 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import labels  # noqa: E402
+import prior  # noqa: E402
 import schema as S  # noqa: E402
 
 DEFAULT_DSN = "postgresql:///work"
@@ -429,9 +430,9 @@ def run_rollup(folder, data):
 ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "component_key", "best_score", "best_percentile",
                "best_unit_id", "best_query_id", "units_hit"]
-CLASSIFY_COLS = ["label_set", "run", "paragraph_id", "doc_id", "project_ids",
+CLASSIFY_COLS = ["label_set", "run", "unit_id", "paragraph_id", "doc_id", "project_ids",
                  "component_number", "label_id", "asked", "best_cosine", "grade", "expected",
-                 "confidence", "p0", "p1", "p2", "p3", "p4", "model_served"]
+                 "confidence", "p0", "p1", "p2", "p3", "p4", "model_served", *prior.COLS]
 MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
                 "project_ids", "component_number", "subcomponent_number", "component_key",
                 "copies", "route", "round", "rank", "score", "patterns",
@@ -439,7 +440,7 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "asset_p_comp", "asset_unit", "asset_p_unit", "assets_yes", "asset_link",
                 "asset_link_level", "asset_link_p", "kinds_yes", "kind_best", "kind_p",
                 "conditional_p", "actors_yes", "actor_best", "actor_p",
-                "template_projects", "template_share", "sent", "committed",
+                "template_projects", "template_share", *prior.COLS, "sent", "committed",
                 "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
                 "p_committed_calibrated", "types_yes", "best_type", "best_p", "model_served",
                 "cost", "text"]
@@ -486,8 +487,11 @@ def classify_rows(data, projects=None, min_cosine=None, sets=None):
     is the one the last run was made with (classify's marker); the flag
     still names one explicitly."""
     import classify
-    return _run_rows(data, lambda n, d: classify.current_run(
+    sha, rows = _run_rows(data, lambda n, d: classify.current_run(
         n, d, projects=projects, min_cosine=min_cosine), "scores.csv", sets)
+    for r in rows:              # a paragraph map (or one made before unit_id) keys on the paragraph
+        r["unit_id"] = r.get("unit_id") or r["paragraph_id"]
+    return sha, rows
 
 
 def measure_rows(data, projects=None, sets=None):
@@ -524,28 +528,46 @@ def measure_rows(data, projects=None, sets=None):
 
 
 ASSET_LINK_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
-                   "model_served", "cost"]
+                   "model_served", "cost", "prior_phrase_cosine", "prior_phrase_match"]
 PAIR_LINK_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
                   "shared_asset_ids", "route", "measure_rank",
-                  "measure_cosine", "probability", "model_served", "cost"]
+                  "measure_cosine", "probability", "model_served", "cost",
+                  "prior_phrase_cosine", "prior_phrase_match"]
 
 
 CHECK_PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_only_a",
-                   "p_only_b", "p_both", "p_neither", "model_served", "cost"]
+                   "p_only_b", "p_both", "p_neither", "model_served", "cost",
+                   "prior_probability_a", "prior_phrase_cosine_a", "prior_probability_b",
+                   "prior_phrase_cosine_b"]
 CHECK_SCOPE_COLS = ["unit_id", "scope", "probability", "p_rule", "p_investment",
                     "p_not_commitment", "model_served", "cost"]
 
 
+CONTEXT_COLS = ["unit_id", "paragraph_id", *prior.PARA_COLS]
+
+
+def context_rows(data, projects=None):
+    """(key, rows) of the paragraph counts made from the classification
+    (src/prior.py), or (None, []) before any model stage has run."""
+    return prior.paragraph_classified(data, projects)
+
+
 def check_rows(data, projects=None):
     """(sha, pair rows, scope rows) of the current commitment checks
-    (src/commit_checks.py), or (None, [], []) when there are none."""
+    (src/commit_checks.py), or (None, [], []) when there are none. The scope
+    question was removed on 2026-10-22: its rows are empty, so a publish
+    empties wbg.unit_scope and the views read every unit as not checked."""
     import commit_checks
     folder = commit_checks.current_run(data, projects=projects)
     if not folder:
         return None, [], []
     out = []
     for file in ("pairs.csv", "scope.csv"):
-        with open(os.path.join(folder, file), newline="", encoding="utf-8") as fh:
+        path = os.path.join(folder, file)
+        if not os.path.exists(path):
+            out.append([])
+            continue
+        with open(path, newline="", encoding="utf-8") as fh:
             out.append(list(csv.DictReader(fh)))
     return os.path.basename(folder), out[0], out[1]
 
@@ -790,6 +812,10 @@ def finish(conn, log=print):
             log(f"  {os.path.basename(path)}: skipped (no openrouter() function in this "
                 f"database; it comes with the box's Metabase setup)")
             continue
+        if "{{panel:" in sql:          # a control-panel setting (inputs/config/control_panel.csv)
+            import re
+            import panel
+            sql = re.sub(r"\{\{panel:([a-z0-9_.]+)\}\}", lambda m: panel.sql_value(m.group(1)), sql)
         if "{VECTOR}" in sql:
             if not vec:
                 log(f"  {os.path.basename(path)}: skipped (no sentence_vectors yet)")
@@ -937,6 +963,8 @@ def main():
         sha, assets_, pairs_ = link_rows(args.data, projects)
         derived(conn, "package_assets", sha, ASSET_LINK_COLS, assets_)
         derived(conn, "commitment_packages", sha, PAIR_LINK_COLS, pairs_)
+        sha, ctx = context_rows(args.data, projects)
+        derived(conn, "unit_paragraph_context", sha, CONTEXT_COLS, ctx)
         sha, cpairs, cscope = check_rows(args.data, projects)
         derived(conn, "unit_pair_checks", sha, CHECK_PAIR_COLS, cpairs)
         derived(conn, "unit_scope", sha, CHECK_SCOPE_COLS, cscope)

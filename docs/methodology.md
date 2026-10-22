@@ -38,7 +38,8 @@ Any model that meets all three may be used, including an external one. For an ex
 | Search sentences for each asset and measure; roll up to paragraphs | Built for any label set in `inputs/taxonomy/` or `analysis/labels/` (`./wbg search assets`, `./wbg search cra`) |
 | The pool of a measure: its word patterns plus every unit whose cosine reaches the pool threshold, with firmness wording | Built inside `./wbg measure` (section 5a) in an earlier trial |
 | Draw a measure's units for grading, measure the model against the grades, calibrate, and draw what the pool missed | Built (`./wbg check <set>`, `--evaluate`, `--elusion`); the first sheet is graded (section 5c) |
-| Grade every model paragraph, footnote and prose table row against each asset with a decision model: the asset map | Built (`./wbg classify assets`, with a per-asset cosine gate for scale); run on the 70-project corpus (section 5b) |
+| Grade every sentence against each asset with a decision model, in the same question form as the measures: the asset map (a sentence naming no asset takes the last one named earlier in its paragraph) | Built (`./wbg classify assets`, with a per-asset cosine gate); the sentence map of 2026-10-22 not yet run (section 5b) |
+| One control panel for every threshold (`inputs/config/control_panel.csv`), and a probability layer after every graded answer (similarity to the graded sentences, `src/posterior.py`) | Built 2026-10-22; not yet run (section 5c, runbook "The control panel") |
 | A measure through the funnel: candidates by cosine, the decision model's grade, the asset answered for the sentence and linked at unit, paragraph or component level, how the commitment is delivered, relevance-feedback rounds (section 5c) | Built (`./wbg measure <set>`); first measure: climate risk assessment (`analysis/labels/cra*`) |
 | The funnel measured against a hand-labelled workbook of activities (section 5c) | Built (`./wbg evaluate <set> --column ...`) |
 | A measure's types: proposed by a generative model, approved by a person, assigned by the decision model (section 5d) | Built (`./wbg types <set>`, `--assign`) |
@@ -64,6 +65,7 @@ The method is split by stage so a change reads only its part. **When you change 
 | 5c, 5d | `docs/method/measures.md` | the funnel, checks against graded sheets, types (`measure.py`, `check_units.py`, `evaluate_activities.py`, `kinds.py`) |
 | 5e | `docs/method/links.md` | packages to assets and commitments (`link_packages.py`) |
 | 5f | `docs/method/dashboards.md` | the dashboards' views, package status, requested measures (`sql/views/13-19`, `measure_requests.py`) |
+| 5g | `docs/method/decisions.md` | one decision system for every question to the decision model: prior, skip, answer, posterior, decision; the prior inputs that need no grading (`prior.py`) |
 | 6 | `docs/method/storage.md` | `data/` layout, joins, the cohort (`paths.py`, `cohort_build.py`) |
 | 7 | `docs/method/limits.md` | known limits |
 | - | `docs/method/history.md` | dated results and trials the method was tuned on; read only when a choice needs its evidence |

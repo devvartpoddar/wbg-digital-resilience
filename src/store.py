@@ -115,6 +115,12 @@ def _publish(conn, data, sets, projects, links, log, written):
     if os.path.exists(qpath):
         written["measure_quality"] = load_pg.load_table(conn, data, "measure_quality",
                                                         "labels/measure_quality.csv")[0]
+    # The paragraph counts read every stage's classification (src/prior.py):
+    # rebuilt whole at every publish, so a set re-run moves every sentence's.
+    sha, ctx = load_pg.context_rows(data, projects)
+    if sha is not None:
+        written["unit_paragraph_context"] = load_pg.replace_rows(
+            conn, "unit_paragraph_context", load_pg.CONTEXT_COLS, ctx, "unit_id", None, sha)[0]
     # The commitment checks (src/commit_checks.py) span every measure: small,
     # written whole whenever a current run exists.
     sha, cpairs, cscope = load_pg.check_rows(data, projects)

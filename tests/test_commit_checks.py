@@ -1,6 +1,6 @@
 """The commitment checks (src/commit_checks.py): pair answers for units two
-measures both commit, and each committed unit's scope, from a fake decision
-model on invented committed units."""
+measures both commit, from a fake decision model on invented committed
+units. No scope question since 2026-10-22."""
 import csv
 import os
 import sys
@@ -53,10 +53,7 @@ def store(tmp_path, monkeypatch):
         out = {}
         for qid, q in body["questions"].items():
             opts = list(q["criteria"])
-            if qid == "pair":
-                pick = "only_b" if "off-grid" in s else "both"
-            else:
-                pick = "rule" if s.startswith("All") else "investment"
+            pick = "only_b" if "off-grid" in s else "both"
             out[qid] = {"type": "choice", "choice": pick,
                         "probabilities": {o: (0.8 if o == pick else 0.2 / (len(opts) - 1))
                                           for o in opts}}
@@ -65,7 +62,7 @@ def store(tmp_path, monkeypatch):
     return str(tmp_path / "data"), calls
 
 
-def test_a_unit_two_measures_commit_gets_one_pair_answer_and_every_unit_a_scope(store):
+def test_a_unit_two_measures_commit_gets_one_pair_answer_and_nothing_else_is_asked(store):
     data, calls = store
     out = commit_checks.run(data, api_key="k", log=lambda *_: None, workers=1)
     pairs = list(csv.DictReader(open(os.path.join(out, "pairs.csv"))))
@@ -74,8 +71,10 @@ def test_a_unit_two_measures_commit_gets_one_pair_answer_and_every_unit_a_scope(
     q = next(c for c in calls if "pair" in c["questions"])["questions"]["pair"]
     assert q["type"] == "choice" and set(q["criteria"]) == set(commit_checks.PAIR_OPTIONS)
     assert "main supply fails" in q["instructions"] and "renewable electricity" in q["instructions"]
-    scope = {r["unit_id"]: r["scope"] for r in csv.DictReader(open(os.path.join(out, "scope.csv")))}
-    assert scope == {"u1": "investment", "u2": "investment", "u3": "rule"}
+    assert all(list(c["questions"]) == ["pair"] for c in calls)
+    assert not os.path.exists(os.path.join(out, "scope.csv"))
+    # The prior inputs: each measure's probability for the unit, known before the pair is asked.
+    assert pairs[0]["prior_probability_a"] == "0.0000" and "prior_phrase_cosine_b" in pairs[0]
 
 
 def test_a_rerun_asks_nothing_and_finds_the_same_folder(store):

@@ -102,19 +102,22 @@ def split(response, questions, call_sha):
     return out
 
 
-# Questions are asked of BATCH items a request: each distinct question set
-# out once in the state, each item (a sentence, a paragraph, a package, a
-# pair) in its own field, and one short question per item and question. A
-# request costs a fixed overhead of about 300 tokens plus its state and
-# questions, and the questions are most of it, so ten items a request cost
-# about a quarter (2026-10-21, on the measure question: US$0.0053 against
-# US$0.0196 for 477 graded units, the same accuracy against Dev's grades
-# within the noise). Every answer is still stored under its own item and
-# question (key), so a re-run reads it back whatever its neighbours were:
-# an item's neighbours move its first answer about as much as a small
-# rewording does, and never a stored one. $WBG_ASK_BATCH overrides (0 asks
-# one item a request, as before 2026-10-22).
-BATCH = int(os.environ.get("WBG_ASK_BATCH", "10"))
+# Items are asked many to a request: each distinct question set out once in
+# the state, each item (a sentence, a paragraph, a package, a pair) in its
+# own field, and one short question per item and question. A request costs a
+# fixed overhead of about 300 tokens plus its state and questions, and the
+# questions are most of it, so a request is filled with items up to
+# BATCH_MAX_CHARS (2026-10-22; ten a request before, which made short items
+# such as sentences pay the questions again every ten). Ten a request cost
+# about a quarter of one a request (2026-10-21, on the measure question:
+# US$0.0053 against US$0.0196 for 477 graded units, the same accuracy
+# against Dev's grades within the noise); fuller requests were not measured
+# against ten. Every answer is still stored under its own item and question
+# (key), so a re-run reads it back whatever its neighbours were: an item's
+# neighbours move its first answer about as much as a small rewording does,
+# and never a stored one. BATCH is the most items a request holds;
+# $WBG_ASK_BATCH overrides it (0 asks one item a request, as before 2026-10-22).
+BATCH = int(os.environ.get("WBG_ASK_BATCH", "500"))
 # A batch may pass the 30,000-character line above which the endpoint reads
 # in its long-context mode (classify.MAX_REQUEST_CHARS): on 60 paragraphs x
 # 13 asset questions, batches of ten agreed with one a request as often at
@@ -135,11 +138,6 @@ def spec(question):
     return question["instructions"] + "\nAnswers:\n" + "\n".join(opts)
 
 
-def _short(text, words=4):
-    w = str(text).split()
-    return " ".join(w[:words]) + (" ..." if len(w) > words else "")
-
-
 HOW = ("Several items follow, each in its own field ('item 01', 'item 02', ...), and each "
        "question is set out in full in its own field ('question <id>'). Each short question "
        "below asks one of those questions about one item: answer it for that item alone, "
@@ -152,7 +150,12 @@ def item_question(question, qid, field):
     in the state, so its options keep their keys and only a short label."""
     c = question["criteria"]
     if question["type"] == "score":
-        crit = [f"{i}: {_short(t)}" for i, t in enumerate(c)]
+        # The grade numbers alone: each grade is written out once, in the
+        # full question in the state. On 615 sentences x 13 assets the
+        # four-word previews were 44 per cent of the characters and changed
+        # nothing (top asset agreeing with Dev 0.66 against 0.65, mean average
+        # precision 0.604 against 0.603; measures 0.882 against 0.878), 2026-10-22.
+        crit = [str(i) for i in range(len(c))]
     elif question["type"] == "noul":
         crit = {"true": "Yes", "false": "No"}
     else:
@@ -182,15 +185,31 @@ def batch_body(states, questions, model):
     return classify.request_body(shared, qs, model), members
 
 
+def _item_chars(state, questions, i):
+    """About what one more item adds to a batched body, in characters."""
+    f = f"item {i:02d}"
+    one = {f: item_text(state)}
+    one.update({f"{f} | {qid}": item_question(q, qid, f) for qid, q in questions.items()})
+    return len(json.dumps(one, ensure_ascii=False))
+
+
 def batches_for(items, model, size):
     """Batched bodies for [(state, {qid: question})] items that share one
-    question set: `size` a request in the items' order, smaller where a
-    request would pass BATCH_MAX_CHARS. Returns
-    [(body, [(item, qid, batch qid)])]."""
+    question set: as many a request as fit under BATCH_MAX_CHARS, at most
+    `size`, in the items' order. Returns [(body, [(item, qid, batch qid)])]."""
     import classify
     out, k = [], 0
     while k < len(items):
-        n = min(size, len(items) - k)
+        qs = items[k][1]
+        base = len(json.dumps(batch_body([], qs, model)[0], ensure_ascii=False))
+        n, used = 0, base
+        while k + n < len(items) and n < size:
+            add = _item_chars(items[k + n][0], qs, n + 1)
+            if n and used + add > BATCH_MAX_CHARS:
+                break
+            used += add
+            n += 1
+        n = max(n, 1)
         while True:
             chunk = items[k:k + n]
             body, members = batch_body([s for s, _ in chunk], chunk[0][1], model)

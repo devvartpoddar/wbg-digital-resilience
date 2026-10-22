@@ -21,7 +21,8 @@ COMMENT ON VIEW wbg.package_status_order IS
 -- empty tables until a check run exists, so the views below always build.
 CREATE TABLE IF NOT EXISTS wbg.unit_pair_checks (unit_id text, set_a text, set_b text,
   decision text, probability numeric, p_only_a numeric, p_only_b numeric, p_both numeric,
-  p_neither numeric, model_served text, model_cost_usd numeric);
+  p_neither numeric, model_served text, model_cost_usd numeric, prior_probability_a numeric,
+  prior_phrase_cosine_a numeric, prior_probability_b numeric, prior_phrase_cosine_b numeric);
 CREATE TABLE IF NOT EXISTS wbg.unit_scope (unit_id text, scope text, probability numeric,
   p_rule numeric, p_investment numeric, p_not_commitment numeric, model_served text,
   model_cost_usd numeric);
@@ -60,10 +61,11 @@ WITH f AS (
     AND f.probability_grade_3 >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
-    -- a pair check that says the unit is only the other measure, or neither
+    -- a pair check that says the unit is only the other measure, or neither,
+    -- at the pair check's floor (control panel floor.pair_check)
     AND NOT (s.apply_measure_pair_checks AND EXISTS (
       SELECT 1 FROM wbg.unit_pair_checks c
-      WHERE c.unit_id = f.unit_id
+      WHERE c.unit_id = f.unit_id AND c.probability >= s.pair_check_floor
         AND ((c.set_a = f.label_set AND c.decision IN ('only_b', 'neither'))
           OR (c.set_b = f.label_set AND c.decision IN ('only_a', 'neither')))))
 ),
@@ -102,7 +104,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (at its measure''s commit floor, else grade 3; in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not; scope is rule, investment or not_commitment (src/commit_checks.py).';
+  'Every committed unit that counts (at its measure''s commit floor, else grade 3; in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not (src/commit_checks.py). scope is ''(not checked)'': the scope question was removed on 2026-10-22.';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$
@@ -123,16 +125,11 @@ CREATE MATERIALIZED VIEW wbg.commitment_package_status AS
 WITH l AS MATERIALIZED (
   SELECT u.commitment_id, u.unit_id, cp.package_id, cp.probability
   FROM wbg.commitment_units u
-  JOIN (SELECT cp.*, row_number() OVER (PARTITION BY cp.label_set, cp.label_id, cp.unit_id,
-                                                     cp.project_id
-                                        ORDER BY cp.probability DESC, cp.package_id) AS link_rank
-        FROM wbg.commitment_packages cp) cp
+  JOIN wbg.commitment_packages cp
     ON cp.label_set = u.label_set AND cp.label_id = u.label_id
    AND cp.unit_id = u.unit_id AND cp.project_id = u.project_id
   CROSS JOIN wbg.dashboard_settings ds
   WHERE cp.probability >= ds.package_link_min_probability
-    -- one investment: its most likely few packages; a rule: every package
-    AND (u.scope <> 'investment' OR cp.link_rank <= ds.investment_package_top)
 )
 SELECT l.commitment_id, l.package_id, max(l.probability) AS link_probability,
        count(DISTINCT l.unit_id) AS units_linked,
@@ -149,7 +146,7 @@ CREATE UNIQUE INDEX ON wbg.commitment_package_status (commitment_id, package_id)
 CREATE INDEX ON wbg.commitment_package_status (package_id);
 ANALYZE wbg.commitment_package_status;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_package_status IS
-  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability, 0.7): the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A sentence that is one investment (unit_scope) links to its most likely dashboard_settings.investment_package_top packages only; a rule links to every package at the threshold. A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
+  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability): the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
 
 -- Near-identical wording across projects. Word-for-word equality found 17
 -- of 2,150 commitments, while four operations of one programme (DRC,
@@ -250,8 +247,8 @@ WITH c AS (
          max(u.probability_grade_3) AS strongest_p,
          -- dropped only if every sentence under a known component was
          bool_and(ud.dropped) FILTER (WHERE ud.dropped IS NOT NULL) AS dropped_by_restructuring,
-         avg((coalesce(u.conditional_probability, 0) < ds.not_conditional_below)::int)::numeric(4, 3)
-           AS share_not_conditional,
+         -- the conditional question was removed on 2026-10-22: kept, empty
+         NULL::numeric(4, 3) AS share_not_conditional,
          min(d.disclosure_date) AS first_seen_date,
          coalesce(max(wo.near_copy_projects), 0) AS same_wording_projects,
          -- a rule if any sentence is one, else an investment if any is, else
@@ -261,7 +258,6 @@ WITH c AS (
               ELSE min(u.scope) END AS scope,
          bool_and(u.scope = 'not_commitment') AS flagged_not_commitment
   FROM wbg.commitment_units u
-  CROSS JOIN wbg.dashboard_settings ds
   LEFT JOIN wbg.documents d ON d.document_id = u.document_id
   LEFT JOIN wbg.unit_wording_overlap wo ON wo.unit_id = u.unit_id AND wo.project_id = u.project_id
   LEFT JOIN wbg.unit_dropped_by_restructuring ud
@@ -329,7 +325,7 @@ CREATE UNIQUE INDEX ON wbg.commitments (commitment_id);
 CREATE INDEX ON wbg.commitments (label_set);
 ANALYZE wbg.commitments;
 COMMENT ON MATERIALIZED VIEW wbg.commitments IS
-  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest P(committed); share_not_conditional is the share of sentences below the conditional line; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether the project''s asset map grades a paragraph as financing this asset. status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen (Dev): project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms disagree on 30 of 131 projects), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names the asset, else paragraph.';
+  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest P(committed); share_not_conditional is empty (the conditional question was removed on 2026-10-22); first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether the project''s asset map grades a paragraph as financing this asset. status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen (Dev): project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms disagree on 30 of 131 projects), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names the asset, else paragraph.';
 
 -- The commitment's sentences, one row per distinct wording (the strongest
 -- unit printing it).

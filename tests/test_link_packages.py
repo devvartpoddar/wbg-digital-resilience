@@ -94,10 +94,10 @@ def store(tmp_path, monkeypatch):
     run = data / "measures" / "cra-abc"
     _csv(str(run / "units.csv"), measure.UNIT_COLS,
          [{"label_id": "cra", "unit_id": u, "paragraph_id": "D:p1", "doc_id": "D",
-           "project_ids": p, "component_number": "1", "sent": "true", "grade": 3,
+           "project_ids": p, "component_number": "1", "sent": "true", "grade": 3, "p3": 0.9,
            "assets_yes": ay, "asset_link": al, "text": t} for u, p, t, ay, al in UNITS]
          + [{"label_id": "cra", "unit_id": "U4", "paragraph_id": "D:p1", "doc_id": "D",
-             "project_ids": "P1", "sent": "true", "grade": 1, "assets_yes": "fiber",
+             "project_ids": "P1", "sent": "true", "grade": 1, "p1": 0.9, "assets_yes": "fiber",
              "text": "Floods are frequent."}])
     (run / "manifest.json").write_text(json.dumps({"scale": ["a", "b", "c", "d"]}))
     monkeypatch.setattr(measure, "current_run", lambda name, d, **kw: str(run))
@@ -118,6 +118,8 @@ def store(tmp_path, monkeypatch):
             out[qid] = {"type": "noul", "noul": 0.9 if yes else 0.1}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
     monkeypatch.setattr(classify, "decide", fake_decide)
+    import prior
+    monkeypatch.setattr(prior, "word_df", lambda d: (100, {}))
     return str(data), calls
 
 
@@ -135,6 +137,9 @@ def test_each_package_is_asked_its_best_assets_by_cosine(store):
     assert len(a) == 2 and a["fiber"]["cosine_rank"] == "1"
     assert float(a["fiber"]["probability"]) == 0.9
     assert all(float(r["cosine"]) <= 1.0 for r in rows)
+    # The prior inputs: the cosine again, and the phrase match weighted by rarity.
+    assert a["fiber"]["prior_phrase_cosine"] == a["fiber"]["cosine"]
+    assert all(0.0 <= float(r["prior_phrase_match"]) <= 1.0 for r in rows)
 
 
 def test_pairs_need_a_shared_asset_and_the_same_project(store):
@@ -152,6 +157,8 @@ def test_pairs_need_a_shared_asset_and_the_same_project(store):
     assert "shared_group_ids" not in pairs[("U2", "P1:B")]
     assert float(pairs[("U1", "P1:A")]["probability"]) == 0.9
     assert float(pairs[("U2", "P1:B")]["probability"]) == 0.9
+    assert 0.0 < float(pairs[("U1", "P1:A")]["prior_phrase_match"]) <= 1.0
+    assert pairs[("U1", "P1:A")]["prior_phrase_cosine"] != ""
     assert not any(u == "U4" for u, _ in pairs)   # not the top grade
 
 

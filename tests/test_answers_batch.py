@@ -91,3 +91,15 @@ def test_one_sentence_asked_two_questions_with_one_id_keeps_both(tmp_path, monke
                          log=lambda *_: None, workers=1, batch=10)
     assert got[0] and got[1]
     assert got[0]["pair"]["answer"]["noul"] == 0.9 and got[1]["pair"]["answer"]["noul"] == 0.2
+
+
+def test_short_items_fill_a_request_up_to_the_size_limit():
+    q = {"q": {"type": "score", "instructions": "x" * 2000, "criteria": ["a", "b"]}}
+    short = [({"sentence": f"s{i}"}, q) for i in range(300)]
+    out = answers.batches_for(short, "m", 500)
+    assert len(out) == 1 and len(out[0][1]) == 300            # one request, not thirty
+    long = [({"sentence": "y" * 30_000}, q) for i in range(5)]
+    sizes = [len(m) for _, m in answers.batches_for(long, "m", 500)]
+    assert sum(sizes) == 5 and max(sizes) == 2                 # split to stay under the limit
+    for body, _ in answers.batches_for(long, "m", 500):
+        assert len(answers.json.dumps(body, ensure_ascii=False)) <= answers.BATCH_MAX_CHARS

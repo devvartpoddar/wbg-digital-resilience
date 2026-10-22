@@ -15,7 +15,7 @@ asset the sentence is about.
   ./wbg check cra --evaluate            read the grades back, store them as labels
                                         (data/labels/cra_units.csv, keyed by text and
                                         question hash), write data/reports/evaluate_units_cra.md
-                                        and the calibration data/labels/cra_calibration.json
+                                        and fit the probability layer (src/posterior.py)
   ./wbg check cra --elusion             draw units the funnel never read, from just below
                                         the pool threshold and from far below it:
                                         data/review/check_units_cra_elusion_s1.xlsx
@@ -24,10 +24,9 @@ asset the sentence is about.
 What the report says, and does not: precision and recall of "committed"
 (and of "at least planned") against the person's grades, over the graded
 pool (candidates and feedback units), with 95 per cent Wilson intervals on
-the raw counts and stratum-weighted point estimates. The calibration is a
-Platt scaling (a logistic fit of the person's grade on the model's
-log-odds) with the Brier score before and after; the measure stage reads it
-and adds p_committed_calibrated to every unit. Recall outside the pool is
+the raw counts and stratum-weighted point estimates. The probability layer
+(src/posterior.py) is fitted on the same grades; the measure stage reads it
+and writes p_committed_calibrated on every unit. Recall outside the pool is
 the elusion sheet's job: a random draw of the units the funnel never read,
 in two strata (near: within ELUSION_BAND below the pool threshold; far: the
 rest), weighted back to their strata, which is how a technology-assisted
@@ -144,14 +143,16 @@ def draw(units, per, seed):
 
 
 def draw_bands(units, top, seed, bands=BANDS):
-    """The units the model read, by band of its probability of the top
-    grade: (unit, stratum, stratum size, rows drawn)."""
+    """The units the model read, by band of the probability the floor reads
+    (the probability layer's, else the model's score for the grades the
+    control panel counts): (unit, stratum, stratum size, rows drawn)."""
     rng = random.Random(seed)
     strata = {}
     for u in units:
         if u["sent"] != "true" or u.get(f"p{top}", "") == "":
             continue
-        p = float(u[f"p{top}"])
+        p = float(u["p_committed_calibrated"]) if u.get("p_committed_calibrated") \
+            else measure.score_of(u)
         s = next((b[0] for b in bands if b[1] <= p < b[2]), None)
         if s is not None:
             strata.setdefault(s, []).append(u)
@@ -489,47 +490,6 @@ def graded_sheet(name, data, seed, elusion=False):
     raise SystemExit(f"check: no sheet for {name} at seed {seed} ({base}.xlsx or {xlsx})")
 
 
-def platt(p, y):
-    """Platt scaling: (a, b) of sigmoid(a * logit(p) + b) fitted to the 0/1
-    grades y by damped Newton steps on the log-likelihood, with the usual
-    smoothed targets so a perfectly separated sample still fits. Returns
-    None with fewer than two of each class."""
-    import numpy
-    p = numpy.clip(numpy.asarray(p, dtype=float), 1e-4, 1 - 1e-4)
-    y = numpy.asarray(y, dtype=float)
-    n1, n0 = y.sum(), len(y) - y.sum()
-    if n1 < 2 or n0 < 2:
-        return None
-    t = numpy.where(y > 0, (n1 + 1) / (n1 + 2), 1 / (n0 + 2))
-    x = numpy.log(p / (1 - p))
-
-    def loss(a, b):
-        z = a * x + b
-        return float((numpy.logaddexp(0, z) - t * z).sum())
-    a, b = 1.0, 0.0
-    for _ in range(200):
-        z = 1 / (1 + numpy.exp(-numpy.clip(a * x + b, -30, 30)))
-        g = numpy.array([((z - t) * x).sum(), (z - t).sum()])
-        w = z * (1 - z)
-        h = numpy.array([[(w * x * x).sum(), (w * x).sum()], [(w * x).sum(), w.sum()]])
-        h += numpy.eye(2) * 1e-6
-        step = numpy.linalg.solve(h, g)
-        base, scale = loss(a, b), 1.0
-        while scale > 1e-4 and loss(a - scale * step[0], b - scale * step[1]) > base:
-            scale /= 2
-        a, b = a - scale * step[0], b - scale * step[1]
-        if abs(scale * step).max() < 1e-8:
-            break
-    return float(a), float(b)
-
-
-def calibrated(p, ab):
-    import math
-    p = min(max(float(p), 1e-4), 1 - 1e-4)
-    z = max(-30.0, min(30.0, ab[0] * math.log(p / (1 - p)) + ab[1]))
-    return 1 / (1 + math.exp(-z))
-
-
 QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "graded_units",
                 "precision", "recall", "evaluated_at", "report_path"]
 
@@ -563,8 +523,127 @@ def write_quality(data, name, key, rows, top):
     os.replace(path + ".part", path)
 
 
-def calibration_path(name, data):
-    return where(data, "labels", f"{name}_calibration.json")
+def posterior_path(name, data):
+    return where(data, "labels", f"{name}_posterior.json")
+
+
+def graded_labels(name, data):
+    """{unit_id: (grade, asset)} of every sentence a person graded for the
+    set, under any wording of its question (the latest grade wins): the
+    person's reading of the sentence, which the probability layer learns
+    from."""
+    lpath = where(data, "labels", f"{name}_units.csv")
+    out = {}
+    if os.path.exists(lpath):
+        with open(lpath, newline="", encoding="utf-8") as fh:
+            for r in sorted(csv.DictReader(fh), key=lambda r: r.get("graded_on", "")):
+                if r.get("grade", "") != "":
+                    out[r["unit_id"]] = (int(r["grade"]), r.get("asset", ""))
+    return out
+
+
+def latest_run(name, data):
+    """(units.csv rows by unit_id, question SHA-256) of the newest measure run
+    asking the set's question as it stands now, or (None, sha)."""
+    import glob
+    import measure
+    run = measure.Run(name, data, log=lambda *_: None, build=False)
+    lid = run.labels[0]["id"]
+    sha = classify.question_shas(run.qs)[lid]
+    for m in sorted(glob.glob(where(data, "measures", f"{glob.escape(name)}-*", "manifest.json")),
+                    key=os.path.getmtime, reverse=True):
+        with open(m, encoding="utf-8") as fh:
+            if json.load(fh).get("question_sha256", {}).get(lid) != sha:
+                continue
+        with open(os.path.join(os.path.dirname(m), "units.csv"), newline="", encoding="utf-8") as fh:
+            return {u["unit_id"]: u for u in csv.DictReader(fh)}, sha
+    return None, sha
+
+
+def fit_layer(name, data):
+    """Fit the measure's probability layer (src/posterior.py) on every
+    sentence a person graded for it and write it for the next run; report
+    the floor the panel's target precision suggests. Returns report lines."""
+    import panel, posterior
+    lo = min(panel.grades())
+    units, sha = latest_run(name, data)
+    lines = ["## Probability layer and suggested floor", ""]
+    if not units:
+        return lines + ["- no run asks the current question yet: run the measure, then evaluate again", ""]
+    graded = graded_labels(name, data)
+    score = {u: sum(float(units[u].get(f"p{g}") or 0) for g in panel.grades())
+             for u in graded if u in units and units[u].get("sent") == "true"}
+    ys = [(u, 1 if graded[u][0] >= lo else 0) for u in score]
+    vector_of = posterior.vector_lookup(data)
+    vecs = {u: vector_of(u) for u in score}
+    layer = posterior.fit(ys, score, {u: v for u, v in vecs.items() if v is not None}, sha, name)
+    target = float(panel.get("floor.target_precision", 0.8))
+    if layer is None:
+        if os.path.exists(posterior_path(name, data)):
+            os.remove(posterior_path(name, data))
+        probs = [score[u] for u, _ in ys]
+        lines.append(f"- too few graded sentences in the current run ({len(ys)}) for a layer: "
+                     f"the model's score stands")
+    else:
+        posterior.write(posterior_path(name, data), layer)
+        lay = posterior.Layer(layer, vector_of)
+        probs = [lay.probability(u, score[u]) for u, _ in ys]
+        lines.append(f"- layer fitted on {layer['n_yes']} graded yes and {layer['n_no']} no "
+                     f"(grade {lo} or more = yes), written to {os.path.basename(posterior_path(name, data))}")
+    t = posterior.suggest_floor(probs, [y for _, y in ys], target)
+    if t:
+        lines.append(f"- suggested floor for the control panel (floor.{name}): {t[0]:.2f}, "
+                     f"precision {t[1]:.2f}, recall {t[2]:.2f} on the graded sentences "
+                     f"(target precision {target}; in-sample, so optimistic); now "
+                     f"{panel.floor(name)}")
+    return lines + [""]
+
+
+def fit_asset_layers(data):
+    """One probability layer per asset (src/posterior.py), fitted on the
+    assets people gave the sentences they graded for any measure (yes = the
+    person named this asset), against the current sentence asset map, and
+    written to data/labels/assets_posterior.json for the measure stage.
+    Returns report lines."""
+    import labels
+    import panel, posterior
+    folder = classify.current_run("assets", data)
+    if not folder:
+        return ["- asset layers: no sentence asset map yet"]
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
+        man = json.load(fh)
+    if man.get("unit") != "sentence":
+        return ["- asset layers: the current asset map is a paragraph map; none fitted"]
+    named = {}
+    for name in labels.label_sets():
+        for u, (_, asset) in graded_labels(name, data).items():
+            if asset:
+                named[u] = asset          # the asset a person gave the sentence
+    scores = {}
+    with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            if r.get("asked") == "true" and r.get("unit_id") in named:
+                scores.setdefault(r["label_id"], {})[r["unit_id"]] = \
+                    sum(float(r.get(f"p{g}") or 0) for g in panel.grades())
+    vector_of = posterior.vector_lookup(data)
+    vecs = {u: vector_of(u) for u in named}
+    vecs = {u: v for u, v in vecs.items() if v is not None}
+    out, lines = {}, ["## Asset probability layers", ""]
+    for asset, sc in sorted(scores.items()):
+        ys = [(u, 1 if named[u] == asset else 0) for u in sc]
+        layer = posterior.fit(ys, sc, vecs, man["question_sha256"].get(asset, ""), asset)
+        if layer:
+            out[asset] = layer
+            lines.append(f"- {asset}: fitted on {layer['n_yes']} yes, {layer['n_no']} no")
+        else:
+            lines.append(f"- {asset}: too few graded sentences ({len(ys)}, "
+                         f"{sum(y for _, y in ys)} yes); the map's score stands")
+    path = classify.layers_path(data)
+    if out:
+        posterior.write(path, out)
+    elif os.path.exists(path):
+        os.remove(path)
+    return lines + [""]
 
 
 def store_labels(name, data, key, graded, source):
@@ -679,32 +758,9 @@ def evaluate(name, data, seed=1, elusion=False, **kw):
         lines.append(f"- model {s}: {len(rs)} rows, person's mean grade "
                      f"{sum(r['grade'] for r in rs) / len(rs):.2f}, graded committed "
                      f"{sum(1 for r in rs if r['grade'] >= top)}")
-    # Platt scaling of P(grade >= k) on the person's grades, with the Brier
-    # score before and after; stored for the measure stage to apply.
-    today = datetime.date.today().isoformat()
-    cal = {"label_set": name, "measure_dir": key[0]["measure_dir"], "graded_rows": len(rows),
-           "graded_on": today, "question_sha256": key[0]["question_sha256"], "grades": {}}
-    lines += ["## Calibration (Platt scaling of P(grade >= k), Brier score before -> after)", ""]
-    for k in (top, top - 1):
-        ps = [sum(r["p"][k:]) for r in rows]
-        ys = [1 if r["grade"] >= k else 0 for r in rows]
-        ab = platt(ps, ys)
-        if ab is None:
-            lines.append(f"- grade >= {k}: too few of one class to fit")
-            continue
-        raw = sum((p - y) ** 2 for p, y in zip(ps, ys)) / len(ps)
-        after = sum((calibrated(p, ab) - y) ** 2 for p, y in zip(ps, ys)) / len(ps)
-        cal["grades"][str(k)] = {"a": ab[0], "b": ab[1], "brier_raw": raw,
-                                 "brier_calibrated": after, "n": len(ps)}
-        lines.append(f"- grade >= {k}: a = {ab[0]:.3f}, b = {ab[1]:.3f}; Brier {raw:.3f} -> "
-                     f"{after:.3f} (fitted and scored on the same {len(ps)} rows: an "
-                     f"in-sample figure)")
     lines.append("")
     write_quality(data, name, key[0], rows, top)
-    cpath = calibration_path(name, data)
-    with open(cpath + ".part", "w", encoding="utf-8") as fh:
-        json.dump(cal, fh, indent=1, sort_keys=True)
-    os.replace(cpath + ".part", cpath)
+    lines += fit_layer(name, data)
     out = where(data, "reports", f"evaluate_units_{name}.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
@@ -730,6 +786,11 @@ def evaluate_all(data, seed, **kw):
             continue
         outs.append(out)
         n += k
+    try:
+        lines = fit_asset_layers(data)
+        print("\n".join(lines))
+    except SystemExit as exc:
+        print(f"  asset layers: {exc}")
     if os.path.exists(where(data, "review", f"check_links_s{seed}.key.csv")):
         try:
             out, k = evaluate_links(data, seed)
@@ -866,14 +927,10 @@ def main():
                          "around each measure's commit floor (about 20, links around 0.7), "
                          "or to tune every threshold (about 28 around each floor, 70 links "
                          "over the whole range)")
-    ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
-    ap.add_argument("--gate", default="none", choices=measure.GATES)
-    ap.add_argument("--asset-min", type=float, default=0.0)
     ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
-    kw = dict(context=args.context, gate=args.gate, asset_min=args.asset_min,
-              projects=classify.scope(args.projects))
+    kw = dict(projects=classify.scope(args.projects))
     if args.evaluate:
         out, n = evaluate(args.label_set, args.data, args.seed, elusion=args.elusion, **kw)
         print(f"{n} graded rows; wrote {out}")

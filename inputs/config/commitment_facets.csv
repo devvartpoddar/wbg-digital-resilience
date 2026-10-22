@@ -1,6 +1,0 @@
-facet_id,group,facet_name,definition,active,version
-conditional,condition,Conditional,"The commitment depends on something not yet decided: a later study, assessment, review, recommendation, decision, agreement or financing; or it is stated as an option that may be taken rather than something that will be done.",true,v1
-bank,actor,The World Bank,"The World Bank itself carries it out: its staff, its supervision or appraisal, or analytical work it does rather than finances.",true,v1
-borrower,actor,The borrower,"The borrower's government, a ministry, a public agency or the project implementation unit carries it out, with or without consultants it hires.",true,v1
-operator,actor,An operator or utility,"A network operator, utility, service provider or other enterprise, public or private, carries it out as the owner or operator of the asset.",true,v1
-contractor,actor,A contractor or bidder,"A contractor, supplier, consultant or bidder must carry it out under a contract, bidding document or specification the project issues.",true,v1

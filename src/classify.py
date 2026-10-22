@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
-"""The asset map: grade every model paragraph, footnote and prose table row
-against each asset with a decision model.
+"""The asset map: grade every sentence the search reads against each asset
+with a decision model.
 
-For each paragraph, one request asks, for every active label in the set, a
-graded question: how does this passage relate to the label? The grades are
+For each sentence, with its section and component, one request asks, for
+every active label in the set, the graded question every stage asks (the
+measures' form, graded_question): how does the sentence relate to the
+label? A sentence that names no asset takes the last one named earlier in
+its paragraph; that rule is applied where the map is read (src/measure.py).
+The grades are
 the label set's scale (inputs/taxonomy/<set>_scale.csv). The model is a
 decision model: it returns a probability for each grade, not text. Default:
 TypeSafe's Jev, pinned to a dated snapshot, through OpenRouter's decisions
 endpoint with the project's own key (embed.read_key). Every answer is stored
 per question (src/answers.py), so a changed definition re-asks one question.
-With --min-cosine, a label's question goes only to the paragraphs where the
-search sees the label.
+With --min-cosine (control panel asset.gate_cosine), a label's question goes
+only to the sentences the search sees the label in.
 
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
        inputs/taxonomy/<set>.csv, <set>_scale.csv
 Writes data/classify/answers/<model>/<aa>/<sha>.json one stored answer per question
-       data/classify/<set>-<version>/scores.csv      paragraph x label: the
+       data/classify/<set>-<version>/scores.csv      sentence x label: the
                                                      probability of each grade,
                                                      the expected grade, the
                                                      model's confidence
@@ -27,7 +31,7 @@ response is requested once and stored under the SHA-256 of the exact request;
 every later run reads the store. The stored responses are the record.
 Resumable: an interrupted run asks only for what is not stored.
 Versioned: <version> is a SHA-256 over the model, the questions and the
-paragraphs; changing a definition, a grade or the text gives a new version.
+sentences; changing a definition, a grade or the text gives a new version.
 
   python3 src/classify.py assets --dry-run    requests and cost, no network
   python3 src/classify.py assets --limit 20   smoke test, under data/classify/smoke_*
@@ -41,6 +45,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import embed  # noqa: E402
 import labels  # noqa: E402
+import panel  # noqa: E402
+import prior  # noqa: E402
 from search import TAXONOMY, _active, _rows  # noqa: E402
 
 # The dated snapshot, as the measure stage uses (measure.MODEL): the alias
@@ -55,25 +61,25 @@ PRICE_PER_MTOK = 0.042
 # vendor describes as slower and less accurate; a request that would pass
 # that is split over several (answers.bodies_for), never truncated.
 MAX_REQUEST_CHARS = 30_000
-# Narrative and annex prose, every footnote given to the model, and every
-# table row the search reads as prose (units.table_units): the climate annex
-# tables are where most commitments sit, and an asset map that skipped them
-# left those commitments with no asset score at all.
-BLOCKS = ("narrative", "annex", "footnote")
-TABLE_ROWS = True
-# A label's question is put to a paragraph only when a unit of the paragraph
-# scores at least this against the label's phrases (0 = ask every label of
-# every paragraph). Measured against the full asset map on the 70-project
+# A label's question is put to a sentence only when it scores at least this
+# against the label's phrases (0 = ask every label of every sentence; the
+# skip rule of docs/method/decisions.md replaces it once fitted). Measured against the full asset map on the 70-project
 # corpus: 0.25 asks 58 per cent of the questions and loses 5.8 per cent of
 # the links at 0.5 (4.0 per cent at 0.9); 0.30 asks 39 per cent and loses
 # 9.0 (5.4). The questions are most of the cost, so this is the dial. On
 # from 2026-10-21 (Dev's decision): 0.25 is the default for every run; pass
 # --min-cosine 0 for the full map a gate is measured against.
-MIN_COSINE = 0.25
+# Control panel: asset.gate_cosine (0.25 since 2026-10-21), applied to each
+# sentence's own cosine since the map became a sentence map.
+MIN_COSINE = float(panel.get("asset.gate_cosine", 0.25))
+# The map grades each search unit (a sentence) with its section and
+# component, asked the same graded question the measures ask (2026-10-22:
+# every decision is about a sentence; a sentence naming no asset takes the
+# last one named before it, src/measure.py). The paragraph map is gone.
 WORKERS = 10
-SCORE_COLS = ["paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
+SCORE_COLS = ["unit_id", "paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
               "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
-              "p3", "p4", "model_served"]
+              "p3", "p4", "model_served", *prior.COLS]
 
 
 # What each run actually asked for is appended to data/reports/spend.csv, so
@@ -147,61 +153,64 @@ def load_labels(name, folder=TAXONOMY):
     return active, scale
 
 
+def graded_question(lab, scale):
+    """The one form of graded question every stage asks (the measures and the
+    assets alike): how the sentence relates to the label, with the label's
+    name and definition and its scale. The question id is never shown to the
+    model, so the name and definition go in the wording."""
+    # Word for word the measure question since 2026-10-20, so its stored
+    # answers stay valid.
+    lead = ("How does the sentence from a World Bank project appraisal document in the "
+            "'sentence' field, relate to")
+    return {"type": "score",
+            "instructions": f"{lead} {lab['name']}? {lab['name']} means: {lab['definition']}",
+            "criteria": [g.replace("{name}", lab["name"]) for g in scale]}
+
+
 def questions(labels, scale):
-    """The questions object of a request: one graded question per label. The
-    question id is never shown to the model, so the label's name and
-    definition go in the wording."""
-    out = {}
-    for lab in labels:
-        out[lab["id"]] = {
-            "type": "score",
-            "instructions": (f"How does this passage from a World Bank project appraisal "
-                             f"document relate to {lab['name']}? {lab['name']} means: "
-                             f"{lab['definition']}"),
-            "criteria": [g.replace("{name}", lab["name"]) for g in scale],
-        }
-    return out
+    """The questions object of a request: one graded question per label."""
+    return {lab["id"]: graded_question(lab, scale) for lab in labels}
 
 
-# -------------------------------------------------------------- the paragraphs
+# --------------------------------------------------------------- the sentences
 
-def paragraphs(data, blocks=BLOCKS, table_rows=TABLE_ROWS):
-    """Model paragraphs with their text (checked against the recorded hash),
-    section and component: the blocks named, plus the table rows the search
-    reads as prose when table_rows is set."""
+def sentences(data):
+    """Every sentence the search reads (the embedded units, copies once),
+    with its text as embedded (a list item with its lead-in), section and
+    component: the items of the sentence asset map, in reading order."""
+    import units
     names = {}
     path = where(data, "appraisal", "components.csv")
     if os.path.exists(path):
         for r in sorted(_rows(path), key=lambda r: r["source"] == "heading"):
             names.setdefault((r["doc_id"], r["number"]), r["name"])
-    prose_rows = set()
-    if table_rows:
-        import units
-        prose_rows = {u["paragraph_id"] for u in units.search_units(data)
-                      if u["kind"] == "table" and not u["left_out"]}
-    rows = [r for r in _rows(where(data, "appraisal", "paragraphs.csv"))
-            if (r.get("for_model") == "true" and r["block"] in blocks)
-            or r["paragraph_id"] in prose_rows]
+    paras = {r["paragraph_id"]: r for r in _rows(where(data, "appraisal", "paragraphs.csv"))}
+    every = {u["unit_id"]: u for u in units.search_units(data)}
+    index = _rows(where(data, "embeddings", "sentence_index.csv"))
     texts, out = {}, []
-    for r in rows:
-        did = r["doc_id"]
+    for r in index:
+        u = every.get(r["unit_id"])
+        if u is None:
+            continue
+        did = u["doc_id"]
         if did not in texts:
             with open(where(data, "text", f"{did}.txt"), encoding="utf-8") as fh:
                 texts[did] = fh.read()
-        body = texts[did][int(r["char_start"]):int(r["char_end"])]
-        if hashlib.sha256(body.encode("utf-8")).hexdigest() != r["text_sha256"]:
-            raise SystemExit(f"classify: {r['paragraph_id']} does not match its recorded "
-                             f"hash - re-run src/clean.py first")
-        # The sub-component if there is one, else the component: its number
-        # and the data sheet's name, or failing that the heading's own title.
+        body = texts[did][int(u["char_start"]):int(u["char_end"])]
+        if u.get("lead_in_start"):
+            body = texts[did][int(u["lead_in_start"]):int(u["lead_in_end"])] + "\n" + body
+        para = paras.get(r["paragraph_id"], {})
         sub = r.get("subcomponent_number") or ""
         comp = sub or r.get("component_number") or ""
         name = names.get((did, comp)) or \
-            (r.get("subcomponent_name") if sub else r.get("component_name")) or ""
-        state = {"section": r.get("section_title", ""), "passage": body}
+            (para.get("subcomponent_name") if sub else para.get("component_name")) or ""
+        state = {"section": para.get("section_title", ""), "sentence": body}
         if comp:
             state["component"] = f"{comp} {name}".strip()
-        out.append({"row": r, "state": state})
+        row = {"unit_id": r["unit_id"], "paragraph_id": r["paragraph_id"], "doc_id": did,
+               "project_ids": r.get("project_ids", ""),
+               "component_number": r.get("component_number", "")}
+        out.append({"row": row, "state": state})
     return out
 
 
@@ -246,8 +255,8 @@ def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
 # ------------------------------------------------------------------- the run
 
 def best_cosines(name, data, taxonomy=TAXONOMY):
-    """{(label_id, paragraph_id): best unit cosine over the label's queries}
-    from the set's current search run, or {} if there is none."""
+    """{(label_id, unit_id): a sentence's best cosine over the label's
+    queries} from the set's current search run, or {} if there is none."""
     import search
     try:
         folder, _ = search.run_folder(name, data, taxonomy=taxonomy)
@@ -264,19 +273,50 @@ def best_cosines(name, data, taxonomy=TAXONOMY):
     for lab, js in cols.items():
         best = numpy.asarray(scores[:, js]).max(axis=1)
         for r, b in zip(index, best):
-            k = (lab, r["paragraph_id"])
+            k = (lab, r["unit_id"])
             if b > out.get(k, -2.0):
                 out[k] = float(b)
     return out
+
+
+def prior_inputs(name, data, taxonomy, items_, cosines, gate):
+    """of(label_id, unit_id) -> the prior inputs (src/prior.py) of a
+    sentence of the map for a label: its best cosine over the label's
+    phrases and the phrase match weighted by word rarity. (The paragraph
+    counts are made after every stage, from the classification.) Computed
+    per row as it is written: the map has a row per sentence and label, and
+    a second table of them would double the stage's memory."""
+    import search
+    cosines = cosines or best_cosines(name, data, taxonomy)
+    weight = prior.Weights(*prior.word_df(data))
+    phrases = {}
+    for q in search.load_queries(name, taxonomy):
+        if q["kind"] == "phrase":
+            phrases.setdefault(q["label_id"], []).append(q["text"])
+    phrases = {lid: prior.phrases(ts, weight) for lid, ts in phrases.items()}
+    labs = set(lab["id"] for lab in load_labels(name, taxonomy)[0])
+    item = {p["row"]["unit_id"]: p for p in items_}
+    last = {}                   # the rows of one sentence are written together
+
+    def of(lid, uid):
+        p = item.get(uid)
+        if p is None or lid not in labs:
+            return {}
+        if last.get("uid") != uid:
+            last.update(uid=uid, words=set(prior.words(p["state"]["sentence"])))
+        return {"prior_phrase_cosine": prior.fmt(cosines.get((lid, uid))),
+                "prior_phrase_match": prior.fmt(prior.phrase_match(last["words"],
+                                                                   phrases.get(lid, [])))}
+    return of
 
 
 def score_rows(p, response, labels, cosines=None, asked=None):
     out = []
     for lab in labels:
         r = p["row"]
-        cos = (cosines or {}).get((lab["id"], r["paragraph_id"]))
+        cos = (cosines or {}).get((lab["id"], r["unit_id"]))
         if asked is not None and lab["id"] not in asked:
-            out.append({"paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
+            out.append({"unit_id": r["unit_id"], "paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
                         "project_ids": r["project_ids"],
                         "component_number": r.get("component_number", ""),
                         "label_id": lab["id"], "asked": "false",
@@ -286,7 +326,7 @@ def score_rows(p, response, labels, cosines=None, asked=None):
         probs = [float(a["probabilities"][k]) for k in sorted(a["probabilities"], key=int)]
         total = sum(probs) or 1.0
         r = p["row"]
-        out.append({"paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
+        out.append({"unit_id": r["unit_id"], "paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
                     "project_ids": r["project_ids"],
                     "component_number": r.get("component_number", ""),
                     "label_id": lab["id"], "asked": "true",
@@ -308,15 +348,15 @@ def in_scope(row, projects):
 def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_COSINE,
          projects=None):
     """Everything a run would send, without sending it: (labels, scale,
-    questions, [(paragraph, request body)], request SHA-256s, run folder,
-    cosines). With min_cosine, a paragraph's request holds only the labels
-    whose best unit cosine in it reaches the threshold; a paragraph with
-    none is not sent. `projects` limits the run to the paragraphs of those
-    projects (a cohort set, say); the run is keyed on the paragraphs it
+    questions, [(sentence, request body)], request SHA-256s, run folder,
+    cosines). With min_cosine, a sentence's request holds only the labels
+    whose cosine reaches the threshold; a sentence with none is not sent.
+    `projects` limits the run to the sentences of those
+    projects (a cohort set, say); the run is keyed on the sentences it
     covers, so a scope is its own run and a wider one later reads the store."""
     labels, scale = load_labels(name, taxonomy)
     qs = questions(labels, scale)
-    paras = [p for p in paragraphs(data) if in_scope(p["row"], projects)]
+    paras = [p for p in sentences(data) if in_scope(p["row"], projects)]
     if limit:
         paras = paras[:limit]
     cosines = best_cosines(name, data, taxonomy) if min_cosine else {}
@@ -327,21 +367,22 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     for p in paras:
         ask = qs if not min_cosine else {
             lid: q for lid, q in qs.items()
-            if cosines.get((lid, p["row"]["paragraph_id"]), 0.0) >= min_cosine}
+            if cosines.get((lid, p["row"]["unit_id"]), 0.0) >= min_cosine}
         bodies.append((p, request_body(p["state"], ask, model)))
-    # A paragraph whose questions do not fit one request is asked in several
-    # (answers.bodies_for); only a paragraph too long for a single question
+    # A sentence whose questions do not fit one request is asked in several
+    # (answers.bodies_for); only a sentence too long for a single question
     # is refused, never truncated.
     for p, body in bodies:
         one = request_body(p["state"], dict(list(body["questions"].items())[:1]), model)
         if len(json.dumps(one, ensure_ascii=False)) > MAX_REQUEST_CHARS:
-            raise SystemExit(f"classify: {p['row']['paragraph_id']} makes a request over "
+            raise SystemExit(f"classify: {p['row']['unit_id']} makes a request over "
                              f"{MAX_REQUEST_CHARS:,} characters with one question; not truncated")
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
-    h = hashlib.sha256(f"min_cosine={min_cosine}\n".encode())
+    h = hashlib.sha256(f"min_cosine={min_cosine}\nunit=sentence\nprior={prior.VERSION}\n"
+                       .encode())
     for p, sha in zip(paras, shas):
-        h.update(f"{p['row']['paragraph_id']}:{sha}\n".encode())
+        h.update(f"{p['row']['unit_id']}:{sha}\n".encode())
     out = where(data, "classify", f"{prefix}{name}-{h.hexdigest()[:12]}")
     return labels, scale, qs, bodies, shas, out, cosines
 
@@ -375,10 +416,12 @@ def _plan_key(name, data, taxonomy, min_cosine, projects, model):
     lookup, about ten lookups per measure)."""
     from paths import file_sha256
     h = hashlib.sha256(f"{name}\t{model}\t{min_cosine}\t{sorted(projects or [])}\t"
-                       f"{MAX_REQUEST_CHARS}\t{BLOCKS}\t{TABLE_ROWS}\n".encode())
+                       f"{MAX_REQUEST_CHARS}\tsentence\n".encode())
     for f in ("paragraphs.csv", "components.csv", "sentences.csv"):
         p = where(data, "appraisal", f)
         h.update((file_sha256(p) if os.path.exists(p) else "-").encode())
+    p = where(data, "embeddings", "sentence_index.csv")
+    h.update((file_sha256(p) if os.path.exists(p) else "-").encode())
     folder = taxonomy or labels.folder(name)
     for f in (f"{name}.csv", f"{name}_scale.csv"):
         p = os.path.join(folder, f)
@@ -430,11 +473,11 @@ def planned_run(name, data, *, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, project
 
 
 def current_run(name, data, taxonomy=TAXONOMY, min_cosine=None, projects=None):
-    """The run folder for the label set and paragraphs as they stand now, or
+    """The run folder for the label set and sentences as they stand now, or
     None if that run has not been written. With min_cosine None (the
     default for readers), the gate is the one the last run for this set and
     scope was made with (the marker it wrote); the run is still checked
-    against the paragraphs, questions and gate as they stand, so a stale
+    against the sentences, questions and gate as they stand, so a stale
     marker finds nothing rather than something old."""
     import glob
     if not glob.glob(where(data, "classify", f"{glob.escape(name)}-*", "manifest.json")):
@@ -470,7 +513,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         except (OSError, SystemExit):
             pass
     n_q = sum(len(b["questions"]) for _, b in bodies)
-    log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} paragraphs, "
+    log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} sentences, "
         f"{n_q:,} questions"
         + (f" (cosine gate {min_cosine}: {n_q / (len(bodies) * len(labels)):.0%} of all)"
            if min_cosine else ""))
@@ -483,7 +526,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     requests_ = [(p["state"], b["questions"]) for p, b in bodies if b["questions"]]
     got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
                           dry_run=True, aliases=ALIASES)
-    log(f"  answers stored already for {sum(1 for g in got if g):,} paragraphs; calls to make: "
+    log(f"  answers stored already for {sum(1 for g in got if g):,} sentences; calls to make: "
         f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
     if dry_run:
         log("  --dry-run: no request made, nothing written")
@@ -504,6 +547,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         return None
 
     rows, served = [], {}
+    prior_of = prior_inputs(name, data, taxonomy, [p for p, _ in bodies], cosines, min_cosine)
     it = iter(got)
     for p, b in bodies:
         if not b["questions"]:
@@ -515,6 +559,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         served[response["model"]] = served.get(response["model"], 0) + 1
         rows += score_rows(p, response, labels, cosines,
                            asked=set(b["questions"]) if min_cosine else None)
+    for r in rows:
+        r.update(prior_of(r["label_id"], r["unit_id"]))
     part = out + ".part"
     os.makedirs(part, exist_ok=True)
     with open(os.path.join(part, "scores.csv"), "w", newline="", encoding="utf-8") as fh:
@@ -524,7 +570,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     manifest = {"label_set": name, "model_requested": model, "models_served": served,
                 "min_cosine": min_cosine, "questions_asked": n_q,
                 "endpoint": ENDPOINT, "labels": [lab["id"] for lab in labels],
-                "scale": scale, "paragraphs": len(bodies), "questions": qs,
+                "scale": scale, "unit": "sentence", "items": len(bodies), "paragraphs": len(bodies),
+                "questions": qs,
                 "question_sha256": question_shas(qs)}
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=1, ensure_ascii=False)
@@ -535,18 +582,38 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     report = where(data, "reports", f"{prefix}classify_{name}.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:
-        fh.write(f"{name}: {len(bodies):,} paragraphs x {len(labels)} labels -> {out}\n"
+        fh.write(f"{name}: {len(bodies):,} sentences x {len(labels)} labels -> {out}\n"
                  f"models served: {served}\n")
         for lab in labels:
             grades = [r["grade"] for r in rows if r["label_id"] == lab["id"] and r["asked"] == "true"]
             counts = [grades.count(g) for g in range(len(scale))]
             skipped = sum(1 for r in rows if r["label_id"] == lab["id"] and r["asked"] != "true")
-            fh.write(f"  {lab['id']:<26} paragraphs by most likely grade: {counts}"
+            fh.write(f"  {lab['id']:<26} sentences by most likely grade: {counts}"
                      + (f"; not asked (cosine gate): {skipped:,}" if skipped else "") + "\n")
     if len(served) > 1:
         log(f"  warning: more than one model snapshot served: {served}")
     log(f"  wrote {out}")
     return out
+
+
+def layers_path(data):
+    return where(data, "labels", "assets_posterior.json")
+
+
+def asset_layers(data, folder, vector_of):
+    """{asset: posterior.Layer} for the assets whose probability layer
+    (fitted by ./wbg check all --evaluate) was fitted on the question the
+    map at `folder` asked; {} when none."""
+    import posterior
+    path = layers_path(data)
+    if not panel.get("posterior.on", True) or not os.path.exists(path):
+        return {}
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
+        shas = json.load(fh).get("question_sha256", {})
+    with open(path, encoding="utf-8") as fh:
+        specs = json.load(fh)
+    return {a: posterior.Layer(spec, vector_of) for a, spec in specs.items()
+            if spec.get("question_sha256") == shas.get(a)}
 
 
 def question_shas(qs):
@@ -568,14 +635,14 @@ def main():
                                       "assets, measures")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--model", default=MODEL)
-    ap.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
+    ap.add_argument("--limit", type=int, default=0, help="first N sentences (smoke test)")
     ap.add_argument("--workers", type=int, default=WORKERS)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--min-cosine", type=float, default=MIN_COSINE,
-                    help="ask a label's question of a paragraph only when a unit of it "
+                    help="ask a label's question of a sentence only when it "
                          "scores at least this against the label's phrases (0 = all)")
     ap.add_argument("--projects", default="",
-                    help="comma-separated project ids: only their paragraphs (./wbg classify "
+                    help="comma-separated project ids: only their sentences (./wbg classify "
                          "--set digital fills this from the cohort)")
     args = ap.parse_args()
     key = "" if args.dry_run else embed.read_key("")

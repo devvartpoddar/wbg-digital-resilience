@@ -96,7 +96,8 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
-           "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade"}
+           "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
+           "prior_para_assets", "prior_para_measures"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "commitment_v2_usd_millions", "commitment_v3_usd_millions",
@@ -110,7 +111,9 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "unit_best_asset_probability", "linked_asset_probability",
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
            "best_actor_probability", "cosine", "probability", "p_only_a", "p_only_b", "p_both",
-           "p_neither", "p_rule", "p_investment", "p_not_commitment"}
+           "p_neither", "p_rule", "p_investment", "p_not_commitment",
+           "prior_phrase_cosine", "prior_phrase_match", "prior_probability_a",
+           "prior_probability_b", "prior_phrase_cosine_a", "prior_phrase_cosine_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
            "was_sent_to_model", "was_asked", "is_committed"}
@@ -150,6 +153,13 @@ def rename(table, csv_name):
 # schema, primary key, foreign keys [(column, table, column)], comments.
 # Table names are the ones a person sees; the loader maps its sources to them.
 
+# The prior inputs that need no grading (src/prior.py, docs/method/decisions.md):
+# stored next to the decision model's answers, read by nothing until a graded
+# sheet fits the weights and cut-offs that use them.
+PRIOR_INPUTS = {
+    "prior_phrase_cosine": "Prior input: best embedding cosine to the label's search phrases.",
+    "prior_phrase_match": "Prior input: the best phrase's share of information found in the text, each word weighted by how rare it is in the corpus (0 to 1).",
+}
 PROBABILITY_GRADES = {
     "most_likely_grade": "The grade with the highest probability, on the label set's scale "
                          "(0 not about it, up to 3 financed or committed). Unmeasured until a "
@@ -376,14 +386,17 @@ TABLES = {
             "run_id": "The search run the row comes from.",
         }),
     "paragraph_grades": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "paragraph_id"),
+        schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
         foreign=[("paragraph_id", "paragraphs", "paragraph_id")],
-        comment="One paragraph per label with the decision model's probability of each grade: "
-                "for the assets, how the paragraph relates to the asset (0 not about it, 1 "
-                "background, 2 supported, 3 financed). The asset map.",
+        comment="The asset map: one sentence per label (since 2026-10-22; one paragraph before) "
+                "with the decision model's probability of each grade: how the sentence relates "
+                "to the asset (0 not about it, 1 background, 2 supported, 3 financed). The "
+                "table keeps its name so the dashboards' questions keep working.",
         columns=dict(PROBABILITY_GRADES, **{
-            "was_asked": "False when a cosine gate kept the question from being asked of this paragraph; the grades are then NULL.",
-            "best_cosine": "The paragraph's best unit cosine against the label's phrases, when a cosine gate was used.",
+            "unit_id": "The sentence graded (search_units.unit_id); for a paragraph map, the paragraph's id.",
+            "was_asked": "False when a cosine gate (control panel asset.gate_cosine) kept the question from being asked of this sentence; the grades are then NULL.",
+            "best_cosine": "The sentence's cosine against the label's phrases, when a cosine gate was used.",
+            **PRIOR_INPUTS,
         })),
     "measure_findings": dict(
         schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
@@ -400,33 +413,34 @@ TABLES = {
             "matched_patterns": "Pattern ids that matched.",
             "firmness": "activity, outcome or none, from wording lists.",
             "was_sent_to_model": "False when a gate kept the unit from being graded.",
-            "is_committed": "The unit counts as committed: P(grade 3) at or above the measure's commit_floor (analysis/labels/<set>.csv), or, where none is written, the most likely grade is 3.",
-            "paragraph_best_asset_id": "The asset map's best asset for the paragraph.",
-            "paragraph_best_asset_probability": "Its probability of grade 2 or more.",
-            "component_best_asset_id": "The best asset among the component's paragraphs.",
-            "component_best_asset_probability": "Its probability.",
-            "unit_best_asset_id": "The asset the model says the sentence itself concerns most.",
-            "unit_best_asset_probability": "Its probability.",
-            "asset_ids_above_threshold": "Every asset the sentence concerns at 0.5 or more.",
-            "linked_asset_id": "The asset the finding is linked to: the unit answer, else the paragraph map, else the component map, at 0.5.",
-            "linked_asset_level": "unit, paragraph, component or none.",
+            "is_committed": "The unit counts as committed or planned: committed_probability_calibrated at or above the measure's floor (control panel inputs/config/control_panel.csv, floor.<set> else floor.default).",
+            "paragraph_best_asset_id": "For a sentence naming no asset: the last asset named earlier in its paragraph, its probability weighted down per sentence back (control panel asset.decay); empty otherwise.",
+            "paragraph_best_asset_probability": "Its weighted probability.",
+            "component_best_asset_id": "Empty since 2026-10-22 (the component level is no longer used).",
+            "component_best_asset_probability": "Empty since 2026-10-22.",
+            "unit_best_asset_id": "The sentence asset map's best asset for the sentence itself.",
+            "unit_best_asset_probability": "Its probability (grades 2 and 3, through the asset's probability layer when fitted).",
+            "asset_ids_above_threshold": "The sentence's own asset when it reaches the control panel's asset.floor.",
+            "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the last one named earlier in its paragraph (level paragraph), at the control panel's asset.floor.",
+            "linked_asset_level": "unit, paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
-            "activity_kinds_above_threshold": "How the commitment is delivered (govern, build, sustain, use) at 0.5 or more.",
-            "best_activity_kind": "The likeliest of them.",
-            "best_activity_kind_probability": "Its probability.",
-            "conditional_probability": "Probability that the commitment depends on a later study, decision or financing, or is stated as an option (inputs/config/commitment_facets.csv).",
-            "actor_ids_above_threshold": "Who carries it out, at 0.5 or more: bank, borrower, operator, contractor (several allowed).",
-            "best_actor_id": "The likeliest of them.",
-            "best_actor_probability": "Its probability.",
+            "activity_kinds_above_threshold": "Empty since 2026-10-22: the delivery question (govern, build, sustain, use) is no longer asked.",
+            "best_activity_kind": "Empty since 2026-10-22.",
+            "best_activity_kind_probability": "Empty since 2026-10-22.",
+            "conditional_probability": "Empty since 2026-10-22: the conditional question is no longer asked.",
+            "actor_ids_above_threshold": "Empty since 2026-10-22: who carries it out is no longer asked.",
+            "best_actor_id": "Empty since 2026-10-22.",
+            "best_actor_probability": "Empty since 2026-10-22.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
             "type_ids_above_threshold": "The measure's types (clusters) this unit is an instance of, at 0.5 or more, from analysis/labels/<set>_types.csv; several allowed; empty when no type claims it ('other') or no list exists yet.",
             "best_type_id": "The likeliest type.",
             "best_type_probability": "Its probability.",
-            "committed_probability_calibrated": "probability_grade_3 after Platt scaling on a person's graded sheet (./wbg check --evaluate); NULL until a sheet has been graded.",
+            "committed_probability_calibrated": "The probability the floor reads: the model's score for grades 2 and 3 through the probability layer (src/posterior.py: similarity to the sentences a person graded), or the score itself until a sheet has been evaluated.",
             "template_project_count": "As in search_units: other projects printing the same words.",
             "template_wording_share": "As in search_units: share of six-word runs shared with two or more other projects.",
             "copy_unit_ids": "Units in other documents that print the same text.",
             "text": "The unit's text with its list lead-in.",
+            **PRIOR_INPUTS,
         })),
     "measure_types": dict(
         schema=PUBLIC, key=("label_set", "label_id", "type_id"), foreign=[],
@@ -498,7 +512,20 @@ TABLES = {
             "cosine_rank": "The asset's rank among the package's assets by that cosine; 1 is the best.",
             "probability": "The decision model's probability that the package procures this asset.",
             "model_served": "The decision-model snapshot that answered.",
+            "prior_phrase_cosine": "Prior input: the cosine above, under the name every question's prior uses.",
+            "prior_phrase_match": "Prior input: the best asset phrase's share of information found in the package description, words weighted by rarity.",
         }),
+    "unit_paragraph_context": dict(
+        schema=PUBLIC, key=("unit_id",),
+        foreign=[("unit_id", "search_units", "unit_id"),
+                 ("paragraph_id", "paragraphs", "paragraph_id")],
+        comment="Prior inputs made once every stage has run (src/prior.py, "
+                "docs/method/decisions.md): for each sentence, how many other sentences of its "
+                "paragraph the pipeline classified as having an asset and as committed for any "
+                "measure. They move when the classification is tuned. Rebuilt whole at every "
+                "publish; read by nothing until a graded sheet fits the weights that use them.",
+        columns={"prior_para_assets": "Other sentences of the paragraph whose best asset in the asset map reaches the control panel's asset.floor.",
+                 "prior_para_measures": "Other sentences of the paragraph committed for any measure (each measure's floor)."}),
     "unit_pair_checks": dict(
         schema=PUBLIC, key=("unit_id", "set_a", "set_b"), foreign=[],
         comment="For a unit two measures both commit: the decision model's choice of only the "
@@ -511,13 +538,16 @@ TABLES = {
                  "probability": "The probability of that answer.",
                  "p_only_a": "Probability of only the first measure.",
                  "p_only_b": "Probability of only the second measure.",
-                 "p_both": "Probability of both.", "p_neither": "Probability of neither."}),
+                 "p_both": "Probability of both.", "p_neither": "Probability of neither.",
+                 "prior_probability_a": "Prior input: the first measure's probability for the unit (its probability layer's, else the model's score).",
+                 "prior_phrase_cosine_a": "Prior input: the unit's cosine to the first measure's phrases.",
+                 "prior_probability_b": "Prior input: the second measure's probability for the unit.",
+                 "prior_phrase_cosine_b": "Prior input: the unit's cosine to the second measure's phrases."}),
     "unit_scope": dict(
         schema=PUBLIC, key=("unit_id",), foreign=[],
-        comment="What kind of statement a committed unit is (src/commit_checks.py): a rule "
-                "that applies to everything of a kind the project buys or builds, one specific "
-                "investment or activity, or not a commitment. The views link an investment to "
-                "its best few packages and a rule to all; not_commitment is a flag, never a cut.",
+        comment="Empty since 2026-10-22: the scope question (a rule, one investment or not a "
+                "commitment) is no longer asked (src/commit_checks.py); kept so the views "
+                "keep their shape.",
         columns={"scope": "rule, investment or not_commitment: the most likely answer.",
                  "probability": "The probability of that answer.",
                  "p_rule": "Probability of a rule.", "p_investment": "Probability of an investment.",
@@ -543,6 +573,8 @@ TABLES = {
             "measure_cosine": "For the measure route, the package description's best cosine to the measure's phrases and definition.",
             "probability": "The decision model's probability that carrying out the package is where the commitment is delivered or applied.",
             "model_served": "The decision-model snapshot that answered.",
+            "prior_phrase_cosine": "Prior input: the package description's best cosine to the measure's phrases.",
+            "prior_phrase_match": "Prior input: the share of the package description's information found in the commitment sentence, words weighted by rarity.",
         }),
     "sentence_vectors": dict(
         schema=INTERNAL, key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
