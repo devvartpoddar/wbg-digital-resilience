@@ -288,6 +288,17 @@ def test_a_graded_training_sheet_fits_the_layer_and_the_gate_for_the_next_run(st
         k: v for k, v in kw.items() if k != "min_cosine"})
     assert nxt.gate_fitted == gate["gate"] and nxt.calibration
     assert nxt.out != first
+    assert gate["lost_upper_95"] is not None
+    # Pooled, the same grades give a layer with the pooled measures named,
+    # and the tuning report runs over what is stored.
+    import tune
+    lines = check_units.fit_pooled_layers(data)
+    assert "pooled layer" in "\n".join(lines["cra"])
+    assert json.load(open(os.path.join(data, "labels", "cra_posterior.json")))["pooled"] == ["cra"]
+    monkeypatch.setattr(tune, "GRID", {"sharpness": [20.0], "near_copy": ["off"], "ridge": [1.0],
+                                       "centroid": [True], "pool": [False, True]})
+    report = open(tune.report(data, log=lambda *_: None)).read()
+    assert "## Probability layer settings" in report and "cannot set yet" in report
 
 
 def test_a_run_publishes_its_findings_assets_and_record_to_postgres(store, monkeypatch):

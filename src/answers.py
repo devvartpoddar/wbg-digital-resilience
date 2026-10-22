@@ -32,6 +32,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
+import panel  # noqa: E402
 
 
 def _slug(model):
@@ -106,24 +107,28 @@ def split(response, questions, call_sha):
 # the state, each item (a sentence, a paragraph, a package, a pair) in its
 # own field, and one short question per item and question. A request costs a
 # fixed overhead of about 300 tokens plus its state and questions, and the
-# questions are most of it, so a request is filled with items up to
-# BATCH_MAX_CHARS (2026-10-22; ten a request before, which made short items
-# such as sentences pay the questions again every ten). Ten a request cost
-# about a quarter of one a request (2026-10-21, on the measure question:
-# US$0.0053 against US$0.0196 for 477 graded units, the same accuracy
-# against Dev's grades within the noise); fuller requests were not measured
-# against ten. Every answer is still stored under its own item and question
-# (key), so a re-run reads it back whatever its neighbours were: an item's
-# neighbours move its first answer about as much as a small rewording does,
-# and never a stored one. BATCH is the most items a request holds;
-# $WBG_ASK_BATCH overrides it (0 asks one item a request, as before 2026-10-22).
-BATCH = int(os.environ.get("WBG_ASK_BATCH", "500"))
+# questions are most of it, so batching cuts the cost: ten a request cost
+# about a quarter of one a request (2026-10-21, 477 graded units, US$0.0053
+# against US$0.0196, the same accuracy within the noise).
+#
+# An item's first answer depends on its neighbours (2026-10-22, 120
+# sentences, the climate risk assessment question): one a request asked
+# twice agreed exactly (0 of 120 crossed 0.5), while batches moved an answer
+# by 0.11 on average (10 to 12 of 120 crossed 0.5) and said yes more often.
+# Against a person's grades (131 sentences of two measures) batches of ten
+# and of 62 to 66 ranked as well as one a request or better (AUC 0.90 and
+# 0.97 against 0.88 and 0.96). Every answer is stored under its own item and
+# question, so a re-run reads it back whatever its neighbours were; only
+# first answers move. Batches above 120 items were never measured, so
+# ask.batch_items stays inside what was (control panel; $WBG_ASK_BATCH
+# overrides it, 0 asks one item a request).
+BATCH = int(os.environ.get("WBG_ASK_BATCH") or panel.get("ask.batch_items", 50))
 # A batch may pass the 30,000-character line above which the endpoint reads
 # in its long-context mode (classify.MAX_REQUEST_CHARS): on 60 paragraphs x
 # 13 asset questions, batches of ten agreed with one a request as often at
 # 80,000 characters as at 30,000 (96 per cent the same grade, mean shift in
 # P(top grade) 0.016), and cost 61 per cent less instead of 24.
-BATCH_MAX_CHARS = 80_000
+BATCH_MAX_CHARS = int(panel.get("ask.batch_max_chars", 80_000))
 
 
 def spec(question):

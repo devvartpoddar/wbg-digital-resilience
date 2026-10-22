@@ -39,18 +39,22 @@ each prints its estimate before asking anything (`--dry-run`).
    | Fetch PDFs, plans, notices, awards, records | hours | overnight (the interface is rate-limited; `./wbg prepare` resumes) | a day or more |
    | Read PDFs (0.3 s a page on a fast core; three workers) | minutes | about 3 hours on the N150 | about 15 hours |
    | Embed the units | US$0.30 | about US$1 | about US$6 |
-   | Asset map, 13 assets, every sentence (starting gate 0.2) | about US$1 to 1.5 | about US$3 to 5 | about US$20 to 30 |
-   | One measure (pool plus feedback; starting gate 0.2) | about US$0.35 | about US$1.2 to 1.5 | about US$7 to 9 |
+   | Asset map, 13 assets (starting gate 0.2) | about US$0.6 to 0.9 | about US$2 to 3 | about US$12 to 18 |
+   | One measure (pool plus feedback; starting gate 0.3) | about US$0.03 to 0.2 | about US$0.1 to 0.7 | about US$0.6 to 4 |
 
-   Estimates (2026-10-22) for the starting gates of 0.2: on the current corpus
-   (251 projects, about 150,000 searched sentences) about four in five sentences
-   reach 0.2 for each measure (at 0.45, 2 to 8 per cent did), at about
-   US$0.00001 a sentence (the v7 runs' rate); the asset map at about US$0.0000026 a
-   question. A clean run's model stages therefore cost about US$18 to 22, against
-   about US$3 to 4 at the old gates of 0.25 and 0.45. Raising a gate later asks
-   nothing (the answers are stored); lowering it asks again, so the first run pays
-   once for the whole range above 0.2. The dry run gives the figure; it fits inside
-   the key's cap of US$50.
+   Estimates (2026-10-22) on the current corpus (251 projects, about 150,000
+   searched sentences), at the v7 runs' rate of about US$0.00001 a sentence for
+   a measure and US$0.0000026 a question for the asset map, ten a request (fifty
+   a request costs a little less). The share of sentences reaching 0.3 runs from
+   about 5 per cent for a narrow measure (backup power) to about 40 for a broad one
+   (renewable energy); feedback rounds add at most 3,500 sentences a measure
+   (US$0.04). Twelve measures: about US$3 to 5. A clean run's model stages: about
+   US$1 embedding, US$2 to 3 asset map, US$3 to 5 measures, US$1 to 2 types,
+   package links and pair checks; **about US$7 to 11 in all**, against US$18 to 22
+   at gates of 0.2 for both and US$3 to 4 at the old 0.25 and 0.45. Asking one
+   sentence a request (`ask.batch_items` 0) would multiply the measures by about
+   four. Raising a gate later asks nothing (the answers are stored); lowering it
+   asks only the sentences it adds. The dry run gives the figure.
 
 ## The run
 
@@ -193,7 +197,7 @@ person merges.
 
 What a change costs:
 
-- **A floor, `asset.floor`, `asset.decay`, `posterior.*`**: nothing. The
+- **A floor, `asset.floor`, `asset.decay`, `posterior.*`, `ask.*`**: nothing. The
   stage reads the stored answers again under the new number: `./wbg run --from measure`;
   `./wbg status` shows those runs as "would be new" until then.
 - **`dashboard.*`**: nothing; `./wbg publish` rebuilds the views with the new value.
@@ -214,15 +218,17 @@ current questions:
 2. `./wbg run --from classify --dry-run`, read the estimates, then without
    `--dry-run`. The first run has **no probability layer and no fitted gate**: the
    floors read the model's score and the pools use the panel's starting gates
-   (`asset.gate_cosine`, `measure.gate_cosine`, both 0.2: about four in five
-   sentences are asked about each measure, so the skip rule is later fitted on
-   graded yes from the whole range). Stored answers are reused wherever
+   (`measure.gate_cosine` 0.3, `asset.gate_cosine` 0.2: one to four in ten
+   sentences are asked about each measure, and assets, which have no word
+   patterns or feedback rounds behind the gate, are asked more widely). Stored answers are reused wherever
    the exact question and state were asked before.
 3. Grade a training sheet: `./wbg check all --design train --seed <n>`
    (about 40 rows a measure, near each floor), then `./wbg check all --seed <n>
    --evaluate`. That stores the grades, fits each measure's layer and gate (and the
    assets', from the assets given on the sheet), and reports each measure out of
-   sample with a suggested floor.
+   sample with a suggested floor. It ends with `data/reports/tune.md`: every
+   layer setting, the asset floor and decay compared on the grades; set the panel
+   from it.
 4. `./wbg run --from classify` again: the runs are new (their keys hold the layers
    and gates); answers come from the store, and only sentences a gate newly lets in
    are asked. Repeat 3 and 4 while definitions are being tuned.

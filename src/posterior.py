@@ -17,16 +17,19 @@ Two similarity numbers, both from the graded sentences of the label:
   centroid  similarity to the (weighted) average graded yes minus
             similarity to the average graded no.
 
-A graded sentence never informs a sentence it nearly copies (similarity at
-posterior.near_copy or more): appraisal documents reuse wording across
-projects and between a project and its additional financing, and a
-near-copy's grade would otherwise decide the vote, so the fit would learn to
-trust the vote more than it deserves. The same rule holds when fitting, when
-checking and when applying, so the weights learned are the weights used.
-Sentences of the same project do vote: they are different sentences, and
-leaving them out starves the vote of a measure whose graded yes sit in a few
-projects. Leakage between projects is the out-of-fold check's job (folds by
-whole project), not the vote's.
+A graded sentence never votes for itself: its features leave its own
+grade out, as an ungraded sentence's never include one, so the weights
+learned are the weights used. Every other graded sentence votes, of the same
+project or a near-copy alike: appraisal documents reuse wording, and a
+sentence whose graded near-copy says yes usually is yes. posterior.near_copy
+can leave near-copies out too (off by default; the tuning report,
+src/tune.py, compares). Leakage between projects is the out-of-fold check's
+job (folds by whole project), not the vote's.
+
+With posterior.pool the labels share the weights on the score and the
+similarities, each label keeping its own intercept (its base rate) and its
+own graded sentences: a label has 40 or so graded rows, few for four
+weights of its own.
 
 The grades come from sheets drawn by band, not at random, so each graded
 sentence carries its design weight (the stratum's size over the rows drawn
@@ -68,56 +71,90 @@ def _projects(p):
     return frozenset(p)
 
 
+def _near(v):
+    """posterior.near_copy as a number: 'off' (or blank) lets every graded
+    sentence vote but the sentence itself."""
+    if isinstance(v, str) and v.strip().lower() in ("", "off", "none"):
+        return 2.0
+    return float(v)
+
+
 def settings():
     return {"sharpness": float(panel.get("posterior.sharpness", 20)),
             "centroid": bool(panel.get("posterior.centroid", True)),
             "ridge": float(panel.get("posterior.ridge", 1.0)),
             "min_graded": int(panel.get("posterior.min_graded", 20)),
             "min_each": int(panel.get("posterior.min_each", 5)),
-            "near_copy": float(panel.get("posterior.near_copy", 0.97)),
+            "near_copy": _near(panel.get("posterior.near_copy", "off")),
+            "pool": bool(panel.get("posterior.pool", False)),
             "folds": int(panel.get("posterior.folds", 5))}
 
 
-def features(vec, G, y, w, sharpness, centroid, keep):
-    """[vote, centroid difference] for one vector against the graded vectors
-    G (rows, unit length) with grades y (0/1) and design weights w; only the
-    rows where `keep` is true count."""
-    s, yy, ww = (G @ vec)[keep], y[keep], w[keep]
-    k = ww * numpy.exp(sharpness * (s - 1.0))
-    vote = float((k * yy).sum() / k.sum()) if k.sum() else 0.5
-    out = [vote]
-    if centroid:
-        Gk = G[keep]
-        pos, neg = yy > 0, yy == 0
-        cp = float(_unit((Gk[pos] * ww[pos, None]).sum(axis=0)) @ vec) if pos.any() else 0.0
-        cn = float(_unit((Gk[neg] * ww[neg, None]).sum(axis=0)) @ vec) if neg.any() else 0.0
-        out.append(cp - cn)
-    return out
+class _Graded:
+    """The graded sentences of one label (unit vectors G, grades y, design
+    weights w) with what the two similarity features need precomputed, so a
+    sentence's features cost one product with G."""
+
+    def __init__(self, G, y, w):
+        self.G, self.y, self.w = G, y, w
+        self.S = G @ G.T if len(G) else numpy.zeros((0, 0))
+        self.wc = {c: w * ((y > 0) if c else (y == 0)) for c in (1, 0)}
+        self.Sw = {c: self.S @ self.wc[c] for c in self.wc}
+        self.N = {c: float(self.wc[c] @ self.Sw[c]) for c in self.wc}
+
+    def drop(self, s, near_copy, own=None):
+        """The rows that may not inform a sentence with similarities s: its
+        near-copies (similarity at near_copy or more) and itself."""
+        d = numpy.flatnonzero(s >= near_copy)
+        return numpy.union1d(d, [own]).astype(int) if own is not None else d
+
+    def features(self, s, drop, sharpness, centroid):
+        """[vote, centroid difference] for a sentence whose similarities to
+        the graded rows are s (unit vectors, so s = G @ vec), the rows in
+        `drop` left out. The centroid of a class is the unit vector of its
+        weighted sum; its norm comes from the Gram matrix less the dropped
+        rows, so nothing is summed again."""
+        keep = numpy.ones(len(s), dtype=bool)
+        keep[drop] = False
+        k = self.w * numpy.exp(sharpness * (s - 1.0)) * keep
+        vote = float((k * self.y).sum() / k.sum()) if k.sum() else 0.5
+        out = [vote]
+        if centroid:
+            c = []
+            for cls in (1, 0):
+                wc = self.wc[cls]
+                R = drop[wc[drop] > 0]
+                n2 = self.N[cls] - 2 * float(wc[R] @ self.Sw[cls][R]) + \
+                    float(wc[R] @ self.S[numpy.ix_(R, R)] @ wc[R])
+                c.append(float((wc * keep) @ s) / math.sqrt(n2) if n2 > 1e-12 else 0.0)
+            out.append(c[0] - c[1])
+        return out
 
 
-def _keep(vec, G, projects, P, near_copy, skip=None):
-    """Which graded rows may inform a sentence: not itself, not a near-copy
-    of it. (projects and P are kept for the out-of-fold split.)"""
-    keep = (G @ vec) < near_copy
-    if skip is not None:
-        keep[skip] = False
-    return keep
-
-
-def _fit(X, y, w, ridge, iters=3000, step=0.5):
-    """Weighted logistic regression on standardised inputs, ridge-pulled
-    towards zero; w is normalised to a mean of 1."""
+def _fit(X, y, w, ridge, group=None, n_groups=1):
+    """Weighted logistic regression on standardised inputs, one intercept
+    per group (a label, when labels are pooled), the slopes shared and
+    pulled towards zero: ridge is the precision of a normal prior on each
+    standardised slope (1 = a prior standard deviation of 1). w is
+    normalised to a mean of 1. Newton steps to convergence. Returns (mu, sd,
+    intercepts, slopes)."""
     w = w / w.mean()
     mu = (X * w[:, None]).sum(axis=0) / w.sum()
     sd = numpy.sqrt(((X - mu) ** 2 * w[:, None]).sum(axis=0) / w.sum()) + 1e-9
-    Z = numpy.c_[numpy.ones(len(X)), (X - mu) / sd]
+    group = numpy.zeros(len(X), dtype=int) if group is None else numpy.asarray(group)
+    Z = numpy.c_[numpy.eye(n_groups)[group], (X - mu) / sd]
+    pen = numpy.r_[numpy.full(n_groups, 1e-6), numpy.full(X.shape[1], ridge)]
     b = numpy.zeros(Z.shape[1])
-    for _ in range(iters):
-        p = 1 / (1 + numpy.exp(-Z @ b))
-        g = Z.T @ (w * (p - y)) / w.sum()
-        g[1:] += ridge * b[1:] / w.sum()
-        b -= step * g
-    return mu.tolist(), sd.tolist(), b.tolist()
+    for _ in range(100):
+        p = 1 / (1 + numpy.exp(-numpy.clip(Z @ b, -30, 30)))
+        g = Z.T @ (w * (p - y)) + pen * b
+        H = (Z * (w * p * (1 - p))[:, None]).T @ Z + numpy.diag(pen)
+        step = numpy.linalg.solve(H, g)
+        m = numpy.abs(step).max()
+        b -= step * (min(1.0, 5.0 / m) if m else 1.0)
+        if m < 1e-9:
+            break
+    return mu.tolist(), sd.tolist(), b[:n_groups].tolist(), b[n_groups:].tolist()
 
 
 def _rows(graded, scores, vectors, groups):
@@ -135,22 +172,32 @@ def _rows(graded, scores, vectors, groups):
 
 
 def _design(rows, scores, vectors, s):
-    """The fit's inputs: X (logit score, vote, centroid), y, w, G, P."""
+    """The fit's inputs: X (logit score, vote[, centroid]), y, w. Each
+    graded sentence's similarities leave itself out, as an ungraded
+    sentence's never include it."""
     y = numpy.array([r[1] for r in rows], dtype="float64")
     w = numpy.array([r[2] for r in rows], dtype="float64")
-    P = [r[3] for r in rows]
-    G = numpy.array([_unit(vectors[r[0]]) for r in rows])
-    X = numpy.array([[_logit(scores[u])] + features(
-        G[i], G, y, w, s["sharpness"], s["centroid"],
-        _keep(G[i], G, p, P, s["near_copy"], skip=i))
-        for i, (u, _, _, p) in enumerate(rows)])
-    return X, y, w, G, P
+    gr = _Graded(numpy.array([_unit(vectors[r[0]]) for r in rows]), y, w)
+    X = numpy.array([[_logit(scores[u])] + gr.features(
+        gr.S[i], gr.drop(gr.S[i], s["near_copy"], i), s["sharpness"], s["centroid"])
+        for i, (u, *_) in enumerate(rows)])
+    return X, y, w
 
 
-def _enough(rows, s):
+def _enough(rows, s, total=True):
     n_yes = sum(r[1] for r in rows)
-    return len(rows) >= s["min_graded"] and n_yes >= s["min_each"] and \
-        len(rows) - n_yes >= s["min_each"]
+    each = n_yes >= s["min_each"] and len(rows) - n_yes >= s["min_each"]
+    return each and (len(rows) >= s["min_graded"] or not total)
+
+
+def _spec(label, question_sha256, s, mu, sd, intercept, slopes, rows, pooled=None):
+    spec = {"label": label, "question_sha256": question_sha256, "settings": s,
+            "mu": mu, "sd": sd, "coef": [intercept] + slopes,
+            "graded": [[u, v, round(wt, 6), "|".join(sorted(p))] for u, v, wt, p in rows],
+            "n_yes": int(sum(r[1] for r in rows)), "n_no": int(sum(1 - r[1] for r in rows))}
+    if pooled:
+        spec["pooled"] = sorted(pooled)
+    return spec
 
 
 def fit(graded, scores, vectors, question_sha256, label, s=None, groups=None):
@@ -163,18 +210,43 @@ def fit(graded, scores, vectors, question_sha256, label, s=None, groups=None):
     rows = _rows(graded, scores, vectors, groups)
     if not _enough(rows, s):
         return None
-    X, y, w, _, _ = _design(rows, scores, vectors, s)
-    mu, sd, b = _fit(X, y, w, s["ridge"])
-    return {"label": label, "question_sha256": question_sha256, "settings": s,
-            "mu": mu, "sd": sd, "coef": b,
-            "graded": [[u, v, round(wt, 6), "|".join(sorted(p))] for u, v, wt, p in rows],
-            "n_yes": int(y.sum()), "n_no": int((1 - y).sum())}
+    X, y, w = _design(rows, scores, vectors, s)
+    mu, sd, b0, b = _fit(X, y, w, s["ridge"])
+    return _spec(label, question_sha256, s, mu, sd, b0[0], b, rows)
+
+
+def fit_pooled(blocks, s=None):
+    """One layer per label, the labels pooled (posterior.pool): each label
+    keeps its own intercept (its own base rate) and its own graded sentences
+    for the vote, and the weights on the score and the similarities are
+    shared, fitted on every label's grades at once. blocks = {label:
+    (graded, scores, vectors, question_sha256)}. A label joins with at
+    least posterior.min_each graded yes and no; the pool needs
+    posterior.min_graded sentences in all. Returns {label: spec}."""
+    s = dict(settings(), **(s or {}))
+    parts = []
+    for label, (graded, scores, vectors, sha) in sorted(blocks.items()):
+        rows = _rows(graded, scores, vectors, None)
+        if _enough(rows, s, total=False):
+            parts.append((label, sha, rows) + _design(rows, scores, vectors, s))
+    if not parts or sum(len(p[2]) for p in parts) < s["min_graded"]:
+        return {}
+    X = numpy.vstack([p[3] for p in parts])
+    y = numpy.concatenate([p[4] for p in parts])
+    # each label's design weights sum to its rows, so no label outweighs
+    # the rest by the size of its strata
+    w = numpy.concatenate([p[5] * len(p[5]) / p[5].sum() for p in parts])
+    group = numpy.concatenate([numpy.full(len(p[2]), i) for i, p in enumerate(parts)])
+    mu, sd, b0, b = _fit(X, y, w, s["ridge"], group, len(parts))
+    names = [p[0] for p in parts]
+    return {label: _spec(label, sha, s, mu, sd, b0[i], b, rows, names)
+            for i, (label, sha, rows, *_) in enumerate(parts)}
 
 
 def folds_of(rows, k):
     """{unit_id: fold}: whole projects to a fold (a sentence of several
     projects goes with the first), assigned by a hash of the project so the
-    split is the same on every run."""
+    split is the same on every run and for every label."""
     out = {}
     for u, _, _, p in rows:
         key = min(p) if p else u
@@ -203,7 +275,43 @@ def out_of_fold(graded, scores, vectors, s=None, groups=None):
             out.update({r[0]: float(scores[r[0]]) for r in test})
             continue
         layer = Layer(spec, vectors.get)
-        out.update({r[0]: layer.probability(r[0], scores[r[0]], r[3]) for r in test})
+        out.update({r[0]: layer.probability(r[0], scores[r[0]]) for r in test})
+    return out
+
+
+def out_of_fold_all(blocks, s=None):
+    """{label: {unit_id: out-of-fold probability}} over every label of
+    blocks (as fit_pooled), pooled or per label as s['pool'] says. The folds
+    are the same for every label (by project), so a pooled fit never sees
+    the test fold of any label. A sentence whose label has no layer in a
+    fold keeps the model's score."""
+    s = dict(settings(), **(s or {}))
+    if not s["pool"]:
+        out = {}
+        for label, (graded, scores, vectors, _) in blocks.items():
+            rows = _rows(graded, scores, vectors, None)
+            out[label] = out_of_fold(rows, scores, vectors, s) or \
+                {r[0]: float(scores[r[0]]) for r in rows}
+        return out
+    rows = {label: _rows(g, sc, v, None) for label, (g, sc, v, _) in blocks.items()}
+    k = max(2, s["folds"])
+    fold = {}
+    for rs in rows.values():
+        fold.update(folds_of(rs, k))
+    out = {label: {} for label in blocks}
+    for f in range(k):
+        train = {label: ([r for r in rows[label] if fold[r[0]] != f],) + blocks[label][1:]
+                 for label in blocks}
+        specs = fit_pooled(train, s)
+        for label, (_, scores, vectors, _) in blocks.items():
+            test = [r for r in rows[label] if fold[r[0]] == f]
+            if not test:
+                continue
+            if label not in specs:
+                out[label].update({r[0]: float(scores[r[0]]) for r in test})
+                continue
+            layer = Layer(specs[label], vectors.get)
+            out[label].update({r[0]: layer.probability(r[0], scores[r[0]]) for r in test})
     return out
 
 
@@ -228,26 +336,27 @@ class Layer:
         self.spec = spec
         rows = [g for g in spec["graded"] if vector_of(g[0]) is not None]
         self.ids = {g[0]: i for i, g in enumerate(rows)}
-        self.y = numpy.array([g[1] for g in rows], dtype="float64")
-        self.w = numpy.array([float(g[2]) if len(g) > 2 else 1.0 for g in rows], dtype="float64")
-        self.P = [_projects(g[3]) if len(g) > 3 else frozenset() for g in rows]
-        self.G = numpy.array([_unit(vector_of(g[0])) for g in rows]) if rows else numpy.zeros((0, 1))
-        self.vector_of, self.projects_of = vector_of, projects_of
+        y = numpy.array([g[1] for g in rows], dtype="float64")
+        w = numpy.array([float(g[2]) if len(g) > 2 else 1.0 for g in rows], dtype="float64")
+        G = numpy.array([_unit(vector_of(g[0])) for g in rows]) if rows else numpy.zeros((0, 1))
+        self.graded = _Graded(G, y, w)
+        self.y, self.G = y, G
+        self.vector_of = vector_of
         st = spec["settings"]
         self.sharp, self.cent = st["sharpness"], st["centroid"]
-        self.near = float(st.get("near_copy", 1.01))
+        self.near = _near(st.get("near_copy", "off"))
         self.mu, self.sd, self.b = (numpy.array(spec[k]) for k in ("mu", "sd", "coef"))
 
     def probability(self, unit_id, score, projects=None):
+        """The posterior for a sentence from its model score. (projects is
+        accepted for older callers and not used: sentences of the same
+        project vote.)"""
         v = self.vector_of(unit_id)
         if v is None or not len(self.y):
             return float(score)
-        v = _unit(v)
-        if projects is None and self.projects_of is not None:
-            projects = self.projects_of(unit_id)
-        keep = _keep(v, self.G, _projects(projects), self.P, self.near, skip=self.ids.get(unit_id))
-        x = numpy.array([_logit(score)] + features(v, self.G, self.y, self.w, self.sharp,
-                                                   self.cent, keep))
+        sims = self.G @ _unit(v)
+        drop = self.graded.drop(sims, self.near, self.ids.get(unit_id))
+        x = numpy.array([_logit(score)] + self.graded.features(sims, drop, self.sharp, self.cent))
         z = self.b[0] + float(((x - self.mu) / self.sd) @ self.b[1:])
         z = max(-30.0, min(30.0, z))
         return 1 / (1 + math.exp(-z))

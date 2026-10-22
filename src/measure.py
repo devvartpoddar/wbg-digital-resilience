@@ -125,7 +125,7 @@ def firmness(text):
 LINK_MIN = float(panel.get("asset.floor", 0.3))   # a sentence has an asset at or above this
 DECAY = float(panel.get("asset.decay", 0.4))      # per sentence back, for a sentence naming none
 TOP = int(panel.get("measure.top", 0))            # round 0 by count; 0 = off (the cosine gate is the pool)
-MIN_COSINE = float(panel.get("measure.gate_cosine", 0.2))  # the starting gate, until the
+MIN_COSINE = float(panel.get("measure.gate_cosine", 0.3))  # the starting gate, until the
                       # skip rule (src/skip.py) has fitted the measure's own
 BATCH = int(panel.get("feedback.batch", 500))      # units per feedback round
 MIN_YIELD = int(panel.get("feedback.min_yield", 10))  # a round yielding fewer is the last
@@ -201,15 +201,16 @@ def asset_map(data, projects=None, vector_of=None, projects_of=None):
     return out, os.path.basename(folder)
 
 
-def sentence_asset(own, earlier, decay=None):
+def sentence_asset(own, earlier, decay=None, floor=None):
     """(asset, probability, level) for a sentence: its own best asset when
     that reaches LINK_MIN (level 'unit'); else the best asset of its own
     scores plus each earlier sentence's in the same paragraph, the k-th one
     back weighted by decay**k (level 'paragraph'); else ('', best, 'none'). own and earlier[i] are
     {asset: probability}; earlier is nearest first."""
     decay = DECAY if decay is None else decay
+    floor = LINK_MIN if floor is None else floor
     best = max(own, key=own.get) if own else ""
-    if best and own[best] >= LINK_MIN:
+    if best and own[best] >= floor:
         return best, own[best], "unit"
     total = dict(own)
     for k, prev in enumerate(earlier, 1):
@@ -217,7 +218,7 @@ def sentence_asset(own, earlier, decay=None):
             total[a] = total.get(a, 0.0) + (decay ** k) * p
     if total:
         a = max(total, key=total.get)
-        if total[a] >= LINK_MIN and decay:
+        if total[a] >= floor and decay:
             return a, min(total[a], 1.0), "paragraph"
         return "", total[a], "none"
     return "", 0.0, "none"
@@ -521,7 +522,7 @@ class Run:
         """The next batch: the unseen units nearest the Rocchio query, in
         index order on ties. The query is the centroid of the committed
         units' vectors minus NEGATIVE_WEIGHT times the centroid of the units
-        graded 0: the first run showed the raw centroid pulls in the
+        asked and not committed: the first run showed the raw centroid pulls in the
         measure's neighbourhood ("resilient infrastructure" in general), and
         the rejected units are exactly what that neighbourhood looks like."""
         pos = [self.row_of[r["unit_id"]] for r in graded
