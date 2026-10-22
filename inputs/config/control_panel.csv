@@ -10,9 +10,6 @@ feedback.batch,500,measure feedback rounds,"Sentences sent per relevance-feedbac
 feedback.min_yield,10,measure feedback rounds,"A round that finds fewer committed sentences than this is the last.",
 feedback.max_rounds,6,measure feedback rounds,"At most this many feedback rounds.",
 feedback.negative_weight,0.5,measure feedback rounds,"How much of the rejected sentences' average is subtracted when choosing the next round.",
-measure.second_pass_min_grade,2,measure second pass,"The facet questions (conditional; who carries it out) are asked of sentences whose most likely grade is at least this, and of every committed sentence.",
-measure.second_pass_context,sentence,measure second pass,"What the facet questions read: sentence (with its section and component, as every other question) or paragraph.",
-kinds.yes,0.5,measure second pass,"An actor (who carries out the commitment) at or above this probability is listed for the sentence.",
 posterior.on,true,every graded question,"After each model answer, combine the model's score with how similar the sentence is to the sentences a person graded for the same label (src/posterior.py). Off = the model's score alone.",
 posterior.sharpness,20,every graded question,"How sharply similarity counts in the weighted vote of graded sentences: higher = only the closest count.",Tested 2026-10-22: 10 to 20 best of 2 to 160.
 posterior.centroid,true,every graded question,"Also use similarity to the average graded commitment minus similarity to the average graded non-commitment.",
@@ -39,8 +36,6 @@ dashboard.commitment_min_probability,0.0,dashboards (sql/views),"A further floor
 dashboard.commitment_link_levels,unit|paragraph,dashboards,"Where a commitment's asset may come from: unit (the sentence names it), paragraph (an earlier sentence in its paragraph does).",
 dashboard.ipf_only,true,dashboards,"Only Investment Project Financing operations count.",
 dashboard.every_asset_and_type,false,dashboards,"A sentence counts under its one best asset and type (false) or every one the model says yes to (true).",
-dashboard.not_conditional_below,0.3,dashboards,"A sentence is not waiting on a later study below this conditional probability.",
 dashboard.package_link_min_probability,0.7,dashboards,"A package counts as linked to a commitment at this probability or more.","On the graded sheet (2026-10-21, 70 pairs): from 0.7 up, 25 yes of 26."
 dashboard.near_copy_share,0.5,dashboards,"Another project prints a sentence near-identically when its committed sentences hold this share of the sentence's six-word runs.",
 dashboard.apply_measure_pair_checks,true,dashboards,"A sentence two measures both commit leaves a measure the pair check says it is not.",
-dashboard.investment_package_top,3,dashboards,"A sentence about one investment links to at most this many of its project's packages; a rule links to all.",

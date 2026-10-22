@@ -20,9 +20,6 @@ SELECT
   -- under every asset and type the model says yes to (true; on the test
   -- slice that made about seven commitments of each sentence). Undecided.
   {{panel:dashboard.every_asset_and_type}} AS every_asset_and_type,
-  -- A unit is "not waiting on a later study" below this conditional
-  -- probability.
-  {{panel:dashboard.not_conditional_below}}::numeric AS not_conditional_below,
   -- A package is linked to a commitment at this probability or more. On Dev's
   -- graded sheet (2026-10-21, 70 pairs) links from 0.5 to 0.7 were 3 yes, 7
   -- no, 5 unsure; from 0.7 up, 25 yes of 26.
@@ -32,12 +29,9 @@ SELECT
   {{panel:dashboard.near_copy_share}}::numeric AS near_copy_share,
   -- A unit two measures both commit leaves a measure the pair check says it
   -- is not (only the other measure, or neither; src/commit_checks.py).
-  {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks,
-  -- A unit whose scope is one investment links to at most this many of its
-  -- project's packages (its most likely ones); a rule links to all.
-  {{panel:dashboard.investment_package_top}} AS investment_package_top;
+  {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks;
 COMMENT ON VIEW wbg.dashboard_settings IS
-  'The readings the dashboard views apply (one row): the floor on P(committed) for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, whether a sentence counts under every asset and type it is given or only its best, the conditional-probability line for "not waiting on a later study", the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and how many packages one investment links to.';
+  'The readings the dashboard views apply (one row): the floor on P(committed) for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, whether a sentence counts under every asset and type it is given or only its best, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, and whether the measure pair checks drop units.';
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the

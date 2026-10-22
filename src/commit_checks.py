@@ -1,32 +1,30 @@
 #!/usr/bin/env python3
-"""Two questions about the committed units of every measure, asked once the
+"""One question about the committed units of every measure, asked once the
 measures have run.
 
-  pairs  A unit two measures both commit (the same sentence graded 3 by each)
-         is asked one choice question per pair: does it commit the project to
-         only A, only B, both, or neither, each measure stated by its one-line
-         boundary (the `boundary` column of analysis/labels/<set>.csv). Each
-         measure is graded on its own, so nothing else holds the boundaries
-         between neighbours: on a test of 35 such units, backup power and
-         renewable energy went to renewable energy only in 5 of 7, climate
-         information and early warning to early warning in 3 of 3
-         (2026-10-21). The views drop a unit from a measure a pair answer
-         says it is not (only the other, or neither).
+  pairs  A unit two measures both commit is asked one choice question per
+         pair: does it commit the project to only A, only B, both, or
+         neither, each measure stated by its one-line boundary (the
+         `boundary` column of analysis/labels/<set>.csv). Each measure is
+         graded on its own, so nothing else holds the boundaries between
+         neighbours. The views drop a unit from a measure a pair answer says
+         it is not (only the other, or neither; control panel
+         dashboard.apply_measure_pair_checks). On Dev's graded sentences
+         (2026-10-22, 249 with a pair answer) the answer raised recall at 0.90
+         precision on those sentences from 0.78 to 0.87 over the probability
+         layer alone, where the other measures' scores and the rank among
+         measures added nothing.
 
-  scope  Every committed unit, once: a requirement on everything of a kind the
-         project buys or builds (a rule), one specific investment or activity,
-         or not a commitment at all. A rule rightly links to many packages, an
-         investment to a few; the views link an investment to its best
-         dashboard_settings.investment_package_top packages and a rule to all.
-         "Not a commitment" is a flag, never a cut: on the test it also caught
-         real lists behind a cross-reference lead-in.
+The scope question (a rule, an investment or not a commitment) was asked here
+until 2026-10-22 and removed: nothing decided on it but how many packages an
+investment links to. wbg.unit_scope stays, empty.
 
-Both are choice questions to the decision model, stored like every answer
+A choice question to the decision model, stored like every answer
 (src/answers.py) and re-read on a re-run.
 
 Reads  data/measures/<set>-<version>/units.csv (via src/kinds.py)
        analysis/labels/<set>.csv (name, boundary)
-Writes data/checks/checks-<version>/{pairs.csv,scope.csv,manifest.json}
+Writes data/checks/checks-<version>/{pairs.csv,manifest.json}
 
   ./wbg run --only measure        runs it after the measures
   python src/commit_checks.py [--dry-run] [--projects P1,P2]
@@ -42,21 +40,8 @@ import labels  # noqa: E402
 
 ASSET_SET = "assets"
 PAIR_OPTIONS = ("only_a", "only_b", "both", "neither")
-SCOPE = {
-    "rule": ("A requirement that applies to everything of a kind the project buys or builds "
-             "(for example: all IT equipment procured will be energy efficient; all sites will "
-             "be designed to withstand floods)."),
-    "investment": ("One specific investment or activity the project finances (for example: a "
-                   "data centre, a backup site, an early warning system, an assessment of named "
-                   "sites)."),
-    "not_commitment": ("Not something the project commits to: background, context, the "
-                       "country's situation, lessons, existing systems, or the World Bank's own "
-                       "process."),
-}
 PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_only_a", "p_only_b",
              "p_both", "p_neither", "model_served", "cost"]
-SCOPE_COLS = ["unit_id", "scope", "probability", "p_rule", "p_investment", "p_not_commitment",
-              "model_served", "cost"]
 
 
 def boundary_of(name):
@@ -82,14 +67,6 @@ def pair_question(a, b):
                      "neither": "Neither."}}}
 
 
-def scope_question():
-    return {"scope": {
-        "type": "choice",
-        "instructions": ("What kind of statement is the sentence in the 'sentence' field? "
-                         "Choose exactly one."),
-        "criteria": dict(SCOPE)}}
-
-
 def committed(data, projects=None):
     """({set: {unit_id: unit row}}, [run folder names]) of every measure set
     with a current run."""
@@ -108,9 +85,9 @@ def committed(data, projects=None):
 
 
 def plan(data, projects=None, model=classify.MODEL):
-    """(pairs [(unit_id, set_a, set_b, request)], scope [(unit_id, request)],
-    out folder). The folder is keyed on the measure runs, the model and
-    every request, so a changed boundary or a new run is a new folder."""
+    """(pairs [(unit_id, set_a, set_b, request)], out folder). The folder
+    is keyed on the measure runs, the model and every request, so a changed
+    boundary or a new run is a new folder."""
     sets, runs = committed(data, projects)
     by_unit, text = defaultdict(set), {}
     for name, us in sets.items():
@@ -122,19 +99,16 @@ def plan(data, projects=None, model=classify.MODEL):
     for uid in sorted(by_unit):
         for a, b in combinations(sorted(by_unit[uid]), 2):
             pairs.append((uid, a, b, ({"sentence": text[uid]}, pair_question(bound[a], bound[b]))))
-    scope = [(uid, ({"sentence": text[uid]}, scope_question())) for uid in sorted(text)]
     h = hashlib.sha256(f"{model}\t{sorted(runs)}\n".encode())
     for _, _, _, (state, qs) in pairs:
         h.update(classify.request_sha(classify.request_body(state, qs, model)).encode())
-    for _, (state, qs) in scope:
-        h.update(classify.request_sha(classify.request_body(state, qs, model)).encode())
-    return pairs, scope, where(data, "checks", f"checks-{h.hexdigest()[:12]}")
+    return pairs, where(data, "checks", f"checks-{h.hexdigest()[:12]}")
 
 
 def current_run(data, projects=None):
     """The checks folder for the measure runs as they stand, or None."""
     try:
-        out = plan(data, projects)[2]
+        out = plan(data, projects)[1]
     except SystemExit:
         return None
     return out if os.path.exists(os.path.join(out, "manifest.json")) else None
@@ -147,13 +121,12 @@ def _probs(entry):
 def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=classify.WORKERS,
         model=classify.MODEL):
     import answers
-    pairs, scope, out = plan(data, projects, model)
-    log(f"checks: {len(pairs):,} unit pair(s) two measures both commit, {len(scope):,} "
-        f"committed unit(s) for scope -> {out}")
+    pairs, out = plan(data, projects, model)
+    log(f"checks: {len(pairs):,} unit pair(s) two measures both commit -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
         return out
-    requests_ = [r for *_, r in pairs] + [r for _, r in scope]
+    requests_ = [r for *_, r in pairs]
     got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
                           dry_run=True)
     log(f"  stored already: {sum(1 for g in got if g):,}; to ask: {st['to_ask']:,} "
@@ -170,8 +143,8 @@ def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=cl
         if st["failures"] or not all(got):
             log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
-    pair_rows, scope_rows = [], []
-    for (uid, a, b, _), g in zip(pairs, got[:len(pairs)]):
+    pair_rows = []
+    for (uid, a, b, _), g in zip(pairs, got):
         p = _probs(g["pair"])
         best = max(p, key=p.get)
         pair_rows.append({"unit_id": uid, "set_a": a, "set_b": b, "decision": best,
@@ -179,33 +152,21 @@ def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=cl
                           **{f"p_{k}": f"{p.get(k, 0.0):.3f}" for k in PAIR_OPTIONS},
                           "model_served": g["pair"]["model"],
                           "cost": f"{float(g['pair'].get('cost_usd') or 0):.6f}"})
-    for (uid, _), g in zip(scope, got[len(pairs):]):
-        p = _probs(g["scope"])
-        best = max(p, key=p.get)
-        scope_rows.append({"unit_id": uid, "scope": best, "probability": f"{p[best]:.3f}",
-                           **{f"p_{k}": f"{p.get(k, 0.0):.3f}" for k in SCOPE},
-                           "model_served": g["scope"]["model"],
-                           "cost": f"{float(g['scope'].get('cost_usd') or 0):.6f}"})
     part = out + ".part"
     os.makedirs(part, exist_ok=True)
-    for file, cols, rows in (("pairs.csv", PAIR_COLS, pair_rows), ("scope.csv", SCOPE_COLS, scope_rows)):
-        with open(os.path.join(part, file), "w", newline="", encoding="utf-8") as fh:
-            w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")
-            w.writeheader()
-            w.writerows(rows)
+    with open(os.path.join(part, "pairs.csv"), "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=PAIR_COLS, lineterminator="\n")
+        w.writeheader()
+        w.writerows(pair_rows)
     decisions = defaultdict(int)
     for r in pair_rows:
         decisions[(r["set_a"], r["set_b"], r["decision"])] += 1
-    scopes = defaultdict(int)
-    for r in scope_rows:
-        scopes[r["scope"]] += 1
-    lines = [f"checks: {len(pair_rows):,} pair answers, {len(scope_rows):,} scope answers by {model}",
-             "  scope: " + ", ".join(f"{k} {v}" for k, v in sorted(scopes.items(), key=lambda x: -x[1])),
+    lines = [f"checks: {len(pair_rows):,} pair answers by {model}",
              "  pairs (set_a / set_b: decision count):"]
     for (a, b, d), n in sorted(decisions.items()):
         lines.append(f"    {a} / {b}: {d} {n}")
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
-        json.dump({"model": model, "pairs": len(pair_rows), "scope": len(scope_rows),
+        json.dump({"model": model, "pairs": len(pair_rows),
                    "created_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
                   fh, indent=1, sort_keys=True)
     os.replace(part, out)

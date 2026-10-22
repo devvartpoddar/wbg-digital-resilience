@@ -541,14 +541,20 @@ CHECK_SCOPE_COLS = ["unit_id", "scope", "probability", "p_rule", "p_investment",
 
 def check_rows(data, projects=None):
     """(sha, pair rows, scope rows) of the current commitment checks
-    (src/commit_checks.py), or (None, [], []) when there are none."""
+    (src/commit_checks.py), or (None, [], []) when there are none. The scope
+    question was removed on 2026-10-22: its rows are empty, so a publish
+    empties wbg.unit_scope and the views read every unit as not checked."""
     import commit_checks
     folder = commit_checks.current_run(data, projects=projects)
     if not folder:
         return None, [], []
     out = []
     for file in ("pairs.csv", "scope.csv"):
-        with open(os.path.join(folder, file), newline="", encoding="utf-8") as fh:
+        path = os.path.join(folder, file)
+        if not os.path.exists(path):
+            out.append([])
+            continue
+        with open(path, newline="", encoding="utf-8") as fh:
             out.append(list(csv.DictReader(fh)))
     return os.path.basename(folder), out[0], out[1]
 

@@ -416,10 +416,10 @@ TABLES = {
             "activity_kinds_above_threshold": "Empty since 2026-10-22: the delivery question (govern, build, sustain, use) is no longer asked.",
             "best_activity_kind": "Empty since 2026-10-22.",
             "best_activity_kind_probability": "Empty since 2026-10-22.",
-            "conditional_probability": "Probability that the commitment depends on a later study, decision or financing, or is stated as an option (inputs/config/commitment_facets.csv).",
-            "actor_ids_above_threshold": "Who carries it out, at 0.5 or more: bank, borrower, operator, contractor (several allowed).",
-            "best_actor_id": "The likeliest of them.",
-            "best_actor_probability": "Its probability.",
+            "conditional_probability": "Empty since 2026-10-22: the conditional question is no longer asked.",
+            "actor_ids_above_threshold": "Empty since 2026-10-22: who carries it out is no longer asked.",
+            "best_actor_id": "Empty since 2026-10-22.",
+            "best_actor_probability": "Empty since 2026-10-22.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
             "type_ids_above_threshold": "The measure's types (clusters) this unit is an instance of, at 0.5 or more, from analysis/labels/<set>_types.csv; several allowed; empty when no type claims it ('other') or no list exists yet.",
             "best_type_id": "The likeliest type.",
@@ -516,10 +516,9 @@ TABLES = {
                  "p_both": "Probability of both.", "p_neither": "Probability of neither."}),
     "unit_scope": dict(
         schema=PUBLIC, key=("unit_id",), foreign=[],
-        comment="What kind of statement a committed unit is (src/commit_checks.py): a rule "
-                "that applies to everything of a kind the project buys or builds, one specific "
-                "investment or activity, or not a commitment. The views link an investment to "
-                "its best few packages and a rule to all; not_commitment is a flag, never a cut.",
+        comment="Empty since 2026-10-22: the scope question (a rule, one investment or not a "
+                "commitment) is no longer asked (src/commit_checks.py); kept so the views "
+                "keep their shape.",
         columns={"scope": "rule, investment or not_commitment: the most likely answer.",
                  "probability": "The probability of that answer.",
                  "p_rule": "Probability of a rule.", "p_investment": "Probability of an investment.",

@@ -1,5 +1,5 @@
 """The accuracy additions: the template (boilerplate) score on search units,
-the Platt calibration, the commitment facets and the embedding context
+the Platt calibration and the embedding context
 prefix. Invented text throughout."""
 import os
 import sys
@@ -59,17 +59,6 @@ def test_platt_scaling_fits_and_stays_a_probability():
     ab2 = check_units.platt([0.01, 0.02, 0.98, 0.99], [0, 0, 1, 1])
     assert ab2 is not None and 0 < check_units.calibrated(0.5, ab2) < 1
     assert check_units.platt([0.1, 0.9], [0, 1]) is None
-
-
-def test_facets_are_read_from_the_config_and_asked_as_yes_no():
-    facets = measure.load_facets()
-    assert {f["id"] for f in facets} >= {"conditional", "borrower", "contractor"}
-    assert {f["group"] for f in facets} == {"condition", "actor"}
-    qs = measure.questions([{"id": "m", "name": "M", "definition": "d"}], ["0", "1"],
-                           "sentence", [], [], facets)
-    assert qs["facet:conditional"]["type"] == "noul"
-    assert "conditional" in qs["facet:conditional"]["instructions"].lower()
-    assert "carries out" in qs["facet:borrower"]["instructions"]
 
 
 def test_section_prefix_uses_the_paragraphs_own_context():

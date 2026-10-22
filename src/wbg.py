@@ -329,8 +329,7 @@ def run(args, data):
                 ["kinds.py", n, "--assign", *quiet, *scope]], data)
             done = [n for n in sets if n not in failed]
             # The checks span every measure (src/commit_checks.py): a unit two
-            # measures commit, and each committed unit's scope. Asked once the
-            # sets are in; a dry run's estimate reads the runs as they stand.
+            # measures commit. Asked once the sets are in; a dry run's estimate reads the runs as they stand.
             if not failed:
                 _run("commit_checks.py", *dry, *scope, data=data)
             if done and not args.dry_run:

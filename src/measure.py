@@ -12,15 +12,12 @@ The funnel, each level cheaper than the next and each one's loss measurable:
   2. The sentence asset map (src/classify.py on the assets set): every
      sentence's score for each asset, asked with the same graded question
      form as the measure's.
-  3. The decision model reads each unit in two passes: the measure's graded
-     question for every unit, then, for the units graded 2 or more, one
-     yes/no question per facet (the delivery question, govern, build, sustain or
-     use, was removed 2026-10-22) and
-     the facets (conditional; who carries it out). The second pass runs in
-     the background while the next round's first pass goes out. Each score
-     (the probabilities of the grades the control panel counts, 2 and 3) goes
-     through the probability layer (src/posterior.py) when one is fitted, and
-     the measure's floor (control panel) reads the result.
+  3. The decision model reads each unit once: the measure's graded question
+     about the sentence. Nothing else is asked here (the delivery, conditional
+     and actor questions were removed 2026-10-22: nothing decided on them).
+     Each score (the probabilities of the grades the control panel counts,
+     2 and 3) goes through the probability layer (src/posterior.py) when one
+     is fitted, and the measure's floor (control panel) reads the result.
   4. Relevance feedback: the vectors of the units the model graded committed
      are averaged into a centroid (minus half the rejected units' centroid);
      the corpus is re-ranked by cosine to it; the next --batch unseen units
@@ -92,22 +89,11 @@ import search  # noqa: E402
 # served it; a mismatch is reported.
 MODEL = "typesafe/jev-1.13-20260917"
 ASSET_SET = "assets"
-# How a commitment is delivered (govern, build, sustain, use) was asked here
-# until 2026-10-22, from inputs/config/activity_kinds.csv; nothing decided on
-# it, so it was removed (Dev) and its columns stay empty.
-# Two more things a TTL conversation turns on, asked of the same units as
-# the kinds: whether the commitment is conditional (group "condition") and
-# who carries it out (group "actor": the Bank, the borrower, an operator, a
-# contractor; one yes/no each, several allowed).
-FACETS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "commitment_facets.csv")
+# Until 2026-10-22 a second pass asked the units graded 2 or more how the
+# commitment is delivered, whether it is conditional and who carries it out;
+# nothing decided on the answers, so it was removed and their columns stay
+# empty. The asset comes from the sentence asset map (src/classify.py).
 CONTEXTS = ("sentence", "paragraph")
-# What the second pass (kind and facet questions) reads: the sentence with its
-# section and component, as every other question (control panel,
-# measure.second_pass_context; 'paragraph' adds the paragraph). The asset is
-# no longer asked here: it comes from the sentence asset map (src/classify.py)
-# and, for a sentence that names none, the last asset named earlier in its
-# paragraph (asset.decay).
-EXTRAS_CONTEXT = panel.get("measure.second_pass_context", "sentence")
 GATES = ("none", "link", "unit", "paragraph", "component")
 
 # Firmness of the wording, read by fixed word lists: 'activity' (the project
@@ -152,7 +138,6 @@ BATCH = int(panel.get("feedback.batch", 500))      # units per feedback round
 MIN_YIELD = int(panel.get("feedback.min_yield", 10))  # a round yielding fewer is the last
 MAX_ROUNDS = int(panel.get("feedback.max_rounds", 6))
 NEGATIVE_WEIGHT = float(panel.get("feedback.negative_weight", 0.5))  # Rocchio: rejected share
-EXTRAS_MIN_GRADE = int(panel.get("measure.second_pass_min_grade", 2))  # kind and facet questions
 
 
 def score_of(u):
@@ -175,6 +160,8 @@ def is_committed(u, top=None, floor=None):
         p = u.get("p_committed_calibrated", "")
         return (float(p) if p != "" else score_of(u)) >= floor
     return int(u["grade"]) in panel.grades()
+# The kind, conditional and actor columns stay, empty, so the tables and
+# views that read them keep their shape.
 UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
              "component_number", "subcomponent_number", "component_key", "copies", "route",
              "round", "rank", "score", "patterns", "firmness",
@@ -188,53 +175,15 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "model_served", "cost", "text"]
 # Asset thresholds the report tabulates (nothing is chosen here).
 REPORT_THRESHOLDS = (0.3, 0.5, 0.7, 0.9)
-ASSET_YES = float(panel.get("kinds.yes", 0.5))  # a kind or actor at or above this is listed
 
 
-def questions(labels, scale, context, assets=(), kinds=(), facets=()):
-    """The measure's graded question(s), one yes/no question per activity
-    kind (how the commitment is delivered: governing, building, sustaining,
-    using) and one per facet (is it conditional; who carries it out). Every
-    question is about the sentence (the paragraph is context only when the
-    control panel says so). The asset is not asked here: it comes from the
-    sentence asset map (src/classify.py, the same graded question for each
-    asset); `assets` is accepted and unused."""
-    where_x = ("the 'sentence' field, read with the 'paragraph' it sits in,"
-               if EXTRAS_CONTEXT == "paragraph" else "the 'sentence' field,")
-    out = {lab["id"]: classify.graded_question(
+def questions(labels, scale, context):
+    """The measure's graded question(s) about the sentence (the paragraph is
+    context only with context 'paragraph'): the same question form as the
+    asset map's (src/classify.py)."""
+    return {lab["id"]: classify.graded_question(
         lab, scale, "sentence+paragraph" if context == "paragraph" else "sentence")
         for lab in labels}
-    for k in kinds:
-        out[f"kind:{k['id']}"] = {
-            "type": "noul",
-            "instructions": (f"Is what the sentence in {where_x} commits the project to delivered "
-                             f"by {k['name'].lower()}? {k['name']} means: {k['definition']}"),
-            "criteria": {"true": f"Yes: the commitment is delivered by {k['name'].lower()}, "
-                                 f"as defined.",
-                         "false": f"No: it is not delivered by {k['name'].lower()}."}}
-    for f in facets:
-        if f["group"] == "condition":
-            text = (f"Is what the sentence in {where_x} commits the project to "
-                    f"{f['name'].lower()}? {f['name']} means: {f['definition']}")
-            crit = {"true": f"Yes: the commitment is {f['name'].lower()}, as defined.",
-                    "false": f"No: the sentence states it as something that will be done."}
-        else:
-            text = (f"Is {f['name']} who carries out what the sentence in {where_x} commits "
-                    f"the project to? {f['name']} means: {f['definition']}")
-            crit = {"true": f"Yes: {f['name']} carries it out, named or clearly implied.",
-                    "false": f"No: the sentence does not have {f['name']} carry it out."}
-        out[f"facet:{f['id']}"] = {"type": "noul", "instructions": text, "criteria": crit}
-    return out
-
-
-def load_facets(path=FACETS_FILE):
-    """The active facets of inputs/config/commitment_facets.csv:
-    [{id, group, name, definition}]."""
-    if not os.path.exists(path):
-        return []
-    return [{"id": f["facet_id"].strip(), "group": f["group"].strip(),
-             "name": f["facet_name"].strip(), "definition": " ".join(f["definition"].split())}
-            for f in labels_mod.rows(path) if labels_mod.is_active(f)]
 
 
 # ------------------------------------------------------------------ the inputs
@@ -353,12 +302,10 @@ class Run:
                          "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
-                         "extras_min_grade": EXTRAS_MIN_GRADE,
-                         "extras_context": EXTRAS_CONTEXT,
                          "projects": sorted(projects) if projects else None,
                          # the control panel's readings this run applies
                          "panel": {**panel.items("read."), **panel.items("asset."),
-                                   **panel.items("posterior."), "kinds.yes": ASSET_YES}}
+                                   **panel.items("posterior.")}}
         self.projects = sorted(projects) if projects else None
         # The floor is a reading, not a question (control panel, floor.*).
         self.floor = labels_mod.commit_floor(name)
@@ -371,10 +318,7 @@ class Run:
         self.patterns = labels_mod.load_patterns(name)
         self.labels, self.scale = classify.load_labels(name, None)
         self.assets = [a for a in labels_mod.load_set(ASSET_SET) if a["active"] == "true"]
-        self.kinds = []           # the delivery question, removed 2026-10-22
-        self.facets = load_facets()
-        self.qs = questions(self.labels, self.scale, context, self.assets, self.kinds,
-                            self.facets)
+        self.qs = questions(self.labels, self.scale, context)
         asset_folder = classify.current_run(ASSET_SET, data, projects=self.projects)
         self.asset_run = os.path.basename(asset_folder) if asset_folder else ""
         if gate in ("paragraph", "component") and not self.asset_run:
@@ -429,7 +373,6 @@ class Run:
         self.layer = posterior.load(self.layer_path, self.question_sha, self.vector_of)
         self.texts = unit_texts(data, self.index)
         self.doc_texts = {}
-        self.pool, self.pending = None, []
         self._loaded = True
 
     # ---- units
@@ -492,15 +435,15 @@ class Run:
              "component": row["asset_p_comp"]}[s["gate"]]
         return p != "" and float(p) >= s["asset_min"]
 
-    def state_of(self, row, context=None):
+    def state_of(self, row):
         para = row["_para"]
         doc = _text(self.doc_texts, self.data, row["doc_id"])
         para_text = doc[int(para["char_start"]):int(para["char_end"])]
         return state_for(row, para, row["text"], para_text, self.names,
-                         context or self.settings["context"])
+                         self.settings["context"])
 
     def grade_into(self, row, entries):
-        """The measure's grade from the first pass's answer."""
+        """The measure's grade from the model's answer."""
         lab = self.labels[0]["id"]
         a = entries[lab]["answer"]
         probs = [float(a["probabilities"][k]) for k in sorted(a["probabilities"], key=int)]
@@ -519,22 +462,6 @@ class Run:
         row["p_committed_calibrated"] = f"{sc:.4f}"
         row["committed"] = "true" if is_committed(
             {**row, "sent": "true", "committed": ""}, len(self.scale) - 1, self.floor) else "false"
-
-    def extras_into(self, row, entries):
-        """The facet answers from the second pass (no kinds since 2026-10-22)."""
-        ks = {k["id"]: float(entries[f"kind:{k['id']}"]["answer"]["noul"]) for k in self.kinds}
-        kb = max(ks, key=ks.get) if ks else ""
-        row.update({"kinds_yes": "|".join(k for k in ks if ks[k] >= ASSET_YES),
-                    "kind_best": kb, "kind_p": f"{ks[kb]:.3f}" if kb else "",
-                    "cost": f"{float(row['cost']) + sum(float(e.get('cost_usd') or 0) for e in entries.values()):.6f}"})
-        fs = {f["id"]: (f["group"], float(entries[f"facet:{f['id']}"]["answer"]["noul"]))
-              for f in self.facets}
-        cond = [p for g, p in fs.values() if g == "condition"]
-        actors = {k: p for k, (g, p) in fs.items() if g == "actor"}
-        ab = max(actors, key=actors.get) if actors else ""
-        row.update({"conditional_p": f"{max(cond):.3f}" if cond else "",
-                    "actors_yes": "|".join(k for k in actors if actors[k] >= ASSET_YES),
-                    "actor_best": ab, "actor_p": f"{actors[ab]:.3f}" if ab else ""})
 
     def link_into(self, row):
         """The sentence's asset from the sentence asset map: its own best
@@ -557,12 +484,8 @@ class Run:
     # ---- a batch to the model
 
     def grade(self, rows, rnd, api_key, dry_run, workers):
-        """Two passes through the answer store for the rows that pass the
-        gate: the measure's question for all of them, then the asset and
-        activity-kind questions only for those graded EXTRAS_MIN_GRADE or
-        more. The questions are most of a request's tokens, so asking them
-        of the 8 per cent that matter cuts a measure's cost by about four
-        fifths. Returns (calls, cost, failures)."""
+        """The measure's question, through the answer store, for the rows
+        that pass the gate. Returns (calls, cost, failures)."""
         import answers
         model = self.settings["model"]
         sent = []
@@ -571,9 +494,7 @@ class Run:
                 row["sent"] = "true"
                 row["_state"] = self.state_of(row)
                 sent.append(row)
-        first = {k: v for k, v in self.qs.items() if ":" not in k}
-        extras = {k: v for k, v in self.qs.items() if ":" in k}
-        requests_ = [(r["_state"], first) for r in sent]
+        requests_ = [(r["_state"], self.qs) for r in sent]
         got, st = answers.ask(model, requests_, self.data,
                               api_key=api_key, log=self.log, workers=workers, dry_run=True)
         self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} pass the gate; measure "
@@ -591,47 +512,7 @@ class Run:
                 return calls, cost, st["failures"] or [("", "an answer is missing")]
         for row, g in zip(sent, got):
             self.grade_into(row, g)
-        need = [r for r in sent if int(r["grade"]) >= EXTRAS_MIN_GRADE
-                or r.get("committed") == "true"] if extras else []
-        if need:
-            ctx = self.settings["extras_context"]
-            states = [self.state_of(r, ctx) for r in need]
-            if self.pool is not None:
-                # The asset, kind and facet answers are not read by the next
-                # round (the centroid uses grades alone), so they are asked
-                # in the background while the next round's measure
-                # questions go out; collect_extras() gathers them.
-                self.pending.append((need, self.pool.submit(
-                    answers.ask, model, [(s, extras) for s in states], self.data,
-                    api_key=api_key, log=self.log, workers=workers)))
-                return calls, cost, []
-            got2, st2 = answers.ask(model, [(s, extras) for s in states], self.data,
-                                    api_key=api_key, log=self.log, workers=workers)
-            calls += st2["calls"]
-            cost += st2["cost_usd"]
-            self.log(f"    asset and kind questions for {len(need):,} units graded >= "
-                     f"{EXTRAS_MIN_GRADE}: {st2['calls']:,} asked, US${st2['cost_usd']:.3f}")
-            if st2["failures"] or not all(got2):
-                return calls, cost, st2["failures"] or [("", "an answer is missing")]
-            for row, g in zip(need, got2):
-                self.extras_into(row, g)
         return calls, cost, []
-
-    def collect_extras(self):
-        """Wait for the background asset, kind and facet answers and write
-        them into their rows. Returns (calls, cost, failures)."""
-        calls, cost, failures = 0, 0.0, []
-        for need, future in self.pending:
-            got2, st2 = future.result()
-            calls += st2["calls"]
-            cost += st2["cost_usd"]
-            if st2["failures"] or not all(got2):
-                failures.extend(st2["failures"] or [("", "an answer is missing")])
-                continue
-            for row, g in zip(need, got2):
-                self.extras_into(row, g)
-        self.pending = []
-        return calls, cost, failures
 
     # ---- relevance feedback
 
@@ -729,20 +610,6 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
             linked[r["asset_link"]] += 1
     lines.append("  committed units by linked asset: " + ", ".join(
         f"{a} {n}" for a, n in sorted(linked.items(), key=lambda x: -x[1])))
-    kinds = defaultdict(int)
-    for r in com:
-        for k in (r["kinds_yes"].split("|") if r["kinds_yes"] else ["none"]):
-            kinds[k] += 1
-    lines.append("  committed units by activity kind (yes at 0.5, several allowed): " + ", ".join(
-        f"{k} {n}" for k, n in sorted(kinds.items(), key=lambda x: -x[1])))
-    actors = defaultdict(int)
-    for r in com:
-        for k in (r["actors_yes"].split("|") if r["actors_yes"] else ["none"]):
-            actors[k] += 1
-    lines.append("  committed units by who carries it out (yes at 0.5, several allowed): "
-                 + ", ".join(f"{k} {n}" for k, n in sorted(actors.items(), key=lambda x: -x[1]))
-                 + f"; conditional at 0.5: "
-                   f"{sum(1 for r in com if r['conditional_p'] and float(r['conditional_p']) >= ASSET_YES)}")
     assets = defaultdict(int)
     for r in com:
         for a in r["assets_yes"].split("|"):
@@ -770,8 +637,6 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
             import store
             store.try_publish(data, sets=[name], projects=run.projects, log=log)
         return run.out
-    from concurrent.futures import ThreadPoolExecutor
-    run.pool = ThreadPoolExecutor(max_workers=2)
     log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades; context "
         f"{run.settings['context']}, gate {run.settings['gate']} "
         f"-> {run.out}")
@@ -785,18 +650,15 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         calls += c
         cost += k
         if failures:
-            run.pool.shutdown(wait=True)
-            c, k, _ = run.collect_extras()
             # Paid calls are paid whether or not the run completes: the
             # ledger must match the provider's bill.
-            classify.record_spend(data, "measure", name, run.settings["model"], calls + c,
-                                  cost + k, time.time() - t0, "failed")
+            classify.record_spend(data, "measure", name, run.settings["model"], calls,
+                                  cost, time.time() - t0, "failed")
             log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
             for sha, err in failures[:5]:
                 log(f"    {sha[:12]}: {err}")
             return None
         if dry_run:
-            run.pool.shutdown(wait=True)
             log("  --dry-run: round 0 only; no request made, nothing written")
             return None
         this = rows if rnd == 0 else batch
@@ -813,17 +675,6 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         if not batch:
             break
         rows.extend(batch)
-    c, k, failures = run.collect_extras()
-    run.pool.shutdown(wait=True)
-    calls += c
-    cost += k
-    if failures:
-        classify.record_spend(data, "measure", name, run.settings["model"], calls, cost,
-                              time.time() - t0, "failed")
-        log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
-        for sha, err in failures[:5]:
-            log(f"    {sha[:12]}: {err}")
-        return None
     seconds = time.time() - t0
     classify.record_spend(data, "measure", name, run.settings["model"], calls, cost, seconds,
                           os.path.basename(run.out))

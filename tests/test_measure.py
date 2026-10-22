@@ -124,10 +124,6 @@ def store(tmp_path, monkeypatch):
         probs = {"0": 0.05, "1": 0.05, "2": 0.1, "3": 0.8} if hit else \
             {"0": 0.9, "1": 0.1, "2": 0.0, "3": 0.0}
         answers = {"cra": {"type": "score", "confidence": 0.7, "probabilities": probs}}
-        for qid, q in body["questions"].items():          # yes/no kinds and facets
-            if qid != "cra":
-                yes = qid in ("kind:build", "facet:borrower") and hit
-                answers[qid] = {"type": "noul", "noul": 0.9 if yes else 0.1}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": answers}
     monkeypatch.setattr(classify, "decide", fake)
     return str(data), calls
@@ -152,20 +148,14 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert r["asset_unit"] == "towers" and r["asset_p_unit"] == "0.9000" and r["assets_yes"] == "towers"
     assert (r["asset_link"], r["asset_link_level"]) == ("towers", "unit")
     assert r["p_committed_calibrated"] == "0.9000" and r["committed"] == "true"
-    assert r["kinds_yes"] == "" and r["kind_best"] == ""          # no delivery question
-    assert r["actors_yes"] == "borrower" and r["actor_best"] == "borrower"
-    assert float(r["conditional_p"]) < 0.5
+    # No delivery, conditional or actor question: their columns stay empty.
+    assert r["kinds_yes"] == r["kind_best"] == r["actors_yes"] == r["conditional_p"] == ""
     assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]
-    # Two passes: the measure alone on the sentence, then the kind and facet
-    # questions for the units graded 2 or more (here the one unit), on the
-    # same sentence state (control panel measure.second_pass_context). No
-    # asset question: the asset comes from the sentence asset map.
-    assert list(calls[0]["questions"]) == ["cra"]
-    assert calls[1]["state"] == calls[0]["state"]
-    assert not any(k.startswith("asset") for k in calls[1]["questions"])
-    assert "cra" not in calls[1]["questions"]
+    # One question, the measure's, about the sentence; the asset comes from
+    # the sentence asset map.
+    assert len(calls) == 1 and list(calls[0]["questions"]) == ["cra"]
     assert calls[0]["model"] == measure.MODEL
 
 
@@ -178,7 +168,7 @@ def test_feedback_rounds_read_the_nearest_unseen_units_until_the_yield_drops(sto
     assert [(r["round"], r["route"]) for r in rows] == [("0", "both"), ("1", "feedback"),
                                                         ("1", "feedback")]
     assert [r["grade"] for r in rows] == ["3", "0", "0"]
-    assert len(calls) == 4            # round 0: measure + extras; round 1: two units, measure only
+    assert len(calls) == 3            # round 0: one unit; round 1: two units
 
 
 def test_a_rerun_reads_the_store_and_asks_nothing(store):
