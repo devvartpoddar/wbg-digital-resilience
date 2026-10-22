@@ -1058,9 +1058,6 @@ def main():
                          "scope (the cohort set they were run with)")
     ap.add_argument("--set", action="append", dest="cohort_set",
                     help="the cohort set the model runs were made over (digital, ...)")
-    ap.add_argument("--min-cosine", type=float, default=None,
-                    help="the asset map's cosine gate, to find the classify run made at "
-                         "that gate (default: the classify stage's default)")
     args = ap.parse_args()
     import classify
     projects = classify.scope(args.projects)
@@ -1120,7 +1117,7 @@ def main():
         for table, cols, (sha, rows) in (
                 ("search_paragraphs", ROLLUP_COLS, search_tables(args.data)),
                 ("paragraph_grades", CLASSIFY_COLS,
-                 classify_rows(args.data, projects, args.min_cosine)),
+                 classify_rows(args.data, projects)),
                 ("measure_findings", MEASURE_COLS, measure_rows(args.data, projects))):
             t0 = time.time()
             if sha is None:

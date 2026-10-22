@@ -4,9 +4,11 @@ of the decision model against those grades: the precision and recall that
 can be quoted, with their confidence intervals.
 
 Draws from the current measure run (src/measure.py) by stratum of the
-model's grade (3, 2, 1, 0) plus the feedback units, so the rare high grades
-are seen and every figure can be weighted back to the graded pool. The
-person sees the sentence with its lead-in, the paragraph around it, its
+pipeline's decision, so every figure can be weighted back to the graded pool:
+a training sheet (--design train, the default) near the floor, where grades
+teach the probability layer and the skip rule most; an evaluation sheet
+(--design eval), a random draw of what counts and what does not, whose
+grades are never used to fit anything. The person sees the sentence with its lead-in, the paragraph around it, its
 section and component, and the measure with its definition; never the
 model's answer. They enter a grade on the set's scale and, if they wish, the
 asset the sentence is about.
@@ -21,12 +23,13 @@ asset the sentence is about.
                                         data/review/check_units_cra_elusion_s1.xlsx
   ./wbg check cra --elusion --evaluate  what the pool missed, with intervals
 
-What the report says, and does not: precision and recall of "committed"
-(and of "at least planned") against the person's grades, over the graded
-pool (candidates and feedback units), with 95 per cent Wilson intervals on
-the raw counts and stratum-weighted point estimates. The probability layer
-(src/posterior.py) is fitted on the same grades; the measure stage reads it
-and writes p_committed_calibrated on every unit. Recall outside the pool is
+What the report says, and does not: the weighted precision and recall of the
+pipeline's decision (the posterior at the floor) against the person's grade
+2 or more, over the graded pool (candidates and feedback units), with 95 per
+cent Wilson intervals on the effective sample size. The probability layer
+(src/posterior.py) and the skip rule's gate (src/skip.py) are fitted on the
+training sheets' grades under the current question; the next run reads
+them. Recall outside the pool is
 the elusion sheet's job: a random draw of the units the funnel never read,
 in two strata (near: within ELUSION_BAND below the pool threshold; far: the
 rest), weighted back to their strata, which is how a technology-assisted
@@ -69,9 +72,8 @@ SHEET_COLS = [("row_id", 8), ("measure", 20), ("measure means", 40), ("project",
 LABEL_COLS = ["label_set", "label_id", "unit_id", "text_sha256", "question_sha256", "grade",
               "asset", "type", "source", "graded_on", "stratum", "weight"]
 THRESHOLDS = [0.15, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-# The band design (--design bands): drawn by the model's probability of the
-# top grade, densest where a cut-off would be chosen, so the floor can be
-# read off the graded sheet. Each band is (stratum, low, high, rows).
+# The band design (--design bands): drawn by the posterior, densest where a
+# cut-off would be chosen, so the floor can be read off the graded sheet. Each band is (stratum, low, high, rows).
 BANDS = [("p<0.15", 0.0, 0.15, 5), ("p0.15-0.4", 0.15, 0.4, 8), ("p0.4-0.6", 0.4, 0.6, 12),
          ("p0.6-0.8", 0.6, 0.8, 10), ("p0.8+", 0.8, 1.01, 5)]
 # The floor design (--design floor): about 20 units a measure in bands around
@@ -82,7 +84,7 @@ FLOOR_STEPS = [(-1.0, -0.2, 2), (-0.2, -0.1, 3), (-0.1, 0.0, 5), (0.0, 0.1, 5), 
 
 
 def floor_bands(floor, scale=1.0):
-    """[(stratum, low, high, rows)] around a commit floor, or BANDS halved;
+    """[(stratum, low, high, rows)] around a floor, or BANDS halved;
     `scale` multiplies every band's rows (the tuning draw: 1.4, about 28)."""
     rows = lambda n: int(n * scale + 0.5)
     if floor is None:

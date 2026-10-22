@@ -20,15 +20,15 @@ stored like every other decision here (docs/methodology.md, section 5e):
      is deep enough.
 
   2. Commitment <-> package, many to many. For every measure run, each
-     committed unit (the top grade) is paired with the packages of its
-     project that share an asset with the assets the unit's own
-     answers named (assets_yes, else its linked asset). Each pair goes to
+     committed unit (measure.is_committed: the posterior at the floor) is
+     paired with the packages of its project that share an asset with the
+     unit's own asset (assets_yes, else its linked asset). Each pair goes to
      the decision model with one yes/no question: would carrying out this
      package be where this commitment is delivered or applied? A commitment
      may link to several packages and a package to several commitments.
 
 Nothing is cut here: the probabilities are stored and a dashboard chooses
-its threshold; YES (0.5) is only the reading threshold the report counts at
+its threshold; YES (control panel link.asset_yes) is only the reading threshold the report counts at
 and the pair step uses to say which assets a package "has".
 
   data/links/packages-<version>/package_assets.csv
@@ -504,8 +504,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--model", default=MODEL)
-    ap.add_argument("--asset-top", type=int, default=ASSET_TOP,
-                    help="assets asked per package, its best by cosine")
     ap.add_argument("--projects", default="", help="comma-separated project ids (the scope)")
     ap.add_argument("--label-set", action="append", dest="sets",
                     help="measure set(s) to pair; default: every set with a current run")
@@ -514,7 +512,7 @@ def main():
     args = ap.parse_args()
     api_key = "" if args.dry_run else embed.read_key("")
     out = link(args.data, api_key=api_key, dry_run=args.dry_run, workers=args.workers,
-               model=args.model, asset_top=args.asset_top,
+               model=args.model,
                projects=classify.scope(args.projects), sets=args.sets)
     if out and not args.dry_run:
         import store

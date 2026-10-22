@@ -6,31 +6,32 @@ The funnel, each level cheaper than the next and each one's loss measurable:
 
   1. The pool: the units a measure's word patterns match (<set>_patterns.csv),
      plus every unit whose best cosine over the measure's phrases reaches
-     --min-cosine (or its embedding top N, when --top is on). No model reads
-     anything here; a cosine threshold carries between a rare measure and a
-     common one where a count does not.
+     the gate: the skip rule's fitted gate (src/skip.py), else the control
+     panel's measure.gate_cosine (or its embedding top N, measure.top). No
+     model reads anything here.
   2. The sentence asset map (src/classify.py on the assets set): every
      sentence's score for each asset, asked with the same graded question
      form as the measure's.
   3. The decision model reads each unit once: the measure's graded question
-     about the sentence. Nothing else is asked here (the delivery, conditional
-     and actor questions were removed 2026-10-22: nothing decided on them).
-     Each score (the probabilities of the grades the control panel counts,
+     about the sentence. Nothing else is asked here. Each score (the probabilities of the grades the control panel counts,
      2 and 3) goes through the probability layer (src/posterior.py) when one
-     is fitted, and the measure's floor (control panel) reads the result.
-  4. Relevance feedback: the vectors of the units the model graded committed
-     are averaged into a centroid (minus half the rejected units' centroid);
-     the corpus is re-ranked by cosine to it; the next --batch unseen units
-     are graded in one parallel batch; and this repeats until a round yields
-     fewer committed units than --min-yield, or --max-rounds is reached. The
+     is fitted, and the measure's floor (control panel) reads the result:
+     the one decision (is_committed).
+  4. Relevance feedback: the vectors of the committed units are averaged
+     into a centroid (minus feedback.negative_weight times the centroid of
+     the units that do not count); the corpus is re-ranked by cosine to it;
+     the next feedback.batch unseen units are graded in one parallel batch;
+     and this repeats until a round yields fewer committed units than
+     feedback.min_yield, or feedback.max_rounds is reached. The
      stopping rule is a yield rule for retrieval depth, not a recall
      guarantee: what the search never reaches stays unmeasured until a
      person grades a sample.
   5. The asset of a unit (asset_link, asset_link_level, asset_link_p): the
      sentence's own best asset when it reaches the control panel's
-     asset.floor (level unit); else the last asset named earlier in its
-     paragraph, its probability weighted by asset.decay per sentence back
-     (level paragraph); else none.
+     asset.floor (level unit); else the asset with the highest sum of its own
+     score and every earlier sentence's in its paragraph, each weighted by
+     asset.decay per sentence back, when that reaches the floor (level
+     paragraph); else none.
 
 Every threshold here is a control-panel setting
 (inputs/config/control_panel.csv, src/panel.py).
@@ -87,10 +88,7 @@ import search  # noqa: E402
 # served it; a mismatch is reported.
 MODEL = "typesafe/jev-1.13-20260917"
 ASSET_SET = "assets"
-# Until 2026-10-22 a second pass asked the units graded 2 or more how the
-# commitment is delivered, whether it is conditional and who carries it out;
-# nothing decided on the answers, so it was removed and their columns stay
-# empty. The asset comes from the sentence asset map (src/classify.py).
+# The asset comes from the sentence asset map (src/classify.py).
 
 # Firmness of the wording, read by fixed word lists: 'activity' (the project
 # finances, builds, requires, includes...), 'outcome' ("will enable", "is
@@ -127,9 +125,8 @@ def firmness(text):
 LINK_MIN = float(panel.get("asset.floor", 0.3))   # a sentence has an asset at or above this
 DECAY = float(panel.get("asset.decay", 0.4))      # per sentence back, for a sentence naming none
 TOP = int(panel.get("measure.top", 0))            # round 0 by count; 0 = off (the cosine gate is the pool)
-MIN_COSINE = float(panel.get("measure.gate_cosine", 0.45))  # round 0 pool: best cosine over the
-                      # measure's phrases (on climate risk assessment, top 2,000 was 0.473 and
-                      # 0.45 kept 168 of 171 committed units from a pool of 3,070)
+MIN_COSINE = float(panel.get("measure.gate_cosine", 0.45))  # the starting gate, until the
+                      # skip rule (src/skip.py) has fitted the measure's own
 BATCH = int(panel.get("feedback.batch", 500))      # units per feedback round
 MIN_YIELD = int(panel.get("feedback.min_yield", 10))  # a round yielding fewer is the last
 MAX_ROUNDS = int(panel.get("feedback.max_rounds", 6))
@@ -208,8 +205,7 @@ def sentence_asset(own, earlier, decay=None):
     """(asset, probability, level) for a sentence: its own best asset when
     that reaches LINK_MIN (level 'unit'); else the best asset of its own
     scores plus each earlier sentence's in the same paragraph, the k-th one
-    back weighted by decay**k (level 'paragraph': the last asset named before
-    it, as the grammar runs); else ('', best, 'none'). own and earlier[i] are
+    back weighted by decay**k (level 'paragraph'); else ('', best, 'none'). own and earlier[i] are
     {asset: probability}; earlier is nearest first."""
     decay = DECAY if decay is None else decay
     best = max(own, key=own.get) if own else ""
@@ -364,7 +360,7 @@ class Run:
         self.projects_of = lambda u: proj.get(u, "")
         self.unit_assets, _ = asset_map(data, self.projects, self.vector_of, self.projects_of)
         # Each paragraph's sentences in reading order, for the asset of a
-        # sentence that names none (the last one named before it).
+        # sentence that names none (the decayed sum over those before it).
         self.before = {}
         seen = {}
         for r in self.index:
@@ -472,8 +468,8 @@ class Run:
 
     def link_into(self, row):
         """The sentence's asset from the sentence asset map: its own best
-        (asset_unit, asset_p_unit; level 'unit'), else the last asset named
-        earlier in its paragraph, weighted down per sentence back
+        (asset_unit, asset_p_unit; level 'unit'), else the decayed sum over
+        the earlier sentences of its paragraph
         (asset_para, asset_p_para; level 'paragraph'), else none."""
         uid = row["unit_id"]
         own = self.unit_assets.get(uid, {})
@@ -725,13 +721,6 @@ def main():
     ap.add_argument("label_set")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--model", default=MODEL)
-    ap.add_argument("--top", type=int, default=TOP, help="round 0 pool by count (0 = off)")
-    ap.add_argument("--min-cosine", type=float, default=MIN_COSINE,
-                    help="round 0 pool: units whose best cosine reaches this (0 = off)")
-    ap.add_argument("--batch", type=int, default=BATCH, help="units per feedback round")
-    ap.add_argument("--min-yield", type=int, default=MIN_YIELD,
-                    help="a round yielding fewer committed units than this is the last")
-    ap.add_argument("--max-rounds", type=int, default=MAX_ROUNDS)
     ap.add_argument("--workers", type=int, default=classify.WORKERS)
     ap.add_argument("--projects", default="",
                     help="comma-separated project ids: only their units, with the asset map "
@@ -745,9 +734,6 @@ def main():
     out = measure(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
                   workers=args.workers, model=args.model,
                   publish=not (args.dry_run or args.no_publish),
-                  top=args.top,
-                  min_cosine=args.min_cosine, batch=args.batch,
-                  min_yield=args.min_yield, max_rounds=args.max_rounds,
                   projects=classify.scope(args.projects))
     return 0 if out or args.dry_run else 1
 

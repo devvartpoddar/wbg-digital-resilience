@@ -5,24 +5,25 @@ with a decision model.
 For each sentence, with its section and component, one request asks, for
 every active label in the set, the graded question every stage asks (the
 measures' form, graded_question): how does the sentence relate to the
-label? A sentence that names no asset takes the last one named earlier in
-its paragraph; that rule is applied where the map is read (src/measure.py).
-The grades are
+label? Which asset a sentence has is decided where the map is read
+(src/measure.py sentence_asset: its own posterior at asset.floor, else the
+decayed sum over the earlier sentences of its paragraph). The grades are
 the label set's scale (inputs/taxonomy/<set>_scale.csv). The model is a
 decision model: it returns a probability for each grade, not text. Default:
 TypeSafe's Jev, pinned to a dated snapshot, through OpenRouter's decisions
 endpoint with the project's own key (embed.read_key). Every answer is stored
 per question (src/answers.py), so a changed definition re-asks one question.
-With --min-cosine (control panel asset.gate_cosine), a label's question goes
-only to the sentences the search sees the label in.
+A label's question goes only to the sentences whose cosine to the label's
+phrases reaches its gate: the skip rule's fitted gate (src/skip.py), else
+the control panel's starting gate (asset.gate_cosine; 0 asks every label of
+every sentence).
 
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
        inputs/taxonomy/<set>.csv, <set>_scale.csv
 Writes data/classify/answers/<model>/<aa>/<sha>.json one stored answer per question
        data/classify/<set>-<version>/scores.csv      sentence x label: the
-                                                     probability of each grade,
-                                                     the expected grade, the
-                                                     model's confidence
+                                                     probability of each grade
+                                                     and the model's confidence
        data/classify/<set>-<version>/manifest.json
        data/reports/classify_<set>.txt
 
@@ -63,20 +64,12 @@ PRICE_PER_MTOK = 0.042
 # that is split over several (answers.bodies_for), never truncated.
 MAX_REQUEST_CHARS = 30_000
 # A label's question is put to a sentence only when it scores at least this
-# against the label's phrases (0 = ask every label of every sentence; the
-# skip rule of docs/method/decisions.md replaces it once fitted). Measured against the full asset map on the 70-project
-# corpus: 0.25 asks 58 per cent of the questions and loses 5.8 per cent of
-# the links at 0.5 (4.0 per cent at 0.9); 0.30 asks 39 per cent and loses
-# 9.0 (5.4). The questions are most of the cost, so this is the dial. On
-# from 2026-10-21 (Dev's decision): 0.25 is the default for every run; pass
-# --min-cosine 0 for the full map a gate is measured against.
-# Control panel: asset.gate_cosine (0.25 since 2026-10-21), applied to each
-# sentence's own cosine since the map became a sentence map.
+# against the label's phrases (control panel asset.gate_cosine; 0 = ask
+# every label of every sentence). The skip rule (src/skip.py) replaces it
+# per asset once fitted.
 MIN_COSINE = float(panel.get("asset.gate_cosine", 0.25))
 # The map grades each search unit (a sentence) with its section and
-# component, asked the same graded question the measures ask (2026-10-22:
-# every decision is about a sentence; a sentence naming no asset takes the
-# last one named before it, src/measure.py). The paragraph map is gone.
+# component, asked the same graded question the measures ask.
 WORKERS = 10
 SCORE_COLS = ["unit_id", "paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
               "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
@@ -362,7 +355,7 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
         paras = paras[:limit]
     cosines = best_cosines(name, data, taxonomy) if min_cosine else {}
     if min_cosine and not cosines:
-        raise SystemExit(f"classify: --min-cosine needs a search run for {name}; run "
+        raise SystemExit(f"classify: a cosine gate needs a search run for {name}; run "
                          f"./wbg search {name} first")
     gates = fitted_gates(name, data, taxonomy, qs) if min_cosine else {}
     bodies = []
@@ -601,10 +594,13 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         fh.write(f"{name}: {len(bodies):,} sentences x {len(labels)} labels -> {out}\n"
                  f"models served: {served}\n")
         for lab in labels:
-            grades = [r["grade"] for r in rows if r["label_id"] == lab["id"] and r["asked"] == "true"]
-            counts = [grades.count(g) for g in range(len(scale))]
+            scores = [sum(float(r.get(f"p{g}") or 0) for g in panel.grades())
+                      for r in rows if r["label_id"] == lab["id"] and r["asked"] == "true"]
+            counts = [sum(1 for p in scores if lo <= p < hi)
+                      for lo, hi in ((0, 0.1), (0.1, 0.3), (0.3, 0.5), (0.5, 0.7), (0.7, 1.01))]
             skipped = sum(1 for r in rows if r["label_id"] == lab["id"] and r["asked"] != "true")
-            fh.write(f"  {lab['id']:<26} sentences by most likely grade: {counts}"
+            fh.write(f"  {lab['id']:<26} sentences by model score (grades 2 and 3; "
+                     f"<0.1, 0.1-0.3, 0.3-0.5, 0.5-0.7, 0.7+): {counts}"
                      + (f"; not asked (cosine gate): {skipped:,}" if skipped else "") + "\n")
     if len(served) > 1:
         log(f"  warning: more than one model snapshot served: {served}")
@@ -669,9 +665,6 @@ def main():
     ap.add_argument("--limit", type=int, default=0, help="first N sentences (smoke test)")
     ap.add_argument("--workers", type=int, default=WORKERS)
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--min-cosine", type=float, default=MIN_COSINE,
-                    help="ask a label's question of a sentence only when it "
-                         "scores at least this against the label's phrases (0 = all)")
     ap.add_argument("--projects", default="",
                     help="comma-separated project ids: only their sentences (./wbg classify "
                          "--set digital fills this from the cohort)")
@@ -679,7 +672,7 @@ def main():
     key = "" if args.dry_run else embed.read_key("")
     out = classify(args.label_set, args.data, model=args.model, api_key=key,
                    limit=args.limit, dry_run=args.dry_run, workers=args.workers,
-                   min_cosine=args.min_cosine, projects=scope(args.projects))
+                   projects=scope(args.projects))
     if out and not (args.dry_run or args.limit):
         import store
         store.try_publish(args.data, sets=[args.label_set], projects=scope(args.projects))
