@@ -9,17 +9,17 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      --min-cosine (or its embedding top N, when --top is on). No model reads
      anything here; a cosine threshold carries between a rare measure and a
      common one where a count does not.
-  2. The asset map (src/classify.py on the assets set), as columns on every
-     unit: the best asset in its paragraph and in its component.
+  2. The sentence asset map (src/classify.py on the assets set): every
+     sentence's score for each asset, asked with the same graded question
+     form as the measure's.
   3. The decision model reads each unit in two passes: the measure's graded
      question for every unit, then, for the units graded 2 or more, one
-     choice question for the asset (which one digital asset the commitment
-     concerns, or that it names none, or that it is not digital), one yes/no
-     question per activity kind (govern, build, sustain, use) and
-     the facets (conditional; who carries it out), so the asset is answered
-     for the sentence itself and the question tokens, which are most of the
-     cost, are spent only where they matter. The second pass runs in the
-     background while the next round's first pass goes out.
+     yes/no question per activity kind (govern, build, sustain, use) and
+     the facets (conditional; who carries it out). The second pass runs in
+     the background while the next round's first pass goes out. Each score
+     (the probabilities of the grades the control panel counts, 2 and 3) goes
+     through the probability layer (src/posterior.py) when one is fitted, and
+     the measure's floor (control panel) reads the result.
   4. Relevance feedback: the vectors of the units the model graded committed
      are averaged into a centroid (minus half the rejected units' centroid);
      the corpus is re-ranked by cosine to it; the next --batch unseen units
@@ -28,13 +28,14 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      stopping rule is a yield rule for retrieval depth, not a recall
      guarantee: what the search never reaches stays unmeasured until a
      person grades a sample.
-  5. The asset link of a unit, the three levels combined (asset_link,
-     asset_link_level, asset_link_p): the unit's chosen asset when it chose
-     one at LINK_MIN or more (the sentence names it), else the paragraph map
-     at LINK_MIN, else the component map, else none. A unit that chose "not
-     a digital asset" takes no link from its paragraph or component
-     (asset_link_level not_digital): the paragraph's asset would be wrong for
-     it, as with streetlights in a paragraph about towers.
+  5. The asset of a unit (asset_link, asset_link_level, asset_link_p): the
+     sentence's own best asset when it reaches the control panel's
+     asset.floor (level unit); else the last asset named earlier in its
+     paragraph, its probability weighted by asset.decay per sentence back
+     (level paragraph); else none.
+
+Every threshold here is a control-panel setting
+(inputs/config/control_panel.csv, src/panel.py).
 
 The measure's question names the measure and its definition and never the
 asset: the decision model reads literally, and a question about "climate
@@ -47,7 +48,9 @@ high. Every row carries the wording's firmness (activity, outcome, none): a
 column to filter on, never a cut.
 
 Reads  data/search/<set>-<version>/{scores.npy,queries.csv}
-       data/classify/assets-<version>/scores.csv        the asset map (optional)
+       data/classify/assets-<version>/scores.csv        the sentence asset map (optional)
+       data/labels/<set>_posterior.json, assets_posterior.json   probability layers (optional)
+       inputs/config/control_panel.csv                   every threshold
        data/embeddings/{sentence_emb.npy,sentence_index.csv}
        data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
        analysis/labels/<set>.csv, <set>_scale.csv, <set>_patterns.csv;
@@ -79,6 +82,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 import classify  # noqa: E402
 import labels as labels_mod  # noqa: E402
+import panel  # noqa: E402
+import posterior  # noqa: E402
 import search  # noqa: E402
 
 # The dated snapshot, not the alias: the alias moves when the vendor ships a
@@ -96,13 +101,13 @@ KINDS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "activity_kinds.c
 # contractor; one yes/no each, several allowed).
 FACETS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "commitment_facets.csv")
 CONTEXTS = ("sentence", "paragraph")
-# The second pass (asset, kind, facet questions) reads the sentence with its
-# paragraph: a climate-annex sentence says "the sites" or "the infrastructure"
-# and the paragraph says which asset that is. The measure's own question
-# stays on the sentence alone (the paragraph doubled its false positives).
-# On the first graded sheet the sentence-alone asset answer agreed with the
-# grader on 13 of 28 committed units; the grader had read the paragraph.
-EXTRAS_CONTEXT = "paragraph"
+# What the second pass (kind and facet questions) reads: the sentence with its
+# section and component, as every other question (control panel,
+# measure.second_pass_context; 'paragraph' adds the paragraph). The asset is
+# no longer asked here: it comes from the sentence asset map (src/classify.py)
+# and, for a sentence that names none, the last asset named earlier in its
+# paragraph (asset.decay).
+EXTRAS_CONTEXT = panel.get("measure.second_pass_context", "sentence")
 GATES = ("none", "link", "unit", "paragraph", "component")
 
 # Firmness of the wording, read by fixed word lists: 'activity' (the project
@@ -136,29 +141,40 @@ def firmness(text):
     if OUTCOME.search(text):
         return "outcome"
     return "none"
-LINK_MIN = 0.5        # an asset answer or map score at or above this makes a link
-TOP = 0               # embedding depth of round 0 by count; 0 = off (the cosine gate is the pool)
-MIN_COSINE = 0.45     # round 0 pool: every unit whose best cosine over the measure's phrases
-                      # reaches this (on climate risk assessment, top 2,000 was 0.473 and
+# Every number below is a control-panel setting (inputs/config/control_panel.csv).
+LINK_MIN = float(panel.get("asset.floor", 0.5))   # a sentence has an asset at or above this
+DECAY = float(panel.get("asset.decay", 0.4))      # per sentence back, for a sentence naming none
+TOP = int(panel.get("measure.top", 0))            # round 0 by count; 0 = off (the cosine gate is the pool)
+MIN_COSINE = float(panel.get("measure.gate_cosine", 0.45))  # round 0 pool: best cosine over the
+                      # measure's phrases (on climate risk assessment, top 2,000 was 0.473 and
                       # 0.45 kept 168 of 171 committed units from a pool of 3,070)
-BATCH = 500           # units per feedback round
-MIN_YIELD = 10        # a round yielding fewer committed units than this is the last
-MAX_ROUNDS = 6
-NEGATIVE_WEIGHT = 0.5  # Rocchio: how much of the rejected units' centroid is subtracted
-EXTRAS_MIN_GRADE = 2   # asset and kind questions are asked of units graded at least this
+BATCH = int(panel.get("feedback.batch", 500))      # units per feedback round
+MIN_YIELD = int(panel.get("feedback.min_yield", 10))  # a round yielding fewer is the last
+MAX_ROUNDS = int(panel.get("feedback.max_rounds", 6))
+NEGATIVE_WEIGHT = float(panel.get("feedback.negative_weight", 0.5))  # Rocchio: rejected share
+EXTRAS_MIN_GRADE = int(panel.get("measure.second_pass_min_grade", 2))  # kind and facet questions
 
 
-def is_committed(u, top, floor=None):
-    """A unit counts as committed: P(top grade) at or above the measure's
-    commit floor (labels.commit_floor), or, with none, the most likely grade
-    is the top one. A row that carries its own `committed` column says so."""
+def score_of(u):
+    """A unit's score: the model's probability of the grades the control panel
+    counts (read.grades, 2 and 3)."""
+    return sum(float(u.get(f"p{g}") or 0) for g in panel.grades())
+
+
+def is_committed(u, top=None, floor=None):
+    """A unit counts as committed (or planned): its probability (the
+    probability layer's, p_committed_calibrated, else the model's score) is
+    at or above the measure's floor (control panel; labels.commit_floor).
+    With no floor, the most likely grade is one the panel counts. A row that
+    carries its own `committed` column says so."""
     if u.get("committed") in ("true", "false"):
         return u["committed"] == "true"
     if u.get("sent") != "true" or u.get("grade", "") == "":
         return False
     if floor is not None:
-        return u.get(f"p{top}", "") != "" and float(u[f"p{top}"]) >= floor
-    return int(u["grade"]) == top
+        p = u.get("p_committed_calibrated", "")
+        return (float(p) if p != "" else score_of(u)) >= floor
+    return int(u["grade"]) in panel.grades()
 UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
              "component_number", "subcomponent_number", "component_key", "copies", "route",
              "round", "rank", "score", "patterns", "firmness",
@@ -172,53 +188,22 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "model_served", "cost", "text"]
 # Asset thresholds the report tabulates (nothing is chosen here).
 REPORT_THRESHOLDS = (0.3, 0.5, 0.7, 0.9)
-ASSET_YES = 0.5       # a kind or actor the unit answer puts at or above this is listed
-# The asset question is one choice over the assets and these two (2026-10-21):
-# as one yes/no question per asset the model said yes to two or more assets
-# for 70 per cent of committed units and "digital systems" to most of them;
-# as a choice, on 167 test units, digital systems fell from 50 to 4 and 49
-# chose "no asset named".
-ASSET_NONE = "no_asset_named"
-ASSET_NOT_DIGITAL = "not_digital"
+ASSET_YES = float(panel.get("kinds.yes", 0.5))  # a kind or actor at or above this is listed
 
 
-def questions(labels, scale, context, assets, kinds=(), facets=()):
-    """The measure's graded question(s), one yes/no question per asset, one
-    per activity kind (how the commitment is delivered: governing, building,
-    sustaining, using) and one per facet (is it conditional; who carries it
-    out). The measure's question is about the sentence (the paragraph is
-    context when the design says so); the others read the sentence with its
-    paragraph (EXTRAS_CONTEXT)."""
-    where_ = ("the 'sentence' field, read with the 'paragraph' it sits in,"
-              if context == "paragraph" else "the 'sentence' field,")
+def questions(labels, scale, context, assets=(), kinds=(), facets=()):
+    """The measure's graded question(s), one yes/no question per activity
+    kind (how the commitment is delivered: governing, building, sustaining,
+    using) and one per facet (is it conditional; who carries it out). Every
+    question is about the sentence (the paragraph is context only when the
+    control panel says so). The asset is not asked here: it comes from the
+    sentence asset map (src/classify.py, the same graded question for each
+    asset); `assets` is accepted and unused."""
     where_x = ("the 'sentence' field, read with the 'paragraph' it sits in,"
                if EXTRAS_CONTEXT == "paragraph" else "the 'sentence' field,")
-    out = {}
-    for lab in labels:
-        out[lab["id"]] = {
-            "type": "score",
-            "instructions": (f"How does the sentence from a World Bank project appraisal "
-                             f"document in {where_} relate to {lab['name']}? "
-                             f"{lab['name']} means: {lab['definition']}"),
-            "criteria": [g.replace("{name}", lab["name"]) for g in scale],
-        }
-    if assets:
-        crit = {a["id"]: f"{a['name']}: {a['definition']}" for a in assets}
-        crit[ASSET_NONE] = ("No asset named: the sentence names no specific digital asset, "
-                            "or speaks of the project's digital investments in general.")
-        crit[ASSET_NOT_DIGITAL] = ("Not a digital asset: the commitment is about something "
-                                   "that is not digital infrastructure or a digital system "
-                                   "(buildings, roads, power for health facilities, "
-                                   "streetlights, households). Power, cooling or climate "
-                                   "protection for a digital site (towers, data centres, "
-                                   "connected schools, user centres) concerns that digital "
-                                   "asset, not this.")
-        out["asset:choice"] = {
-            "type": "choice",
-            "instructions": (f"Which one digital asset does the commitment in {where_x} "
-                             f"concern? Choose exactly one: the most specific asset it names "
-                             f"or clearly implies."),
-            "criteria": crit}
+    out = {lab["id"]: classify.graded_question(
+        lab, scale, "sentence+paragraph" if context == "paragraph" else "sentence")
+        for lab in labels}
     for k in kinds:
         out[f"kind:{k['id']}"] = {
             "type": "noul",
@@ -254,26 +239,48 @@ def load_facets(path=FACETS_FILE):
 
 # ------------------------------------------------------------------ the inputs
 
-def asset_map(data, projects=None):
-    """({paragraph_id: (label, p_at_least_2)}, {(doc_id, component_number):
-    (label, p)}, run name) from the current assets classification over the
-    same scope. Empty without a run."""
+def asset_map(data, projects=None, vector_of=None):
+    """({unit_id: {asset: probability}}, run name) from the current sentence
+    asset map over the same scope: each asked sentence's score for each
+    asset (read.grades), through the asset's probability layer when one has
+    been fitted (data/labels/assets_posterior.json). Empty without a run."""
     folder = classify.current_run(ASSET_SET, data, projects=projects)
     if not folder:
-        return {}, {}, ""
-    para, comp = {}, {}
+        return {}, ""
+    layers = classify.asset_layers(data, folder, vector_of) if vector_of else {}
+    out = {}
     with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            if r.get("asked") not in ("", None, "true"):
+            if r.get("asked") not in ("", None, "true") or not r.get("unit_id"):
                 continue
-            p = float(r["p2"] or 0) + float(r["p3"] or 0)
-            pid = r["paragraph_id"]
-            if p > para.get(pid, ("", -1.0))[1]:
-                para[pid] = (r["label_id"], p)
-            key = (r["doc_id"], r.get("component_number") or "")
-            if key[1] and p > comp.get(key, ("", -1.0))[1]:
-                comp[key] = (r["label_id"], p)
-    return para, comp, os.path.basename(folder)
+            p = score_of(r)
+            if r["label_id"] in layers:
+                p = layers[r["label_id"]].probability(r["unit_id"], p)
+            out.setdefault(r["unit_id"], {})[r["label_id"]] = p
+    return out, os.path.basename(folder)
+
+
+def sentence_asset(own, earlier, decay=None):
+    """(asset, probability, level) for a sentence: its own best asset when
+    that reaches LINK_MIN (level 'unit'); else the best asset of its own
+    scores plus each earlier sentence's in the same paragraph, the k-th one
+    back weighted by decay**k (level 'paragraph': the last asset named before
+    it, as the grammar runs); else ('', best, 'none'). own and earlier[i] are
+    {asset: probability}; earlier is nearest first."""
+    decay = DECAY if decay is None else decay
+    best = max(own, key=own.get) if own else ""
+    if best and own[best] >= LINK_MIN:
+        return best, own[best], "unit"
+    total = dict(own)
+    for k, prev in enumerate(earlier, 1):
+        for a, p in prev.items():
+            total[a] = total.get(a, 0.0) + (decay ** k) * p
+    if total:
+        a = max(total, key=total.get)
+        if total[a] >= LINK_MIN and decay:
+            return a, min(total[a], 1.0), "paragraph"
+        return "", total[a], "none"
+    return "", 0.0, "none"
 
 
 def unit_texts(data, index):
@@ -348,10 +355,12 @@ class Run:
                          "negative_weight": NEGATIVE_WEIGHT,
                          "extras_min_grade": EXTRAS_MIN_GRADE,
                          "extras_context": EXTRAS_CONTEXT,
-                         "projects": sorted(projects) if projects else None}
+                         "projects": sorted(projects) if projects else None,
+                         # the control panel's readings this run applies
+                         "panel": {**panel.items("read."), **panel.items("asset."),
+                                   **panel.items("posterior."), "kinds.yes": ASSET_YES}}
         self.projects = sorted(projects) if projects else None
-        # The commit floor is a reading, not a question; it is part of the
-        # version only when written, so the folders made before it keep their names.
+        # The floor is a reading, not a question (control panel, floor.*).
         self.floor = labels_mod.commit_floor(name)
         if self.floor is not None:
             self.settings["commit_floor"] = self.floor
@@ -374,18 +383,15 @@ class Run:
         if gate in ("paragraph", "component") and not self.asset_run:
             raise SystemExit(f"measure: --gate {gate} needs the asset map: run ./wbg classify "
                              f"{ASSET_SET} first")
-        # Platt scaling from a graded sheet (./wbg check <set> --evaluate), when
-        # one exists: applied to P(committed) as p_committed_calibrated. Part
-        # of the version, so new grades give a new run (from the store, free).
-        self.calibration = None
-        cpath = where(data, "labels", f"{name}_calibration.json")
-        if os.path.exists(cpath):
-            with open(cpath, encoding="utf-8") as fh:
-                cal = json.load(fh)
-            # Grades are keyed on the exact question (AGENTS.md rule 9), and so
-            # is the scaling fitted to them: a revised definition starts without one.
-            if cal.get("question_sha256") == classify.question_shas(self.qs)[self.labels[0]["id"]]:
-                self.calibration = cal.get("grades", {}).get(str(len(self.scale) - 1))
+        # The probability layer (src/posterior.py) fitted by the evaluation of a
+        # graded sheet (./wbg check <set> --evaluate) on the same question:
+        # applied to every score as p_committed_calibrated, which the floor
+        # reads. Part of the version, so new grades give a new run (from the
+        # store, free). The fit is keyed on the exact question (AGENTS.md rule
+        # 9): a revised definition starts without one.
+        self.question_sha = classify.question_shas(self.qs)[self.labels[0]["id"]]
+        self.layer_path = where(data, "labels", f"{name}_posterior.json")
+        self.calibration = posterior.digest(posterior.read_spec(self.layer_path, self.question_sha))
         h = hashlib.sha256()
         h.update(f"{os.path.basename(self.search_run)}\t{self.asset_run}\t"
                  f"{json.dumps(self.settings, sort_keys=True)}\n".encode())
@@ -407,12 +413,23 @@ class Run:
         if self._loaded:
             return
         data = self.data
-        self.para_assets, self.comp_assets, _ = asset_map(data, self.projects)
         self.paras = paragraph_rows(data)
         self.names = component_names(data)
         self.queries, self.scores, self.index = search.load_run(self.search_run, data)
         self.row_of = {r["unit_id"]: i for i, r in enumerate(self.index)}
         self.matrix = numpy.load(where(data, "embeddings", "sentence_emb.npy"), mmap_mode="r")
+        self.vector_of = lambda u: (numpy.asarray(self.matrix[self.row_of[u]], dtype="float64")
+                                    if u in self.row_of else None)
+        self.unit_assets, _ = asset_map(data, self.projects, self.vector_of)
+        # Each paragraph's sentences in reading order, for the asset of a
+        # sentence that names none (the last one named before it).
+        self.before = {}
+        seen = {}
+        for r in self.index:
+            prior = seen.setdefault(r["paragraph_id"], [])
+            self.before[r["unit_id"]] = list(reversed(prior))
+            prior.append(r["unit_id"])
+        self.layer = posterior.load(self.layer_path, self.question_sha, self.vector_of)
         self.texts = unit_texts(data, self.index)
         self.doc_texts = {}
         self.pool, self.pending = None, []
@@ -423,16 +440,11 @@ class Run:
     def base_row(self, r, route, rnd, rank="", score="", patterns=""):
         """A units.csv row for index row r, without the model's answers."""
         para = self.paras[r["paragraph_id"]]
-        a_para = self.para_assets.get(r["paragraph_id"], ("", ""))
-        a_comp = self.comp_assets.get((r["doc_id"], r.get("component_number") or ""), ("", ""))
         text = self.texts[r["unit_id"]]
-        return {**{c: r.get(c, "") for c in search.CONTEXT}, "label_id": self.labels[0]["id"],
+        row = {**{c: r.get(c, "") for c in search.CONTEXT}, "label_id": self.labels[0]["id"],
                 "route": route, "round": rnd, "rank": rank, "score": score,
                 "patterns": patterns, "firmness": firmness(text),
-                "asset_para": a_para[0],
-                "asset_p_para": "" if a_para[1] == "" else f"{a_para[1]:.4f}",
-                "asset_comp": a_comp[0],
-                "asset_p_comp": "" if a_comp[1] == "" else f"{a_comp[1]:.4f}",
+                "asset_para": "", "asset_p_para": "", "asset_comp": "", "asset_p_comp": "",
                 "asset_unit": "", "asset_p_unit": "", "assets_yes": "", "asset_link": "",
                 "asset_link_level": "", "asset_link_p": "", "kinds_yes": "", "kind_best": "",
                 "kind_p": "", "conditional_p": "", "actors_yes": "", "actor_best": "",
@@ -440,6 +452,8 @@ class Run:
                 "template_share": r.get("template_share", ""), "p_committed_calibrated": "",
                 "sent": "false", "committed": "false",
                 "text": text, "_para": para}
+        self.link_into(row)
+        return row
 
     def candidate_rows(self):
         """Round 0's pool: every unit a word pattern matches, plus every unit
@@ -500,25 +514,17 @@ class Run:
                     **{f"p{i}": (f"{probs[i]:.4f}" if i < len(probs) else "") for i in range(5)},
                     "model_served": entries[lab]["model"],
                     "cost": f"{sum(float(e.get('cost_usd') or 0) for e in entries.values()):.6f}"})
+        # The score (read.grades) through the probability layer, when one is
+        # fitted; the floor reads the result.
+        sc = sum(probs[g] for g in panel.grades() if g < len(probs)) / total
+        if self.layer:
+            sc = self.layer.probability(row["unit_id"], sc)
+        row["p_committed_calibrated"] = f"{sc:.4f}"
         row["committed"] = "true" if is_committed(
             {**row, "sent": "true", "committed": ""}, len(self.scale) - 1, self.floor) else "false"
-        if self.calibration:
-            import math
-            p = min(max(probs[-1] / total, 1e-4), 1 - 1e-4)
-            z = self.calibration["a"] * math.log(p / (1 - p)) + self.calibration["b"]
-            z = max(-30.0, min(30.0, z))
-            row["p_committed_calibrated"] = f"{1 / (1 + math.exp(-z)):.4f}"
-        self.link_into(row)
 
     def extras_into(self, row, entries):
-        """The asset and activity-kind answers from the second pass."""
-        ps = {k: float(v) for k, v in entries["asset:choice"]["answer"]["probabilities"].items()}
-        best = max(ps, key=ps.get) if ps else ""
-        named = best not in ("", ASSET_NONE, ASSET_NOT_DIGITAL)
-        row.update({"asset_unit": best if best != ASSET_NONE else "",
-                    "asset_p_unit": f"{ps[best]:.3f}" if best and best != ASSET_NONE else "",
-                    "assets_yes": best if named else ""})
-        self.link_into(row)
+        """The activity-kind and facet answers from the second pass."""
         ks = {k["id"]: float(entries[f"kind:{k['id']}"]["answer"]["noul"]) for k in self.kinds}
         kb = max(ks, key=ks.get) if ks else ""
         row.update({"kinds_yes": "|".join(k for k in ks if ks[k] >= ASSET_YES),
@@ -534,19 +540,22 @@ class Run:
                     "actor_best": ab, "actor_p": f"{actors[ab]:.3f}" if ab else ""})
 
     def link_into(self, row):
-        """asset_link, asset_link_level, asset_link_p from the three levels."""
-        if row["asset_unit"] == ASSET_NOT_DIGITAL and row["asset_p_unit"] != "" \
-                and float(row["asset_p_unit"]) >= LINK_MIN:
-            row.update({"asset_link": "", "asset_link_level": "not_digital",
-                        "asset_link_p": row["asset_p_unit"]})
-            return
-        for level, a, p in (("unit", row["asset_unit"], row["asset_p_unit"]),
-                            ("paragraph", row["asset_para"], row["asset_p_para"]),
-                            ("component", row["asset_comp"], row["asset_p_comp"])):
-            if p != "" and float(p) >= LINK_MIN:
-                row.update({"asset_link": a, "asset_link_level": level, "asset_link_p": p})
-                return
-        row.update({"asset_link": "", "asset_link_level": "none", "asset_link_p": ""})
+        """The sentence's asset from the sentence asset map: its own best
+        (asset_unit, asset_p_unit; level 'unit'), else the last asset named
+        earlier in its paragraph, weighted down per sentence back
+        (asset_para, asset_p_para; level 'paragraph'), else none."""
+        uid = row["unit_id"]
+        own = self.unit_assets.get(uid, {})
+        earlier = [self.unit_assets.get(u, {}) for u in self.before.get(uid, [])]
+        best = max(own, key=own.get) if own else ""
+        a, p, level = sentence_asset(own, earlier)
+        row.update({"asset_unit": best, "asset_p_unit": f"{own[best]:.4f}" if best else "",
+                    "assets_yes": best if level == "unit" else "",
+                    "asset_para": a if level == "paragraph" else "",
+                    "asset_p_para": f"{p:.4f}" if level == "paragraph" else "",
+                    "asset_comp": "", "asset_p_comp": "",
+                    "asset_link": a, "asset_link_level": level,
+                    "asset_link_p": f"{p:.4f}" if a else ""})
 
     # ---- a batch to the model
 
@@ -766,8 +775,8 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         return run.out
     from concurrent.futures import ThreadPoolExecutor
     run.pool = ThreadPoolExecutor(max_workers=2)
-    log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades + {len(run.assets)} asset "
-        f"questions per unit; context {run.settings['context']}, gate {run.settings['gate']} "
+    log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades; context "
+        f"{run.settings['context']}, gate {run.settings['gate']} "
         f"-> {run.out}")
     t0 = time.time()
     rows = run.candidate_rows()

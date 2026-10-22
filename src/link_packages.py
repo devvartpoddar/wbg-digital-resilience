@@ -56,19 +56,20 @@ import classify  # noqa: E402
 import embed  # noqa: E402
 import labels  # noqa: E402
 import measure  # noqa: E402
+import panel  # noqa: E402
 import search  # noqa: E402
 
 LINK_VERSION = "3"   # 3: pairs by a shared asset only, the asset groups removed (2026-10-21)
 MODEL = measure.MODEL
 ASSET_SET = "assets"
-ASSET_TOP = 4        # assets asked per package: its best by cosine over the taxonomy's phrases
+ASSET_TOP = int(panel.get("link.asset_top", 4))  # assets asked per package: its best by cosine
 # Packages also paired by the measure itself (Dev, 2026-10-20): a climate
 # risk assessment consultancy or works to raise tower sites buys no digital
 # asset, so the asset route never pairs them. For each committed unit, its
 # project's packages nearest the measure's phrases and definition (cosine
 # over the stored embeddings), not already paired by asset, up to this many.
-MEASURE_TOP = 3
-YES = 0.5            # the reading threshold: an asset at or above it is one the package "has"
+MEASURE_TOP = int(panel.get("link.measure_top", 3))  # control panel
+YES = float(panel.get("link.asset_yes", 0.5))  # an asset at or above it is one the package "has"
 ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
               "model_served", "cost"]
 PAIR_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",

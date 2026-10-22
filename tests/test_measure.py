@@ -103,13 +103,16 @@ def store(tmp_path, monkeypatch):
     numpy.save(os.path.join(folder, "scores.npy"), scores)
     with open(os.path.join(folder, "manifest.json"), "w") as fh:
         json.dump({"index_sha256": search._sha_file(str(emb / "sentence_index.csv"))}, fh)
-    # The asset map: paragraph 1 is about an asset, the others are not.
+    # The sentence asset map: the first sentence is about an asset, the
+    # flood sentence is not.
     amap = data / "classify" / "assets-abc"
     amap.mkdir(parents=True)
     _csv(str(amap / "scores.csv"), classify.SCORE_COLS, [
-        {"paragraph_id": "D:p00001", "doc_id": "D", "project_ids": "P1", "component_number": "1",
+        {"unit_id": us[0]["unit_id"], "paragraph_id": "D:p00001", "doc_id": "D",
+         "project_ids": "P1", "component_number": "1",
          "label_id": "towers", "grade": 3, "p0": 0.0, "p1": 0.1, "p2": 0.2, "p3": 0.7},
-        {"paragraph_id": "D:p00002", "doc_id": "D", "project_ids": "P1", "component_number": "1",
+        {"unit_id": us[2]["unit_id"], "paragraph_id": "D:p00002", "doc_id": "D",
+         "project_ids": "P1", "component_number": "1",
          "label_id": "towers", "grade": 0, "p0": 0.9, "p1": 0.1, "p2": 0.0, "p3": 0.0}])
     (amap / "manifest.json").write_text("{}")
     monkeypatch.setattr(classify, "current_run", lambda name, d, taxonomy=None, projects=None: str(amap))
@@ -121,15 +124,8 @@ def store(tmp_path, monkeypatch):
         probs = {"0": 0.05, "1": 0.05, "2": 0.1, "3": 0.8} if hit else \
             {"0": 0.9, "1": 0.1, "2": 0.0, "3": 0.0}
         answers = {"cra": {"type": "score", "confidence": 0.7, "probabilities": probs}}
-        for qid, q in body["questions"].items():          # the asset choice; yes/no kinds
-            if qid == "asset:choice":
-                s = body["state"]["sentence"]
-                pick = "towers" if "tower" in s else \
-                    "not_digital" if "streetlight" in s else "no_asset_named"
-                opts = list(q["criteria"])
-                answers[qid] = {"type": "choice", "choice": pick, "probabilities": {
-                    o: (0.9 if o == pick else round(0.1 / (len(opts) - 1), 4)) for o in opts}}
-            elif qid != "cra":
+        for qid, q in body["questions"].items():          # yes/no kinds and facets
+            if qid != "cra":
                 yes = qid in ("kind:build", "facet:borrower") and hit
                 answers[qid] = {"type": "noul", "noul": 0.9 if yes else 0.1}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": answers}
@@ -151,25 +147,24 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     rows = _rows(out)
     assert [r["route"] for r in rows] == ["both"]           # pattern hit, embedding top 1
     r = rows[0]
-    assert r["grade"] == "3" and r["asset_para"] == "towers" and r["asset_p_para"] == "0.9000"
-    assert r["asset_comp"] == "towers" and r["sent"] == "true" and r["round"] == "0"
-    assert r["asset_unit"] == "towers" and r["asset_p_unit"] == "0.900" and r["assets_yes"] == "towers"
+    assert r["grade"] == "3" and r["sent"] == "true" and r["round"] == "0"
+    # The sentence names its asset: the sentence map's score (grades 2 and 3).
+    assert r["asset_unit"] == "towers" and r["asset_p_unit"] == "0.9000" and r["assets_yes"] == "towers"
+    assert (r["asset_link"], r["asset_link_level"]) == ("towers", "unit")
+    assert r["p_committed_calibrated"] == "0.9000" and r["committed"] == "true"
     assert r["kinds_yes"] == "build" and r["kind_best"] == "build"
     assert r["actors_yes"] == "borrower" and r["actor_best"] == "borrower"
     assert float(r["conditional_p"]) < 0.5
     assert "paragraph" not in calls[0]["state"]              # sentence design by default
     assert calls[0]["state"]["component"] == "1 Connectivity"
     assert "towers" not in calls[0]["questions"]["cra"]["instructions"]
-    # Two passes: the measure alone on the sentence, then asset, kind and
-    # facet questions for the units graded 2 or more (here the one unit),
-    # with the paragraph added to the state.
+    # Two passes: the measure alone on the sentence, then the kind and facet
+    # questions for the units graded 2 or more (here the one unit), on the
+    # same sentence state (control panel measure.second_pass_context). No
+    # asset question: the asset comes from the sentence asset map.
     assert list(calls[0]["questions"]) == ["cra"]
-    assert calls[1]["state"]["sentence"] == calls[0]["state"]["sentence"]
-    assert "paragraph" in calls[1]["state"] and "ten towers" in calls[1]["state"]["paragraph"]
-    q = calls[1]["questions"]["asset:choice"]
-    assert q["type"] == "choice" and "towers" in q["criteria"]
-    assert {"no_asset_named", "not_digital"} <= set(q["criteria"])
-    assert not any(k.startswith("asset:") and k != "asset:choice" for k in calls[1]["questions"])
+    assert calls[1]["state"] == calls[0]["state"]
+    assert not any(k.startswith("asset") for k in calls[1]["questions"])
     assert "cra" not in calls[1]["questions"]
     assert calls[0]["model"] == measure.MODEL
 
@@ -214,13 +209,31 @@ def test_a_dry_run_asks_nothing(store):
     assert calls == []
 
 
-def test_a_unit_that_is_not_digital_takes_no_link_from_its_paragraph():
-    run = measure.Run.__new__(measure.Run)
-    base = {"asset_para": "towers", "asset_p_para": "0.9000", "asset_comp": "towers",
-            "asset_p_comp": "0.9000"}
-    row = dict(base, asset_unit="not_digital", asset_p_unit="0.800")
-    run.link_into(row)
-    assert (row["asset_link"], row["asset_link_level"]) == ("", "not_digital")
-    row = dict(base, asset_unit="", asset_p_unit="")          # no asset named: the paragraph's
-    run.link_into(row)
-    assert (row["asset_link"], row["asset_link_level"]) == ("towers", "paragraph")
+def test_a_sentence_naming_no_asset_takes_the_last_one_named_before_it(monkeypatch):
+    monkeypatch.setattr(measure, "LINK_MIN", 0.3)
+    towers, fiber = {"towers": 0.9}, {"fiber": 0.95}
+    # its own asset first
+    assert measure.sentence_asset({"fiber": 0.6}, [towers], 0.4) == ("fiber", 0.6, "unit")
+    # none of its own: one sentence back counts 0.4 of its probability
+    assert measure.sentence_asset({}, [towers], 0.4)[::2] == ("towers", "paragraph")
+    # the nearest earlier asset wins over one further back
+    assert measure.sentence_asset({}, [towers, fiber], 0.4)[0] == "towers"
+    # too far back (0.16 x 0.9 < 0.3): no asset
+    a, p, level = measure.sentence_asset({}, [{}, towers], 0.4)
+    assert (a, level) == ("", "none") and abs(p - 0.144) < 1e-9
+    # decay 0 turns the rule off
+    assert measure.sentence_asset({}, [towers], 0.0)[2] == "none"
+
+
+def test_the_asset_map_grades_each_sentence_with_the_measure_questions_form(store):
+    data, _ = store
+    items = classify.sentences(data)
+    assert len(items) == 4 and items[0]["row"]["unit_id"] != items[0]["row"]["paragraph_id"]
+    st = items[1]["state"]
+    assert st["sentence"] == "The project will finance ten towers."
+    assert st["section"] == "Project Components" and st["component"] == "1 Connectivity"
+    # One form of graded question for assets and measures alike.
+    lab = {"id": "towers", "name": "Mobile networks", "definition": "masts"}
+    q = classify.graded_question(lab, ["Not {name}.", "{name}."], "sentence")
+    m = measure.questions([dict(lab, id="cra")], ["Not {name}.", "{name}."], "sentence")["cra"]
+    assert q["instructions"] == m["instructions"] and q["criteria"] == m["criteria"]

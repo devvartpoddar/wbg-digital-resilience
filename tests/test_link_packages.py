@@ -94,10 +94,10 @@ def store(tmp_path, monkeypatch):
     run = data / "measures" / "cra-abc"
     _csv(str(run / "units.csv"), measure.UNIT_COLS,
          [{"label_id": "cra", "unit_id": u, "paragraph_id": "D:p1", "doc_id": "D",
-           "project_ids": p, "component_number": "1", "sent": "true", "grade": 3,
+           "project_ids": p, "component_number": "1", "sent": "true", "grade": 3, "p3": 0.9,
            "assets_yes": ay, "asset_link": al, "text": t} for u, p, t, ay, al in UNITS]
          + [{"label_id": "cra", "unit_id": "U4", "paragraph_id": "D:p1", "doc_id": "D",
-             "project_ids": "P1", "sent": "true", "grade": 1, "assets_yes": "fiber",
+             "project_ids": "P1", "sent": "true", "grade": 1, "p1": 0.9, "assets_yes": "fiber",
              "text": "Floods are frequent."}])
     (run / "manifest.json").write_text(json.dumps({"scale": ["a", "b", "c", "d"]}))
     monkeypatch.setattr(measure, "current_run", lambda name, d, **kw: str(run))

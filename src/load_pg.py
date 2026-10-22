@@ -429,7 +429,7 @@ def run_rollup(folder, data):
 ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "component_key", "best_score", "best_percentile",
                "best_unit_id", "best_query_id", "units_hit"]
-CLASSIFY_COLS = ["label_set", "run", "paragraph_id", "doc_id", "project_ids",
+CLASSIFY_COLS = ["label_set", "run", "unit_id", "paragraph_id", "doc_id", "project_ids",
                  "component_number", "label_id", "asked", "best_cosine", "grade", "expected",
                  "confidence", "p0", "p1", "p2", "p3", "p4", "model_served"]
 MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
@@ -486,8 +486,11 @@ def classify_rows(data, projects=None, min_cosine=None, sets=None):
     is the one the last run was made with (classify's marker); the flag
     still names one explicitly."""
     import classify
-    return _run_rows(data, lambda n, d: classify.current_run(
+    sha, rows = _run_rows(data, lambda n, d: classify.current_run(
         n, d, projects=projects, min_cosine=min_cosine), "scores.csv", sets)
+    for r in rows:              # a paragraph map (or one made before unit_id) keys on the paragraph
+        r["unit_id"] = r.get("unit_id") or r["paragraph_id"]
+    return sha, rows
 
 
 def measure_rows(data, projects=None, sets=None):
@@ -790,6 +793,10 @@ def finish(conn, log=print):
             log(f"  {os.path.basename(path)}: skipped (no openrouter() function in this "
                 f"database; it comes with the box's Metabase setup)")
             continue
+        if "{{panel:" in sql:          # a control-panel setting (inputs/config/control_panel.csv)
+            import re
+            import panel
+            sql = re.sub(r"\{\{panel:([a-z0-9_.]+)\}\}", lambda m: panel.sql_value(m.group(1)), sql)
         if "{VECTOR}" in sql:
             if not vec:
                 log(f"  {os.path.basename(path)}: skipped (no sentence_vectors yet)")

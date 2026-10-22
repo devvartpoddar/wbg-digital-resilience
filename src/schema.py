@@ -376,14 +376,16 @@ TABLES = {
             "run_id": "The search run the row comes from.",
         }),
     "paragraph_grades": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "paragraph_id"),
+        schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
         foreign=[("paragraph_id", "paragraphs", "paragraph_id")],
-        comment="One paragraph per label with the decision model's probability of each grade: "
-                "for the assets, how the paragraph relates to the asset (0 not about it, 1 "
-                "background, 2 supported, 3 financed). The asset map.",
+        comment="The asset map: one sentence per label (since 2026-10-22; one paragraph before) "
+                "with the decision model's probability of each grade: how the sentence relates "
+                "to the asset (0 not about it, 1 background, 2 supported, 3 financed). The "
+                "table keeps its name so the dashboards' questions keep working.",
         columns=dict(PROBABILITY_GRADES, **{
-            "was_asked": "False when a cosine gate kept the question from being asked of this paragraph; the grades are then NULL.",
-            "best_cosine": "The paragraph's best unit cosine against the label's phrases, when a cosine gate was used.",
+            "unit_id": "The sentence graded (search_units.unit_id); for a paragraph map, the paragraph's id.",
+            "was_asked": "False when a cosine gate (control panel asset.gate_cosine) kept the question from being asked of this sentence; the grades are then NULL.",
+            "best_cosine": "The sentence's cosine against the label's phrases, when a cosine gate was used.",
         })),
     "measure_findings": dict(
         schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
@@ -400,16 +402,16 @@ TABLES = {
             "matched_patterns": "Pattern ids that matched.",
             "firmness": "activity, outcome or none, from wording lists.",
             "was_sent_to_model": "False when a gate kept the unit from being graded.",
-            "is_committed": "The unit counts as committed: P(grade 3) at or above the measure's commit_floor (analysis/labels/<set>.csv), or, where none is written, the most likely grade is 3.",
-            "paragraph_best_asset_id": "The asset map's best asset for the paragraph.",
-            "paragraph_best_asset_probability": "Its probability of grade 2 or more.",
-            "component_best_asset_id": "The best asset among the component's paragraphs.",
-            "component_best_asset_probability": "Its probability.",
-            "unit_best_asset_id": "The asset the model says the sentence itself concerns most.",
-            "unit_best_asset_probability": "Its probability.",
-            "asset_ids_above_threshold": "Every asset the sentence concerns at 0.5 or more.",
-            "linked_asset_id": "The asset the finding is linked to: the unit answer, else the paragraph map, else the component map, at 0.5.",
-            "linked_asset_level": "unit, paragraph, component or none.",
+            "is_committed": "The unit counts as committed or planned: committed_probability_calibrated at or above the measure's floor (control panel inputs/config/control_panel.csv, floor.<set> else floor.default).",
+            "paragraph_best_asset_id": "For a sentence naming no asset: the last asset named earlier in its paragraph, its probability weighted down per sentence back (control panel asset.decay); empty otherwise.",
+            "paragraph_best_asset_probability": "Its weighted probability.",
+            "component_best_asset_id": "Empty since 2026-10-22 (the component level is no longer used).",
+            "component_best_asset_probability": "Empty since 2026-10-22.",
+            "unit_best_asset_id": "The sentence asset map's best asset for the sentence itself.",
+            "unit_best_asset_probability": "Its probability (grades 2 and 3, through the asset's probability layer when fitted).",
+            "asset_ids_above_threshold": "The sentence's own asset when it reaches the control panel's asset.floor.",
+            "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the last one named earlier in its paragraph (level paragraph), at the control panel's asset.floor.",
+            "linked_asset_level": "unit, paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
             "activity_kinds_above_threshold": "How the commitment is delivered (govern, build, sustain, use) at 0.5 or more.",
             "best_activity_kind": "The likeliest of them.",
@@ -422,7 +424,7 @@ TABLES = {
             "type_ids_above_threshold": "The measure's types (clusters) this unit is an instance of, at 0.5 or more, from analysis/labels/<set>_types.csv; several allowed; empty when no type claims it ('other') or no list exists yet.",
             "best_type_id": "The likeliest type.",
             "best_type_probability": "Its probability.",
-            "committed_probability_calibrated": "probability_grade_3 after Platt scaling on a person's graded sheet (./wbg check --evaluate); NULL until a sheet has been graded.",
+            "committed_probability_calibrated": "The probability the floor reads: the model's score for grades 2 and 3 through the probability layer (src/posterior.py: similarity to the sentences a person graded), or the score itself until a sheet has been evaluated.",
             "template_project_count": "As in search_units: other projects printing the same words.",
             "template_wording_share": "As in search_units: share of six-word runs shared with two or more other projects.",
             "copy_unit_ids": "Units in other documents that print the same text.",

@@ -30,6 +30,9 @@ def _csv(path, cols, rows):
 
 @pytest.fixture
 def store(tmp_path, monkeypatch):
+    # The paragraph map's machinery (control panel asset.unit = paragraph);
+    # the sentence map is tested through the measure stage.
+    monkeypatch.setattr(classify, "UNIT", "paragraph")
     monkeypatch.setattr(classify, "MIN_COSINE", 0.0)
     data = tmp_path / "data"
     text = "\n\n".join(TEXTS)

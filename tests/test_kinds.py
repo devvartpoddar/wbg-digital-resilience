@@ -33,7 +33,8 @@ def store(tmp_path, monkeypatch):
     run = data / "measures" / "cra-abc"
     _csv(str(run / "units.csv"), measure.UNIT_COLS, [
         {"label_id": "cra", "unit_id": u, "paragraph_id": "D:p1", "doc_id": "D",
-         "project_ids": "P1", "component_number": "1", "sent": "true", "grade": g, "text": t}
+         "project_ids": "P1", "component_number": "1", "sent": "true", "grade": g,
+         "p3": 0.9 if g == "3" else 0.0, "text": t}
         for u, t, g in UNITS])
     (run / "manifest.json").write_text(json.dumps({"scale": ["a", "b", "c", "d"]}))
     monkeypatch.setattr(measure, "current_run", lambda name, d, **kw: str(run))

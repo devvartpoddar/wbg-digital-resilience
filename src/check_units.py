@@ -144,14 +144,16 @@ def draw(units, per, seed):
 
 
 def draw_bands(units, top, seed, bands=BANDS):
-    """The units the model read, by band of its probability of the top
-    grade: (unit, stratum, stratum size, rows drawn)."""
+    """The units the model read, by band of the probability the floor reads
+    (the probability layer's, else the model's score for the grades the
+    control panel counts): (unit, stratum, stratum size, rows drawn)."""
     rng = random.Random(seed)
     strata = {}
     for u in units:
         if u["sent"] != "true" or u.get(f"p{top}", "") == "":
             continue
-        p = float(u[f"p{top}"])
+        p = float(u["p_committed_calibrated"]) if u.get("p_committed_calibrated") \
+            else measure.score_of(u)
         s = next((b[0] for b in bands if b[1] <= p < b[2]), None)
         if s is not None:
             strata.setdefault(s, []).append(u)
@@ -567,6 +569,129 @@ def calibration_path(name, data):
     return where(data, "labels", f"{name}_calibration.json")
 
 
+def posterior_path(name, data):
+    return where(data, "labels", f"{name}_posterior.json")
+
+
+def graded_labels(name, data):
+    """{unit_id: (grade, asset)} of every sentence a person graded for the
+    set, under any wording of its question (the latest grade wins): the
+    person's reading of the sentence, which the probability layer learns
+    from."""
+    lpath = where(data, "labels", f"{name}_units.csv")
+    out = {}
+    if os.path.exists(lpath):
+        with open(lpath, newline="", encoding="utf-8") as fh:
+            for r in sorted(csv.DictReader(fh), key=lambda r: r.get("graded_on", "")):
+                if r.get("grade", "") != "":
+                    out[r["unit_id"]] = (int(r["grade"]), r.get("asset", ""))
+    return out
+
+
+def latest_run(name, data):
+    """(units.csv rows by unit_id, question SHA-256) of the newest measure run
+    asking the set's question as it stands now, or (None, sha)."""
+    import glob
+    import measure
+    run = measure.Run(name, data, log=lambda *_: None, build=False)
+    lid = run.labels[0]["id"]
+    sha = classify.question_shas(run.qs)[lid]
+    for m in sorted(glob.glob(where(data, "measures", f"{glob.escape(name)}-*", "manifest.json")),
+                    key=os.path.getmtime, reverse=True):
+        with open(m, encoding="utf-8") as fh:
+            if json.load(fh).get("question_sha256", {}).get(lid) != sha:
+                continue
+        with open(os.path.join(os.path.dirname(m), "units.csv"), newline="", encoding="utf-8") as fh:
+            return {u["unit_id"]: u for u in csv.DictReader(fh)}, sha
+    return None, sha
+
+
+def fit_layer(name, data):
+    """Fit the measure's probability layer (src/posterior.py) on every
+    sentence a person graded for it and write it for the next run; report
+    the floor the panel's target precision suggests. Returns report lines."""
+    import panel, posterior
+    lo = min(panel.grades())
+    units, sha = latest_run(name, data)
+    lines = ["## Probability layer and suggested floor", ""]
+    if not units:
+        return lines + ["- no run asks the current question yet: run the measure, then evaluate again", ""]
+    graded = graded_labels(name, data)
+    score = {u: sum(float(units[u].get(f"p{g}") or 0) for g in panel.grades())
+             for u in graded if u in units and units[u].get("sent") == "true"}
+    ys = [(u, 1 if graded[u][0] >= lo else 0) for u in score]
+    vector_of = posterior.vector_lookup(data)
+    vecs = {u: vector_of(u) for u in score}
+    layer = posterior.fit(ys, score, {u: v for u, v in vecs.items() if v is not None}, sha, name)
+    target = float(panel.get("floor.target_precision", 0.8))
+    if layer is None:
+        if os.path.exists(posterior_path(name, data)):
+            os.remove(posterior_path(name, data))
+        probs = [score[u] for u, _ in ys]
+        lines.append(f"- too few graded sentences in the current run ({len(ys)}) for a layer: "
+                     f"the model's score stands")
+    else:
+        posterior.write(posterior_path(name, data), layer)
+        lay = posterior.Layer(layer, vector_of)
+        probs = [lay.probability(u, score[u]) for u, _ in ys]
+        lines.append(f"- layer fitted on {layer['n_yes']} graded yes and {layer['n_no']} no "
+                     f"(grade {lo} or more = yes), written to {os.path.basename(posterior_path(name, data))}")
+    t = posterior.suggest_floor(probs, [y for _, y in ys], target)
+    if t:
+        lines.append(f"- suggested floor for the control panel (floor.{name}): {t[0]:.2f}, "
+                     f"precision {t[1]:.2f}, recall {t[2]:.2f} on the graded sentences "
+                     f"(target precision {target}; in-sample, so optimistic); now "
+                     f"{panel.floor(name)}")
+    return lines + [""]
+
+
+def fit_asset_layers(data):
+    """One probability layer per asset (src/posterior.py), fitted on the
+    assets people gave the sentences they graded for any measure (yes = the
+    person named this asset), against the current sentence asset map, and
+    written to data/labels/assets_posterior.json for the measure stage.
+    Returns report lines."""
+    import labels
+    import panel, posterior
+    folder = classify.current_run("assets", data)
+    if not folder:
+        return ["- asset layers: no sentence asset map yet"]
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
+        man = json.load(fh)
+    if man.get("unit") != "sentence":
+        return ["- asset layers: the current asset map is a paragraph map; none fitted"]
+    named = {}
+    for name in labels.label_sets():
+        for u, (_, asset) in graded_labels(name, data).items():
+            if asset:
+                named[u] = asset          # the asset a person gave the sentence
+    scores = {}
+    with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            if r.get("asked") == "true" and r.get("unit_id") in named:
+                scores.setdefault(r["label_id"], {})[r["unit_id"]] = \
+                    sum(float(r.get(f"p{g}") or 0) for g in panel.grades())
+    vector_of = posterior.vector_lookup(data)
+    vecs = {u: vector_of(u) for u in named}
+    vecs = {u: v for u, v in vecs.items() if v is not None}
+    out, lines = {}, ["## Asset probability layers", ""]
+    for asset, sc in sorted(scores.items()):
+        ys = [(u, 1 if named[u] == asset else 0) for u in sc]
+        layer = posterior.fit(ys, sc, vecs, man["question_sha256"].get(asset, ""), asset)
+        if layer:
+            out[asset] = layer
+            lines.append(f"- {asset}: fitted on {layer['n_yes']} yes, {layer['n_no']} no")
+        else:
+            lines.append(f"- {asset}: too few graded sentences ({len(ys)}, "
+                         f"{sum(y for _, y in ys)} yes); the map's score stands")
+    path = classify.layers_path(data)
+    if out:
+        posterior.write(path, out)
+    elif os.path.exists(path):
+        os.remove(path)
+    return lines + [""]
+
+
 def store_labels(name, data, key, graded, source):
     """The person's grades as labels in data/labels/<set>_units.csv, keyed by
     text and question, never by position; a later grade of the same text
@@ -701,6 +826,7 @@ def evaluate(name, data, seed=1, elusion=False, **kw):
                      f"in-sample figure)")
     lines.append("")
     write_quality(data, name, key[0], rows, top)
+    lines += fit_layer(name, data)
     cpath = calibration_path(name, data)
     with open(cpath + ".part", "w", encoding="utf-8") as fh:
         json.dump(cal, fh, indent=1, sort_keys=True)
@@ -730,6 +856,11 @@ def evaluate_all(data, seed, **kw):
             continue
         outs.append(out)
         n += k
+    try:
+        lines = fit_asset_layers(data)
+        print("\n".join(lines))
+    except SystemExit as exc:
+        print(f"  asset layers: {exc}")
     if os.path.exists(where(data, "review", f"check_links_s{seed}.key.csv")):
         try:
             out, k = evaluate_links(data, seed)

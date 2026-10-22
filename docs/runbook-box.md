@@ -166,6 +166,41 @@ settings; they are bookkeeping. Every count in the findings is the decision
 model's grade, not a person's: the graded sheet's precision and recall
 (`data/reports/evaluate_units_<set>.md`) is the number to quote beside it.
 
+## The control panel
+
+Every threshold a person tunes is one line of `inputs/config/control_panel.csv`
+(setting, value, stage, what it does, how to tune it): the gates (`asset.gate_cosine`,
+`measure.gate_cosine`), the feedback rounds, how a sentence gets its asset
+(`asset.floor`, `asset.decay`), the probability layer (`posterior.*`), the floor
+per measure (`floor.default`, `floor.<set>`), the package links (`link.*`) and the
+dashboard readings (`dashboard.*`, filled into `sql/views/13_dashboard_settings.sql`
+at publish). Code only reads it (`src/panel.py`); a change is a pull request a
+person merges.
+
+What a change costs:
+
+- **A floor, `asset.floor`, `asset.decay`, `posterior.*`, `link.asset_yes`**: nothing. The
+  stage reads the stored answers again under the new number: `./wbg run --from measure`
+  (or `--from link`); `./wbg status` shows those runs as "would be new" until then.
+- **`dashboard.*`**: nothing; `./wbg publish` rebuilds the views with the new value.
+- **A gate (`asset.gate_cosine`, `measure.gate_cosine`) or the feedback settings**: the
+  sentences newly let in are asked; the rest come from the store. Dry-run first.
+- **`measure.second_pass_context`**: the kind and facet questions are asked again.
+
+Tuning the floors: after a run, `./wbg check all --seed <n> --evaluate` fits each
+measure's probability layer (`data/labels/<set>_posterior.json`) and each asset's
+(`data/labels/assets_posterior.json`) from the graded sentences, and writes into each
+`data/reports/evaluate_units_<set>.md` the floor whose precision on those sentences
+reaches `floor.target_precision`. Put the floors you accept into the panel, then re-run
+the measures (from the store, free).
+
+**First run after the change of 2026-10-22 (not yet run).** The sentence asset map is
+new, so `./wbg classify assets --dry-run` first: it asks every sentence again (a few
+times the paragraph map's US$1.0 to 1.2). The measure questions are unchanged and come
+from the store; the kind and facet questions are asked again (now on the sentence).
+Every floor is `floor.default` 0.5 until the evaluation suggests better ones, so the
+published counts will move.
+
 ## Changing what the dashboards show, without a model call
 
 A person decides the clusters; the files carry the

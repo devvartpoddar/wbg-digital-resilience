@@ -1,43 +1,41 @@
--- The few readings the dashboard views apply, in one place. Each is a
--- setting Dev may change; a change is
--- one edit here and a publish. Nothing upstream reads these: the files and
--- the model's answers do not depend on them.
+-- The few readings the dashboard views apply, in one place. Each value is a
+-- control-panel setting (inputs/config/control_panel.csv, dashboard.*),
+-- filled in at publish: a change is one edit there and a publish. Nothing
+-- upstream reads these: the files and the model's answers do not depend on them.
 DROP VIEW IF EXISTS wbg.dashboard_settings CASCADE;
 CREATE VIEW wbg.dashboard_settings AS
 SELECT
-  -- A unit counts towards a commitment when it is committed (its measure's
-  -- commit_floor in analysis/labels/<set>.csv, read off Dev's graded sheet of
-  -- 2026-10-21; else the most likely grade is 3), P(grade 3) is at least this
-  -- (a further floor over every measure; 0),
-  0.0::numeric AS commitment_min_probability,
+  -- A unit counts towards a commitment when it is committed (its probability
+  -- at its measure's floor, control panel floor.*), its probability is at
+  -- least this (a further floor over every measure; 0),
+  {{panel:dashboard.commitment_min_probability}}::numeric AS commitment_min_probability,
   -- and its asset is found at one of these levels: 'unit', the sentence's
-  -- own words name it (every asset the model says yes to); 'paragraph', the
-  -- sentence names none and the paragraph's asset map gives it (Dev,
-  -- 2026-10-20: a measure found in a sentence takes its asset from the
-  -- sentence or, failing that, its paragraph). 'component' and 'none' widen.
-  ARRAY['unit', 'paragraph']::text[] AS commitment_link_levels,
+  -- own words name it; 'paragraph', the sentence names none and an earlier
+  -- sentence of its paragraph does (the last one named, control panel
+  -- asset.decay). 'none' widens.
+  {{panel:dashboard.commitment_link_levels}} AS commitment_link_levels,
   -- Only Investment Project Financing operations (Dev, 2026-10-20).
-  true AS ipf_only,
+  {{panel:dashboard.ipf_only}} AS ipf_only,
   -- A sentence counts under its one best asset and one best type (false), or
   -- under every asset and type the model says yes to (true; on the test
   -- slice that made about seven commitments of each sentence). Undecided.
-  false AS every_asset_and_type,
+  {{panel:dashboard.every_asset_and_type}} AS every_asset_and_type,
   -- A unit is "not waiting on a later study" below this conditional
   -- probability.
-  0.3::numeric AS not_conditional_below,
+  {{panel:dashboard.not_conditional_below}}::numeric AS not_conditional_below,
   -- A package is linked to a commitment at this probability or more. On Dev's
   -- graded sheet (2026-10-21, 70 pairs) links from 0.5 to 0.7 were 3 yes, 7
   -- no, 5 unsure; from 0.7 up, 25 yes of 26.
-  0.7::numeric AS package_link_min_probability,
+  {{panel:dashboard.package_link_min_probability}}::numeric AS package_link_min_probability,
   -- Another project prints a sentence near-identically when its committed
   -- sentences hold at least this share of the sentence's six-word runs.
-  0.5::numeric AS near_copy_share,
+  {{panel:dashboard.near_copy_share}}::numeric AS near_copy_share,
   -- A unit two measures both commit leaves a measure the pair check says it
   -- is not (only the other measure, or neither; src/commit_checks.py).
-  true AS apply_measure_pair_checks,
+  {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks,
   -- A unit whose scope is one investment links to at most this many of its
   -- project's packages (its most likely ones); a rule links to all.
-  3 AS investment_package_top;
+  {{panel:dashboard.investment_package_top}} AS investment_package_top;
 COMMENT ON VIEW wbg.dashboard_settings IS
   'The readings the dashboard views apply (one row): the floor on P(committed) for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, whether a sentence counts under every asset and type it is given or only its best, the conditional-probability line for "not waiting on a later study", the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and how many packages one investment links to.';
 

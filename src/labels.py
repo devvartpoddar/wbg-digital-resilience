@@ -114,14 +114,12 @@ def rows(path):
 
 
 def commit_floor(name):
-    """A measure's commit floor: the P(top grade) at or above which a unit
-    counts as committed (the `commit_floor` column of the set's file, a
-    person's reading of a graded sheet), or None where none is written and
-    the most likely grade decides."""
-    for lab in load_set(name):
-        if lab["active"] == "true" and lab.get("commit_floor"):
-            return float(lab["commit_floor"])
-    return None
+    """A measure's floor: the probability at or above which a sentence counts
+    as committed (or planned) for it. Read from the control panel
+    (inputs/config/control_panel.csv: floor.<set>, else floor.default), or
+    None where neither is written and the most likely grade decides."""
+    import panel
+    return panel.floor(name)
 
 
 def is_active(r):
@@ -145,7 +143,6 @@ def load_set(name, dirs=None, taxonomy=None):
         out.append({"id": r[id_col].strip(), "name": r[name_col].strip(),
                     "definition": " ".join(r["definition"].split()),
                     "active": str(is_active(r)).lower(), "version": r.get("version", ""),
-                    "commit_floor": (r.get("commit_floor") or "").strip(),
                     "folder": os.path.relpath(d, ROOT)})
     if not out:
         raise SystemExit(f"labels: {path} has no rows")
