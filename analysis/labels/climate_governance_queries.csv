@@ -1,15 +1,7 @@
-measure_id,query_id,query,active
-climate_governance,v4_project_support_development_regulations_incorporating,the project will support the development of regulations incorporating climate resilience requirements,true
-climate_governance,v4_technical_codes_revised_incorporate_requirements,technical codes will be revised to incorporate requirements for climate and disaster resilience,true
-climate_governance,v4_regulatory_framework_establish_minimum_resilience,the regulatory framework will establish minimum resilience requirements for future infrastructure investments,true
-climate_governance,v4_project_support_adoption_sector_standards,the project will support adoption of sector standards for infrastructure exposed to climate hazards,true
-climate_governance,v4_sector_regulations_revised_incorporate_energy,sector regulations will be revised to incorporate energy-efficiency requirements,true
-climate_governance,v4_government_develop_mandatory_guidelines_integrating,the government will develop mandatory guidelines for integrating climate risk into infrastructure planning,true
-climate_governance,v4_activity_support_adoption_climate_resilient,the activity will support the adoption of climate-resilient infrastructure standards,true
-climate_governance,v4_project_establish_regulatory_framework_incorporating,the project will establish a regulatory framework for incorporating climate resilience into sector investments,true
-climate_governance,standards,resilience standards will be adopted for infrastructure,false
-climate_governance,regulations,climate resilience requirements will be incorporated into regulations,false
-climate_governance,strategy,national resilience strategies will be developed,false
-climate_governance,guidelines,technical guidelines will include climate considerations,false
-climate_governance,sector_plans,sector plans will integrate climate risks,false
-climate_governance,procurement,resilience requirements will be embedded in procurement documents,false
+measure_id,query_id,query,type_id,active
+climate_governance,search_regulation,A binding decree will require telecommunications operators to meet climate-resilience standards.,regulation,true
+climate_governance,search_code_standard,National technical standards will require climate-resilient infrastructure design.,code_standard,true
+climate_governance,search_planning_framework,Mandatory climate-risk screening will be incorporated into the sector investment appraisal procedure.,planning_framework,true
+climate_governance,search_continuity_protocols,Formal sector operating protocols will require service continuity during climate shocks.,continuity_protocols,true
+climate_governance,search_policy_framework,A sector policy and action plan will establish explicit climate-resilience requirements.,policy_framework,true
+climate_governance,search_parent,The telecommunications regulator will adopt mandatory climate-resilience requirements for future network investments.,,true

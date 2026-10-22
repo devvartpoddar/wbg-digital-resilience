@@ -1,8 +1,11 @@
-measure_id,pattern_id,pattern,active
-backup_power,v4_uninterruptible_power_suppl_y,\buninterruptible power suppl(?:y|ies)\b,true
-backup_power,v4_backup_power,\bbackup power\b,true
-backup_power,generator,\bgenerators?\b,false
-backup_power,ups,\b(?-i:UPS)\b|\buninterruptible power\b,false
-backup_power,battery,\bbattery storage\b|\bbatteries\b,false
-backup_power,autonomy,\bpower autonomy\b|\bhours of autonomy\b,false
-backup_power,backup_power,\b(?:backup|back-up|standby|stand-by) power\b,false
+measure_id,pattern_id,pattern,flags,type_id,active
+backup_power,search_ups,\buninterruptible power suppl(?:y|ies)\b,IGNORECASE,ups,true
+backup_power,search_battery_backup,"\b(?:battery|batteries)[^.;]{0,65}(?:backup|back-up|outage|autonomy|reserve)|\b(?:backup|back-up) batter\w*",IGNORECASE,battery_backup,true
+backup_power,search_standby_generation,\b(?:standby|stand-by|backup|back-up|emergency)[- ]generat\w*,IGNORECASE,standby_generation,true
+backup_power,search_redundant_power_feed,\b(?:dual|redundant|independent|alternative) (?:power |electricity |grid )?(?:feeds?|supplies|connections?)\b|\bpower redundancy\b,IGNORECASE,redundant_power_feed,true
+backup_power,search_renewable_backup,"\b(?:solar|renewable)[^.;]{0,70}(?:backup|back-up|outage|standby)|\b(?:backup|back-up)[^.;]{0,50}(?:solar|renewable)",IGNORECASE,renewable_backup,true
+backup_power,search_parent,\b(?:backup|back-up|standby|stand-by) power\b|\bpower autonomy\b,IGNORECASE,,true
+backup_power,search_backup_generic,\b(?:back[- ]?up|standby) (?:systems?|energy|capacity)\b,IGNORECASE,,true
+backup_power,search_generator_generic,\bgenerators?\b,IGNORECASE,,true
+backup_power,search_ups_acronym,\bUPS\b,CASE_SENSITIVE,,true
+backup_power,search_power_redundancy,\bpower redundancy\b,IGNORECASE,,true

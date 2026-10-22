@@ -1,3 +1,7 @@
-measure_id,pattern_id,pattern,active
-climate_governance,resilience_framework,"\b(?:climate[- ]resilien\w*|resilien\w*|climate|adaptation)\b[^.;]{0,40}?\b(?:standards?|regulations?|guidelines?|codes?|strateg(?:y|ies)|policies|policy|plans?|frameworks?)\b",false
-climate_governance,framework_climate,"\b(?:standards?|regulations?|guidelines?|codes?|strateg(?:y|ies)|policies|policy|plans?)\b[^.;]{0,40}?\b(?:climate|resilien\w*|adaptation|hazard)\b",false
+measure_id,pattern_id,pattern,flags,type_id,active
+climate_governance,search_regulation,"(?:\b(?:climate|adaptation|emissions)\b[^.;]{0,100}\b(?:laws?|regulations?|decrees?)\b|\b(?:laws?|regulations?|decrees?)\b[^.;]{0,100}\b(?:climate|adaptation|emissions)\b)",IGNORECASE,regulation,true
+climate_governance,search_code_standard,"\b(?:climate|resilien\w*|energy[- ]efficien\w*)[^.;]{0,60}\b(?:codes?|standards?|guidelines?)\b|\b(?:codes?|standards?|guidelines?)\b[^.;]{0,60}(?:climate|resilien\w*|energy[- ]efficien\w*)",IGNORECASE,code_standard,true
+climate_governance,search_planning_framework,"(?:\b(?:climate|hazard)\b[^.;]{0,100}\b(?:mandatory screening|investment appraisal|planning procedures?|approval procedures?|screening requirements?)\b|\b(?:mandatory screening|investment appraisal|planning procedures?|approval procedures?|screening requirements?)\b[^.;]{0,100}\b(?:climate|hazard)\b)",IGNORECASE,planning_framework,true
+climate_governance,search_continuity_protocols,"\b(?:operating|continuity|emergency)\b[^.;]{0,40}\bprotocols?\b",IGNORECASE,continuity_protocols,true
+climate_governance,search_policy_framework,"\b(?:climate|adaptation|emissions)[^.;]{0,60}\b(?:polic\w*|strateg\w*|action plans?)\b|\b(?:polic\w*|strateg\w*|action plans?)\b[^.;]{0,60}(?:climate|adaptation|emissions)",IGNORECASE,policy_framework,true
+climate_governance,search_parent,"\b(?:climate resilience|emissions reduction)[^.;]{0,65}(?:sector rules|regulatory framework)|\bregulatory framework[^.;]{0,65}(?:climate|emissions)",IGNORECASE,,true

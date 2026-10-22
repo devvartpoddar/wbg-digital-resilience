@@ -1,0 +1,50 @@
+asset_id,pattern_id,pattern,flags,active
+fiber,search_01,\b(?:fib(?:re|er)[- ]optic|optical fib(?:re|er)|fib(?:re|er) (?:backbone|backhaul|networks?|cables?))\b,IGNORECASE,true
+fiber,search_02,\b(?:dark fib(?:re|er)|OPGW|optical ground wire|FTT[HPXB]|fib(?:re|er) to the (?:home|premises))\b,IGNORECASE,true
+fiber,search_03,"\b(?:ducts?|conduits?|trenching)[^.;]{0,60}fib(?:re|er)",IGNORECASE,true
+mobile_towers,search_01,\b(?:mobile|telecom\w*|cellular) (?:towers?|sites?|networks?)\b|\bbase (?:transceiver )?stations?\b|\bradio access networks?\b,IGNORECASE,true
+mobile_towers,search_02,\bfixed wireless(?: access)?\b|\bmicrowave (?:radio )?(?:links?|backhaul)\b|\bterrestrial (?:radio|television|TV) broadcast\w*\b,IGNORECASE,true
+mobile_towers,search_03,\bspectrum (?:assignment|allocation|licen[cs]\w*)\b|\btower sharing\b,IGNORECASE,true
+mobile_towers,search_04,"\b(?:cell|mobile|telecom\w*) sites?[^.;]{0,60}(?:power|shelter|grounding)",IGNORECASE,true
+satellite,search_01,\b(?:VSAT|satellite (?:terminals?|links?|connectivity|broadband|internet))\b,IGNORECASE,true
+satellite,search_02,\b(?:satellite (?:ground stations?|capacity|backhaul|communications?)|teleports?)\b,IGNORECASE,true
+satellite,search_03,"(?:\bsatellite\b[^.;]{0,100}\b(?:licen[cs]\w*|landing rights|authori[sz]\w*|regulat\w*)\b|\b(?:licen[cs]\w*|landing rights|authori[sz]\w*|regulat\w*)\b[^.;]{0,100}\bsatellite\b)",IGNORECASE,true
+submarine_cable,search_01,\b(?:submarine|undersea) (?:fib(?:re|er) )?(?:optic )?cables?\b|\bcable landing stations?\b,IGNORECASE,true
+submarine_cable,search_02,"\bcross[- ]border (?:terrestrial )?(?:fib(?:re|er)|links?|connectivity)\b|(?:\binternational gateways?\b[^.;]{0,90}\b(?:telecom\w*|internet|bandwidth|fib(?:re|er)|communications?|IP transit)\b|\b(?:telecom\w*|internet|bandwidth|fib(?:re|er)|communications?|IP transit)\b[^.;]{0,90}\binternational gateways?\b)",IGNORECASE,true
+submarine_cable,search_03,"\binternational bandwidth\b|\bsubmarine cable[^.;]{0,40}(?:repair|maintenance)",IGNORECASE,true
+data_hosting,search_01,\b(?:data cent(?:re|er)s?|server rooms?|colocation|co-location)\b,IGNORECASE,true
+data_hosting,search_02,\bcloud (?:hosting|services?|computing|infrastructure|migration)\b|\b(?:government|sovereign) cloud\b,IGNORECASE,true
+data_hosting,search_03,\bdisaster recovery (?:sites?|cent(?:re|er)s?|environments?)\b|\bsecondary computing environments?\b,IGNORECASE,true
+data_hosting,search_04,\b(?:internet exchange points?|IXPs?|high[- ]performance computing)\b,IGNORECASE,true
+institutional_networks,search_01,\bGovNet\b|\bgovernment (?:wide[- ]area |virtual private )?networks?\b,IGNORECASE,true
+institutional_networks,search_02,\bNRENs?\b|\bresearch and education networks?\b,IGNORECASE,true
+institutional_networks,search_03,"\blocal area networks?\b|\bLANs?\b|(?:\b(?:health|education|government|institutional)\b[^.;]{0,90}\b(?:WANs?|VPNs?|wide area networks?|virtual private networks?)\b|\b(?:WANs?|VPNs?|wide area networks?|virtual private networks?)\b[^.;]{0,90}\b(?:health|education|government|institutional)\b)",IGNORECASE,true
+institutional_networks,search_04,\bnetwork operations? cent(?:re|er)s?\b|\bunified communications\b,IGNORECASE,true
+cybersecurity,search_01,\bsecurity operations? cent(?:re|er)s?\b|\b(?:CSIRTs?|CERTs?|computer (?:security incident|emergency) response teams?)\b,IGNORECASE,true
+cybersecurity,search_02,"\bcyber[- ]?secur\w*|\bpenetration testing\b|(?:\b(?:security audits?|threat monitoring)\b[^.;]{0,80}\b(?:cyber|network|information systems?|digital|IT|ICT)\b|\b(?:cyber|network|information systems?|digital|IT|ICT)\b[^.;]{0,80}\b(?:security audits?|threat monitoring)\b)",IGNORECASE,true
+cybersecurity,search_03,"\bcyber[^.;]{0,40}(?:standards?|incident response|regulations?)",IGNORECASE,true
+dpi,search_01,\b(?:digital identi\w*|foundational ID|civil registration|CRVS|unique identification)\b,IGNORECASE,true
+dpi,search_02,\b(?:interoperable|fast|instant) payments?\b|\b(?:payment rails?|national payment switch\w*)\b,IGNORECASE,true
+dpi,search_03,\b(?:data exchange|interoperability) (?:platforms?|layers?|systems?)\b,IGNORECASE,true
+dpi,search_04,\b(?:digital signatures?|digital credentials?|public key infrastructure|PKI|trust services?)\b,IGNORECASE,true
+dpi,search_05,"\b(?:data protection|consent|data governance)[^.;]{0,75}(?:digital identity|data exchange|foundational|DPI)",IGNORECASE,true
+drm_ews,search_01,\bhydro[- ]met\w*|\b(?:weather|hydrological|seismic) (?:stations?|monitoring|forecast\w*)\b,IGNORECASE,true
+drm_ews,search_02,\bearly[- ]warning\b|\bcell broadcast\b|\b(?:hazard|emergency) alerts?\b,IGNORECASE,true
+drm_ews,search_03,\bemergency (?:call[- ]taking|dispatch|call centres?|call centers?)\b|\b(?:112|911) (?:services?|platforms?|systems?)\b,IGNORECASE,true
+drm_ews,search_04,"\bTETRA\b|\b(?:responder|emergency) (?:radio|communications?) networks?\b|(?:\bemergency operations? cent(?:re|er)s?\b[^.;]{0,90}\b(?:digital|telecom\w*|radio|dispatch|communications?|warning|disaster)\b|\b(?:digital|telecom\w*|radio|dispatch|communications?|warning|disaster)\b[^.;]{0,90}\bemergency operations? cent(?:re|er)s?\b)",IGNORECASE,true
+access_connectivity,search_01,"(?:\b(?:last[- ]mile|connect\w*)\b[^.;]{0,90}\b(?:internet|broadband|fib(?:re|er)|wireless|satellite|Wi[- ]?Fi)\b|\b(?:internet|broadband|fib(?:re|er)|wireless|satellite|Wi[- ]?Fi)\b[^.;]{0,90}\b(?:last[- ]mile|connect\w*)\b)",IGNORECASE,true
+access_connectivity,search_02,\b(?:public wi[- ]?fi|community networks?|public (?:internet )?access points?)\b,IGNORECASE,true
+access_connectivity,search_03,"\b(?:devices?|tablets?|laptops?|subscriptions?)[^.;]{0,60}(?:internet access|get online|connectivity|beneficiaries)",IGNORECASE,true
+access_connectivity,search_04,"\buniversal (?:service|access) (?:funds?|programmes?|programs?)\b|\bviability[- ]gap[^.;]{0,45}(?:connect\w*|operators?)",IGNORECASE,true
+operational_tech,search_01,\b(?:SCADA|smart[- ]grid communications?)\b,IGNORECASE,true
+operational_tech,search_02,\b(?:smart meters?|advanced metering infrastructure)\b,IGNORECASE,true
+operational_tech,search_03,\bintelligent transport systems?\b|\b(?:traffic control|electronic tolling|fleet tracking)\b,IGNORECASE,true
+operational_tech,search_04,\b(?:operational sensor networks?|utility telemetry|IoT|internet of things)\b,IGNORECASE,true
+geospatial,search_01,\b(?:spatial data infrastructure|GIS platforms?|geoportals?|geospatial platforms?)\b,IGNORECASE,true
+geospatial,search_02,\b(?:earth observation|satellite imagery)\b,IGNORECASE,true
+geospatial,search_03,\b(?:aerial (?:surveys?|mapping|photography)|drone (?:surveys?|mapping)|LiDAR|light detection and ranging)\b,IGNORECASE,true
+geospatial,search_04,\b(?:geodetic networks?|continuously operating reference stations?|CORS|base mapping)\b,IGNORECASE,true
+digital_systems,search_01,\b(?:management information systems?|HMIS|EMIS|IFMIS|ERP)\b,IGNORECASE,true
+digital_systems,search_02,\b(?:social|land|cadastre|credit|collateral|business) (?:registr\w*|information systems?)\b,IGNORECASE,true
+digital_systems,search_03,\b(?:government service portals?|case[- ]management (?:systems?|platforms?)|e[- ]procurement|e[- ]health)\b,IGNORECASE,true
+digital_systems,search_04,\b(?:mobile|agricultural advisory) app(?:lication)?s?\b|\bsector information systems?\b,IGNORECASE,true

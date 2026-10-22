@@ -1,120 +1,54 @@
 asset_id,query_id,query,active
-fiber,backbone,national fibre optic backbone network,true
-fiber,backhaul,fibre backhaul and transmission network expansion,true
-fiber,metro_ring,metropolitan fibre ring,true
-fiber,last_mile,last-mile fibre connections to homes and businesses,true
-fiber,ducts,ducts and conduits for laying fibre optic cable,true
-fiber,opgw,optical fibre on electricity transmission lines (OPGW),true
-fiber,ftth,fibre to the home and fibre to the premises,true
-fiber,trenching,trenching and civil works for fibre deployment,true
-fiber,middle_mile,middle mile fibre network,true
-fiber,dark_fiber,dark fibre leasing and open access fibre,true
-fiber,terrestrial,terrestrial fibre optic network deployment,true
-mobile_towers,towers,telecommunication towers and masts,true
-mobile_towers,base_stations,mobile network base stations and cell sites,true
-mobile_towers,rural_coverage,rural mobile coverage sites in unserved areas,true
-mobile_towers,4g_rollout,4G and 5G mobile network rollout,true
-mobile_towers,microwave,microwave transmission links,true
-mobile_towers,passive,passive tower infrastructure: power supply shelter and grounding,true
-mobile_towers,sharing,shared tower and infrastructure sharing,true
-mobile_towers,ran,radio access network equipment,true
-mobile_towers,site_power,backup power and solar power for cell sites,true
-mobile_towers,mobile_broadband,mobile broadband network expansion,true
-mobile_towers,spectrum,spectrum assignment for mobile broadband,true
-submarine_cable,cross_border,cross-border terrestrial fibre link to neighbouring countries,true
-submarine_cable,cable,submarine fibre optic cable system,true
-submarine_cable,landing,cable landing station,true
-submarine_cable,international,international connectivity through an undersea cable,true
-submarine_cable,consortium,regional submarine cable consortium and capacity purchase,true
-submarine_cable,bandwidth,international bandwidth capacity,true
-submarine_cable,redundancy,redundant submarine cable route and second cable,true
-submarine_cable,repair,submarine cable repair and maintenance,true
-submarine_cable,gateway,international internet gateway,true
-submarine_cable,regional_links,regional connectivity linking neighbouring countries' networks,true
-submarine_cable,landlocked,access to the sea for a landlocked country's international connectivity,true
-data_hosting,gov_dc,government data centre,true
-data_hosting,national_dc,national data centre,true
-data_hosting,tier,tier III data centre certification,true
-data_hosting,server_room,server rooms and hosting equipment,true
-data_hosting,gov_cloud,government cloud and sovereign cloud platform,true
-data_hosting,colocation,colocation and hosting services,true
-data_hosting,cooling_power,data centre power supply and cooling,true
-data_hosting,migration,migration of government systems to the cloud,true
-data_hosting,storage,data storage and backup infrastructure,true
-data_hosting,ixp,internet exchange point (IXP),true
-data_hosting,data_infra,data infrastructure for storing and processing government data,true
-cybersecurity,cert,computer emergency response team (CERT or CSIRT),true
-cybersecurity,soc,security operations centre,true
-cybersecurity,strategy,national cybersecurity strategy and legislation,true
-cybersecurity,cii,protection of critical information infrastructure,true
-cybersecurity,incident,cyber incident response and threat monitoring,true
-cybersecurity,audit,penetration testing and security audits,true
-cybersecurity,pki,public key infrastructure and digital certificates,true
-cybersecurity,capacity,cybersecurity skills and capacity building,true
-dpi,digital_id,digital identification system,true
-dpi,crvs,civil registration and vital statistics,true
-dpi,payments,digital payments platform and government-to-person transfers,true
-dpi,interop,interoperability and data exchange platform,true
-dpi,portal,e-government service portal,false
-dpi,signatures,digital signatures and online authentication,true
-dpi,registries,foundational registries and social registry,true
-dpi,enterprise_arch,government enterprise architecture and shared platforms,false
-dpi,unique_id,unique identification number for residents,true
-dpi,data_protection,personal data protection and data governance,true
-dpi,data_protection_law,data protection law and data protection authority,true
-drm_ews,dr_site,disaster recovery site and backup data centre,false
-drm_ews,ews,early warning system,true
-drm_ews,hydromet,hydro-meteorological monitoring stations,true
-drm_ews,radar,weather radar and forecasting systems,true
-drm_ews,alerting,emergency alerts broadcast to mobile phones,true
-drm_ews,responders,emergency communications network for first responders,true
-drm_ews,risk_platform,disaster risk information platform,false
-drm_ews,emergency_line,911 emergency response platform,true
-drm_ews,floods,flood and cyclone warning,true
-drm_ews,hazard_maps,geospatial hazard and risk mapping,false
-drm_ews,continuity,business continuity and disaster recovery of government systems,false
-drm_ews,eoc,emergency operations centre,true
-access_connectivity,usf,universal service fund,false
-access_connectivity,affordability,affordable internet access,false
-access_connectivity,subsidies,subsidies for devices and connectivity,false
-access_connectivity,public_wifi,public Wi-Fi access points,true
-access_connectivity,community,community networks,true
-access_connectivity,schools_health,connecting schools and health facilities to the internet,true
-access_connectivity,literacy,digital literacy training,false
-access_connectivity,coverage_gap,closing the mobile coverage gap in rural areas,false
-access_connectivity,smartphones,access to smartphones and devices,true
-access_connectivity,public_buildings,connecting government offices and public buildings in rural areas with fibre,true
-access_connectivity,last_mile_institutions,last-mile fibre to schools and health facilities,true
-access_connectivity,universal_access,universal access to broadband for underserved communities,false
-data_hosting,dr_site,disaster recovery site and backup data centre for government systems,true
-data_hosting,continuity,business continuity and disaster recovery of government digital systems,true
-digital_systems,hmis,health management information system,true
-digital_systems,emis,education management information system,true
-digital_systems,ifmis,integrated financial management information system,true
-digital_systems,eservices,online government services and e-services portal,true
-digital_systems,platform,digital platform for service delivery,true
-digital_systems,case_mgmt,case management and document management system,true
-digital_systems,app,mobile application for citizens or farmers,true
-digital_systems,software,software development for a government system,true
-digital_systems,land,land administration and cadastre information system,true
-digital_systems,agri,digital agriculture advisory and e-voucher platform,true
-satellite,ground_station,satellite ground station and teleport,true
-satellite,vsat,VSAT terminals for remote and island sites,true
-satellite,leo_capacity,satellite capacity from low earth orbit operators for backhaul,true
-satellite,sat_backbone,satellite links used as backbone or backhaul where fibre is absent,true
-satellite,landing_rights,satellite licensing and landing rights,true
-institutional_networks,govnet,government wide-area network connecting ministries and agencies,true
-institutional_networks,nren,national research and education network connecting universities,true
-institutional_networks,sector_network,health sector network linking hospitals and district offices,true
-institutional_networks,noc,network operations centre for the government network,true
-institutional_networks,lan,institutional local area networks and shared email and voice services,true
-operational_tech,scada,SCADA and control systems for power water and transport,true
-operational_tech,smart_meters,smart meters and advanced metering infrastructure,true
-operational_tech,its,intelligent transport systems for traffic management and tolling,true
-operational_tech,iot_sensors,sensor and Internet of Things networks for utilities and agriculture,true
-operational_tech,smart_grid,smart grid communications,true
-geospatial,sdi,spatial data infrastructure platform and geoportal,true
-geospatial,mapping_agency,systems and equipment of the national mapping agency,true
-geospatial,imagery,satellite imagery and earth observation services,true
-geospatial,survey,aerial and drone surveys and LiDAR,true
-geospatial,geodetic,geodetic network and continuously operating reference stations,true
+fiber,search_01,"Domestic fibre backbone, middle-mile and backhaul networks will be upgraded.",true
+fiber,search_02,"Dark fibre, OPGW and fibre-to-the-premises infrastructure will be deployed.",true
+fiber,search_03,"Ducts, conduits and trenching will support domestic fibre deployment.",true
+mobile_towers,search_01,"Mobile towers, base stations and radio access networks will be upgraded.",true
+mobile_towers,search_02,"Fixed wireless, microwave and terrestrial broadcast networks will be deployed.",true
+mobile_towers,search_03,Spectrum assignment and tower-sharing rules will support mobile broadband networks.,true
+mobile_towers,search_04,Solar power and protective shelters will be installed at cell sites.,true
+satellite,search_01,Satellite terminals and VSAT links will connect remote sites.,true
+satellite,search_02,"Satellite ground stations, teleports and purchased capacity will support backhaul.",true
+satellite,search_03,Satellite licensing and landing rights will enable communications services.,true
+submarine_cable,search_01,Submarine cables and landing stations will expand international connectivity.,true
+submarine_cable,search_02,Cross-border terrestrial fibre links and international gateways will be upgraded.,true
+submarine_cable,search_03,International bandwidth and submarine cable repair capacity will be procured.,true
+data_hosting,search_01,Government data centres and server rooms will receive resilient power and cooling.,true
+data_hosting,search_02,Cloud hosting and computing capacity will support government systems.,true
+data_hosting,search_03,Secondary computing environments and disaster recovery sites will restore services.,true
+data_hosting,search_04,An internet exchange point will allow internet service providers to exchange traffic locally.,true
+institutional_networks,search_01,Government WANs and VPNs will link ministries and shared services.,true
+institutional_networks,search_02,Research and education networks will connect universities and research institutions.,true
+institutional_networks,search_03,Government offices will be linked through a shared wide area network.,true
+institutional_networks,search_04,Network operations centres and shared voice and email will support the government network.,true
+cybersecurity,search_01,Security operations centres and incident response teams will protect digital services.,true
+cybersecurity,search_02,"Cybersecurity threat monitoring, security audits and penetration testing will be strengthened.",true
+cybersecurity,search_03,Cybersecurity standards and incident-response procedures will protect networks.,true
+dpi,search_01,Digital identity and civil registration systems will provide shared foundational services.,true
+dpi,search_02,"Interoperable payment rails, national switches and fast payment systems will be developed.",true
+dpi,search_03,Shared data exchange and interoperability layers will connect public systems.,true
+dpi,search_04,"Digital signatures, credentials and public key infrastructure will support shared digital trust.",true
+dpi,search_05,Data protection and consent rules will govern shared digital identity and data exchange.,true
+drm_ews,search_01,Hydrometeorological stations and forecasting systems will support hazard monitoring.,true
+drm_ews,search_02,Early warning platforms will send cell broadcast alerts and siren warnings.,true
+drm_ews,search_03,Emergency call-taking and dispatch platforms will support 112 and 911 services.,true
+drm_ews,search_04,Dedicated responder radio networks and digitally equipped emergency operations centres will be upgraded.,true
+access_connectivity,search_01,"Last-mile fibre, wireless and satellite links will connect schools and health facilities.",true
+access_connectivity,search_02,"Public Wi-Fi, community networks and public access points will provide internet access.",true
+access_connectivity,search_03,Devices and subscriptions will be provided to beneficiaries so they can get online.,true
+access_connectivity,search_04,Universal service programmes will subsidise connections to underserved communities.,true
+operational_tech,search_01,"SCADA equipment will monitor and control pumps, substations and utility operations.",true
+operational_tech,search_02,Smart meters and advanced metering infrastructure will monitor utility operations.,true
+operational_tech,search_03,"Intelligent transport systems will support traffic control, tolling and fleet tracking.",true
+operational_tech,search_04,Remote sensors and telemetry will monitor the condition and operation of utility infrastructure.,true
+geospatial,search_01,"Spatial data infrastructure, GIS platforms and geoportals will manage location data.",true
+geospatial,search_02,Satellite imagery and earth observation data will support a national geospatial platform.,true
+geospatial,search_03,Aerial photography and drone surveys will produce digital base maps.,true
+geospatial,search_04,"Geodetic networks, reference stations and base mapping will support national spatial data.",true
+digital_systems,search_01,"Named health, education and financial management information systems will be upgraded.",true
+digital_systems,search_02,Sector registries and land and cadastre systems will support public administration.,true
+digital_systems,search_03,"Government service portals, case-management platforms and sector applications will be developed.",true
+digital_systems,search_04,Mobile agricultural advisory applications and named sector systems will receive operating equipment.,true
+institutional_networks,search_lan,Local area networks will connect computers and shared services within government buildings.,true
+institutional_networks,search_health,A dedicated communications network will link hospitals and health facilities.,true
+data_hosting,search_hpc,A high-performance computing facility will provide shared computing capacity.,true
+geospatial,search_lidar,LiDAR surveys will capture terrain elevation data for a geospatial information system.,true

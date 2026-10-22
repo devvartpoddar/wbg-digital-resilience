@@ -1,6 +1,10 @@
-measure_id,pattern_id,pattern,active
-cra,v4_climate_disaster_risk_assessment,\bclimate (?:and disaster )?risk assessment\b,true
-cra,v4_climate_vulnerability_assessment,\bclimate vulnerability assessment\b,true
-cra,risk_assess,"\b(?:climate|disaster|hazard|flood|cyclone|seismic|multi-hazard)\w*\b[^.;]{0,60}?\b(?:risk|vulnerabilit\w*|resilience)\b[^.;]{0,30}?\b(?:assessments?|assessed|screening|screened|analys[ie]s|mapping|maps|evaluations?|studies|study)\b",false
-cra,assess_climate,"\b(?:assess\w*|screen\w*|evaluat\w*|map(?:ping)?)\b[^.;]{0,50}?\b(?:climate|disaster|hazard)\w*\b[^.;]{0,30}?\b(?:risks?|vulnerabilit\w*|exposure)\b",false
-cra,vulnerability_assessment,\b(?:vulnerability|hazard|risk) (?:assessments?|mapping|maps)\b,false
+measure_id,pattern_id,pattern,flags,type_id,active
+cra,search_site_specific,"\b(?:site|asset|facility)[- ](?:specific|level)[^.;]{0,45}(?:risk|vulnerability|hazard)[^.;]{0,30}(?:assess\w*|screen\w*)",IGNORECASE,site_specific,true
+cra,search_route_level,"\b(?:route|corridor|alignment)[^.;]{0,60}(?:hazard|climate|flood|landslide|vulnerability)[^.;]{0,35}(?:assess\w*|analys\w*|stud\w*)|\b(?:route|corridor)[- ]level assessments?\b",IGNORECASE,route_level,true
+cra,search_system_network,"\b(?:network|system)[^.;]{0,65}(?:climate|hazard)[^.;]{0,40}(?:assess\w*|analys\w*)",IGNORECASE,system_network,true
+cra,search_sector_wide,"\b(?:sector[- ]wide|national|portfolio)[^.;]{0,60}(?:climate|hazard|vulnerability)[^.;]{0,35}(?:assess\w*|analys\w*)",IGNORECASE,sector_wide,true
+cra,search_hazard_mapping,\b(?:hazard|flood|landslide|climate[- ]risk)[- ]+(?:and[- ]+exposure[- ]+)?(?:mapping|maps?)\b,IGNORECASE,hazard_mapping,true
+cra,search_hazard_studies,\b(?:flood|hydrological|landslide|slope[- ]stability|seismic)[- ]+(?:modelling|modeling|studies|study|investigations?|assessments?)\b,IGNORECASE,hazard_studies,true
+cra,search_continuity_risk,"\b(?:climate|hazard|disaster)[^.;]{0,65}(?:continuity|service disruption)[^.;]{0,40}(?:assess\w*|analys\w*)|\b(?:continuity|service disruption)[^.;]{0,65}(?:climate|hazard|disaster)",IGNORECASE,continuity_risk,true
+cra,search_parent,\b(?:climate|disaster|natural[- ]hazard|multi[- ]hazard)[- ]+(?:(?:and|or)[- ]+(?:climate|disaster)[- ]+)?(?:risk|vulnerability|exposure)[- ]+(?:assessments?|screening|analys[ie]s)\b,IGNORECASE,,true
+cra,search_assessment_word_order,"\bassess\w*\b[^.;]{0,100}\bclimate\b[^.;]{0,50}\brisks?\b|\bclimate(?: and disaster)? risk screening\b",IGNORECASE,,true

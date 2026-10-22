@@ -1,8 +1,8 @@
-measure_id,pattern_id,pattern,active
-ews,v4_early_warning_system,\bearly warning system\b,true
-ews,v4_cell_broadcast,\bcell broadcast\b,true
-ews,early_warning,\bearly[- ]warning\b,false
-ews,alert_system,\b(?:alert|warning) (?:systems?|platforms?|services?)\b,false
-ews,emergency_comms,\bemergency communications?\b,false
-ews,cell_broadcast,\bcell broadcast\b,false
-ews,disaster_alert,\bdisaster (?:alerts?|warnings?|notifications?)\b,false
+measure_id,pattern_id,pattern,flags,type_id,active
+ews,search_warning_generation,\bearly[- ]warning systems?\b|\b(?:hazard|flood|storm|drought)[- ]warnings?\b|\bwarning (?:generation|issuance)\b,IGNORECASE,warning_generation,true
+ews,search_cell_broadcast,\bcell broadcast\b,IGNORECASE,cell_broadcast,true
+ews,search_emergency_messaging,"\b(?:warning|alert)[^.;]{0,65}(?:SMS|sirens?|radio|television|mobile app\w*)|\b(?:SMS|sirens?|radio)[^.;]{0,65}(?:warning|alert)",IGNORECASE,emergency_messaging,true
+ews,search_institutional_alerting,"\b(?:hazard|flood|storm|disaster)[^.;]{0,50}(?:alerts?|warnings?)[^.;]{0,65}(?:institutions?|schools?|responders?|road users?)",IGNORECASE,institutional_alerting,true
+ews,search_sector_warning,"\b(?:disease|pest|pollution)[^.;]{0,55}(?:early[- ]warning|alerts?)|\b(?:early[- ]warning|alerts?)[^.;]{0,55}(?:disease|pest|pollution)",IGNORECASE,sector_warning,true
+ews,search_parent,\b(?:public warning|hazard alert\w*|early[- ]warning)\b,IGNORECASE,,true
+ews,search_mass_messaging,\b(?:SMS blasts?|mass messaging|location[- ]based messaging)\b,IGNORECASE,emergency_messaging,true

@@ -1,6 +1,8 @@
-measure_id,pattern_id,pattern,active
-network_redundancy,v4_route_diversity,\broute diversity\b,true
-network_redundancy,v4_single_point_s_failure,\bsingle point(?:s)? of failure\b,true
-network_redundancy,redundant_network,"\bredundan\w*\b[^.;]{0,50}?\b(?:links?|routes?|paths?|network\w*|fib(?:re|er)|cables?|connect\w*|architecture|backbone)\b",false
-network_redundancy,route_diversity,\b(?:route|path) diversity\b|\bdiverse rout\w*,false
-network_redundancy,backup_link,\b(?:backup|secondary|alternative) (?:links?|routes?|paths?|connect\w*)\b,false
+measure_id,pattern_id,pattern,flags,type_id,active
+network_redundancy,search_international_redundancy,"\b(?:international|submarine|cross[- ]border)\b[^.;]{0,65}\b(?:redundan\w*|alternative routes?|second cables?)\b|\bsecond (?:submarine|international|cable)\b|\bredundan\w*\b[^.;]{0,45}\b(?:submarine|international)\b",IGNORECASE,international_redundancy,true
+network_redundancy,search_route_diversity,\b(?:route|path) diversity\b|\b(?:diverse|independent|redundant) (?:fibre|fiber|communications?|network)? ?(?:routes?|paths?)\b,IGNORECASE,route_diversity,true
+network_redundancy,search_backup_link,"\b(?:satellite|microwave)[^.;]{0,60}(?:backup|back-up|alternative|fail)|\b(?:backup|back-up) (?:communications? )?links?\b",IGNORECASE,backup_link,true
+network_redundancy,search_provider_diversity,"(?:\b(?:second|alternative|multiple|independent) (?:international )?(?:operators?|providers?|carriers?)\b[^.;]{0,100}\b(?:internet|telecom\w*|connectivity|redundan\w*|backup|continuity)\b|\b(?:internet|telecom\w*|connectivity|redundan\w*|backup|continuity)\b[^.;]{0,100}\b(?:second|alternative|multiple|independent) (?:international )?(?:operators?|providers?|carriers?)\b)",IGNORECASE,provider_diversity,true
+network_redundancy,search_critical_site_dual_links,"(?:\b(?:dual|two|redundant|independent) (?:internet |communications? |network )?(?:links?|connections?)\b[^.;]{0,100}\b(?:data[- ]cent(?:re|er)s?|hospitals?|critical facilities|government offices)\b|\b(?:data[- ]cent(?:re|er)s?|hospitals?|critical facilities|government offices)\b[^.;]{0,100}\b(?:dual|two|redundant|independent) (?:internet |communications? |network )?(?:links?|connections?)\b)",IGNORECASE,critical_site_dual_links,true
+network_redundancy,search_node_redundancy,\b(?:redundant|backup|duplicate|secondary) (?:network )?(?:nodes?|switches?|routers?|exchanges?|network operations? cent(?:re|er)s?)\b,IGNORECASE,node_redundancy,true
+network_redundancy,search_parent,\b(?:network|connectivity) redundan\w*\b|\bredundant network\b|\bsingle points? of (?:communications? )?failure\b,IGNORECASE,,true

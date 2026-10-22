@@ -1,18 +1,9 @@
-measure_id,query_id,query,active
-cra,v4_project_finance_detailed_climate_disaster,the project will finance a detailed climate and disaster risk assessment for the proposed investments,true
-cra,v4_site_specific_climate_risk_assessments,site-specific climate risk assessments will be undertaken before the detailed designs are finalized,true
-cra,v4_consultant_assess_exposure_proposed_sites,the consultant will assess exposure of the proposed sites to flooding extreme heat and other relevant hazards,true
-cra,v4_feasibility_study_include_detailed_assessment,the feasibility study will include a detailed assessment of current and future climate risks affecting the investments,true
-cra,v4_project_finance_hazard_vulnerability_assessments,the project will finance hazard and vulnerability assessments for the proposed infrastructure,true
-cra,v4_route_level_assessments_identify_sections,route-level assessments will identify sections exposed to flooding landslides erosion and other hazards,true
-cra,v4_operators_required_undertake_climate_risk,operators will be required to undertake climate risk assessments for infrastructure financed under the project,true
-cra,v4_bidders_evaluate_relevant_climate_disaster,bidders shall evaluate relevant climate and disaster hazards affecting the proposed locations,true
-cra,v4_detailed_vulnerability_assessments_undertaken_inform,detailed vulnerability assessments will be undertaken to inform engineering and investment decisions,true
-cra,v4_hazard_maps_prepared_under_project,hazard maps will be prepared under the project to assess exposure of proposed investment locations,true
-cra,site_specific,a site-specific climate risk assessment will be conducted for the infrastructure before construction,false
-cra,design_siting,climate and disaster risk assessment to inform the design and siting of the works,false
-cra,existing_infra,assessment of the climate vulnerability and resilience of existing infrastructure,false
-cra,operator,climate risk assessments to be carried out by the operator or contractor and included in the tender,false
-cra,hazard_mapping,hazard mapping to identify sites exposed to floods storms and landslides,false
-cra,national,national or sector-wide climate vulnerability assessment,false
-cra,screening,climate and disaster risk screening of project activities,false
+measure_id,query_id,query,type_id,active
+cra,search_site_specific,Existing facilities and proposed sites will undergo climate and disaster risk assessments.,site_specific,true
+cra,search_route_level,Route-level assessments will evaluate flood and landslide risks along cable corridors.,route_level,true
+cra,search_system_network,The backbone network will be assessed for climate vulnerability and cascading disruption.,system_network,true
+cra,search_sector_wide,A sector-wide assessment will evaluate climate risks across the infrastructure portfolio.,sector_wide,true
+cra,search_hazard_mapping,Flood-hazard and infrastructure-exposure maps will be prepared to guide investment decisions.,hazard_mapping,true
+cra,search_hazard_studies,Flood modelling and slope-stability investigations will inform infrastructure design.,hazard_studies,true
+cra,search_continuity_risk,An assessment will examine how natural hazards could interrupt critical digital services.,continuity_risk,true
+cra,search_parent,The project will undertake climate and disaster risk assessments for infrastructure.,,true

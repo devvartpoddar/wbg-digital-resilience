@@ -1,17 +1,10 @@
-measure_id,query_id,query,active
-resilient_infrastructure_design,v4_equipment_elevated_above_design_flood,equipment will be elevated above the design flood level,true
-resilient_infrastructure_design,v4_facilities_incorporate_flood_protection_drainage,the facilities will incorporate flood-protection and drainage measures,true
-resilient_infrastructure_design,v4_foundations_reinforced_withstand_flooding_extreme,foundations will be reinforced to withstand flooding and extreme wind conditions,true
-resilient_infrastructure_design,v4_cables_installed_reinforced_waterproof_ducts,cables will be installed in reinforced and waterproof ducts in flood-prone locations,true
-resilient_infrastructure_design,v4_technical_specifications_require_structures_withstand,technical specifications will require structures to withstand the applicable extreme wind loads,true
-resilient_infrastructure_design,v4_protective_enclosures_provided_equipment_exposed,protective enclosures will be provided for equipment exposed to flooding and severe weather,true
-resilient_infrastructure_design,v4_design_incorporate_measures_protect_equipment,the design will incorporate measures to protect equipment from extreme heat,true
-resilient_infrastructure_design,v4_critical_equipment_raised_above_areas,critical equipment will be raised above areas susceptible to inundation,true
-resilient_infrastructure_design,v4_drainage_systems_constructed_prevent_water,drainage systems will be constructed to prevent water accumulation around critical facilities,true
-resilient_infrastructure_design,v4_weather_resistant_materials_specified_infrastructure,weather-resistant materials will be specified for infrastructure exposed to identified climate hazards,true
-resilient_infrastructure_design,withstand,infrastructure will be designed to withstand extreme weather events,false
-resilient_infrastructure_design,elevated,facilities will be elevated above projected flood levels,false
-resilient_infrastructure_design,standards,resilient engineering standards will be incorporated,false
-resilient_infrastructure_design,flood_protection,flood protection measures will be included in facility designs,false
-resilient_infrastructure_design,hardened,assets will be hardened against climate risks,false
-resilient_infrastructure_design,specs,technical specifications will incorporate resilience requirements,false
+measure_id,query_id,query,type_id,active
+resilient_infrastructure_design,search_elevation,Equipment and facility floors will be elevated above projected flood levels.,elevation,true
+resilient_infrastructure_design,search_drainage,Protective drainage will prevent floodwater from damaging digital facilities.,drainage,true
+resilient_infrastructure_design,search_flood_barriers,Flood barriers and waterproof enclosures will protect equipment and facilities.,flood_barriers,true
+resilient_infrastructure_design,search_protected_cabling,Armoured cables and reinforced waterproof ducts will protect network infrastructure against hazards.,protected_cabling,true
+resilient_infrastructure_design,search_wind_storm,Towers and structures will be reinforced to withstand extreme winds and storms.,wind_storm,true
+resilient_infrastructure_design,search_heat,Heat-tolerant components and shading will protect equipment against extreme temperatures.,heat,true
+resilient_infrastructure_design,search_ground_hazards,"Reinforced foundations and slope protection will reduce earthquake, landslide and erosion damage.",ground_hazards,true
+resilient_infrastructure_design,search_weatherproofing,"Protective enclosures and coatings will protect equipment against rain, dust, humidity and corrosion.",weatherproofing,true
+resilient_infrastructure_design,search_parent,Equipment will be raised above flood levels and towers reinforced against storms.,,true

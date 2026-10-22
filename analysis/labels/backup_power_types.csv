@@ -1,7 +1,6 @@
 measure_id,type_id,type_name,definition,active,version
-backup_power,ups,Uninterruptible power supply,UPS units that bridge short interruptions (minutes) for equipment. Does not include batteries sized for hours of autonomy (battery backup) or generators.,true,v1.0
-backup_power,battery_backup,Battery backup,Batteries charged from the main supply that keep a site running for hours during an outage. Includes batteries charged by solar where the sentence states a reserve during outages (hours or days of autonomy). Does not include short-bridge UPS units.,true,v1.0
-backup_power,standby_generation,Standby generator,"Diesel, gas or other fuel generators that start when the main supply fails. Does not include a second grid connection (independent power feed) or solar systems.",true,v1.0
-backup_power,redundant_power_feed,Independent power feed,"A second, independent connection to the electricity grid or a separate substation feed. Does not include generators, batteries or solar systems.",true,v1.0
-backup_power,renewable_backup,Solar or renewable backup,"Solar or other renewable generation, with storage, installed so a site keeps running when the main supply fails. Does not include renewable systems that are the site's normal supply (that is renewable energy, not backup power).",true,v1.0
-backup_power,power_autonomy,Extended power autonomy,Provides backup electricity for a specified duration,false,v1.0
+backup_power,ups,Uninterruptible power supply,UPS equipment that maintains electricity through interruptions. Do not infer a duration unless stated; battery backup may also qualify when an explicit battery reserve is described.,true,v2.0
+backup_power,battery_backup,Battery backup,"Battery reserves that maintain operations during loss of the primary electricity supply, including at solar-powered sites. Storage alone does not establish a backup function.",true,v2.0
+backup_power,standby_generation,Standby generator,Fuel-based generation that supplies electricity when the primary supply fails. Excludes generators serving only as the normal supply.,true,v2.0
+backup_power,redundant_power_feed,Independent power feed,Independent alternative grid or substation feeds that maintain electricity when the primary feed fails. Multiple feeds without an explicit continuity function are insufficient.,true,v2.0
+backup_power,renewable_backup,Solar or renewable backup,Renewable generation explicitly arranged to maintain operations during loss of the primary supply. Battery backup may also qualify when storage provides the reserve.,true,v2.0
