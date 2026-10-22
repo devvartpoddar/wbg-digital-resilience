@@ -13,7 +13,10 @@ posterior.on,true,every graded question,"After each model answer, combine the mo
 posterior.sharpness,20,every graded question,"How sharply similarity counts in the weighted vote of graded sentences: higher = only the closest count.",Tested 2026-10-22: 10 to 20 best of 2 to 160.
 posterior.centroid,true,every graded question,"Also use similarity to the average graded commitment minus similarity to the average graded non-commitment.",
 posterior.ridge,1.0,every graded question,"How strongly the layer's weights are pulled towards zero when fitted (more = closer to the model's score alone).",
-posterior.min_graded,20,every graded question,"A label with fewer graded sentences than this (or fewer than 5 of either kind) gets no layer: its score is the model's.",
+posterior.min_graded,20,every graded question,"A label with fewer graded sentences than this (or fewer than posterior.min_each of either kind) gets no layer: its score is the model's.",
+posterior.min_each,5,every graded question,"A label needs at least this many graded yes and this many graded no for a layer.",
+posterior.near_copy,0.97,every graded question,"A graded sentence does not inform a sentence it nearly copies (embedding similarity at this or more), nor any sentence of its own project: in fitting, checking and applying alike, so a reused paragraph's grade does not decide its copies.",Lower it if boilerplate still dominates the vote.
+posterior.folds,5,evaluation report,"The layer is checked out of sample in this many folds, whole projects to a fold; the suggested floor is read off the out-of-fold probabilities.",
 floor.default,0.5,commitment,"A sentence counts as committed (or planned) for a measure when its probability reaches this. One floor for every measure unless a line below overrides it.",Set from the evaluation report's suggested floors (./wbg check all --evaluate) after the first run.
 floor.target_precision,0.8,evaluation report,"The evaluation report suggests, per measure, the lowest floor whose precision on graded sentences reaches this.",
 floor.adaptation_applications,,commitment,Override of floor.default for this measure (blank = default).,

@@ -119,3 +119,19 @@ def test_the_tuning_draw_is_the_floor_draw_at_about_28_rows():
         assert [b[0] for b in bands] == [b[0] for b in check_units.floor_bands(floor)]
         assert sum(b[3] for b in bands) == 28
     assert sum(b[3] for b in check_units.floor_bands(None, check_units.TUNE_SCALE)) == 29
+
+
+def test_only_grades_given_under_the_current_question_are_read(tmp_path):
+    import check_units
+    lab = tmp_path / "labels"
+    lab.mkdir()
+    rows = [dict(label_set="cra", label_id="cra", unit_id="u1", text_sha256="t1",
+                 question_sha256="old", grade="3", graded_on="2026-10-01", weight="4"),
+            dict(label_set="cra", label_id="cra", unit_id="u2", text_sha256="t2",
+                 question_sha256="new", grade="1", graded_on="2026-10-02", weight="2.5")]
+    with open(lab / "cra_units.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=check_units.LABEL_COLS, restval="")
+        w.writeheader()
+        w.writerows(rows)
+    assert check_units.graded_labels("cra", str(tmp_path), "new") == {"u2": (1, "", 2.5)}
+    assert set(check_units.graded_labels("cra", str(tmp_path))) == {"u1", "u2"}

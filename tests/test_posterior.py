@@ -11,7 +11,8 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
                                 "src"))
 import posterior  # noqa: E402
 
-S = {"sharpness": 20.0, "centroid": True, "ridge": 1.0, "min_graded": 20}
+S = {"sharpness": 20.0, "centroid": True, "ridge": 1.0, "min_graded": 20, "min_each": 5,
+     "near_copy": 1.01, "folds": 5}
 
 
 def _graded(n=40, seed=0):
@@ -76,4 +77,49 @@ def test_the_suggested_floor_keeps_the_most_recall_at_the_target():
     ys = [1, 1, 1, 0, 1, 0, 0]
     t, prec, rec = posterior.suggest_floor(probs, ys, 0.8)
     assert t == 0.6 and prec == 0.8 and rec == 1.0
+    # Weighted: the false positive at 0.7 stands for four sentences, so 0.6
+    # no longer reaches 0.8; 0.75 and 0.8 keep the same three, and the higher wins.
+    t, prec, rec = posterior.suggest_floor(probs, ys, 0.8, ws=[1, 1, 1, 4, 1, 1, 1])
+    assert t == 0.8 and prec == 1.0 and rec == 0.75
     assert posterior.suggest_floor([0.9, 0.8], [0, 0], 0.8)[1] == 0.0   # none reaches: the most precise
+
+
+def test_a_graded_sentence_of_the_same_project_or_a_near_copy_does_not_vote():
+    graded, scores, vecs = _graded()
+    # Each graded sentence in a project of its own.
+    graded = [(u, y, 1.0, f"G{i}") for i, (u, y) in enumerate(graded)]
+    yes_projects = "|".join(p for _, y, _, p in graded if y)
+    s = dict(S, near_copy=0.999)
+    spec = posterior.fit(graded, scores, vecs, "q1", "cra", s)
+    layer = posterior.Layer(spec, vecs.get)
+    vecs["near_yes"] = numpy.array([1.0, 0.0, 0.0])
+    # From another project the yes neighbours vote; from theirs they do not.
+    assert layer.probability("near_yes", 0.5, "C") > layer.probability("near_yes", 0.5, yes_projects)
+    # A near-copy of a graded yes is not informed by it.
+    vecs["copy"] = vecs["u1"].copy()
+    keep = posterior._keep(posterior._unit(vecs["copy"]), layer.G, frozenset(), layer.P, 0.999)
+    assert not keep[layer.ids["u1"]]
+
+
+def test_design_weights_move_the_fit_towards_the_heavier_rows():
+    graded, scores, vecs = _graded()
+    light = posterior.fit([(u, y, 1.0) for u, y in graded], scores, vecs, "q", "cra", S)
+    heavy = posterior.fit([(u, y, 5.0 if y == 0 else 1.0) for u, y in graded], scores, vecs,
+                          "q", "cra", S)
+    # More weight on the noes lowers the intercept: a lower base rate.
+    assert heavy["coef"][0] < light["coef"][0]
+
+
+def test_out_of_fold_scores_each_project_with_a_layer_fitted_without_it():
+    graded, scores, vecs = _graded(n=60)
+    graded = [(u, y, 1.0, f"P{i % 7}") for i, (u, y) in enumerate(graded)]
+    oof = posterior.out_of_fold(graded, scores, vecs, S)
+    assert set(oof) == {u for u, *_ in graded}
+    yes = [oof[u] for u, y, *_ in graded if y]
+    no = [oof[u] for u, y, *_ in graded if not y]
+    assert min(yes) > max(no)
+    folds = posterior.folds_of(posterior._rows(graded, scores, vecs, None), 5)
+    by_project = {}
+    for u, _, _, p in graded:
+        by_project.setdefault(p, set()).add(folds[u])
+    assert all(len(f) == 1 for f in by_project.values())   # a project sits in one fold

@@ -46,7 +46,7 @@ def test_paragraph_counts_are_other_sentences_classified_with_an_asset_or_a_meas
     emb.mkdir()
     (emb / "sentence_index.csv").write_text(
         "unit_id,paragraph_id,project_ids\na1,pA,P1\na2,pA,P1\na3,pA,P1\nb1,pB,P2\n")
-    monkeypatch.setattr(measure, "asset_map", lambda data, projects=None, vector_of=None: (
+    monkeypatch.setattr(measure, "asset_map", lambda data, projects=None, vector_of=None, projects_of=None: (
         {"a1": {"fiber": 0.9}, "a2": {"fiber": 0.2, "towers": 0.31}, "a3": {"fiber": 0.1}},
         "assets-x"))
     runs = {}

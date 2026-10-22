@@ -181,7 +181,7 @@ def questions(labels, scale):
 
 # ------------------------------------------------------------------ the inputs
 
-def asset_map(data, projects=None, vector_of=None):
+def asset_map(data, projects=None, vector_of=None, projects_of=None):
     """({unit_id: {asset: probability}}, run name) from the current sentence
     asset map over the same scope: each asked sentence's score for each
     asset (read.grades), through the asset's probability layer when one has
@@ -189,7 +189,7 @@ def asset_map(data, projects=None, vector_of=None):
     folder = classify.current_run(ASSET_SET, data, projects=projects)
     if not folder:
         return {}, ""
-    layers = classify.asset_layers(data, folder, vector_of) if vector_of else {}
+    layers = classify.asset_layers(data, folder, vector_of, projects_of) if vector_of else {}
     out = {}
     with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
@@ -349,7 +349,9 @@ class Run:
         self.matrix = numpy.load(where(data, "embeddings", "sentence_emb.npy"), mmap_mode="r")
         self.vector_of = lambda u: (numpy.asarray(self.matrix[self.row_of[u]], dtype="float64")
                                     if u in self.row_of else None)
-        self.unit_assets, _ = asset_map(data, self.projects, self.vector_of)
+        proj = {r["unit_id"]: r.get("project_ids", "") for r in self.index}
+        self.projects_of = lambda u: proj.get(u, "")
+        self.unit_assets, _ = asset_map(data, self.projects, self.vector_of, self.projects_of)
         # Each paragraph's sentences in reading order, for the asset of a
         # sentence that names none (the last one named before it).
         self.before = {}
@@ -358,7 +360,8 @@ class Run:
             prior = seen.setdefault(r["paragraph_id"], [])
             self.before[r["unit_id"]] = list(reversed(prior))
             prior.append(r["unit_id"])
-        self.layer = posterior.load(self.layer_path, self.question_sha, self.vector_of)
+        self.layer = posterior.load(self.layer_path, self.question_sha, self.vector_of,
+                                    self.projects_of)
         self.texts = unit_texts(data, self.index)
         self.load_prior()
         self._loaded = True

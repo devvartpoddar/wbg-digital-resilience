@@ -600,7 +600,7 @@ def layers_path(data):
     return where(data, "labels", "assets_posterior.json")
 
 
-def asset_layers(data, folder, vector_of):
+def asset_layers(data, folder, vector_of, projects_of=None):
     """{asset: posterior.Layer} for the assets whose probability layer
     (fitted by ./wbg check all --evaluate) was fitted on the question the
     map at `folder` asked; {} when none."""
@@ -612,7 +612,7 @@ def asset_layers(data, folder, vector_of):
         shas = json.load(fh).get("question_sha256", {})
     with open(path, encoding="utf-8") as fh:
         specs = json.load(fh)
-    return {a: posterior.Layer(spec, vector_of) for a, spec in specs.items()
+    return {a: posterior.Layer(spec, vector_of, projects_of) for a, spec in specs.items()
             if spec.get("question_sha256") == shas.get(a)}
 
 
