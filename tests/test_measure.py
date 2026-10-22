@@ -181,20 +181,6 @@ def test_a_rerun_reads_the_store_and_asks_nothing(store):
     assert len(calls) == n
 
 
-def test_the_paragraph_design_is_another_version_with_the_paragraph(store):
-    data, calls = store
-    a = measure.measure("cra", data, **RUN)
-    b = measure.measure("cra", data, **dict(RUN, context="paragraph"))
-    assert a != b and calls[-1]["state"]["paragraph"].startswith("A site-specific")
-
-
-def test_a_gate_leaves_the_unit_in_the_table_but_unsent(store):
-    data, calls = store
-    out = measure.measure("cra", data, **dict(RUN, gate="paragraph", asset_min=0.95))
-    rows = _rows(out)
-    assert rows[0]["sent"] == "false" and rows[0]["grade"] == "" and calls == []
-
-
 def test_a_dry_run_asks_nothing(store):
     data, calls = store
     assert measure.measure("cra", data, dry_run=True, log=lambda *_: None, top=1) is None
@@ -226,6 +212,6 @@ def test_the_asset_map_grades_each_sentence_with_the_measure_questions_form(stor
     assert st["section"] == "Project Components" and st["component"] == "1 Connectivity"
     # One form of graded question for assets and measures alike.
     lab = {"id": "towers", "name": "Mobile networks", "definition": "masts"}
-    q = classify.graded_question(lab, ["Not {name}.", "{name}."], "sentence")
-    m = measure.questions([dict(lab, id="cra")], ["Not {name}.", "{name}."], "sentence")["cra"]
+    q = classify.graded_question(lab, ["Not {name}.", "{name}."])
+    m = measure.questions([dict(lab, id="cra")], ["Not {name}.", "{name}."])["cra"]
     assert q["instructions"] == m["instructions"] and q["criteria"] == m["criteria"]

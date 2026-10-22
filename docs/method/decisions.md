@@ -15,6 +15,28 @@ method and the inputs do not.
    probability that a person would say yes (`src/posterior.py`).
 5. **Decision.** The floor reads the posterior, never the model's answer alone.
 
+## The thresholds, one line each in the control panel
+
+The method is the same at every level; only these numbers differ, and each
+is one line of `inputs/config/control_panel.csv`. Until a graded sheet fits
+the skip rule, the cosine gates are the skip; until it fits the posterior,
+the floors read the model's score (through the similarity layer when one is
+fitted).
+
+| Level | Skip (what is not asked) | Decision (floor) |
+|---|---|---|
+| Asset map | `asset.gate_cosine` | `asset.floor` (with `asset.decay` for the paragraph's earlier sentences) |
+| Measure | `measure.gate_cosine`, `measure.top`, `feedback.*` | `floor.default`, `floor.<measure>` |
+| Type | none: every committed sentence | `floor.types` (0: its most likely type) |
+| Package to asset | `link.asset_top` | `link.asset_yes` |
+| Commitment to package | `link.measure_top` and shared assets | `dashboard.package_link_min_probability` |
+| Pair check | none: every sentence two measures commit | `floor.pair_check` (0: its most likely answer) |
+
+There is one way to ask each question: the sentence alone (no paragraph
+context, no asset gate on a measure, no paragraph map), in the same graded
+form for assets and measures. The options that asked otherwise were removed
+on 2026-10-22.
+
 Precision comes before cost: a skip exists to drop items that cannot count,
 not to save money at the price of recall.
 

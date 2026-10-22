@@ -41,8 +41,7 @@ SELECT u.label_set, u.label_id, l.label_name AS measure_name, u.project_id, pr.c
        MAX(li.activity_kinds) AS activity_kinds,
        MAX(li.actors) AS actors,
        MAX(li.type_ids) AS type_ids,
-       COUNT(*) FILTER (WHERE coalesce(u.is_committed, u.most_likely_grade = 3) AND u.conditional_probability >= 0.5)
-         AS conditional_committed_units
+       NULL::bigint AS conditional_committed_units   -- the conditional question was removed (2026-10-22)
 FROM u
 LEFT JOIN lists li ON li.label_set = u.label_set AND li.label_id = u.label_id
                   AND li.project_id = u.project_id

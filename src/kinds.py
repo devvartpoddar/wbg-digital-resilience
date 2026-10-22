@@ -57,6 +57,7 @@ import classify  # noqa: E402
 import common  # noqa: E402
 import labels  # noqa: E402
 import measure  # noqa: E402
+import panel  # noqa: E402
 import prior  # noqa: E402
 
 # The cheapest capable generative model on the route the project already
@@ -70,6 +71,9 @@ PROPOSAL_COLS = ["run", "type_id", "type_name", "definition", "example_units"]
 TYPE_NONE = "none"
 OTH_PREFIX = "OTH."
 OTH_MIN = 5              # fewer "none" units than this are reported, not proposed from
+# A sentence takes its most likely type when that type's probability reaches
+# this (control panel floor.types; 0 = always), else no type.
+TYPE_FLOOR = float(panel.get("floor.types", 0) or 0)
 ASSIGN_COLS = ["label_id", "unit_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "model_served", "cost", "types_yes", "best_type", "best_p"]
 
@@ -363,7 +367,7 @@ def choice_probs(entry):
     return {k: float(v) for k, v in entry["answer"]["probabilities"].items()}
 
 
-def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, read_at=0.5, **kw):
+def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
     """(run folder, approved, rows [(label, unit, questions)], out folder): what
     an assignment run asks and where it goes, without asking. The folder is
     keyed on the measure run, the model and every request, so a changed
@@ -382,9 +386,7 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, read_at=0.
             rows.append((lid, u, qs))
     h = hashlib.sha256()
     h.update(f"{os.path.basename(run_folder)}\t{model}\n".encode())
-    if read_at != 0.5:          # the default keeps the folders made before it was keyed
-        h.update(f"read_at={read_at}\n".encode())
-    h.update(f"prior={prior.VERSION}\n".encode())
+    h.update(f"prior={prior.VERSION}\nfloor={TYPE_FLOOR}\n".encode())
     for (lid, u, _), sha in zip(rows, shas):
         h.update(f"{u['unit_id']}:{sha}\n".encode())
     return run_folder, approved, rows, where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
@@ -444,15 +446,14 @@ def gaps(name, lid, label, approved, none_units, data, *, api_key, dry_run, log,
 
 
 def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=print,
-           workers=classify.WORKERS, read_at=0.5, **kw):
+           workers=classify.WORKERS, **kw):
     """Each committed unit's type: one choice over the approved types and
     none; then the gap step (OTH types from the none units, assigned by a
-    second choice). read_at is kept for the folder key of runs made before
-    the choice; the choice itself has no threshold."""
+    second choice)."""
     if no_run_yet(name, data, dry_run, "assignment", log, **kw):
         return "no measure run"
     run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log,
-                                                  read_at=read_at, **kw)
+                                                  **kw)
     log(f"{name}: {len(rows):,} committed units x one type choice -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
@@ -499,7 +500,7 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
             b2 = max(second, key=second.get)
             if b2 != TYPE_NONE:
                 best, probs = b2, {**{k: v for k, v in probs.items()}, **second}
-        yes = [] if best == TYPE_NONE else [best]
+        yes = [] if best == TYPE_NONE or probs[best] < TYPE_FLOOR else [best]
         counts[lid][best if yes else "other"] += 1
         model_served = "|".join(sorted({e["model"] for e in entries}))
         served.add(model_served)
@@ -615,10 +616,6 @@ def main():
     ap.add_argument("--assign", action="store_true", help="assign to the approved types")
     ap.add_argument("--runs", type=int, default=RUNS)
     ap.add_argument("--max-types", type=int, default=8)
-    ap.add_argument("--read-at", type=float, default=0.5)
-    ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
-    ap.add_argument("--gate", default="none", choices=measure.GATES)
-    ap.add_argument("--asset-min", type=float, default=0.0)
     ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--dry-run", action="store_true")
@@ -627,11 +624,10 @@ def main():
     args = ap.parse_args()
     import embed
     key = "" if args.dry_run else embed.read_key("")
-    kw = dict(context=args.context, gate=args.gate, asset_min=args.asset_min,
-              projects=classify.scope(args.projects))
+    kw = dict(projects=classify.scope(args.projects))
     if args.assign:
         out = assign(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
-                     read_at=args.read_at, **kw)
+                     **kw)
         if out and not (args.dry_run or args.no_publish):
             import store
             store.try_publish(args.data, sets=[args.label_set], projects=kw["projects"])

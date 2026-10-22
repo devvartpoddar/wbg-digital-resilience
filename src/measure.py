@@ -40,9 +40,8 @@ asset: the decision model reads literally, and a question about "climate
 risk assessment of digital infrastructure" scored a tower-siting assessment
 at 0.17 where the same question without the asset phrase scored it 0.97.
 
-Nothing is gated by default. --gate link|unit|paragraph|component with
---asset-min sends only the units the chosen asset link scores at least that
-high. Every row carries the wording's firmness (activity, outcome, none): a
+Nothing is gated on the asset: every unit in the pool is asked about the
+sentence alone, the same question form as the asset map's. Every row carries the wording's firmness (activity, outcome, none): a
 column to filter on, never a cut.
 
 Reads  data/search/<set>-<version>/{scores.npy,queries.csv}
@@ -61,14 +60,12 @@ Writes data/classify/answers/<model>/...                 every answer, once
        Postgres (src/store.py)
 
 <version> is a SHA-256 over the search run, the patterns, the asset map
-version, the exact questions, the model, the context design, the gate and
-the feedback settings. The units a feedback round reads depend on the
+version, the exact questions, the model, the prior inputs' version and the
+feedback settings. The units a feedback round reads depend on the
 stored answers, which are the record, so an unchanged run reads the store
 and asks nothing.
 
-  ./wbg measure cra                      sentence context, cosine pool, feedback rounds
-  ./wbg measure cra --context paragraph
-  ./wbg measure cra --gate unit --asset-min 0.5
+  ./wbg measure cra                      cosine pool, feedback rounds
   ./wbg measure cra --dry-run            round 0 only, no request
 """
 import argparse, csv, hashlib, json, os, re, sys, time
@@ -94,8 +91,6 @@ ASSET_SET = "assets"
 # commitment is delivered, whether it is conditional and who carries it out;
 # nothing decided on the answers, so it was removed and their columns stay
 # empty. The asset comes from the sentence asset map (src/classify.py).
-CONTEXTS = ("sentence", "paragraph")
-GATES = ("none", "link", "unit", "paragraph", "component")
 
 # Firmness of the wording, read by fixed word lists: 'activity' (the project
 # finances, builds, requires, includes...), 'outcome' ("will enable", "is
@@ -129,7 +124,7 @@ def firmness(text):
         return "outcome"
     return "none"
 # Every number below is a control-panel setting (inputs/config/control_panel.csv).
-LINK_MIN = float(panel.get("asset.floor", 0.5))   # a sentence has an asset at or above this
+LINK_MIN = float(panel.get("asset.floor", 0.3))   # a sentence has an asset at or above this
 DECAY = float(panel.get("asset.decay", 0.4))      # per sentence back, for a sentence naming none
 TOP = int(panel.get("measure.top", 0))            # round 0 by count; 0 = off (the cosine gate is the pool)
 MIN_COSINE = float(panel.get("measure.gate_cosine", 0.45))  # round 0 pool: best cosine over the
@@ -178,13 +173,10 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
 REPORT_THRESHOLDS = (0.3, 0.5, 0.7, 0.9)
 
 
-def questions(labels, scale, context):
-    """The measure's graded question(s) about the sentence (the paragraph is
-    context only with context 'paragraph'): the same question form as the
-    asset map's (src/classify.py)."""
-    return {lab["id"]: classify.graded_question(
-        lab, scale, "sentence+paragraph" if context == "paragraph" else "sentence")
-        for lab in labels}
+def questions(labels, scale):
+    """The measure's graded question(s) about the sentence: the same question
+    form as the asset map's (src/classify.py)."""
+    return {lab["id"]: classify.graded_question(lab, scale) for lab in labels}
 
 
 # ------------------------------------------------------------------ the inputs
@@ -273,7 +265,7 @@ def component_names(data):
     return names
 
 
-def state_for(row, para, unit_text, para_text, names, context):
+def state_for(row, para, unit_text, names):
     sub = row.get("subcomponent_number") or ""
     comp = sub or row.get("component_number") or ""
     name = names.get((row["doc_id"], comp)) or \
@@ -281,8 +273,6 @@ def state_for(row, para, unit_text, para_text, names, context):
     state = {"section": para.get("section_title", ""), "sentence": unit_text}
     if comp:
         state["component"] = f"{comp} {name}".strip()
-    if context == "paragraph" and para_text != unit_text:
-        state["paragraph"] = para_text
     return state
 
 
@@ -291,15 +281,11 @@ def state_for(row, para, unit_text, para_text, names, context):
 class Run:
     """Everything one measure run needs, loaded once."""
 
-    def __init__(self, name, data, *, model=MODEL, context="sentence", gate="none",
-                 asset_min=0.0, top=TOP, min_cosine=MIN_COSINE, batch=BATCH,
+    def __init__(self, name, data, *, model=MODEL, top=TOP, min_cosine=MIN_COSINE, batch=BATCH,
                  min_yield=MIN_YIELD, max_rounds=MAX_ROUNDS, build=True, log=print,
                  projects=None):
-        if context not in CONTEXTS or gate not in GATES:
-            raise SystemExit(f"measure: --context is one of {CONTEXTS}, --gate one of {GATES}")
         self.name, self.data, self.log = name, data, log
-        self.settings = {"model": model, "context": context, "gate": gate,
-                         "asset_min": asset_min, "top": top, "min_cosine": min_cosine,
+        self.settings = {"model": model, "top": top, "min_cosine": min_cosine,
                          "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
@@ -321,12 +307,9 @@ class Run:
         self.patterns = labels_mod.load_patterns(name)
         self.labels, self.scale = classify.load_labels(name, None)
         self.assets = [a for a in labels_mod.load_set(ASSET_SET) if a["active"] == "true"]
-        self.qs = questions(self.labels, self.scale, context)
+        self.qs = questions(self.labels, self.scale)
         asset_folder = classify.current_run(ASSET_SET, data, projects=self.projects)
         self.asset_run = os.path.basename(asset_folder) if asset_folder else ""
-        if gate in ("paragraph", "component") and not self.asset_run:
-            raise SystemExit(f"measure: --gate {gate} needs the asset map: run ./wbg classify "
-                             f"{ASSET_SET} first")
         # The probability layer (src/posterior.py) fitted by the evaluation of a
         # graded sheet (./wbg check <set> --evaluate) on the same question:
         # applied to every score as p_committed_calibrated, which the floor
@@ -376,7 +359,6 @@ class Run:
         self.layer = posterior.load(self.layer_path, self.question_sha, self.vector_of)
         self.texts = unit_texts(data, self.index)
         self.load_prior()
-        self.doc_texts = {}
         self._loaded = True
 
     def load_prior(self):
@@ -449,24 +431,8 @@ class Run:
             rows.append(self.base_row(r, route, 0, int(rank[i]), f"{best[i]:.6f}", "|".join(hit)))
         return rows
 
-    def gated(self, row, rnd):
-        s = self.settings
-        if s["gate"] == "none" or (s["gate"] in ("unit", "link") and rnd == 0):
-            return True
-        if s["gate"] == "link":
-            if row["asset_link_level"] == "":          # not graded yet: link from the maps alone
-                self.link_into(row)
-            return row["asset_link"] != "" and float(row["asset_link_p"]) >= s["asset_min"]
-        p = {"unit": row["asset_p_unit"], "paragraph": row["asset_p_para"],
-             "component": row["asset_p_comp"]}[s["gate"]]
-        return p != "" and float(p) >= s["asset_min"]
-
     def state_of(self, row):
-        para = row["_para"]
-        doc = _text(self.doc_texts, self.data, row["doc_id"])
-        para_text = doc[int(para["char_start"]):int(para["char_end"])]
-        return state_for(row, para, row["text"], para_text, self.names,
-                         self.settings["context"])
+        return state_for(row, row["_para"], row["text"], self.names)
 
     def grade_into(self, row, entries):
         """The measure's grade from the model's answer."""
@@ -511,19 +477,18 @@ class Run:
 
     def grade(self, rows, rnd, api_key, dry_run, workers):
         """The measure's question, through the answer store, for the rows
-        that pass the gate. Returns (calls, cost, failures)."""
+        in the pool. Returns (calls, cost, failures)."""
         import answers
         model = self.settings["model"]
         sent = []
         for row in rows:
-            if self.gated(row, rnd):
-                row["sent"] = "true"
-                row["_state"] = self.state_of(row)
-                sent.append(row)
+            row["sent"] = "true"
+            row["_state"] = self.state_of(row)
+            sent.append(row)
         requests_ = [(r["_state"], self.qs) for r in sent]
         got, st = answers.ask(model, requests_, self.data,
                               api_key=api_key, log=self.log, workers=workers, dry_run=True)
-        self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} pass the gate; measure "
+        self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} asked; measure "
                  f"question: {st['to_ask']:,} to ask (about US${st['estimate_usd']:.3f})")
         if dry_run:
             return 0, 0.0, []
@@ -589,9 +554,7 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
     sent = [r for r in rows if r["sent"] == "true"]
     com = [r for r in sent if int(r["grade"]) == top]
     lines = [f"{run.name}: {len(rows):,} units seen, {len(sent):,} graded by {s['model']} "
-             f"(context {s['context']}, gate {s['gate']}"
-             + (f" >= {s['asset_min']}" if s["gate"] != "none" else "")
-             + f", pool: cosine >= {s['min_cosine']}" + (f" or top {s['top']}" if s["top"] else "")
+             f"(pool: cosine >= {s['min_cosine']}" + (f" or top {s['top']}" if s["top"] else "")
              + f", batch {s['batch']}, min yield {s['min_yield']})",
              f"  search run {os.path.basename(run.search_run)}; {len(run.patterns)} pattern(s); "
              f"asset map {run.asset_run or 'none'}",
@@ -615,20 +578,13 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
         f"{k} {v[0]:,}/{v[1]:,}" for k, v in sorted(by_route.items())))
     lines.append("  committed units by the unit-level asset answer (best asset at >= " +
                  ", ".join(f"{t}: {sum(1 for r in com if r['asset_p_unit'] and float(r['asset_p_unit']) >= t)}"
-                           for t in REPORT_THRESHOLDS) + f") of {len(com)}; no asset at 0.5: "
+                           for t in REPORT_THRESHOLDS) + f") of {len(com)}; no asset of its own at {LINK_MIN}: "
                  f"{sum(1 for r in com if not r['assets_yes'])}")
-    if run.asset_run:
-        lines.append("  committed units kept by a gate on the paragraph / the component map at " +
-                     ", ".join(f"{t}: {sum(1 for r in com if r['asset_p_para'] and float(r['asset_p_para']) >= t)}"
-                               f"/{sum(1 for r in com if r['asset_p_comp'] and float(r['asset_p_comp']) >= t)}"
-                               for t in REPORT_THRESHOLDS)
-                     + f"; committed units with no paragraph score: "
-                       f"{sum(1 for r in com if not r['asset_p_para'])}")
     levels = defaultdict(int)
     for r in com:
         levels[r["asset_link_level"]] += 1
-    lines.append("  committed units by asset link level (unit answer, else paragraph map, else "
-                 f"component map, at {LINK_MIN}): " + ", ".join(
+    lines.append("  committed units by asset link level (the sentence's own asset, else "
+                 f"an earlier sentence of its paragraph, at {LINK_MIN}): " + ", ".join(
                      f"{k} {v}" for k, v in sorted(levels.items(), key=lambda x: -x[1])))
     linked = defaultdict(int)
     for r in com:
@@ -641,7 +597,7 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
         for a in r["assets_yes"].split("|"):
             if a:
                 assets[a] += 1
-    lines.append("  committed units by asset (unit answer >= 0.5, several allowed): " + ", ".join(
+    lines.append(f"  committed units by their own asset (at {LINK_MIN}): " + ", ".join(
         f"{a} {n}" for a, n in sorted(assets.items(), key=lambda x: -x[1])))
     proj = defaultdict(int)
     for r in com:
@@ -663,9 +619,7 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
             import store
             store.try_publish(data, sets=[name], projects=run.projects, log=log)
         return run.out
-    log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades; context "
-        f"{run.settings['context']}, gate {run.settings['gate']} "
-        f"-> {run.out}")
+    log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades -> {run.out}")
     t0 = time.time()
     rows = run.candidate_rows()
     rounds, calls, cost = {}, 0, 0.0
@@ -755,11 +709,6 @@ def main():
     ap.add_argument("label_set")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--model", default=MODEL)
-    ap.add_argument("--context", default="sentence", choices=CONTEXTS)
-    ap.add_argument("--gate", default="none", choices=GATES)
-    ap.add_argument("--asset-min", type=float, default=0.0,
-                    help="with --gate: the asset probability a unit, paragraph or component "
-                         "needs for the unit to be sent")
     ap.add_argument("--top", type=int, default=TOP, help="round 0 pool by count (0 = off)")
     ap.add_argument("--min-cosine", type=float, default=MIN_COSINE,
                     help="round 0 pool: units whose best cosine reaches this (0 = off)")
@@ -780,8 +729,7 @@ def main():
     out = measure(args.label_set, args.data, api_key=key, dry_run=args.dry_run,
                   workers=args.workers, model=args.model,
                   publish=not (args.dry_run or args.no_publish),
-                  context=args.context,
-                  gate=args.gate, asset_min=args.asset_min, top=args.top,
+                  top=args.top,
                   min_cosine=args.min_cosine, batch=args.batch,
                   min_yield=args.min_yield, max_rounds=args.max_rounds,
                   projects=classify.scope(args.projects))

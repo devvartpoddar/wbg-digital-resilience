@@ -21,7 +21,8 @@ COMMENT ON VIEW wbg.package_status_order IS
 -- empty tables until a check run exists, so the views below always build.
 CREATE TABLE IF NOT EXISTS wbg.unit_pair_checks (unit_id text, set_a text, set_b text,
   decision text, probability numeric, p_only_a numeric, p_only_b numeric, p_both numeric,
-  p_neither numeric, model_served text, model_cost_usd numeric);
+  p_neither numeric, model_served text, model_cost_usd numeric, prior_probability_a numeric,
+  prior_phrase_cosine_a numeric, prior_probability_b numeric, prior_phrase_cosine_b numeric);
 CREATE TABLE IF NOT EXISTS wbg.unit_scope (unit_id text, scope text, probability numeric,
   p_rule numeric, p_investment numeric, p_not_commitment numeric, model_served text,
   model_cost_usd numeric);
@@ -60,10 +61,11 @@ WITH f AS (
     AND f.probability_grade_3 >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
-    -- a pair check that says the unit is only the other measure, or neither
+    -- a pair check that says the unit is only the other measure, or neither,
+    -- at the pair check's floor (control panel floor.pair_check)
     AND NOT (s.apply_measure_pair_checks AND EXISTS (
       SELECT 1 FROM wbg.unit_pair_checks c
-      WHERE c.unit_id = f.unit_id
+      WHERE c.unit_id = f.unit_id AND c.probability >= s.pair_check_floor
         AND ((c.set_a = f.label_set AND c.decision IN ('only_b', 'neither'))
           OR (c.set_b = f.label_set AND c.decision IN ('only_a', 'neither')))))
 ),
@@ -144,7 +146,7 @@ CREATE UNIQUE INDEX ON wbg.commitment_package_status (commitment_id, package_id)
 CREATE INDEX ON wbg.commitment_package_status (package_id);
 ANALYZE wbg.commitment_package_status;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_package_status IS
-  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability, 0.7): the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
+  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability): the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
 
 -- Near-identical wording across projects. Word-for-word equality found 17
 -- of 2,150 commitments, while four operations of one programme (DRC,

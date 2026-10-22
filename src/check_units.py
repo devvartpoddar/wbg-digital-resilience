@@ -15,7 +15,7 @@ asset the sentence is about.
   ./wbg check cra --evaluate            read the grades back, store them as labels
                                         (data/labels/cra_units.csv, keyed by text and
                                         question hash), write data/reports/evaluate_units_cra.md
-                                        and the calibration data/labels/cra_calibration.json
+                                        and fit the probability layer (src/posterior.py)
   ./wbg check cra --elusion             draw units the funnel never read, from just below
                                         the pool threshold and from far below it:
                                         data/review/check_units_cra_elusion_s1.xlsx
@@ -24,10 +24,9 @@ asset the sentence is about.
 What the report says, and does not: precision and recall of "committed"
 (and of "at least planned") against the person's grades, over the graded
 pool (candidates and feedback units), with 95 per cent Wilson intervals on
-the raw counts and stratum-weighted point estimates. The calibration is a
-Platt scaling (a logistic fit of the person's grade on the model's
-log-odds) with the Brier score before and after; the measure stage reads it
-and adds p_committed_calibrated to every unit. Recall outside the pool is
+the raw counts and stratum-weighted point estimates. The probability layer
+(src/posterior.py) is fitted on the same grades; the measure stage reads it
+and writes p_committed_calibrated on every unit. Recall outside the pool is
 the elusion sheet's job: a random draw of the units the funnel never read,
 in two strata (near: within ELUSION_BAND below the pool threshold; far: the
 rest), weighted back to their strata, which is how a technology-assisted
@@ -491,47 +490,6 @@ def graded_sheet(name, data, seed, elusion=False):
     raise SystemExit(f"check: no sheet for {name} at seed {seed} ({base}.xlsx or {xlsx})")
 
 
-def platt(p, y):
-    """Platt scaling: (a, b) of sigmoid(a * logit(p) + b) fitted to the 0/1
-    grades y by damped Newton steps on the log-likelihood, with the usual
-    smoothed targets so a perfectly separated sample still fits. Returns
-    None with fewer than two of each class."""
-    import numpy
-    p = numpy.clip(numpy.asarray(p, dtype=float), 1e-4, 1 - 1e-4)
-    y = numpy.asarray(y, dtype=float)
-    n1, n0 = y.sum(), len(y) - y.sum()
-    if n1 < 2 or n0 < 2:
-        return None
-    t = numpy.where(y > 0, (n1 + 1) / (n1 + 2), 1 / (n0 + 2))
-    x = numpy.log(p / (1 - p))
-
-    def loss(a, b):
-        z = a * x + b
-        return float((numpy.logaddexp(0, z) - t * z).sum())
-    a, b = 1.0, 0.0
-    for _ in range(200):
-        z = 1 / (1 + numpy.exp(-numpy.clip(a * x + b, -30, 30)))
-        g = numpy.array([((z - t) * x).sum(), (z - t).sum()])
-        w = z * (1 - z)
-        h = numpy.array([[(w * x * x).sum(), (w * x).sum()], [(w * x).sum(), w.sum()]])
-        h += numpy.eye(2) * 1e-6
-        step = numpy.linalg.solve(h, g)
-        base, scale = loss(a, b), 1.0
-        while scale > 1e-4 and loss(a - scale * step[0], b - scale * step[1]) > base:
-            scale /= 2
-        a, b = a - scale * step[0], b - scale * step[1]
-        if abs(scale * step).max() < 1e-8:
-            break
-    return float(a), float(b)
-
-
-def calibrated(p, ab):
-    import math
-    p = min(max(float(p), 1e-4), 1 - 1e-4)
-    z = max(-30.0, min(30.0, ab[0] * math.log(p / (1 - p)) + ab[1]))
-    return 1 / (1 + math.exp(-z))
-
-
 QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "graded_units",
                 "precision", "recall", "evaluated_at", "report_path"]
 
@@ -563,10 +521,6 @@ def write_quality(data, name, key, rows, top):
         w.writeheader()
         w.writerows(sorted(current.values(), key=lambda r: (r["label_set"], r["evaluated_at"])))
     os.replace(path + ".part", path)
-
-
-def calibration_path(name, data):
-    return where(data, "labels", f"{name}_calibration.json")
 
 
 def posterior_path(name, data):
@@ -804,33 +758,9 @@ def evaluate(name, data, seed=1, elusion=False, **kw):
         lines.append(f"- model {s}: {len(rs)} rows, person's mean grade "
                      f"{sum(r['grade'] for r in rs) / len(rs):.2f}, graded committed "
                      f"{sum(1 for r in rs if r['grade'] >= top)}")
-    # Platt scaling of P(grade >= k) on the person's grades, with the Brier
-    # score before and after; stored for the measure stage to apply.
-    today = datetime.date.today().isoformat()
-    cal = {"label_set": name, "measure_dir": key[0]["measure_dir"], "graded_rows": len(rows),
-           "graded_on": today, "question_sha256": key[0]["question_sha256"], "grades": {}}
-    lines += ["## Calibration (Platt scaling of P(grade >= k), Brier score before -> after)", ""]
-    for k in (top, top - 1):
-        ps = [sum(r["p"][k:]) for r in rows]
-        ys = [1 if r["grade"] >= k else 0 for r in rows]
-        ab = platt(ps, ys)
-        if ab is None:
-            lines.append(f"- grade >= {k}: too few of one class to fit")
-            continue
-        raw = sum((p - y) ** 2 for p, y in zip(ps, ys)) / len(ps)
-        after = sum((calibrated(p, ab) - y) ** 2 for p, y in zip(ps, ys)) / len(ps)
-        cal["grades"][str(k)] = {"a": ab[0], "b": ab[1], "brier_raw": raw,
-                                 "brier_calibrated": after, "n": len(ps)}
-        lines.append(f"- grade >= {k}: a = {ab[0]:.3f}, b = {ab[1]:.3f}; Brier {raw:.3f} -> "
-                     f"{after:.3f} (fitted and scored on the same {len(ps)} rows: an "
-                     f"in-sample figure)")
     lines.append("")
     write_quality(data, name, key[0], rows, top)
     lines += fit_layer(name, data)
-    cpath = calibration_path(name, data)
-    with open(cpath + ".part", "w", encoding="utf-8") as fh:
-        json.dump(cal, fh, indent=1, sort_keys=True)
-    os.replace(cpath + ".part", cpath)
     out = where(data, "reports", f"evaluate_units_{name}.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
@@ -997,14 +927,10 @@ def main():
                          "around each measure's commit floor (about 20, links around 0.7), "
                          "or to tune every threshold (about 28 around each floor, 70 links "
                          "over the whole range)")
-    ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
-    ap.add_argument("--gate", default="none", choices=measure.GATES)
-    ap.add_argument("--asset-min", type=float, default=0.0)
     ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
-    kw = dict(context=args.context, gate=args.gate, asset_min=args.asset_min,
-              projects=classify.scope(args.projects))
+    kw = dict(projects=classify.scope(args.projects))
     if args.evaluate:
         out, n = evaluate(args.label_set, args.data, args.seed, elusion=args.elusion, **kw)
         print(f"{n} graded rows; wrote {out}")

@@ -2,7 +2,6 @@ setting,value,stage,what_it_does,how_to_tune
 read.grades,2|3,every graded question,"The model's score for a sentence is the sum of its probabilities for these grades (2 planned, 3 committed): loose first, tightened by the floors.",Leave unless the scale changes.
 asset.gate_cosine,0.25,asset map (src/classify.py),"An asset's question goes to a sentence only when the sentence scores at least this against the asset's search phrases. 0 asks every asset of every sentence.",Lower it if assets are missed; each step down costs more questions (run with --dry-run to see how many).
 asset.floor,0.3,asset map,"A sentence has an asset when the probability for its best asset (after the similarity layer, with the decay below) reaches this.","Tested 2026-10-22 with decay 0.4: 0.3 best. Raise it if sentences get the wrong asset; lower it if too many get none."
-asset.unit,sentence,asset map,"What the asset map grades: sentence (the same graded question the measures ask) or paragraph (the earlier map).",
 asset.decay,0.4,asset map,"A sentence that names no asset takes the last asset named earlier in its paragraph, its probability multiplied by this for each sentence back (one back x0.4, two back x0.16). 0 turns the rule off.",Tested on the graded sentences 2026-10-22: 0.4 best of 0 to 1.
 measure.gate_cosine,0.45,measure pool (src/measure.py),"A sentence goes to a measure's question when its best similarity to the measure's phrases and definition reaches this, or a word pattern matches.",Lower it to reach more sentences (more questions); the feedback rounds below find what the gate misses.
 measure.top,0,measure pool,"Also send the measure's best N sentences by similarity, whatever their score. 0 = off.",Usually off.
@@ -29,6 +28,8 @@ floor.ews,,commitment,Override of floor.default for this measure.,
 floor.network_redundancy,,commitment,Override of floor.default for this measure.,
 floor.renewable_energy,,commitment,Override of floor.default for this measure.,
 floor.resilient_infrastructure_design,,commitment,Override of floor.default for this measure.,
+floor.types,0,types (src/kinds.py),"A committed sentence takes its most likely type when that type's probability reaches this; else no type. 0 = always its most likely type.",Set from the evaluation sheet once types are graded.
+floor.pair_check,0,pair check (sql/views/16_commitments.sql),"A pair check drops a sentence from a measure only when its answer (only the other measure, or neither) has at least this probability. 0 = its most likely answer, always.",Set from the evaluation sheet once pair checks are graded.
 link.asset_top,4,package links (src/link_packages.py),"Assets asked of each procurement package: its best this many by similarity.",
 link.asset_yes,0.5,package links,"A package has an asset at or above this probability.",
 link.measure_top,3,package links,"Each committed sentence is also paired with its project's nearest this many packages by similarity to the measure.",

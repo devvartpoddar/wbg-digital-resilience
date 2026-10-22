@@ -118,21 +118,15 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
                      for t in THRESHOLDS}
         gate_unit = {t: any(u["asset_p_unit"] and float(u["asset_p_unit"]) >= t for u in committed)
                      for t in THRESHOLDS}
-        gate_para = {t: any(u["asset_p_para"] and float(u["asset_p_para"]) >= t for u in committed)
-                     for t in THRESHOLDS}
-        gate_comp = {t: any(u["asset_p_comp"] and float(u["asset_p_comp"]) >= t for u in committed)
-                     for t in THRESHOLDS}
         rows.append({"row": a["row"], "project_id": a["project_id"], "flag": flag,
                      "positive": positive, "negative": negative, "paragraphs": len(paras),
                      "candidates": len(mine), "graded": len(sent), "committed": len(committed),
                      "best_expected": max((float(u["expected"]) for u in sent), default=""),
                      **{f"gate_link_{t}": gate_link[t] for t in THRESHOLDS},
                      **{f"gate_unit_{t}": gate_unit[t] for t in THRESHOLDS},
-                     **{f"gate_para_{t}": gate_para[t] for t in THRESHOLDS},
-                     **{f"gate_comp_{t}": gate_comp[t] for t in THRESHOLDS},
                      "snippet": " ".join(a["text"].split())[:160]})
     slug = re.sub(r"[^a-z0-9]+", "_", column.lower()).strip("_")[:40]
-    base = where(data, "reports", f"evaluate_{name}_{slug}_{kw.get('context', 'sentence')}")
+    base = where(data, "reports", f"evaluate_{name}_{slug}")
     os.makedirs(os.path.dirname(base), exist_ok=True)
     with open(base + ".csv", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
@@ -163,10 +157,6 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
                  f"{t}: {share(pos_m, f'gate_link_{t}')}" for t in THRESHOLDS),
              "    3 + asset gate on the unit answer, at threshold " + ", ".join(
                  f"{t}: {share(pos_m, f'gate_unit_{t}')}" for t in THRESHOLDS),
-             "    3 + asset gate on the paragraph, at threshold " + ", ".join(
-                 f"{t}: {share(pos_m, f'gate_para_{t}')}" for t in THRESHOLDS),
-             "    3 + asset gate on the component, at threshold " + ", ".join(
-                 f"{t}: {share(pos_m, f'gate_comp_{t}')}" for t in THRESHOLDS),
              "",
              f"  false positives among matched negatives (grade {top_grade} somewhere in the activity):",
              f"    {share(neg_m, 'committed')}; with link gate "
@@ -191,16 +181,12 @@ def main():
     ap.add_argument("label_set")
     ap.add_argument("--column", required=True, help="the workbook's theme column")
     ap.add_argument("--text-regex", help="a positive must also match this in its text")
-    ap.add_argument("--context", default="sentence", choices=measure.CONTEXTS)
-    ap.add_argument("--gate", default="none", choices=measure.GATES)
-    ap.add_argument("--asset-min", type=float, default=0.0)
     ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
     import classify
-    evaluate(args.label_set, args.data, args.column, args.text_regex, context=args.context,
-             projects=classify.scope(args.projects),
-             gate=args.gate, asset_min=args.asset_min)
+    evaluate(args.label_set, args.data, args.column, args.text_regex,
+             projects=classify.scope(args.projects))
     return 0
 
 

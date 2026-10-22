@@ -897,17 +897,14 @@ def main(argv=None):
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     _filters(p)
     p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
-    p.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
+    p.add_argument("--limit", type=int, default=0, help="first N sentences (smoke test)")
     p.add_argument("--min-cosine", type=float, default=_classify.MIN_COSINE,
-                   help="ask a label of a paragraph only when a unit scores at least this")
+                   help="ask a label of a sentence only when it scores at least this")
     p = sub.add_parser("measure", help="grade a measure's pool with the decision model, "
                                        "with the asset map as columns (after ./wbg search "
                                        "<set> and ./wbg classify assets)")
     p.add_argument("label_set", help="a set in analysis/labels/")
     _filters(p)
-    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
-    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
-    p.add_argument("--asset-min", type=float, default=0.0)
     p.add_argument("--top", type=int, default=_measure.TOP, help="round 0 pool by count (0 = off)")
     p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
                    help="round 0 pool: units whose best cosine reaches this")
@@ -968,9 +965,6 @@ def main(argv=None):
     _filters(p)
     p.add_argument("--assign", action="store_true")
     p.add_argument("--runs", type=int, default=3)
-    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
-    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
-    p.add_argument("--asset-min", type=float, default=0.0)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("check", help="draw a measure's units for a person to grade, or "
                                      "--evaluate the grades: precision and recall with intervals")
@@ -984,18 +978,12 @@ def main(argv=None):
                    help="draw by the model's grade, or by band of its probability of the top "
                         "grade (the default for `all`: every measure and the package links in "
                         "one workbook)")
-    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
-    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
-    p.add_argument("--asset-min", type=float, default=0.0)
     p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
                                         "hand-labelled activities workbook")
     p.add_argument("label_set")
     _filters(p)
     p.add_argument("--column", required=True)
     p.add_argument("--text-regex")
-    p.add_argument("--context", default="sentence", choices=("sentence", "paragraph"))
-    p.add_argument("--gate", default="none", choices=("none", "link", "unit", "paragraph", "component"))
-    p.add_argument("--asset-min", type=float, default=0.0)
     p = sub.add_parser("requests", help="run the measures asked for from the dashboard "
                                         "(wbg_requests.measure_requests), one at a time, "
                                         "US$1 cap each")
@@ -1044,8 +1032,7 @@ def main(argv=None):
         _run("classify.py", args.label_set, *extra, *_scope(args), data=data)
         return 0
     if args.cmd == "measure":
-        _run("measure.py", args.label_set, "--context", args.context, "--gate", args.gate,
-             "--asset-min", str(args.asset_min), "--top", str(args.top),
+        _run("measure.py", args.label_set, "--top", str(args.top),
              "--min-cosine", str(args.min_cosine), "--batch",
              str(args.batch), "--min-yield", str(args.min_yield), "--max-rounds",
              str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), *_scope(args),
@@ -1066,20 +1053,17 @@ def main(argv=None):
         return 0
     if args.cmd == "types":
         _run("kinds.py", args.label_set, *(["--assign"] if args.assign else []),
-             "--runs", str(args.runs), "--context", args.context, "--gate", args.gate,
-             "--asset-min", str(args.asset_min), *(["--dry-run"] if args.dry_run else []),
+             "--runs", str(args.runs), *(["--dry-run"] if args.dry_run else []),
              *_scope(args), data=data)
         return 0
     if args.cmd == "check":
         _run("check_units.py", args.label_set, *(["--evaluate"] if args.evaluate else []),
              *(["--elusion"] if args.elusion else []), "--seed", str(args.seed),
-             *(["--design", args.design] if args.design else []), "--context", args.context, "--gate", args.gate,
-             "--asset-min", str(args.asset_min), data=data)
+             *(["--design", args.design] if args.design else []), data=data)
         return 0
     if args.cmd == "evaluate":
         _run("evaluate_activities.py", args.label_set, "--column", args.column,
              *(["--text-regex", args.text_regex] if args.text_regex else []),
-             "--context", args.context, "--gate", args.gate, "--asset-min", str(args.asset_min),
              *_scope(args), data=data)
         return 0
     if args.cmd == "requests":

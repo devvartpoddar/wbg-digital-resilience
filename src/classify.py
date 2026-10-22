@@ -1,7 +1,6 @@
 #!/usr/bin/env python3
-"""The asset map: grade every sentence the search reads (control panel
-asset.unit = sentence; 'paragraph' keeps the earlier map of paragraphs,
-footnotes and prose table rows) against each asset with a decision model.
+"""The asset map: grade every sentence the search reads against each asset
+with a decision model.
 
 For each sentence, with its section and component, one request asks, for
 every active label in the set, the graded question every stage asks (the
@@ -20,7 +19,7 @@ only to the sentences the search sees the label in.
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
        inputs/taxonomy/<set>.csv, <set>_scale.csv
 Writes data/classify/answers/<model>/<aa>/<sha>.json one stored answer per question
-       data/classify/<set>-<version>/scores.csv      paragraph x label: the
+       data/classify/<set>-<version>/scores.csv      sentence x label: the
                                                      probability of each grade,
                                                      the expected grade, the
                                                      model's confidence
@@ -32,7 +31,7 @@ response is requested once and stored under the SHA-256 of the exact request;
 every later run reads the store. The stored responses are the record.
 Resumable: an interrupted run asks only for what is not stored.
 Versioned: <version> is a SHA-256 over the model, the questions and the
-paragraphs; changing a definition, a grade or the text gives a new version.
+sentences; changing a definition, a grade or the text gives a new version.
 
   python3 src/classify.py assets --dry-run    requests and cost, no network
   python3 src/classify.py assets --limit 20   smoke test, under data/classify/smoke_*
@@ -62,15 +61,9 @@ PRICE_PER_MTOK = 0.042
 # vendor describes as slower and less accurate; a request that would pass
 # that is split over several (answers.bodies_for), never truncated.
 MAX_REQUEST_CHARS = 30_000
-# Narrative and annex prose, every footnote given to the model, and every
-# table row the search reads as prose (units.table_units): the climate annex
-# tables are where most commitments sit, and an asset map that skipped them
-# left those commitments with no asset score at all.
-BLOCKS = ("narrative", "annex", "footnote")
-TABLE_ROWS = True
-# A label's question is put to a paragraph only when a unit of the paragraph
-# scores at least this against the label's phrases (0 = ask every label of
-# every paragraph). Measured against the full asset map on the 70-project
+# A label's question is put to a sentence only when it scores at least this
+# against the label's phrases (0 = ask every label of every sentence; the
+# skip rule of docs/method/decisions.md replaces it once fitted). Measured against the full asset map on the 70-project
 # corpus: 0.25 asks 58 per cent of the questions and loses 5.8 per cent of
 # the links at 0.5 (4.0 per cent at 0.9); 0.30 asks 39 per cent and loses
 # 9.0 (5.4). The questions are most of the cost, so this is the dial. On
@@ -79,12 +72,10 @@ TABLE_ROWS = True
 # Control panel: asset.gate_cosine (0.25 since 2026-10-21), applied to each
 # sentence's own cosine since the map became a sentence map.
 MIN_COSINE = float(panel.get("asset.gate_cosine", 0.25))
-# What the map grades (control panel, asset.unit): 'sentence', each search
-# unit with its section and component, asked the same graded question the
-# measures ask (2026-10-22: every decision is about a sentence; a sentence
-# naming no asset takes the last one named before it, src/measure.py), or
-# 'paragraph', the earlier map.
-UNIT = panel.get("asset.unit", "sentence")
+# The map grades each search unit (a sentence) with its section and
+# component, asked the same graded question the measures ask (2026-10-22:
+# every decision is about a sentence; a sentence naming no asset takes the
+# last one named before it, src/measure.py). The paragraph map is gone.
 WORKERS = 10
 SCORE_COLS = ["unit_id", "paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
               "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
@@ -162,73 +153,26 @@ def load_labels(name, folder=TAXONOMY):
     return active, scale
 
 
-def graded_question(lab, scale, unit="sentence"):
+def graded_question(lab, scale):
     """The one form of graded question every stage asks (the measures and the
-    assets alike): how the sentence (or, for the old paragraph map, the
-    passage) relates to the label, with the label's name and definition and
-    its scale. The question id is never shown to the model, so the name and
-    definition go in the wording."""
-    if unit == "sentence":
-        # Word for word the measure question since 2026-10-20, so its stored
-        # answers stay valid.
-        lead = ("How does the sentence from a World Bank project appraisal document in the "
-                "'sentence' field, relate to")
-    elif unit == "sentence+paragraph":
-        lead = ("How does the sentence from a World Bank project appraisal document in the "
-                "'sentence' field, read with the 'paragraph' it sits in, relate to")
-    else:
-        lead = "How does this passage from a World Bank project appraisal document relate to"
+    assets alike): how the sentence relates to the label, with the label's
+    name and definition and its scale. The question id is never shown to the
+    model, so the name and definition go in the wording."""
+    # Word for word the measure question since 2026-10-20, so its stored
+    # answers stay valid.
+    lead = ("How does the sentence from a World Bank project appraisal document in the "
+            "'sentence' field, relate to")
     return {"type": "score",
             "instructions": f"{lead} {lab['name']}? {lab['name']} means: {lab['definition']}",
             "criteria": [g.replace("{name}", lab["name"]) for g in scale]}
 
 
-def questions(labels, scale, unit=None):
+def questions(labels, scale):
     """The questions object of a request: one graded question per label."""
-    return {lab["id"]: graded_question(lab, scale, unit or UNIT) for lab in labels}
+    return {lab["id"]: graded_question(lab, scale) for lab in labels}
 
 
-# -------------------------------------------------------------- the paragraphs
-
-def paragraphs(data, blocks=BLOCKS, table_rows=TABLE_ROWS):
-    """Model paragraphs with their text (checked against the recorded hash),
-    section and component: the blocks named, plus the table rows the search
-    reads as prose when table_rows is set."""
-    names = {}
-    path = where(data, "appraisal", "components.csv")
-    if os.path.exists(path):
-        for r in sorted(_rows(path), key=lambda r: r["source"] == "heading"):
-            names.setdefault((r["doc_id"], r["number"]), r["name"])
-    prose_rows = set()
-    if table_rows:
-        import units
-        prose_rows = {u["paragraph_id"] for u in units.search_units(data)
-                      if u["kind"] == "table" and not u["left_out"]}
-    rows = [r for r in _rows(where(data, "appraisal", "paragraphs.csv"))
-            if (r.get("for_model") == "true" and r["block"] in blocks)
-            or r["paragraph_id"] in prose_rows]
-    texts, out = {}, []
-    for r in rows:
-        did = r["doc_id"]
-        if did not in texts:
-            with open(where(data, "text", f"{did}.txt"), encoding="utf-8") as fh:
-                texts[did] = fh.read()
-        body = texts[did][int(r["char_start"]):int(r["char_end"])]
-        if hashlib.sha256(body.encode("utf-8")).hexdigest() != r["text_sha256"]:
-            raise SystemExit(f"classify: {r['paragraph_id']} does not match its recorded "
-                             f"hash - re-run src/clean.py first")
-        # The sub-component if there is one, else the component: its number
-        # and the data sheet's name, or failing that the heading's own title.
-        sub = r.get("subcomponent_number") or ""
-        comp = sub or r.get("component_number") or ""
-        name = names.get((did, comp)) or \
-            (r.get("subcomponent_name") if sub else r.get("component_name")) or ""
-        state = {"section": r.get("section_title", ""), "passage": body}
-        if comp:
-            state["component"] = f"{comp} {name}".strip()
-        out.append({"row": r, "state": state})
-    return out
-
+# --------------------------------------------------------------- the sentences
 
 def sentences(data):
     """Every sentence the search reads (the embedded units, copies once),
@@ -267,17 +211,6 @@ def sentences(data):
                "project_ids": r.get("project_ids", ""),
                "component_number": r.get("component_number", "")}
         out.append({"row": row, "state": state})
-    return out
-
-
-def items(data, unit=None):
-    """The map's items: sentences, or paragraphs for the old map. Each row
-    carries unit_id (the paragraph's id for a paragraph)."""
-    if (unit or UNIT) == "sentence":
-        return sentences(data)
-    out = paragraphs(data)
-    for p in out:
-        p["row"] = {**p["row"], "unit_id": p["row"]["paragraph_id"]}
     return out
 
 
@@ -321,10 +254,9 @@ def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
 
 # ------------------------------------------------------------------- the run
 
-def best_cosines(name, data, taxonomy=TAXONOMY, unit=None):
-    """{(label_id, item id): best cosine over the label's queries} from the
-    set's current search run - a sentence's own, or a paragraph's best
-    sentence - or {} if there is none."""
+def best_cosines(name, data, taxonomy=TAXONOMY):
+    """{(label_id, unit_id): a sentence's best cosine over the label's
+    queries} from the set's current search run, or {} if there is none."""
     import search
     try:
         folder, _ = search.run_folder(name, data, taxonomy=taxonomy)
@@ -340,9 +272,8 @@ def best_cosines(name, data, taxonomy=TAXONOMY, unit=None):
     out = {}
     for lab, js in cols.items():
         best = numpy.asarray(scores[:, js]).max(axis=1)
-        key = "unit_id" if (unit or UNIT) == "sentence" else "paragraph_id"
         for r, b in zip(index, best):
-            k = (lab, r[key])
+            k = (lab, r["unit_id"])
             if b > out.get(k, -2.0):
                 out[k] = float(b)
     return out
@@ -417,15 +348,15 @@ def in_scope(row, projects):
 def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_COSINE,
          projects=None):
     """Everything a run would send, without sending it: (labels, scale,
-    questions, [(paragraph, request body)], request SHA-256s, run folder,
-    cosines). With min_cosine, a paragraph's request holds only the labels
-    whose best unit cosine in it reaches the threshold; a paragraph with
-    none is not sent. `projects` limits the run to the paragraphs of those
-    projects (a cohort set, say); the run is keyed on the paragraphs it
+    questions, [(sentence, request body)], request SHA-256s, run folder,
+    cosines). With min_cosine, a sentence's request holds only the labels
+    whose cosine reaches the threshold; a sentence with none is not sent.
+    `projects` limits the run to the sentences of those
+    projects (a cohort set, say); the run is keyed on the sentences it
     covers, so a scope is its own run and a wider one later reads the store."""
     labels, scale = load_labels(name, taxonomy)
     qs = questions(labels, scale)
-    paras = [p for p in items(data) if in_scope(p["row"], projects)]
+    paras = [p for p in sentences(data) if in_scope(p["row"], projects)]
     if limit:
         paras = paras[:limit]
     cosines = best_cosines(name, data, taxonomy) if min_cosine else {}
@@ -438,8 +369,8 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
             lid: q for lid, q in qs.items()
             if cosines.get((lid, p["row"]["unit_id"]), 0.0) >= min_cosine}
         bodies.append((p, request_body(p["state"], ask, model)))
-    # A paragraph whose questions do not fit one request is asked in several
-    # (answers.bodies_for); only a paragraph too long for a single question
+    # A sentence whose questions do not fit one request is asked in several
+    # (answers.bodies_for); only a sentence too long for a single question
     # is refused, never truncated.
     for p, body in bodies:
         one = request_body(p["state"], dict(list(body["questions"].items())[:1]), model)
@@ -448,9 +379,8 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
                              f"{MAX_REQUEST_CHARS:,} characters with one question; not truncated")
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
-    h = hashlib.sha256(f"min_cosine={min_cosine}\n".encode() +
-                       (f"unit=sentence\nprior={prior.VERSION}\n".encode()
-                        if UNIT == "sentence" else b""))
+    h = hashlib.sha256(f"min_cosine={min_cosine}\nunit=sentence\nprior={prior.VERSION}\n"
+                       .encode())
     for p, sha in zip(paras, shas):
         h.update(f"{p['row']['unit_id']}:{sha}\n".encode())
     out = where(data, "classify", f"{prefix}{name}-{h.hexdigest()[:12]}")
@@ -486,13 +416,12 @@ def _plan_key(name, data, taxonomy, min_cosine, projects, model):
     lookup, about ten lookups per measure)."""
     from paths import file_sha256
     h = hashlib.sha256(f"{name}\t{model}\t{min_cosine}\t{sorted(projects or [])}\t"
-                       f"{MAX_REQUEST_CHARS}\t{BLOCKS}\t{TABLE_ROWS}\t{UNIT}\n".encode())
+                       f"{MAX_REQUEST_CHARS}\tsentence\n".encode())
     for f in ("paragraphs.csv", "components.csv", "sentences.csv"):
         p = where(data, "appraisal", f)
         h.update((file_sha256(p) if os.path.exists(p) else "-").encode())
-    if UNIT == "sentence":
-        p = where(data, "embeddings", "sentence_index.csv")
-        h.update((file_sha256(p) if os.path.exists(p) else "-").encode())
+    p = where(data, "embeddings", "sentence_index.csv")
+    h.update((file_sha256(p) if os.path.exists(p) else "-").encode())
     folder = taxonomy or labels.folder(name)
     for f in (f"{name}.csv", f"{name}_scale.csv"):
         p = os.path.join(folder, f)
@@ -544,11 +473,11 @@ def planned_run(name, data, *, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, project
 
 
 def current_run(name, data, taxonomy=TAXONOMY, min_cosine=None, projects=None):
-    """The run folder for the label set and paragraphs as they stand now, or
+    """The run folder for the label set and sentences as they stand now, or
     None if that run has not been written. With min_cosine None (the
     default for readers), the gate is the one the last run for this set and
     scope was made with (the marker it wrote); the run is still checked
-    against the paragraphs, questions and gate as they stand, so a stale
+    against the sentences, questions and gate as they stand, so a stale
     marker finds nothing rather than something old."""
     import glob
     if not glob.glob(where(data, "classify", f"{glob.escape(name)}-*", "manifest.json")):
@@ -584,7 +513,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         except (OSError, SystemExit):
             pass
     n_q = sum(len(b["questions"]) for _, b in bodies)
-    log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} {UNIT}s, "
+    log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} sentences, "
         f"{n_q:,} questions"
         + (f" (cosine gate {min_cosine}: {n_q / (len(bodies) * len(labels)):.0%} of all)"
            if min_cosine else ""))
@@ -597,7 +526,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     requests_ = [(p["state"], b["questions"]) for p, b in bodies if b["questions"]]
     got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
                           dry_run=True, aliases=ALIASES)
-    log(f"  answers stored already for {sum(1 for g in got if g):,} {UNIT}s; calls to make: "
+    log(f"  answers stored already for {sum(1 for g in got if g):,} sentences; calls to make: "
         f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
     if dry_run:
         log("  --dry-run: no request made, nothing written")
@@ -618,8 +547,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         return None
 
     rows, served = [], {}
-    prior_of = prior_inputs(name, data, taxonomy, [p for p, _ in bodies], cosines, min_cosine) \
-        if UNIT == "sentence" else (lambda lid, uid: {})
+    prior_of = prior_inputs(name, data, taxonomy, [p for p, _ in bodies], cosines, min_cosine)
     it = iter(got)
     for p, b in bodies:
         if not b["questions"]:
@@ -642,7 +570,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     manifest = {"label_set": name, "model_requested": model, "models_served": served,
                 "min_cosine": min_cosine, "questions_asked": n_q,
                 "endpoint": ENDPOINT, "labels": [lab["id"] for lab in labels],
-                "scale": scale, "unit": UNIT, "items": len(bodies), "paragraphs": len(bodies),
+                "scale": scale, "unit": "sentence", "items": len(bodies), "paragraphs": len(bodies),
                 "questions": qs,
                 "question_sha256": question_shas(qs)}
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
@@ -654,13 +582,13 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     report = where(data, "reports", f"{prefix}classify_{name}.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:
-        fh.write(f"{name}: {len(bodies):,} {UNIT}s x {len(labels)} labels -> {out}\n"
+        fh.write(f"{name}: {len(bodies):,} sentences x {len(labels)} labels -> {out}\n"
                  f"models served: {served}\n")
         for lab in labels:
             grades = [r["grade"] for r in rows if r["label_id"] == lab["id"] and r["asked"] == "true"]
             counts = [grades.count(g) for g in range(len(scale))]
             skipped = sum(1 for r in rows if r["label_id"] == lab["id"] and r["asked"] != "true")
-            fh.write(f"  {lab['id']:<26} {UNIT}s by most likely grade: {counts}"
+            fh.write(f"  {lab['id']:<26} sentences by most likely grade: {counts}"
                      + (f"; not asked (cosine gate): {skipped:,}" if skipped else "") + "\n")
     if len(served) > 1:
         log(f"  warning: more than one model snapshot served: {served}")
@@ -707,14 +635,14 @@ def main():
                                       "assets, measures")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--model", default=MODEL)
-    ap.add_argument("--limit", type=int, default=0, help="first N paragraphs (smoke test)")
+    ap.add_argument("--limit", type=int, default=0, help="first N sentences (smoke test)")
     ap.add_argument("--workers", type=int, default=WORKERS)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--min-cosine", type=float, default=MIN_COSINE,
-                    help="ask a label's question of a paragraph only when a unit of it "
+                    help="ask a label's question of a sentence only when it "
                          "scores at least this against the label's phrases (0 = all)")
     ap.add_argument("--projects", default="",
-                    help="comma-separated project ids: only their paragraphs (./wbg classify "
+                    help="comma-separated project ids: only their sentences (./wbg classify "
                          "--set digital fills this from the cohort)")
     args = ap.parse_args()
     key = "" if args.dry_run else embed.read_key("")
