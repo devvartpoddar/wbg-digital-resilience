@@ -442,7 +442,7 @@ MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id
                 "project_ids", "component_number", "subcomponent_number", "component_key",
                 "copies", "route", "round", "rank", "score", "patterns",
                 "firmness", "asset_para", "asset_p_para", "asset_unit", "asset_p_unit",
-                "assets_yes", "asset_link", "asset_link_level", "asset_link_p",
+                "assets_yes", "asset_link", "asset_link_level", "asset_link_p", "asset_links",
                 "template_projects", "template_share", *prior.COLS, "sent", "committed",
                 "confidence", "p0", "p1", "p2", "p3",
                 "p_committed_calibrated", "types_yes", "best_type", "best_p", "model_served",
@@ -513,8 +513,8 @@ def classify_rows(data, projects=None, min_cosine=None, sets=None):
     return sha + "|" + "|".join(digests), rows
 
 
-UNIT_ASSET_COLS = ["unit_id", "paragraph_id", "project_ids", "asset_id", "probability",
-                   "asset_level", "own_best_asset_id", "own_best_probability"]
+UNIT_ASSET_COLS = ["unit_id", "asset_rank", "paragraph_id", "project_ids", "asset_id",
+                   "probability", "asset_level", "own_best_asset_id", "own_best_probability"]
 
 
 def unit_asset_rows(data, projects=None):
@@ -540,15 +540,21 @@ def unit_asset_rows(data, projects=None):
         earlier = before.setdefault(r["paragraph_id"], [])
         if not projects or set(r.get("project_ids", "").split("|")) & set(projects):
             mine = own.get(r["unit_id"], {})
-            a, p, level = measure.sentence_asset(mine, [own.get(u, {}) for u in reversed(earlier)])
+            win, level = measure.sentence_assets(mine, [own.get(u, {}) for u in reversed(earlier)])
             best = max(mine, key=mine.get) if mine else ""
-            rows.append({"unit_id": r["unit_id"], "paragraph_id": r["paragraph_id"],
-                         "project_ids": r.get("project_ids", ""), "asset_id": a,
-                         "probability": f"{p:.4f}" if a else "", "asset_level": level,
-                         "own_best_asset_id": best,
-                         "own_best_probability": f"{mine[best]:.4f}" if best else ""})
+            base = {"unit_id": r["unit_id"], "paragraph_id": r["paragraph_id"],
+                    "project_ids": r.get("project_ids", ""), "asset_level": level,
+                    "own_best_asset_id": best,
+                    "own_best_probability": f"{mine[best]:.4f}" if best else ""}
+            # one row per winning asset (asset.multiple), best first; a
+            # sentence with none keeps one row at rank 0
+            for k, (a, p) in enumerate(win, 1):
+                rows.append(dict(base, asset_rank=k, asset_id=a, probability=f"{p:.4f}"))
+            if not win:
+                rows.append(dict(base, asset_rank=0, asset_id="", probability=""))
         earlier.append(r["unit_id"])
     key = hashlib.sha256(f"{run}|{digest}|{measure.LINK_MIN}|{measure.DECAY}|"
+                         f"{measure.PARA_MIN}|{measure.MULTIPLE}|"
                          f"{sorted(projects or [])}".encode()).hexdigest()
     return key, rows
 

@@ -193,8 +193,9 @@ def unit_assets(u, levels=None):
     ids = set()
     if "unit" in levels:
         ids = {x for x in (u.get("assets_yes") or "").split("|") if x}
-    if not ids and u.get("asset_link") and (u.get("asset_link_level") or "unit") in levels:
-        ids.add(u["asset_link"])
+    if not ids and (u.get("asset_link_level") or "unit") in levels:
+        # every asset the sentence links to (asset.multiple), else the one
+        ids = {x for x in (u.get("asset_links") or u.get("asset_link") or "").split("|") if x}
     return ids
 
 

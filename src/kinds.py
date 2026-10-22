@@ -74,6 +74,12 @@ OTH_MIN = 5              # fewer "none" units than this are reported, not propos
 # A sentence takes its most likely type when that type's probability reaches
 # this (control panel floor.types; 0 = always), else no type.
 TYPE_FLOOR = float(panel.get("floor.types", 0) or 0)
+# Several types may win (control panel types.multiple): beside the likeliest,
+# every other type whose probability reaches floor.types_also. The answer is
+# one choice whose probabilities sum to 1, so a second type that high means
+# the sentence reads as both.
+TYPE_MULTIPLE = bool(panel.get("types.multiple", True))
+TYPE_ALSO = float(panel.get("floor.types_also", 0.3) or 0.3)
 ASSIGN_COLS = ["label_id", "unit_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "model_served", "cost", "types_yes", "best_type", "best_p"]
 
@@ -384,7 +390,8 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
             rows.append((lid, u, qs))
     h = hashlib.sha256()
     h.update(f"{os.path.basename(run_folder)}\t{model}\n".encode())
-    h.update(f"prior={prior.VERSION}\nfloor={TYPE_FLOOR}\n".encode())
+    h.update(f"prior={prior.VERSION}\nfloor={TYPE_FLOOR}\nmultiple={TYPE_MULTIPLE}\n"
+             f"also={TYPE_ALSO}\n".encode())
     for (lid, u, _), sha in zip(rows, shas):
         h.update(f"{u['unit_id']}:{sha}\n".encode())
     return run_folder, approved, rows, where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
@@ -499,6 +506,10 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
             if b2 != TYPE_NONE:
                 best, probs = b2, {**{k: v for k, v in probs.items()}, **second}
         yes = [] if best == TYPE_NONE or probs[best] < TYPE_FLOOR else [best]
+        if yes and TYPE_MULTIPLE:
+            yes += sorted((t for t, q in probs.items()
+                           if t not in (best, TYPE_NONE) and q >= max(TYPE_ALSO, TYPE_FLOOR)),
+                          key=lambda t: (-probs[t], t))
         counts[lid][best if yes else "other"] += 1
         model_served = "|".join(sorted({e["model"] for e in entries}))
         served.add(model_served)

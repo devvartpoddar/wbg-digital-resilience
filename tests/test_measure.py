@@ -328,3 +328,17 @@ def test_a_run_publishes_its_findings_assets_and_record_to_postgres(store, monke
         assert conn.execute("SELECT count(*) FROM wbg.answers").fetchone()[0] == len(got)
         stages = {r[0] for r in conn.execute("SELECT stage FROM wbg.runs")}
         assert {"measures", "classify"} <= stages
+
+
+def test_a_sentence_takes_every_asset_at_the_floor_best_first():
+    own = {"fiber": 0.8, "data_hosting": 0.4, "geospatial": 0.1}
+    assert measure.sentence_assets(own, [], floor=0.3, multiple=True) == (
+        [("fiber", 0.8), ("data_hosting", 0.4)], "unit")
+    assert measure.sentence_assets(own, [], floor=0.3, multiple=False) == ([("fiber", 0.8)], "unit")
+    # none of its own: the paragraph sums, each at the paragraph floor
+    win, level = measure.sentence_assets({"fiber": 0.2}, [{"fiber": 0.5, "dpi": 0.9}],
+                                         decay=0.4, floor=0.3, paragraph_floor=0.3,
+                                         multiple=True)
+    assert level == "paragraph" and [a for a, _ in win] == ["fiber", "dpi"]
+    assert measure.sentence_asset({"fiber": 0.2}, [{"fiber": 0.5, "dpi": 0.9}], decay=0.4,
+                                  floor=0.3, paragraph_floor=0.3)[:2] == ("fiber", 0.4)

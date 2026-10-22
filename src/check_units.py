@@ -939,7 +939,9 @@ def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
                      "w": int(k["stratum_size"]) / int(k["stratum_drawn"]),
                      "p": _posterior(u), "model": measure.score_of(u),
                      "committed": u.get("committed") == "true",
-                     "link": u.get("asset_link", ""), "stratum": k["stratum"]})
+                     "link": u.get("asset_link", ""),
+                     "links": set((u.get("asset_links") or u.get("asset_link") or "").split("|")) - {""},
+                     "stratum": k["stratum"]})
     is_eval = all(r["stratum"].startswith(EVAL) for r in rows)
     lines = [f"# {name}: the pipeline's decision against {len(rows)} graded units", "",
              f"Drawn from {key[0]['measure_dir']} by stratum "
@@ -971,9 +973,11 @@ def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
     lines.append("")
     withasset = [r for r in rows if r["asset"] and r["yes"]]
     if withasset:
-        agree = sum(1 for r in withasset if r["asset"] == r["link"])
+        agree = sum(1 for r in withasset if r["asset"] in r["links"])
+        extra = sum(len(r["links"] - {r["asset"]}) for r in withasset)
         lines += [f"## Asset on units the person graded yes and gave an asset: "
-                  f"{agree} of {len(withasset)} agree with the pipeline's asset", ""]
+                  f"{agree} of {len(withasset)} have it among the pipeline's assets "
+                  f"({extra} further assets the pipeline gave them)", ""]
     withtype = [r for r in rows if r["type"] and r["yes"]]
     if withtype:
         best = assigned_types(name, data)

@@ -72,12 +72,18 @@ u AS (
          CASE coalesce(f.linked_asset_level, 'none')
            WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph' ELSE 'none' END
            AS asset_from,
-         coalesce(f.linked_asset_id, '(no asset)') AS asset_id,
-         CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0 THEN '(no type)'
-              ELSE f.best_type_id END AS type_id,
+         a.asset_id, t.type_id,
          -- the wording, for collapsing word-for-word copies
          regexp_replace(lower(f.text), '\s+', ' ', 'g') AS wording
   FROM f
+  -- a unit with several assets or types (asset.multiple, types.multiple)
+  -- is a unit of each of those commitments
+  CROSS JOIN LATERAL unnest(CASE WHEN coalesce(cardinality(f.linked_asset_ids), 0) = 0
+                                 THEN ARRAY[coalesce(f.linked_asset_id, '(no asset)')]
+                                 ELSE f.linked_asset_ids END) AS a(asset_id)
+  CROSS JOIN LATERAL unnest(CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0
+                                 THEN ARRAY['(no type)']
+                                 ELSE f.type_ids_above_threshold END) AS t(type_id)
 )
 SELECT md5(project_id || '|' || label_set || '|' || asset_id || '|' || type_id) AS commitment_id,
        u.*
@@ -87,7 +93,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not (src/commit_checks.py).';
+  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. A unit two measures commit is dropped from a measure its pair check says it is not (src/commit_checks.py).';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$

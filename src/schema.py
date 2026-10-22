@@ -70,7 +70,7 @@ RENAME = {
     "asset_unit": "unit_best_asset_id", "asset_p_unit": "unit_best_asset_probability",
     "assets_yes": "asset_ids_above_threshold",
     "asset_link": "linked_asset_id", "asset_link_level": "linked_asset_level",
-    "asset_link_p": "linked_asset_probability",
+    "asset_link_p": "linked_asset_probability", "asset_links": "linked_asset_ids",
     "template_projects": "template_project_count", "template_share": "template_wording_share",
 }
 # Renames that apply in one table only (csv name -> column name).
@@ -86,7 +86,7 @@ RENAME_IN = {
 
 # Types by column name (after renaming). Anything not here is text, except
 # *_date -> date and *_at -> timestamptz.
-INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_offset",
+INTEGER = {"ordinal", "asset_rank", "text_start_offset", "text_end_offset", "pdf_text_start_offset",
            "pdf_text_end_offset", "word_count", "character_count", "row_count", "page_from",
            "page_to", "page_number", "part_number", "approval_fiscal_year", "pdf_size_bytes",
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
@@ -118,6 +118,7 @@ BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_lat
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
          "matched_types", "asset_ids_above_threshold", "type_ids_above_threshold",
+         "linked_asset_ids",
          "component_mentions",
          "shared_asset_ids"}
 INDEXED = {"document_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
@@ -414,12 +415,13 @@ TABLES = {
             "paragraph_best_asset_probability": "That decayed sum (at most 1).",
             "unit_best_asset_id": "The sentence asset map's best asset for the sentence itself.",
             "unit_best_asset_probability": "Its probability (grades 2 and 3, through the asset's probability layer when fitted).",
-            "asset_ids_above_threshold": "The sentence's own asset when it reaches the control panel's asset.floor.",
+            "asset_ids_above_threshold": "The sentence's own assets at the control panel's asset.floor, best first (every one with asset.multiple, else the best).",
+            "linked_asset_ids": "Every asset the finding is linked to at its level (asset.multiple), best first; linked_asset_id is the first.",
             "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the decayed sum over its paragraph's earlier sentences (level paragraph), at the control panel's asset.floor and asset.paragraph_floor.",
             "linked_asset_level": "unit, paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
-            "type_ids_above_threshold": "The unit's type (one choice among the measure's types in analysis/labels/<set>_types.csv) when its probability reaches the control panel's floor.types; empty when none does or no list exists yet.",
+            "type_ids_above_threshold": "The unit's types (one choice among the measure's types in analysis/labels/<set>_types.csv): the likeliest when its probability reaches the control panel's floor.types, and with types.multiple every other at floor.types_also; empty when none does or no list exists yet.",
             "best_type_id": "The likeliest type.",
             "best_type_probability": "Its probability.",
             "template_project_count": "As in search_units: other projects printing the same words.",
@@ -558,10 +560,12 @@ TABLES = {
             "prior_phrase_match": "Prior input: the share of the package description's information found in the commitment sentence, words weighted by rarity.",
         }),
     "unit_assets": dict(
-        schema=PUBLIC, key=("unit_id",),
+        schema=PUBLIC, key=("unit_id", "asset_rank"),
         foreign=[("unit_id", "search_units", "unit_id"),
                  ("paragraph_id", "paragraphs", "paragraph_id")],
-        comment="The asset of every sentence the search reads, decided as the measure stage "
+        comment="The assets of every sentence the search reads, one row per asset (asset_rank "
+                "1 the best; with asset.multiple every asset at its floor; rank 0 a sentence "
+                "with none), decided as the measure stage "
                 "decides it: the sentence's own best asset when its posterior reaches the "
                 "control panel's asset.floor (level unit); else the asset with the highest "
                 "sum of its own score and the earlier sentences' scores in its paragraph, each "
@@ -569,6 +573,7 @@ TABLES = {
                 "paragraph); else none. Rebuilt at every publish from the current asset map "
                 "and its probability layers.",
         columns={"asset_id": "The sentence's asset; empty at level none.",
+                 "asset_rank": "1 for the sentence's best asset, 2 the next, and so on; 0 for a sentence with none.",
                  "probability": "The posterior (level unit) or the decayed sum (level paragraph).",
                  "asset_level": "unit, paragraph or none.",
                  "own_best_asset_id": "The sentence's own best asset, whatever its probability.",

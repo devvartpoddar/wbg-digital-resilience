@@ -126,6 +126,7 @@ def firmness(text):
 LINK_MIN = float(panel.get("asset.floor", 0.3))   # a sentence has an asset at or above this
 DECAY = float(panel.get("asset.decay", 0.4))      # per sentence back, for a sentence naming none
 PARA_MIN = float(panel.get("asset.paragraph_floor", LINK_MIN))  # the decayed sum's own floor
+MULTIPLE = bool(panel.get("asset.multiple", True))  # every asset at the floor, not the best only
 TOP = int(panel.get("measure.top", 0))            # round 0 by count; 0 = off (the cosine gate is the pool)
 MIN_COSINE = float(panel.get("measure.gate_cosine", 0.3))  # the starting gate, until the
                       # skip rule (src/skip.py) has fitted the measure's own
@@ -165,7 +166,7 @@ UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_i
              "round", "rank", "score", "patterns", "firmness",
              "asset_para", "asset_p_para",
              "asset_unit", "asset_p_unit", "assets_yes", "asset_link", "asset_link_level",
-             "asset_link_p", "template_projects", "template_share",
+             "asset_link_p", "asset_links", "asset_links_p", "template_projects", "template_share",
              *prior.COLS, "sent", "committed",
              "grade", "expected", "confidence", "p0", "p1", "p2", "p3",
              "p_committed_calibrated",
@@ -203,30 +204,49 @@ def asset_map(data, projects=None, vector_of=None, projects_of=None, folder=None
     return out, os.path.basename(folder)
 
 
-def sentence_asset(own, earlier, decay=None, floor=None, paragraph_floor=None):
-    """(asset, probability, level) for a sentence: its own best asset when
-    that reaches LINK_MIN, asset.floor (level 'unit'); else the best asset of
-    its own scores plus each earlier sentence's in the same paragraph, the
-    k-th one back weighted by decay**k, when that sum reaches PARA_MIN,
-    asset.paragraph_floor (level 'paragraph'): a sum is on another scale
-    than one sentence's posterior, so it has its own floor; else ('', best, 'none'). own and earlier[i] are
-    {asset: probability}; earlier is nearest first."""
+def sentence_assets(own, earlier, decay=None, floor=None, paragraph_floor=None, multiple=None):
+    """([(asset, probability)], level) for a sentence, best first. Level
+    'unit': the assets whose own posterior reaches LINK_MIN (asset.floor).
+    Else level 'paragraph': for each asset, its own score plus each earlier
+    sentence's in the same paragraph, the k-th one back weighted by decay**k;
+    the assets whose sum reaches PARA_MIN (asset.paragraph_floor; a sum is
+    on another scale than one sentence's posterior, so it has its own
+    floor). Else ([], 'none'). With multiple (asset.multiple) every asset at
+    the floor wins, as a sentence can be committed for several measures;
+    without it only the best. own and earlier[i] are {asset: probability};
+    earlier is nearest first."""
     decay = DECAY if decay is None else decay
     floor = LINK_MIN if floor is None else floor
     paragraph_floor = PARA_MIN if paragraph_floor is None else paragraph_floor
-    best = max(own, key=own.get) if own else ""
-    if best and own[best] >= floor:
-        return best, own[best], "unit"
+    multiple = MULTIPLE if multiple is None else multiple
+    rank = lambda d: sorted(d.items(), key=lambda x: (-x[1], x[0]))
+    win = [(a, p) for a, p in rank(own) if p >= floor]
+    if win:
+        return (win if multiple else win[:1]), "unit"
+    if not decay:
+        return [], "none"
     total = dict(own)
     for k, prev in enumerate(earlier, 1):
         for a, p in prev.items():
             total[a] = total.get(a, 0.0) + (decay ** k) * p
-    if total:
-        a = max(total, key=total.get)
-        if total[a] >= paragraph_floor and decay:
-            return a, min(total[a], 1.0), "paragraph"
-        return "", total[a], "none"
-    return "", 0.0, "none"
+    win = [(a, min(p, 1.0)) for a, p in rank(total) if p >= paragraph_floor]
+    if win:
+        return (win if multiple else win[:1]), "paragraph"
+    return [], "none"
+
+
+def sentence_asset(own, earlier, decay=None, floor=None, paragraph_floor=None, multiple=None):
+    """(best asset, probability, level) of sentence_assets; ('', best sum or
+    0, 'none') when no asset wins."""
+    win, level = sentence_assets(own, earlier, decay, floor, paragraph_floor, multiple)
+    if win:
+        return win[0][0], win[0][1], level
+    decay = DECAY if decay is None else decay
+    total = dict(own)
+    for k, prev in enumerate(earlier, 1):
+        for a, p in prev.items():
+            total[a] = total.get(a, 0.0) + (decay ** k) * p
+    return "", (max(total.values()) if total else 0.0), "none"
 
 
 def unit_texts(data, index):
@@ -475,21 +495,26 @@ class Run:
             {**row, "sent": "true", "committed": ""}, self.floor) else "false"
 
     def link_into(self, row):
-        """The sentence's asset from the sentence asset map: its own best
-        (asset_unit, asset_p_unit; level 'unit'), else the decayed sum over
-        the earlier sentences of its paragraph
-        (asset_para, asset_p_para; level 'paragraph'), else none."""
+        """The sentence's assets from the sentence asset map (sentence_assets):
+        its own at asset.floor (assets_yes; level 'unit'), else the decayed
+        sums over the earlier sentences of its paragraph (asset_para; level
+        'paragraph'), else none; every winner with asset.multiple
+        (asset_links, best first), and the best one alone in asset_link."""
         uid = row["unit_id"]
         own = self.unit_assets.get(uid, {})
         earlier = [self.unit_assets.get(u, {}) for u in self.before.get(uid, [])]
         best = max(own, key=own.get) if own else ""
-        a, p, level = sentence_asset(own, earlier)
+        win, level = sentence_assets(own, earlier)
+        ids = "|".join(a for a, _ in win)
+        a, p = win[0] if win else ("", 0.0)
         row.update({"asset_unit": best, "asset_p_unit": f"{own[best]:.4f}" if best else "",
-                    "assets_yes": best if level == "unit" else "",
+                    "assets_yes": ids if level == "unit" else "",
                     "asset_para": a if level == "paragraph" else "",
                     "asset_p_para": f"{p:.4f}" if level == "paragraph" else "",
                     "asset_link": a, "asset_link_level": level,
-                    "asset_link_p": f"{p:.4f}" if a else ""})
+                    "asset_link_p": f"{p:.4f}" if a else "",
+                    "asset_links": ids,
+                    "asset_links_p": "|".join(f"{q:.4f}" for _, q in win)})
 
     # ---- a batch to the model
 
