@@ -138,11 +138,6 @@ def spec(question):
     return question["instructions"] + "\nAnswers:\n" + "\n".join(opts)
 
 
-def _short(text, words=4):
-    w = str(text).split()
-    return " ".join(w[:words]) + (" ..." if len(w) > words else "")
-
-
 HOW = ("Several items follow, each in its own field ('item 01', 'item 02', ...), and each "
        "question is set out in full in its own field ('question <id>'). Each short question "
        "below asks one of those questions about one item: answer it for that item alone, "
@@ -155,7 +150,12 @@ def item_question(question, qid, field):
     in the state, so its options keep their keys and only a short label."""
     c = question["criteria"]
     if question["type"] == "score":
-        crit = [f"{i}: {_short(t)}" for i, t in enumerate(c)]
+        # The grade numbers alone: each grade is written out once, in the
+        # full question in the state. On 615 sentences x 13 assets the
+        # four-word previews were 44 per cent of the characters and changed
+        # nothing (top asset agreeing with Dev 0.66 against 0.65, mean average
+        # precision 0.604 against 0.603; measures 0.882 against 0.878), 2026-10-22.
+        crit = [str(i) for i in range(len(c))]
     elif question["type"] == "noul":
         crit = {"true": "Yes", "false": "No"}
     else:
