@@ -15,10 +15,6 @@ measures have run.
          layer alone, where the other measures' scores and the rank among
          measures added nothing.
 
-The scope question (a rule, an investment or not a commitment) was asked here
-until 2026-10-22 and removed: nothing decided on it but how many packages an
-investment links to. wbg.unit_scope stays, empty.
-
 A choice question to the decision model, stored like every answer
 (src/answers.py) and re-read on a re-run.
 

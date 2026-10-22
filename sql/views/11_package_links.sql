@@ -19,7 +19,7 @@ COMMENT ON VIEW wbg.package_assets_in_context IS
 DROP VIEW IF EXISTS wbg.commitment_packages_in_context;
 CREATE VIEW wbg.commitment_packages_in_context AS
 SELECT cp.label_set, cp.label_id, f.measure_name, cp.project_id, f.cohort_set, f.project_name,
-       f.country_name, cp.unit_id, f.most_likely_grade, f.probability_grade_3,
+       f.country_name, cp.unit_id, f.is_committed, f.posterior_probability,
        f.linked_asset_id, f.linked_asset_level,
        f.best_type_id, f.best_type_name, f.text AS commitment_text, f.component_number AS commitment_component_number,
        cp.package_id, p.description_clean AS package_description, p.category, p.method_code,

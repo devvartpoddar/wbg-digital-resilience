@@ -1,5 +1,6 @@
 -- One filter for every Metabase card on the measure view: the committed
--- units under the dashboard's filters, as a table function. A card is then
+-- units (is_committed: the posterior at the measure's floor) under the
+-- dashboard's filters, as a table function. A card is then
 --   SELECT ... FROM wbg.findings_under(measure => {{measure}}, min_p => {{min_p}},
 --                                      link => {{link}} [[, cohort_set => {{set}}]]
 --                                      [[, country => {{country}}]] ...) f
@@ -14,6 +15,8 @@
 --   type_: a type id or name, or 'No type (other)'.
 DROP FUNCTION IF EXISTS wbg.findings_under(text, double precision, text, text, text, text, text,
                                             double precision, text, text, text, text);
+DROP FUNCTION IF EXISTS wbg.findings_under(text, double precision, text, text, text, text, text,
+                                            double precision, text, text);
 CREATE FUNCTION wbg.findings_under(
     measure text,
     min_p double precision DEFAULT 0,
@@ -24,17 +27,15 @@ CREATE FUNCTION wbg.findings_under(
     status text DEFAULT NULL,
     months double precision DEFAULT NULL,
     asset text DEFAULT NULL,
-    type_ text DEFAULT NULL,
-    kind text DEFAULT NULL,
-    actor text DEFAULT NULL)
+    type_ text DEFAULT NULL)
 -- The columns of wbg.measure_findings_in_context, spelled out: a function returning
 -- the view's row type would be dropped with the view on every reload.
-RETURNS TABLE (label_set text, label_id text, measure_name text, project_id text, cohort_set text, project_name text, country_name text, document_id text, document_title text, document_kind text, component_number text, component_name text, unit_id text, unit_kind text, feedback_round integer, route text, most_likely_grade integer, expected_grade numeric, grade_confidence numeric, probability_grade_3 numeric, committed_probability_calibrated numeric, firmness text, linked_asset_id text, linked_asset_level text, linked_asset_probability numeric, asset_ids_above_threshold text[], activity_kinds_above_threshold text[], best_activity_kind text, conditional_probability numeric, actor_ids_above_threshold text[], best_actor_id text, type_ids_above_threshold text[], best_type_id text, best_type_name text, best_type_probability numeric, template_project_count integer, template_wording_share numeric, text text, paragraph_text text, section_title text)
+RETURNS TABLE (label_set text, label_id text, measure_name text, project_id text, cohort_set text, project_name text, country_name text, document_id text, document_title text, document_kind text, component_number text, component_name text, unit_id text, unit_kind text, feedback_round integer, route text, is_committed boolean, posterior_probability numeric, grade_confidence numeric, firmness text, linked_asset_id text, linked_asset_level text, linked_asset_probability numeric, asset_ids_above_threshold text[], type_ids_above_threshold text[], best_type_id text, best_type_name text, best_type_probability numeric, template_project_count integer, template_wording_share numeric, text text, paragraph_text text, section_title text)
 LANGUAGE sql STABLE AS $$
   SELECT f.*
   FROM wbg.measure_findings_in_context f
-  WHERE f.label_set = findings_under.measure AND f.most_likely_grade = 3
-    AND f.probability_grade_3 >= coalesce(findings_under.min_p, 0)
+  WHERE f.label_set = findings_under.measure AND f.is_committed
+    AND f.posterior_probability >= coalesce(findings_under.min_p, 0)
     AND (CASE coalesce(findings_under.link, 'sentence')
            WHEN 'sentence' THEN f.linked_asset_level = 'unit'
            WHEN 'sentence or paragraph' THEN f.linked_asset_level IN ('unit', 'paragraph')
@@ -61,12 +62,6 @@ LANGUAGE sql STABLE AS $$
                     JOIN wbg.measure_types t ON t.label_set = x.label_set AND t.type_id = x.member
                     WHERE x.unit_id = f.unit_id AND x.project_id = f.project_id AND x.kind = 'type'
                       AND (x.member = findings_under.type_ OR t.type_name = findings_under.type_)))
-    AND (findings_under.kind IS NULL OR EXISTS (SELECT 1 FROM wbg.measure_finding_lists x
-                                 WHERE x.unit_id = f.unit_id AND x.project_id = f.project_id
-                                   AND x.kind = 'activity_kind' AND x.member = findings_under.kind))
-    AND (findings_under.actor IS NULL OR EXISTS (SELECT 1 FROM wbg.measure_finding_lists x
-                                  WHERE x.unit_id = f.unit_id AND x.project_id = f.project_id
-                                    AND x.kind = 'actor' AND x.member = findings_under.actor))
 $$;
 COMMENT ON FUNCTION wbg.findings_under IS
   'The committed units of a findings_under.measure under the dashboard filters: one filter for every card on the findings_under.measure view. Every argument but the findings_under.measure may be NULL.';

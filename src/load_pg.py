@@ -35,7 +35,7 @@ peer authentication over the local socket - no password anywhere).
   python3 src/load_pg.py
   python3 src/load_pg.py --force
 """
-import argparse, contextlib, time, csv, glob, hashlib, os, re, sys
+import argparse, contextlib, time, csv, glob, hashlib, json, os, re, sys
 from datetime import datetime, timezone
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -129,7 +129,7 @@ TABLES = [
 # into wbg by prepare().
 OLD_NAMES = ["taxonomy", "classify_scores", "measures", "releases", "rejected",
              "superseded_packages", "search_best", "sentences", "document_parts", "candidates",
-             "label_groups"]
+             "label_groups", "unit_scope"]
 OLD_VIEWS = ["v_packages", "v_paragraphs", "v_notices", "v_awards", "v_classified_paragraphs",
              "v_search_paragraphs"]
 _ISO_DATE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -430,18 +430,19 @@ def run_rollup(folder, data):
 ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "project_ids",
                "component_number", "component_key", "best_score", "best_percentile",
                "best_unit_id", "best_query_id", "units_hit"]
+# The model's raw answer (p0-p3, confidence) is loaded as the record; the
+# decision is the posterior (p_committed_calibrated -> posterior_probability).
 CLASSIFY_COLS = ["label_set", "run", "unit_id", "paragraph_id", "doc_id", "project_ids",
-                 "component_number", "label_id", "asked", "best_cosine", "grade", "expected",
-                 "confidence", "p0", "p1", "p2", "p3", "p4", "model_served", *prior.COLS]
+                 "component_number", "label_id", "asked", "best_cosine",
+                 "confidence", "p0", "p1", "p2", "p3", "p_committed_calibrated", "model_served",
+                 *prior.COLS]
 MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",
                 "project_ids", "component_number", "subcomponent_number", "component_key",
                 "copies", "route", "round", "rank", "score", "patterns",
-                "firmness", "asset_para", "asset_p_para", "asset_comp",
-                "asset_p_comp", "asset_unit", "asset_p_unit", "assets_yes", "asset_link",
-                "asset_link_level", "asset_link_p", "kinds_yes", "kind_best", "kind_p",
-                "conditional_p", "actors_yes", "actor_best", "actor_p",
+                "firmness", "asset_para", "asset_p_para", "asset_unit", "asset_p_unit",
+                "assets_yes", "asset_link", "asset_link_level", "asset_link_p",
                 "template_projects", "template_share", *prior.COLS, "sent", "committed",
-                "grade", "expected", "confidence", "p0", "p1", "p2", "p3", "p4",
+                "confidence", "p0", "p1", "p2", "p3",
                 "p_committed_calibrated", "types_yes", "best_type", "best_p", "model_served",
                 "cost", "text"]
 
@@ -483,15 +484,201 @@ def _run_rows(data, finder, file, sets=None):
 
 
 def classify_rows(data, projects=None, min_cosine=None, sets=None):
-    """The current asset map for the scope. With min_cosine None, the gate
-    is the one the last run was made with (classify's marker); the flag
-    still names one explicitly."""
+    """The current asset map for the scope, each asked row with its
+    posterior (the model's score for grades 2 and 3 through the asset's
+    probability layer, src/posterior.py). With min_cosine None, the gate is
+    the one the last run was made with (classify's marker)."""
     import classify
+    import measure
+    import posterior
     sha, rows = _run_rows(data, lambda n, d: classify.current_run(
         n, d, projects=projects, min_cosine=min_cosine), "scores.csv", sets)
-    for r in rows:              # a paragraph map (or one made before unit_id) keys on the paragraph
-        r["unit_id"] = r.get("unit_id") or r["paragraph_id"]
-    return sha, rows
+    if sha is None:
+        return sha, rows
+    vector_of, projects_of = posterior.lookups(data)
+    layers, digests = {}, []
+    for run in sorted({r["run"] for r in rows}):
+        folder = where(data, "classify", run)
+        layers[run] = classify.asset_layers(data, folder, vector_of, projects_of)
+        digests.append(classify.asset_layers_digest(data, folder))
+    for r in rows:
+        if r.get("asked") != "true":
+            r["p_committed_calibrated"] = ""
+            continue
+        p = measure.score_of(r)
+        lay = layers.get(r["run"], {}).get(r["label_id"])
+        r["p_committed_calibrated"] = f"{lay.probability(r['unit_id'], p) if lay else p:.4f}"
+    return sha + "|" + "|".join(digests), rows
+
+
+UNIT_ASSET_COLS = ["unit_id", "paragraph_id", "project_ids", "asset_id", "probability",
+                   "asset_level", "own_best_asset_id", "own_best_probability"]
+
+
+def unit_asset_rows(data, projects=None):
+    """(key, rows) of wbg.unit_assets: every indexed sentence's asset as the
+    measure stage decides it (measure.sentence_asset over the asset map read
+    through its layers), or (None, []) without an asset map."""
+    import measure
+    import posterior
+    from paths import where as _where
+    index_path = _where(data, "embeddings", "sentence_index.csv")
+    if not os.path.exists(index_path):
+        return None, []
+    vector_of, projects_of = posterior.lookups(data)
+    own, run = measure.asset_map(data, projects, vector_of, projects_of)
+    if not run:
+        return None, []
+    import classify
+    digest = classify.asset_layers_digest(data, _where(data, "classify", run))
+    with open(index_path, newline="", encoding="utf-8") as fh:
+        index = list(csv.DictReader(fh))
+    before, rows = {}, []
+    for r in index:
+        earlier = before.setdefault(r["paragraph_id"], [])
+        if not projects or set(r.get("project_ids", "").split("|")) & set(projects):
+            mine = own.get(r["unit_id"], {})
+            a, p, level = measure.sentence_asset(mine, [own.get(u, {}) for u in reversed(earlier)])
+            best = max(mine, key=mine.get) if mine else ""
+            rows.append({"unit_id": r["unit_id"], "paragraph_id": r["paragraph_id"],
+                         "project_ids": r.get("project_ids", ""), "asset_id": a,
+                         "probability": f"{p:.4f}" if a else "", "asset_level": level,
+                         "own_best_asset_id": best,
+                         "own_best_probability": f"{mine[best]:.4f}" if best else ""})
+        earlier.append(r["unit_id"])
+    key = hashlib.sha256(f"{run}|{digest}|{measure.LINK_MIN}|{measure.DECAY}|"
+                         f"{sorted(projects or [])}".encode()).hexdigest()
+    return key, rows
+
+
+# ------------------------------------------------ the record of judgement
+#
+# What a person decided and what the model answered, loaded so evaluation is
+# reproducible from SQL (docs/method/checks-and-postgres.md). Each table is
+# replaced whole when its sources change.
+
+GRADED_COLS = ["label_set", "label_id", "unit_id", "text_sha256", "question_sha256", "grade",
+               "asset", "type", "source", "graded_on", "stratum", "weight"]
+GRADED_LINK_COLS = ["label_set", "unit_id", "package_id", "text_sha256", "package_sha256",
+                    "question_sha256", "applies", "source", "graded_on"]
+DRAW_COLS = ["sheet", "row_id", "label_id", "label_set", "unit_id", "package_id", "paragraph_id",
+             "text_sha256", "question_sha256", "stratum", "stratum_size", "stratum_drawn",
+             "measure_dir"]
+LAYER_COLS = ["label_set", "label_id", "question_sha256", "graded_yes", "graded_no",
+              "coefficients", "settings", "file_sha256"]
+GATE_COLS = ["label_set", "label_id", "gate", "share_lost", "positives", "question_sha256",
+             "search_run"]
+RUN_COLS = ["run_id", "stage", "label_set", "created_at", "calls", "cost_usd", "manifest"]
+SPEND_COLS = ["at", "stage", "label_set", "model", "calls", "cost_usd", "seconds", "run"]
+ANSWER_COLS = ["answer_sha256", "model", "model_served", "answer", "cost_usd", "asked_at",
+               "call_sha256"]
+
+
+def _files_key(paths):
+    """A key over files' names and checksums ('' for none)."""
+    from paths import file_sha256
+    h = hashlib.sha256()
+    for p in sorted(paths):
+        h.update(f"{os.path.basename(p)}\t{file_sha256(p, remember=False)}\n".encode())
+    return h.hexdigest() if paths else None
+
+
+def _csv_rows(paths, extra=None):
+    for p in sorted(paths):
+        with open(p, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                yield dict(r, **(extra(p) if extra else {}))
+
+
+def judgement_tables(data):
+    """[(table, cols, key, rows, types)] of the record of judgement: graded
+    labels and package links, every sheet's draw, the fitted layers and
+    gates, the run manifests and the spend ledger. key is None for a table
+    with no source yet."""
+    lab = os.path.join(data, "labels")
+    out = []
+    units = glob.glob(os.path.join(lab, "*_units.csv"))
+    out.append(("graded_labels", GRADED_COLS, _files_key(units), list(_csv_rows(units)), {}))
+    links = glob.glob(os.path.join(lab, "package_links.csv"))
+    out.append(("graded_package_links", GRADED_LINK_COLS, _files_key(links),
+                list(_csv_rows(links)), {}))
+    keys = glob.glob(os.path.join(data, "review", "*.key.csv"))
+    out.append(("check_draws", DRAW_COLS, _files_key(keys), list(_csv_rows(
+        keys, lambda p: {"sheet": os.path.basename(p)[:-len(".key.csv")]})), {}))
+    layers = glob.glob(os.path.join(lab, "*_posterior.json"))
+    rows = []
+    for p in sorted(layers):
+        from paths import file_sha256
+        with open(p, encoding="utf-8") as fh:
+            spec = json.load(fh)
+        name = os.path.basename(p)[:-len("_posterior.json")]
+        specs = spec.items() if "coef" not in spec else [(spec.get("label", name), spec)]
+        for lid, sp in sorted(specs):
+            rows.append({"label_set": name, "label_id": lid,
+                         "question_sha256": sp.get("question_sha256", ""),
+                         "graded_yes": sp.get("n_yes", ""), "graded_no": sp.get("n_no", ""),
+                         "coefficients": json.dumps(sp.get("coef")),
+                         "settings": json.dumps(sp.get("settings"), sort_keys=True),
+                         "file_sha256": file_sha256(p, remember=False)})
+    out.append(("posterior_layers", LAYER_COLS, _files_key(layers), rows,
+                {"coefficients": "jsonb", "settings": "jsonb"}))
+    gates = glob.glob(os.path.join(lab, "*_gate.json"))
+    rows = []
+    for p in sorted(gates):
+        with open(p, encoding="utf-8") as fh:
+            for lid, g in sorted(json.load(fh).items()):
+                rows.append({"label_set": os.path.basename(p)[:-len("_gate.json")],
+                             "label_id": lid, "gate": g.get("gate"), "share_lost": g.get("lost"),
+                             "positives": g.get("positives"),
+                             "question_sha256": g.get("question_sha256", ""),
+                             "search_run": g.get("search_run", "")})
+    out.append(("skip_gates", GATE_COLS, _files_key(gates), rows, {}))
+    mans = [p for st in ("classify", "measures", "links", "types", "checks")
+            for p in glob.glob(os.path.join(data, st, "*", "manifest.json"))]
+    rows = []
+    for p in sorted(mans):
+        with open(p, encoding="utf-8") as fh:
+            m = json.load(fh)
+        run = os.path.basename(os.path.dirname(p))
+        rows.append({"run_id": run, "stage": os.path.basename(os.path.dirname(os.path.dirname(p))),
+                     "label_set": m.get("label_set") or (run.rsplit("-", 1)[0] if "-" in run else ""),
+                     "created_at": m.get("created_at", ""),
+                     "calls": m.get("calls_this_run", m.get("calls", "")),
+                     "cost_usd": m.get("cost_this_run_usd", m.get("cost_usd", "")),
+                     "manifest": json.dumps(m, sort_keys=True, ensure_ascii=False)})
+    out.append(("runs", RUN_COLS, _files_key(mans), rows, {"manifest": "jsonb"}))
+    spend = glob.glob(os.path.join(data, "reports", "spend.csv"))
+    out.append(("spend", SPEND_COLS, _files_key(spend), list(_csv_rows(spend)), {}))
+    return out
+
+
+def answer_rows(data):
+    """(key, rows) of every stored decision-model answer, or (None, []).
+    The key is over the store's file names, so an unchanged store is not
+    reloaded; rows are read only when it changed."""
+    root_ = os.path.join(data, "classify", "answers")
+    if not os.path.isdir(root_):
+        return None, []
+    names = []
+    for model in sorted(os.listdir(root_)):
+        for shard in sorted(os.listdir(os.path.join(root_, model))):
+            d = os.path.join(root_, model, shard)
+            if os.path.isdir(d):
+                names.extend(os.path.join(model, shard, f) for f in sorted(os.listdir(d))
+                             if f.endswith(".json"))
+    key = hashlib.sha256("\n".join(names).encode()).hexdigest() if names else None
+
+    def rows():
+        for n in names:
+            with open(os.path.join(root_, n), encoding="utf-8") as fh:
+                e = json.load(fh)
+            yield {"answer_sha256": os.path.basename(n)[:-5],
+                   "model": os.path.dirname(os.path.dirname(n)).replace("__", "/"),
+                   "model_served": e.get("model", ""),
+                   "answer": json.dumps(e.get("answer"), sort_keys=True),
+                   "cost_usd": e.get("cost_usd", ""), "asked_at": e.get("asked_at", ""),
+                   "call_sha256": e.get("call", "")}
+    return key, rows()
 
 
 def measure_rows(data, projects=None, sets=None):
@@ -539,8 +726,6 @@ CHECK_PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_on
                    "p_only_b", "p_both", "p_neither", "model_served", "cost",
                    "prior_probability_a", "prior_phrase_cosine_a", "prior_probability_b",
                    "prior_phrase_cosine_b"]
-CHECK_SCOPE_COLS = ["unit_id", "scope", "probability", "p_rule", "p_investment",
-                    "p_not_commitment", "model_served", "cost"]
 
 
 CONTEXT_COLS = ["unit_id", "paragraph_id", *prior.PARA_COLS]
@@ -553,23 +738,14 @@ def context_rows(data, projects=None):
 
 
 def check_rows(data, projects=None):
-    """(sha, pair rows, scope rows) of the current commitment checks
-    (src/commit_checks.py), or (None, [], []) when there are none. The scope
-    question was removed on 2026-10-22: its rows are empty, so a publish
-    empties wbg.unit_scope and the views read every unit as not checked."""
+    """(sha, pair rows) of the current commitment checks
+    (src/commit_checks.py), or (None, []) when there are none."""
     import commit_checks
     folder = commit_checks.current_run(data, projects=projects)
     if not folder:
-        return None, [], []
-    out = []
-    for file in ("pairs.csv", "scope.csv"):
-        path = os.path.join(folder, file)
-        if not os.path.exists(path):
-            out.append([])
-            continue
-        with open(path, newline="", encoding="utf-8") as fh:
-            out.append(list(csv.DictReader(fh)))
-    return os.path.basename(folder), out[0], out[1]
+        return None, []
+    with open(os.path.join(folder, "pairs.csv"), newline="", encoding="utf-8") as fh:
+        return os.path.basename(folder), list(csv.DictReader(fh))
 
 
 def link_rows(data, projects=None):
@@ -904,14 +1080,15 @@ def main():
     def took(t0):
         return f"  ({time.time() - t0:.0f}s)"
 
-    def derived(conn, table, sha, cols, rows, after=()):
+    def derived(conn, table, sha, cols, rows, after=(), types=None):
         t0 = time.time()
         if sha is None:
             print(f"  {table:<20} skipped: no source")
         elif not args.force and _last_sha(conn, table) == sha:
             print(f"  {table:<20} unchanged{took(t0)}")
         else:
-            n, bad = load_rows(conn, table, cols, rows, sha, release_id, after=after)
+            n, bad = load_rows(conn, table, cols, rows, sha, release_id, after=after,
+                               types=types)
             print(f"  {table:<20} {n:>8} rows{note(bad)}{took(t0)}")
 
     # One transaction for the whole load, views included: a reader (a
@@ -965,9 +1142,14 @@ def main():
         derived(conn, "commitment_packages", sha, PAIR_LINK_COLS, pairs_)
         sha, ctx = context_rows(args.data, projects)
         derived(conn, "unit_paragraph_context", sha, CONTEXT_COLS, ctx)
-        sha, cpairs, cscope = check_rows(args.data, projects)
+        sha, cpairs = check_rows(args.data, projects)
         derived(conn, "unit_pair_checks", sha, CHECK_PAIR_COLS, cpairs)
-        derived(conn, "unit_scope", sha, CHECK_SCOPE_COLS, cscope)
+        sha, ua = unit_asset_rows(args.data, projects)
+        derived(conn, "unit_assets", sha, UNIT_ASSET_COLS, ua)
+        for table, cols, sha, rows_, types in judgement_tables(args.data):
+            derived(conn, table, sha, cols, rows_, types=types)
+        sha, ans = answer_rows(args.data)
+        derived(conn, "answers", sha, ANSWER_COLS, ans, types={"answer": "jsonb"})
 
         lab = label_rows()
         derived(conn, "labels", hashlib.sha256(repr(lab).encode()).hexdigest(),

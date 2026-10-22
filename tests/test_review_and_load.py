@@ -139,3 +139,64 @@ def test_an_evaluation_writes_its_headline_numbers(tmp_path):
     assert got[0]["precision"] == "1.000" and got[0]["recall"] == "0.500"
     assert got[0]["version"]                     # the measure file's version column
     assert got[0]["sheet"] == "training"
+
+
+def test_the_record_of_judgement_is_read_for_postgres(tmp_path):
+    """Grades, draws, layers, gates, run manifests, the spend ledger and the
+    answer store each become rows of their own table."""
+    import json
+    import load_pg
+    d = tmp_path
+    (d / "labels").mkdir()
+    (d / "labels" / "cra_units.csv").write_text(
+        "label_set,label_id,unit_id,text_sha256,question_sha256,grade,asset,type,source,"
+        "graded_on,stratum,weight\ncra,cra,u1,t1,q1,3,,,s1,2026-10-22,train:near,2.5\n")
+    (d / "labels" / "cra_gate.json").write_text(json.dumps(
+        {"cra": {"gate": 0.41, "lost": 0.0, "positives": 12, "question_sha256": "q1",
+                 "search_run": "cra-x"}}))
+    (d / "labels" / "cra_posterior.json").write_text(json.dumps(
+        {"label": "cra", "question_sha256": "q1", "coef": [0.1, 1.0], "n_yes": 9, "n_no": 11,
+         "settings": {"sharpness": 20}}))
+    (d / "review").mkdir()
+    (d / "review" / "check_units_cra_s1.key.csv").write_text(
+        "row_id,label_id,unit_id,stratum,stratum_size,stratum_drawn\n1,cra,u1,train:near,10,4\n")
+    (d / "measures" / "cra-abc").mkdir(parents=True)
+    (d / "measures" / "cra-abc" / "manifest.json").write_text(json.dumps(
+        {"label_set": "cra", "calls_this_run": 3, "cost_this_run_usd": 0.01,
+         "created_at": "2026-10-22T00:00:00Z"}))
+    (d / "reports").mkdir()
+    (d / "reports" / "spend.csv").write_text(
+        "at,stage,label_set,model,calls,cost_usd,seconds,run\n2026-10-22T00:00:00Z,measure,cra,m,3,0.01,4,cra-abc\n")
+    ans = d / "classify" / "answers" / "typesafe__jev" / "ab"
+    ans.mkdir(parents=True)
+    (ans / "abcd.json").write_text(json.dumps({"answer": {"type": "score"}, "model": "jev-x",
+                                               "cost_usd": 0.001, "call": "c1"}))
+    got = {t: (key, rows) for t, cols, key, rows, _ in load_pg.judgement_tables(str(d))}
+    assert got["graded_labels"][1][0]["weight"] == "2.5"
+    assert got["check_draws"][1][0]["sheet"] == "check_units_cra_s1"
+    assert got["skip_gates"][1][0]["gate"] == 0.41
+    layer = got["posterior_layers"][1][0]
+    assert (layer["label_id"], layer["graded_yes"]) == ("cra", 9)
+    assert got["runs"][1][0]["stage"] == "measures" and got["runs"][1][0]["calls"] == 3
+    assert got["spend"][1][0]["stage"] == "measure"
+    assert got["graded_package_links"][0] is None            # no source: not loaded
+    key, rows = load_pg.answer_rows(str(d))
+    rows = list(rows)
+    assert key and rows[0]["answer_sha256"] == "abcd" and rows[0]["model"] == "typesafe/jev"
+
+
+def test_every_sentence_gets_its_asset_as_the_measure_stage_decides_it(tmp_path, monkeypatch):
+    import load_pg
+    import measure
+    (tmp_path / "embeddings").mkdir()
+    (tmp_path / "embeddings" / "sentence_index.csv").write_text(
+        "unit_id,paragraph_id,project_ids\nD:p1:s1,D:p1,P1\nD:p1:s2,D:p1,P1\nD:p2:s1,D:p2,P1\n")
+    monkeypatch.setattr(measure, "asset_map", lambda *a, **k: (
+        {"D:p1:s1": {"towers": 0.9}, "D:p1:s2": {"towers": 0.1}, "D:p2:s1": {"fiber": 0.05}},
+        "assets-abc"))
+    import classify
+    monkeypatch.setattr(classify, "asset_layers_digest", lambda *a: "")
+    key, rows = load_pg.unit_asset_rows(str(tmp_path))
+    by = {r["unit_id"]: (r["asset_id"], r["asset_level"]) for r in rows}
+    assert by == {"D:p1:s1": ("towers", "unit"), "D:p1:s2": ("towers", "paragraph"),
+                  "D:p2:s1": ("", "none")}
