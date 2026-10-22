@@ -125,6 +125,7 @@ def firmness(text):
 # Every number below is a control-panel setting (inputs/config/control_panel.csv).
 LINK_MIN = float(panel.get("asset.floor", 0.3))   # a sentence has an asset at or above this
 DECAY = float(panel.get("asset.decay", 0.4))      # per sentence back, for a sentence naming none
+PARA_MIN = float(panel.get("asset.paragraph_floor", LINK_MIN))  # the decayed sum's own floor
 TOP = int(panel.get("measure.top", 0))            # round 0 by count; 0 = off (the cosine gate is the pool)
 MIN_COSINE = float(panel.get("measure.gate_cosine", 0.3))  # the starting gate, until the
                       # skip rule (src/skip.py) has fitted the measure's own
@@ -202,14 +203,17 @@ def asset_map(data, projects=None, vector_of=None, projects_of=None, folder=None
     return out, os.path.basename(folder)
 
 
-def sentence_asset(own, earlier, decay=None, floor=None):
+def sentence_asset(own, earlier, decay=None, floor=None, paragraph_floor=None):
     """(asset, probability, level) for a sentence: its own best asset when
-    that reaches LINK_MIN (level 'unit'); else the best asset of its own
-    scores plus each earlier sentence's in the same paragraph, the k-th one
-    back weighted by decay**k (level 'paragraph'); else ('', best, 'none'). own and earlier[i] are
+    that reaches LINK_MIN, asset.floor (level 'unit'); else the best asset of
+    its own scores plus each earlier sentence's in the same paragraph, the
+    k-th one back weighted by decay**k, when that sum reaches PARA_MIN,
+    asset.paragraph_floor (level 'paragraph'): a sum is on another scale
+    than one sentence's posterior, so it has its own floor; else ('', best, 'none'). own and earlier[i] are
     {asset: probability}; earlier is nearest first."""
     decay = DECAY if decay is None else decay
     floor = LINK_MIN if floor is None else floor
+    paragraph_floor = PARA_MIN if paragraph_floor is None else paragraph_floor
     best = max(own, key=own.get) if own else ""
     if best and own[best] >= floor:
         return best, own[best], "unit"
@@ -219,7 +223,7 @@ def sentence_asset(own, earlier, decay=None, floor=None):
             total[a] = total.get(a, 0.0) + (decay ** k) * p
     if total:
         a = max(total, key=total.get)
-        if total[a] >= floor and decay:
+        if total[a] >= paragraph_floor and decay:
             return a, min(total[a], 1.0), "paragraph"
         return "", total[a], "none"
     return "", 0.0, "none"
@@ -292,6 +296,8 @@ class Run:
         # The skip rule (src/skip.py): the gate the evaluation fitted for this
         # question and search run, else the panel's starting gate.
         self.gate_fitted = None
+        if min_cosine is None and not MIN_COSINE:
+            min_cosine = 0.0        # a panel gate of 0: no gate, every sentence (as the asset map)
         if min_cosine is None:
             import skip
             self.gate_fitted = skip.read(data, name, classify.question_shas(self.qs),
@@ -437,7 +443,7 @@ class Run:
             if not classify.in_scope(r, self.projects):
                 continue
             hit = [p["pattern_id"] for p in mine if p["regex"].search(self.texts[r["unit_id"]])]
-            near = (top and rank[i] <= top) or (floor and best[i] >= floor)
+            near = (top and rank[i] <= top) or best[i] >= floor   # gate 0: every sentence
             if not hit and not near:
                 continue
             route = "both" if hit and near else ("pattern" if hit else "embedding")
@@ -582,7 +588,7 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
     for r in com:
         levels[r["asset_link_level"]] += 1
     lines.append("  committed units by asset link level (the sentence's own asset, else "
-                 f"an earlier sentence of its paragraph, at {LINK_MIN}): " + ", ".join(
+                 f"an earlier sentence of its paragraph, at {LINK_MIN} and {PARA_MIN}): " + ", ".join(
                      f"{k} {v}" for k, v in sorted(levels.items(), key=lambda x: -x[1])))
     linked = defaultdict(int)
     for r in com:

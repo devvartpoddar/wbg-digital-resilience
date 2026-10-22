@@ -42,7 +42,7 @@ The dashboards (Metabase collection "WBG v2": Overview, Measure, Project, Commit
 
 **A commitment's status** is the first of its packages' statuses in `package_status_order` (Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Not in latest plan, Cancelled), or No package found.
 
-**Same wording across projects.** Each committed unit's text is cut into six-word runs; another project counts when its committed units hold at least `dashboard.near_copy_share` of them (programmes print one climate section with small edits).
+**Same wording across projects.** Each committed unit's text is cut into runs of `text.shingle_words` (six) words; another project counts when its committed units hold at least `dashboard.near_copy_share` of them (programmes print one climate section with small edits).
 
 **Dropped by a restructuring.** True only where a later restructuring paper marks the component of every sentence with a known component "Marked for Deletion"; NULL when no sentence sits under a known component. Absence from a later paper is not read as dropping.
 

@@ -214,3 +214,21 @@ def test_main_publishes_nothing_on_a_dry_run(store, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["search.py", "assets", "--data", data])
     assert search.main() == 0
     assert published == [((data,), {"sets": ["assets"]})]
+
+
+def test_types_with_no_phrase_written_for_them_are_listed(tmp_path):
+    import search
+    d = tmp_path / "labels"
+    d.mkdir()
+    (d / "m.csv").write_text("measure_id,measure_name,definition,active\nm,M,a measure,true\n")
+    (d / "m_types.csv").write_text("measure_id,type_id,type_name,definition,active\n"
+                                   "m,site,Site,one site,true\nm,route,Route,a route,true\n")
+    (d / "m_queries.csv").write_text("measure_id,query_id,query,active,type_id\n"
+                                     "m,q1,a site assessment,true,site\nm,q2,general,true,\n")
+    gaps = search.type_coverage("m", folder=str(d))
+    assert [(t, n) for _, t, n in gaps] == [("route", "Route")]
+    (d / "m_queries.csv").write_text("measure_id,query_id,query,active,type_id\n"
+                                     "m,q1,x,true,nosuch\n")
+    import pytest
+    with pytest.raises(SystemExit):
+        search.type_coverage("m", folder=str(d))

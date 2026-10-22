@@ -415,7 +415,7 @@ TABLES = {
             "unit_best_asset_id": "The sentence asset map's best asset for the sentence itself.",
             "unit_best_asset_probability": "Its probability (grades 2 and 3, through the asset's probability layer when fitted).",
             "asset_ids_above_threshold": "The sentence's own asset when it reaches the control panel's asset.floor.",
-            "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the decayed sum over its paragraph's earlier sentences (level paragraph), at the control panel's asset.floor.",
+            "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the decayed sum over its paragraph's earlier sentences (level paragraph), at the control panel's asset.floor and asset.paragraph_floor.",
             "linked_asset_level": "unit, paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
@@ -565,7 +565,7 @@ TABLES = {
                 "decides it: the sentence's own best asset when its posterior reaches the "
                 "control panel's asset.floor (level unit); else the asset with the highest "
                 "sum of its own score and the earlier sentences' scores in its paragraph, each "
-                "weighted by asset.decay per sentence back, when that reaches the floor (level "
+                "weighted by asset.decay per sentence back, when that reaches asset.paragraph_floor (level "
                 "paragraph); else none. Rebuilt at every publish from the current asset map "
                 "and its probability layers.",
         columns={"asset_id": "The sentence's asset; empty at level none.",

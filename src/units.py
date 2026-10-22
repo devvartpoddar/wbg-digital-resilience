@@ -79,7 +79,8 @@ UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block"
              "section_path", "component_number", "subcomponent_number", "component_key",
              "char_start", "char_end", "n_tokens", "text_sha256", "lead_in_start",
              "lead_in_end", "left_out", "copy_of", "template_projects", "template_share"]
-TEMPLATE_SHINGLE = 6        # words per shingle for template_share
+import panel  # noqa: E402
+TEMPLATE_SHINGLE = int(panel.get("text.shingle_words", 6))  # words per run, shared with the views
 TEMPLATE_MIN_PROJECTS = 2   # a shingle is template wording when this many other projects print it
 
 WORD = re.compile(r"[^\W\d_]{2,}")
@@ -275,9 +276,10 @@ def search_units(data):
     here = os.path.dirname(os.path.abspath(__file__))
     inputs += [os.path.join(here, f) for f in ("units.py", "sentences.py", "keys.py",
                                                 "common.py")]
-    key = hashlib.sha256("\n".join(file_sha256(f, remember=not f.endswith(".py"))
-                                   if os.path.exists(f) else "-"
-                                   for f in inputs).encode()).hexdigest()[:16]
+    key = hashlib.sha256(("\n".join(file_sha256(f, remember=not f.endswith(".py"))
+                                    if os.path.exists(f) else "-"
+                                    for f in inputs) + f"\nshingle={TEMPLATE_SHINGLE}")
+                         .encode()).hexdigest()[:16]
     cache = where(data, "cache", f"search_units-{key}.json")
     try:
         with open(cache, encoding="utf-8") as fh:

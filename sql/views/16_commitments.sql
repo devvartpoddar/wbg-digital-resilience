@@ -154,8 +154,9 @@ w AS (
   FROM u
 ),
 sh AS (
-  SELECT DISTINCT w.unit_id, w.project_id, md5(array_to_string(w.ws[i:i + 5], ' ')) AS h
-  FROM w, generate_series(1, greatest(cardinality(w.ws) - 5, 1)) i
+  SELECT DISTINCT w.unit_id, w.project_id,
+         md5(array_to_string(w.ws[i:i + {{panel:text.shingle_words}} - 1], ' ')) AS h
+  FROM w, generate_series(1, greatest(cardinality(w.ws) - {{panel:text.shingle_words}} + 1, 1)) i
 ),
 n AS (SELECT unit_id, project_id, count(*) AS runs FROM sh GROUP BY unit_id, project_id),
 shared AS (

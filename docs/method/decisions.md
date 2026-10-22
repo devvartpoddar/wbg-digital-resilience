@@ -12,7 +12,7 @@ Every question the pipeline puts to the decision model (TypeSafe's Jev) is handl
 
 | Level | Skip | Decision |
 |---|---|---|
-| Asset map | fitted gate, else `asset.gate_cosine`; word patterns; `asset_feedback.*` | `asset.floor`, with `asset.decay` for the paragraph rule |
+| Asset map | fitted gate, else `asset.gate_cosine`; word patterns; `asset_feedback.*` | `asset.floor`; `asset.decay` and `asset.paragraph_floor` for the paragraph rule |
 | Measure | fitted gate, else `measure.gate_cosine`; `measure.top`; `feedback.*` | `floor.<set>`, else `floor.default` |
 | Type | none: every committed sentence | `floor.types` |
 | Package to asset | `link.asset_top` | `link.asset_yes` |

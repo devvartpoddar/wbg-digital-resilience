@@ -16,8 +16,8 @@ Sections:
   score     which reading of the model's four grade probabilities ranks the
             graded sentences best: P(2)+P(3) (read.grades), P(3), or the
             expected grade.
-  asset     asset.floor and asset.decay on the sentences a person gave an
-            asset (in sample: the asset layers are fitted on the same
+  asset     asset.floor, asset.paragraph_floor and asset.decay on the
+            sentences a person gave an asset (in sample: the asset layers are fitted on the same
             grades).
   not yet   the settings these grades cannot set, and the sheet each needs.
 """
@@ -169,7 +169,7 @@ def asset_grid(data):
     # renames the next map (its feedback rounds read them)
     amap, run = measure.asset_map(data, None, vector_of, projects_of,
                                   folder=classify.last_run("assets", data))
-    lines = ["## Asset floor and decay", ""]
+    lines = ["## Asset floor, paragraph floor and decay", ""]
     if not amap:
         return lines + ["- no sentence asset map yet", ""]
     with open(where(data, "embeddings", "sentence_index.csv"), newline="", encoding="utf-8") as fh:
@@ -196,24 +196,35 @@ def asset_grid(data):
               "sentence's own level where the person said the sentence names none (an asset "
               "from the paragraph is not counted against it: the sheet asks about the sentence). "
               "In sample: the asset layers were fitted on the same grades.", "",
-              "| floor | decay | agree | given | wrong asset | on 'none' |",
-              "|---|---|---|---|---|---|"]
+              "| rank | floor | paragraph floor | decay | agree | given | wrong asset | on 'none' |",
+              "|---|---|---|---|---|---|---|---|"]
     rw = sum(w for _, w in real.values())
     nw = sum(w for _, w in none.values()) or 1.0
-    now = (float(panel.get("asset.floor", 0.3)), float(panel.get("asset.decay", 0.4)))
+    now = (float(panel.get("asset.floor", 0.3)),
+           float(panel.get("asset.paragraph_floor", panel.get("asset.floor", 0.3))),
+           float(panel.get("asset.decay", 0.4)))
+    results = []
     for fl in FLOORS:
-        for d in DECAYS:
-            agree = given = 0.0
-            for u, (a, w) in real.items():
-                got = measure.sentence_asset(amap.get(u, {}), [amap.get(x, {}) for x in before[u]],
-                                             d, fl)[0]
-                given += w if got else 0.0
-                agree += w if got == a else 0.0
-            onnone = sum(w for u, (_, w) in none.items()
-                         if measure.sentence_asset(amap.get(u, {}), [], 0.0, fl)[0])
-            mark = " (panel)" if (fl, d) == now else ""
-            lines.append(f"| {fl}{mark} | {d} | {agree / rw:.2f} | {given / rw:.2f} | "
-                         f"{(given - agree) / rw:.2f} | {onnone / nw:.2f} |")
+        onnone = sum(w for u, (_, w) in none.items()
+                     if measure.sentence_asset(amap.get(u, {}), [], 0.0, fl)[0])
+        for pf in FLOORS:
+            for d in DECAYS:
+                if d == 0 and pf != fl:
+                    continue                 # no paragraph rule: its floor reads nothing
+                agree = given = 0.0
+                for u, (a, w) in real.items():
+                    got = measure.sentence_asset(amap.get(u, {}),
+                                                 [amap.get(x, {}) for x in before[u]],
+                                                 d, fl, pf)[0]
+                    given += w if got else 0.0
+                    agree += w if got == a else 0.0
+                results.append((agree / rw, -(onnone / nw), (fl, pf, d), given / rw, onnone / nw))
+    results.sort(key=lambda r: (-r[0], -r[1], r[2]))
+    for k, (ag, _, (fl, pf, d), gv, on) in enumerate(results, 1):
+        mark = " (panel)" if (fl, pf, d) == now else ""
+        if k <= 20 or mark:
+            lines.append(f"| {k}{mark} | {fl} | {pf} | {d} | {ag:.2f} | {gv:.2f} | {gv - ag:.2f} "
+                         f"| {on:.2f} |")
     return lines + ["", "Read it: the highest agree with a low 'on none'; decay 0 is the "
                     "sentence alone.", ""]
 
