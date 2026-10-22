@@ -153,4 +153,4 @@ LEFT JOIN wbg.labels l ON l.label_set = 'assets' AND l.label_id = g.label_id
 WHERE g.label_set = 'assets' AND g.most_likely_grade >= 2
 GROUP BY pp.project_id, g.label_id, l.label_name;
 COMMENT ON VIEW wbg.project_assets IS
-  'One row per project and digital asset the asset map finds there: paragraphs the decision model grades financed (built, bought, installed, connected or operated) and paragraphs graded supported without paying for the asset (technical assistance, policy, studies). how is Financed if any paragraph is graded financed. Since the sentence map of 2026-10-22 (one choice: which asset), a sentence that chooses an asset counts as financed and none as supported only; the measure question says how. The model''s grades; documented is not done.';
+  'One row per project and digital asset the asset map finds there: paragraphs the decision model grades financed (built, bought, installed, connected or operated) and paragraphs graded supported without paying for the asset (technical assistance, policy, studies). how is Financed if any paragraph is graded financed. The model''s grades; documented is not done.';

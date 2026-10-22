@@ -182,31 +182,8 @@ def graded_question(lab, scale, unit="sentence"):
             "criteria": [g.replace("{name}", lab["name"]) for g in scale]}
 
 
-CHOICE = "asset"         # the one question of the sentence map
-NONE = "none"
-
-
-def choice_question(labels):
-    """The sentence map's one question: which label the sentence concerns,
-    or none. One question whatever the number of labels (2026-10-22: on 615
-    graded sentences it agreed with Dev's asset as often as one graded
-    question per asset, 0.66 against 0.65, at 42 per cent of the cost; a new
-    asset adds an option, not a question per sentence)."""
-    crit = {lab["id"]: f"{lab['name']}: {lab['definition']}" for lab in labels}
-    crit[NONE] = ("None: the sentence names or clearly refers to no specific digital asset, "
-                  "or only to the project's digital investments in general.")
-    return {"type": "choice",
-            "instructions": ("Which digital asset does the sentence from a World Bank project "
-                             "appraisal document in the 'sentence' field concern? Choose exactly "
-                             "one: the most specific asset it names or clearly refers to, or none."),
-            "criteria": crit}
-
-
 def questions(labels, scale, unit=None):
-    """The questions object of a request: for the sentence map one choice
-    over the labels; for the paragraph map one graded question per label."""
-    if (unit or UNIT) == "sentence":
-        return {CHOICE: choice_question(labels)}
+    """The questions object of a request: one graded question per label."""
     return {lab["id"]: graded_question(lab, scale, unit or UNIT) for lab in labels}
 
 
@@ -371,8 +348,6 @@ def best_cosines(name, data, taxonomy=TAXONOMY, unit=None):
 
 
 def score_rows(p, response, labels, cosines=None, asked=None):
-    if UNIT == "sentence":
-        return choice_rows(p, response, labels, cosines)
     out = []
     for lab in labels:
         r = p["row"]
@@ -402,37 +377,6 @@ def score_rows(p, response, labels, cosines=None, asked=None):
     return out
 
 
-def choice_rows(p, response, labels, cosines=None):
-    """One row per label for a sentence asked the choice question: the
-    option's probability as p3 and its complement as p0 (so readers that add
-    grades 2 and 3 read the choice probability), grade 3 for the chosen label
-    and 0 for the others. A sentence not asked gets rows with asked=false."""
-    r = p["row"]
-    a = (response.get("answers") or {}).get(CHOICE)
-    base = {"unit_id": r["unit_id"], "paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"],
-            "project_ids": r["project_ids"], "component_number": r.get("component_number", "")}
-    if a is None:
-        return [dict(base, label_id=lab["id"], asked="false",
-                     best_cosine=_cos(cosines, lab["id"], r["unit_id"])) for lab in labels]
-    probs = {k: float(v) for k, v in a["probabilities"].items()}
-    best = max(probs, key=probs.get) if probs else ""
-    out = []
-    for lab in labels:
-        q = probs.get(lab["id"], 0.0)
-        out.append(dict(base, label_id=lab["id"], asked="true",
-                        best_cosine=_cos(cosines, lab["id"], r["unit_id"]),
-                        grade=3 if best == lab["id"] else 0, expected=f"{3 * q:.3f}",
-                        confidence=f"{float(a.get('confidence', 0)):.3f}",
-                        p0=f"{1 - q:.4f}", p1="0.0000", p2="0.0000", p3=f"{q:.4f}", p4="",
-                        model_served=response.get("model", "")))
-    return out
-
-
-def _cos(cosines, lab, uid):
-    c = (cosines or {}).get((lab, uid))
-    return "" if c is None else f"{c:.4f}"
-
-
 def in_scope(row, projects):
     """Whether a row's project_ids meet the scope (None or empty = every project)."""
     return not projects or bool(set(row.get("project_ids", "").split("|")) & set(projects))
@@ -458,14 +402,9 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
                          f"./wbg search {name} first")
     bodies = []
     for p in paras:
-        if CHOICE in qs:            # the sentence map: asked when any label passes the gate
-            ask = qs if not min_cosine or any(
-                cosines.get((lab["id"], p["row"]["unit_id"]), 0.0) >= min_cosine
-                for lab in labels) else {}
-        else:
-            ask = qs if not min_cosine else {
-                lid: q for lid, q in qs.items()
-                if cosines.get((lid, p["row"]["unit_id"]), 0.0) >= min_cosine}
+        ask = qs if not min_cosine else {
+            lid: q for lid, q in qs.items()
+            if cosines.get((lid, p["row"]["unit_id"]), 0.0) >= min_cosine}
         bodies.append((p, request_body(p["state"], ask, model)))
     # A paragraph whose questions do not fit one request is asked in several
     # (answers.bodies_for); only a paragraph too long for a single question
@@ -614,7 +553,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     n_q = sum(len(b["questions"]) for _, b in bodies)
     log(f"{name}: {len(labels)} labels x {len(scale)} grades, {len(bodies):,} {UNIT}s, "
         f"{n_q:,} questions"
-        + (f" (cosine gate {min_cosine}: {n_q / (len(bodies) * len(qs)):.0%} of all)"
+        + (f" (cosine gate {min_cosine}: {n_q / (len(bodies) * len(labels)):.0%} of all)"
            if min_cosine else ""))
     if os.path.exists(os.path.join(out, "manifest.json")):
         log(f"  already written: {out}")
@@ -709,7 +648,7 @@ def asset_layers(data, folder, vector_of):
     with open(path, encoding="utf-8") as fh:
         specs = json.load(fh)
     return {a: posterior.Layer(spec, vector_of) for a, spec in specs.items()
-            if spec.get("question_sha256") == (shas.get(a) or shas.get(CHOICE))}
+            if spec.get("question_sha256") == shas.get(a)}
 
 
 def question_shas(qs):
