@@ -19,7 +19,8 @@ rule's fitted gate, src/skip.py, else the control panel's asset.gate_cosine;
 0 asks every label of every sentence) or that a word pattern of the label
 matches (<set>_patterns.csv, optional); then feedback rounds (src/feedback.py)
 look below the gate, asking the sentences nearest those whose posterior
-reaches asset.floor, until a round yields too few.
+reaches asset.floor, until a round yields too few (asset_feedback.* on the
+control panel, apart from the measures' feedback.*).
 
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
        inputs/taxonomy/<set>.csv, <set>_scale.csv, <set>_patterns.csv (optional)
@@ -353,7 +354,7 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     the measures' rule); a sentence with no question is not sent. routes =
     {(unit_id, label_id): embedding | pattern | both}. The feedback rounds
     (classify) follow from the stored answers, so the folder is keyed on what
-    they read too: the feedback settings, asset.floor and the asset layers.
+    they read too: asset_feedback.*, asset.floor and the asset layers.
     `projects` limits the run to the sentences of those projects (a cohort
     set, say); the run is keyed on the sentences it covers, so a scope is its
     own run and a wider one later reads the store."""
@@ -394,7 +395,7 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
                              f"{MAX_REQUEST_CHARS:,} characters with one question; not truncated")
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
-    fb = feedback.settings() if rounds_apply(min_cosine, limit) else {}
+    fb = feedback.settings(feedback.ASSET) if rounds_apply(min_cosine, limit) else {}
     h = hashlib.sha256(f"min_cosine={min_cosine}\nunit=sentence\nprior={prior.VERSION}\n"
                        f"gates={skip.digest(gates)}\n".encode())
     if pats or fb:
@@ -415,7 +416,7 @@ def rounds_apply(min_cosine, limit):
     is asked already), not on a smoke test, and while feedback.max_rounds is
     above 0."""
     import feedback
-    return bool(min_cosine) and not limit and feedback.settings()["max_rounds"] > 0
+    return bool(min_cosine) and not limit and feedback.settings(feedback.ASSET)["max_rounds"] > 0
 
 
 def feedback_rounds(name, data, qs, bodies, merged, asked, routes, round_of, *, model,
@@ -432,7 +433,7 @@ def feedback_rounds(name, data, qs, bodies, merged, asked, routes, round_of, *, 
     import feedback
     import numpy
     import posterior
-    fb = feedback.settings()
+    fb = feedback.settings(feedback.ASSET)
     floor = float(panel.get("asset.floor", 0.3))
     vector_of, projects_of = posterior.lookups(data)
     layers = layers_for(data, question_shas(qs), vector_of, projects_of)
@@ -546,7 +547,8 @@ def _plan_key(name, data, taxonomy, min_cosine, projects, model):
         p = os.path.join(folder, f)
         h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
     # what the feedback rounds read (plan() keys the folder on them too)
-    h.update(json.dumps([panel.items("feedback."), panel.get("asset.floor"),
+    h.update(json.dumps([panel.items("feedback."), panel.items("asset_feedback."),
+                         panel.get("asset.floor"),
                          panel.get("posterior.on", True), panel.get("read.grades")],
                         sort_keys=True, default=str).encode())
     p = layers_path(data)
@@ -683,7 +685,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     rounds = rounds_apply(min_cosine, limit)
     if rounds:
         import feedback
-        fb = feedback.settings()
+        fb = feedback.settings(feedback.ASSET)
         log(f"  then feedback rounds: at most {fb['max_rounds']} of {fb['batch']} sentences an "
             f"asset ({len(qs) * fb['max_rounds'] * fb['batch']:,} questions at most)")
     if dry_run:
