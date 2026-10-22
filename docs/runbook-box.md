@@ -39,7 +39,7 @@ each prints its estimate before asking anything (`--dry-run`).
    | Fetch PDFs, plans, notices, awards, records | hours | overnight (the interface is rate-limited; `./wbg prepare` resumes) | a day or more |
    | Read PDFs (0.3 s a page on a fast core; three workers) | minutes | about 3 hours on the N150 | about 15 hours |
    | Embed the units | US$0.30 | about US$1 | about US$6 |
-   | Asset map, 13 assets (starting gate 0.2) | about US$0.6 to 0.9 | about US$2 to 3 | about US$12 to 18 |
+   | Asset map, 13 assets (starting gate 0.3, plus feedback rounds) | about US$0.25 to 0.35 | about US$0.8 to 1.2 | about US$5 to 7 |
    | One measure (pool plus feedback; starting gate 0.3) | about US$0.03 to 0.2 | about US$0.1 to 0.7 | about US$0.6 to 4 |
 
    Estimates (2026-10-22) on the current corpus (251 projects, about 150,000
@@ -49,8 +49,8 @@ each prints its estimate before asking anything (`--dry-run`).
    about 5 per cent for a narrow measure (backup power) to about 40 for a broad one
    (renewable energy); feedback rounds add at most 3,500 sentences a measure
    (US$0.04). Twelve measures: about US$3 to 5. A clean run's model stages: about
-   US$1 embedding, US$2 to 3 asset map, US$3 to 5 measures, US$1 to 2 types,
-   package links and pair checks; **about US$7 to 11 in all**, against US$18 to 22
+   US$1 embedding, US$0.8 to 1.2 asset map, US$3 to 5 measures, US$1 to 2 types,
+   package links and pair checks; **about US$6 to 9 in all**, against US$18 to 22
    at gates of 0.2 for both and US$3 to 4 at the old 0.25 and 0.45. Asking one
    sentence a request (`ask.batch_items` 0) would multiply the measures by about
    four. Raising a gate later asks nothing (the answers are stored); lowering it
@@ -218,9 +218,9 @@ current questions:
 2. `./wbg run --from classify --dry-run`, read the estimates, then without
    `--dry-run`. The first run has **no probability layer and no fitted gate**: the
    floors read the model's score and the pools use the panel's starting gates
-   (`measure.gate_cosine` 0.3, `asset.gate_cosine` 0.2: one to four in ten
-   sentences are asked about each measure, and assets, which have no word
-   patterns or feedback rounds behind the gate, are asked more widely). Stored answers are reused wherever
+   (`measure.gate_cosine` and `asset.gate_cosine`, both 0.3: one to four in ten
+   sentences are asked about each measure; measures and assets alike then get
+   word patterns and feedback rounds below the gate). Stored answers are reused wherever
    the exact question and state were asked before.
 3. Grade a training sheet: `./wbg check all --design train --seed <n>`
    (about 40 rows a measure, near each floor), then `./wbg check all --seed <n>

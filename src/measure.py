@@ -17,7 +17,8 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      2 and 3) goes through the probability layer (src/posterior.py) when one
      is fitted, and the measure's floor (control panel) reads the result:
      the one decision (is_committed).
-  4. Relevance feedback: the vectors of the committed units are averaged
+  4. Relevance feedback (src/feedback.py, the asset map's too): the vectors
+     of the committed units are averaged
      into a centroid (minus feedback.negative_weight times the centroid of
      the units that do not count); the corpus is re-ranked by cosine to it;
      the next feedback.batch unseen units are graded in one parallel batch;
@@ -180,12 +181,12 @@ def questions(labels, scale):
 
 # ------------------------------------------------------------------ the inputs
 
-def asset_map(data, projects=None, vector_of=None, projects_of=None):
+def asset_map(data, projects=None, vector_of=None, projects_of=None, folder=None):
     """({unit_id: {asset: probability}}, run name) from the current sentence
     asset map over the same scope: each asked sentence's score for each
     asset (read.grades), through the asset's probability layer when one has
     been fitted (data/labels/assets_posterior.json). Empty without a run."""
-    folder = classify.current_run(ASSET_SET, data, projects=projects)
+    folder = folder or classify.current_run(ASSET_SET, data, projects=projects)
     if not folder:
         return {}, ""
     layers = classify.asset_layers(data, folder, vector_of, projects_of) if vector_of else {}
@@ -525,37 +526,21 @@ class Run:
         asked and not committed: the first run showed the raw centroid pulls in the
         measure's neighbourhood ("resilient infrastructure" in general), and
         the rejected units are exactly what that neighbourhood looks like."""
+        import feedback
         pos = [self.row_of[r["unit_id"]] for r in graded
                if r["sent"] == "true" and r["committed"] == "true"]
         neg = [self.row_of[r["unit_id"]] for r in graded
                if r["sent"] == "true" and r["committed"] != "true"]
-        if not pos:
+        q = feedback.query(self.matrix, pos, neg, NEGATIVE_WEIGHT)
+        if q is None:
             return []
-        centroid = numpy.asarray(self.matrix[sorted(pos)], dtype="float32").mean(axis=0)
-        if neg and NEGATIVE_WEIGHT:
-            centroid -= NEGATIVE_WEIGHT * numpy.asarray(self.matrix[sorted(neg)],
-                                                        dtype="float32").mean(axis=0)
-        norm = numpy.linalg.norm(centroid)
-        if not norm:
-            return []
-        centroid /= norm
-        n = self.matrix.shape[0]
-        sims = numpy.empty(n, dtype="float32")
-        for s in range(0, n, search.BLOCK):
-            block = numpy.asarray(self.matrix[s:s + search.BLOCK], dtype="float32")
-            sims[s:s + block.shape[0]] = block @ centroid
+        (order, sims), = feedback.ranked(self.matrix, [q])
         seen = {r["unit_id"] for r in graded}
-        order = numpy.lexsort((numpy.arange(n), -sims))
-        rows = []
-        for i in order.tolist():
-            uid = self.index[i]["unit_id"]
-            if uid in seen or not classify.in_scope(self.index[i], self.projects):
-                continue
-            rows.append(self.base_row(self.index[i], "feedback", rnd, len(rows) + 1,
-                                      f"{float(sims[i]):.6f}"))
-            if len(rows) >= self.settings["batch"]:
-                break
-        return rows
+        pick = feedback.next_rows(
+            order, lambda i: self.index[i]["unit_id"] not in seen and
+            classify.in_scope(self.index[i], self.projects), self.settings["batch"])
+        return [self.base_row(self.index[i], "feedback", rnd, k + 1, f"{float(sims[i]):.6f}")
+                for k, i in enumerate(pick)]
 
 
 def report_lines(run, rows, rounds, calls, cost, seconds, served):

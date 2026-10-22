@@ -246,3 +246,52 @@ def test_answers_under_the_alias_are_reused_for_the_snapshot(tmp_path, monkeypat
                           api_key="k", workers=1, aliases=("alias",))
     assert len(asked) == 1 and asked[0]["state"] == {"p": "b"}
     assert got[0]["q"]["answer"]["noul"] == 0.9 and got[0]["q"]["migrated_from"] == "alias"
+
+
+def test_assets_get_the_measures_routes_patterns_and_feedback_rounds(store, monkeypatch, tmp_path):
+    """A gated map asks the gate's sentences and the pattern's, then looks
+    again below the gate: each round asks the sentences nearest those that
+    count, and an asset stops when a round finds fewer than min_yield."""
+    import numpy
+    data, tax, calls = store
+    texts = ["The project will finance towers.",          # s1 above the gate
+             "Raised towers on plinths.",                  # s2 below it, near s1
+             "Background on the economy.",                 # s3 below, far
+             "Other towers elsewhere.",                    # s4 below, farthest
+             "New masts in the north."]                    # s5 below; the pattern matches
+    vecs = numpy.array([[1, 0, 0], [0.95, 0.05, 0], [0.2, 1, 0], [0, 0, 1], [0, 0.3, 1]],
+                       dtype="float32")
+    vecs /= numpy.linalg.norm(vecs, axis=1, keepdims=True)
+    os.makedirs(os.path.join(data, "embeddings"), exist_ok=True)
+    numpy.save(os.path.join(data, "embeddings", "sentence_emb.npy"), vecs)
+    ids = [f"D:p{i:05d}:s001" for i in range(1, 6)]
+    _csv(os.path.join(data, "embeddings", "sentence_index.csv"), ["unit_id", "project_ids"],
+         [{"unit_id": u, "project_ids": "P1"} for u in ids])
+    monkeypatch.setattr(classify, "sentences", lambda d: [
+        {"row": {"unit_id": u, "paragraph_id": u[:8], "doc_id": "D", "project_ids": "P1",
+                 "component_number": ""}, "state": {"section": "S", "sentence": t}, "i": i}
+        for i, (u, t) in enumerate(zip(ids, texts))])
+    monkeypatch.setattr(classify, "best_cosines", lambda name, d, taxonomy=None: {
+        ("towers", u): c for u, c in zip(ids, [0.5, 0.1, 0.1, 0.05, 0.05])})
+    _csv(os.path.join(tax, "assets_patterns.csv"), ["asset_id", "pattern_id", "pattern", "active"],
+         [{"asset_id": "towers", "pattern_id": "masts", "pattern": r"\bmasts?\b",
+           "active": "true"}])
+    p = tmp_path / "panel.csv"
+    p.write_text("setting,value\nread.grades,2|3\nasset.floor,0.5\nfeedback.batch,1\n"
+                 "feedback.min_yield,1\nfeedback.max_rounds,3\nfeedback.negative_weight,0.5\n")
+    monkeypatch.setenv("WBG_PANEL", str(p))
+    out = _run(store, min_cosine=0.3)
+    rows = {r["unit_id"]: r for r in csv.DictReader(open(os.path.join(out, "scores.csv")))}
+    got = {u: (rows[u]["asked"], rows[u]["route"], rows[u]["round"]) for u in ids}
+    assert got[ids[0]] == ("true", "embedding", "0")
+    assert got[ids[4]] == ("true", "pattern", "0")
+    assert got[ids[1]] == ("true", "feedback", "1")      # nearest the yes: asked, and yes
+    assert got[ids[2]][:2] == ("true", "feedback")        # the next round: no yes, so it stops
+    assert got[ids[3]][0] == "false"
+    man = json.load(open(os.path.join(out, "manifest.json")))
+    assert [h["yes"] for h in man["feedback_rounds"]["towers"]] == [1, 0]
+    # A rerun reads everything from the store.
+    n = len(calls)
+    import shutil
+    shutil.rmtree(out)
+    assert _run(store, min_cosine=0.3) == out and len(calls) == n

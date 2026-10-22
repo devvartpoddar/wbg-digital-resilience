@@ -164,7 +164,11 @@ def asset_grid(data):
     import labels
     import measure
     vector_of, projects_of = posterior.lookups(data)
-    amap, run = measure.asset_map(data, None, vector_of, projects_of)
+    import classify
+    # the map the grades were drawn against: refitting the asset layers
+    # renames the next map (its feedback rounds read them)
+    amap, run = measure.asset_map(data, None, vector_of, projects_of,
+                                  folder=classify.last_run("assets", data))
     lines = ["## Asset floor and decay", ""]
     if not amap:
         return lines + ["- no sentence asset map yet", ""]
