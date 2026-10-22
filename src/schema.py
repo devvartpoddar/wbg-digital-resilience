@@ -422,7 +422,7 @@ TABLES = {
             "linked_asset_level": "unit, paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
-            "type_ids_above_threshold": "The unit's types (one choice among the measure's types in analysis/labels/<set>_types.csv): the likeliest when its probability reaches the control panel's floor.types, and with types.multiple every other at floor.types_also; empty when none does or no list exists yet.",
+            "type_ids_above_threshold": "The unit's types (one choice among the measure's types in analysis/labels/<set>_types.csv): every type whose probability, through the types' layer once fitted, reaches the control panel's floor.types (the likeliest only without types.multiple); empty when none does or no list exists yet.",
             "best_type_id": "The likeliest type.",
             "best_type_probability": "Its probability.",
             "template_project_count": "As in search_units: other projects printing the same words.",
@@ -435,7 +435,7 @@ TABLES = {
         schema=PUBLIC, key=("label_set", "label_id", "type_id"), foreign=[],
         comment="A measure's approved types (its clusters): proposed by a generative model "
                 "from the committed units, approved by a person in analysis/labels/"
-                "<set>_types.csv, assigned by the decision model one yes/no each.",
+                "<set>_types.csv, assigned by the decision model in one choice question over the types and none (src/kinds.py); a unit has every type whose probability reaches floor.types.",
         columns={"type_name": "The name shown (display_name in the file when given, else "
                               "the name the model was asked with).",
                  "definition": "The definition the decision model was given.",
@@ -497,8 +497,9 @@ TABLES = {
         comment="Which digital asset a procurement package buys, builds, installs, connects "
                 "or operates: one row per package and asset asked (its best few by cosine "
                 "over the asset taxonomy's phrases), with the decision model's yes "
-                "probability (src/link_packages.py). Filter on the probability; no cut-off "
-                "is built in.",
+                "probability and its posterior (src/link_packages.py). A package has the "
+                "asset when posterior_probability reaches the control panel's link.asset_yes; "
+                "a package may have several.",
         columns={
             "label_id": "The asset's id in wbg.labels (label_set assets).",
             "cosine": "The package description's best cosine over the asset's search phrases.",
@@ -548,12 +549,14 @@ TABLES = {
                 "or that is among the project's packages nearest the "
                 "measure itself (route), with the decision model's yes probability "
                 "(src/link_packages.py). Many to many: a commitment may link to several "
-                "packages and a package to several commitments. Filter on the probability.",
+                "packages and a package to several commitments. A link counts when "
+                "posterior_probability (the model's yes through the link layer once fitted) "
+                "reaches dashboard.package_link_min_probability.",
         columns={
             "label_set": "The measure's set.",
             "label_id": "The measure.",
             "unit_id": "The committed unit (wbg.measure_findings).",
-            "shared_asset_ids": "Assets both the unit's answers and the package's answers name at 0.5.",
+            "shared_asset_ids": "Assets both sides have: the unit's (asset.floor, or asset.paragraph_floor at the link levels counted) and the package's (posterior at link.asset_yes).",
             "route": "How the pair was made: asset (a shared asset) or measure (the package is among the project's nearest to the measure's phrases; no asset needed).",
             "measure_rank": "For the measure route, the package's rank by cosine to the measure among the project's packages not paired by asset.",
             "measure_cosine": "For the measure route, the package description's best cosine to the measure's phrases and definition.",
@@ -569,10 +572,10 @@ TABLES = {
         comment="The assets of every sentence the search reads, one row per asset (asset_rank "
                 "1 the best; with asset.multiple every asset at its floor; rank 0 a sentence "
                 "with none), decided as the measure stage "
-                "decides it: the sentence's own best asset when its posterior reaches the "
-                "control panel's asset.floor (level unit); else the asset with the highest "
-                "sum of its own score and the earlier sentences' scores in its paragraph, each "
-                "weighted by asset.decay per sentence back, when that reaches asset.paragraph_floor (level "
+                "decides it: the sentence's own assets whose posterior reaches the "
+                "control panel's asset.floor (level unit); else the assets whose sum of their "
+                "own score and the earlier sentences' scores in its paragraph, each weighted by "
+                "asset.decay per sentence back, reaches asset.paragraph_floor (level "
                 "paragraph); else none. Rebuilt at every publish from the current asset map "
                 "and its probability layers.",
         columns={"asset_id": "The sentence's asset; empty at level none.",

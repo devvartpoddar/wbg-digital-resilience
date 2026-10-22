@@ -403,6 +403,8 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
                                           for l, v in sorted(pats.items())},
                              "feedback": fb,
                              "floor": float(panel.get("asset.floor", 0.3)) if fb else None,
+                             "grades": list(panel.grades()) if fb else None,
+                             "layers_on": bool(panel.get("posterior.on", True)) if fb else None,
                              "layers": layers_digest_for(data, question_shas(qs)) if fb else ""},
                             sort_keys=True).encode())
     for p, sha in zip(paras, shas):

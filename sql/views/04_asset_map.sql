@@ -25,4 +25,4 @@ LEFT JOIN wbg.labels l ON l.label_set = 'assets' AND l.label_id = ua.asset_id
 LEFT JOIN wbg.paragraphs pa ON pa.paragraph_id = ua.paragraph_id
 WHERE ua.asset_level <> 'none';
 COMMENT ON VIEW wbg.asset_map IS
-  'One row per sentence the pipeline gives an asset: its own best asset at the control panel''s asset.floor (asset_level unit), else the decayed sum over its paragraph''s earlier sentences (asset_level paragraph). The model''s reading, not a person''s; documented is not done.';
+  'One row per sentence and asset the pipeline gives it: its own assets at the control panel''s asset.floor (asset_level unit), else the assets whose decayed sum over its paragraph''s earlier sentences reaches asset.paragraph_floor (asset_level paragraph); every such asset with asset.multiple. The model''s reading, not a person''s; documented is not done.';

@@ -10,9 +10,10 @@ The four decisions after them go through the same loop:
   package_assets  a package              <asset>                    P(yes)
   package_links   a commitment-package   link                       P(yes)
 
-Each kind's labels are pooled into one fit (posterior.fit_pooled: one
-intercept per label, the weights shared), since a type, a pair side or an
-asset has few graded rows of its own. Grades come from the combined
+Each kind's labels are pooled into one fit when posterior.pool is on (as
+for measures and assets: posterior.fit_pooled, one intercept per label, the
+weights shared), since a type, a pair side or an asset has few graded rows
+of its own. Grades come from the combined
 workbook (./wbg check all): the type column of each measure tab, and the
 tabs 'pair checks', 'package assets' and 'package links'; ./wbg check all
 --evaluate stores them in data/labels/ and fits the layers into
@@ -286,8 +287,12 @@ def fit_kind(data, kind, blocks):
     """Fit one kind's pooled layer on blocks ({label: (graded [(item, y,
     weight, projects)], scores, vectors, question SHA-256)}), write it, and
     return (report lines, {label: {item: out-of-fold probability}})."""
-    s = dict(posterior.settings(), pool=True)
-    specs = posterior.fit_pooled(blocks, s)
+    s = posterior.settings()
+    if s["pool"]:
+        specs = posterior.fit_pooled(blocks, s)
+    else:
+        specs = {lab: sp for lab, (g, sc, v, q) in blocks.items()
+                 if (sp := posterior.fit(g, sc, v, q, lab, s))}
     path = layer_path(data, kind)
     n = sum(len(b[0]) for b in blocks.values())
     yes = sum(r[1] for b in blocks.values() for r in b[0])
@@ -298,7 +303,7 @@ def fit_kind(data, kind, blocks):
                 f"layer; the model's answer stands"], {}
     posterior.write(path, specs)
     oof = posterior.out_of_fold_all(blocks, s)
-    return [f"- {kind}: pooled layer over {len(specs)} labels ({n} graded, {yes} yes), "
+    return [f"- {kind}: {'pooled ' if s['pool'] else ''}layer over {len(specs)} labels ({n} graded, {yes} yes), "
             f"written to {os.path.basename(path)}"], oof
 
 
@@ -328,11 +333,13 @@ def type_blocks(data):
         for r in read_type_grades(data, name):
             uid = by_text.get(r.get("text_sha256", ""))
             if uid in assigned and int(r["grade"]) >= lo:
-                given[uid] = (r["type"], float(r.get("weight") or 1.0))
+                ts = set(r["type"].split("|")) - {"", "other"}
+                if ts:
+                    given[uid] = (ts, float(r.get("weight") or 1.0))
         for label, qsha in shas.items():
             t = label.split(":", 1)[1]
-            rows = [(u, int(given[u][0] == t), given[u][1], projects_of(u)) for u in given
-                    if given[u][0] not in ("", "other") and f"p_{t}" in assigned[u]]
+            rows = [(u, int(t in given[u][0]), given[u][1], projects_of(u)) for u in given
+                    if f"p_{t}" in assigned[u]]
             score = {u: float(assigned[u][f"p_{t}"] or 0) for u, *_ in rows}
             vecs = {u: vector_of(u) for u in score}
             vecs = {u: v for u, v in vecs.items() if v is not None}

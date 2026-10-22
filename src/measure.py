@@ -27,12 +27,13 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      stopping rule is a yield rule for retrieval depth, not a recall
      guarantee: what the search never reaches stays unmeasured until a
      person grades a sample.
-  5. The asset of a unit (asset_link, asset_link_level, asset_link_p): the
-     sentence's own best asset when it reaches the control panel's
-     asset.floor (level unit); else the asset with the highest sum of its own
-     score and every earlier sentence's in its paragraph, each weighted by
-     asset.decay per sentence back, when that reaches the floor (level
-     paragraph); else none.
+  5. The assets of a unit (sentence_assets; asset_links, best first in
+     asset_link): the sentence's own assets whose posterior reaches the
+     control panel's asset.floor (level unit); else the assets whose sum of
+     their own score and every earlier sentence's in the paragraph, each
+     weighted by asset.decay per sentence back, reaches asset.paragraph_floor
+     (level paragraph); else none. Every winner with asset.multiple, the best
+     only without.
 
 Every threshold here is a control-panel setting
 (inputs/config/control_panel.csv, src/panel.py).
