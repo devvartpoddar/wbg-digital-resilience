@@ -47,6 +47,7 @@ import embed  # noqa: E402
 import labels  # noqa: E402
 import panel  # noqa: E402
 import prior  # noqa: E402
+import skip  # noqa: E402
 from search import TAXONOMY, _active, _rows  # noqa: E402
 
 # The dated snapshot, as the measure stage uses (measure.MODEL): the alias
@@ -363,11 +364,12 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     if min_cosine and not cosines:
         raise SystemExit(f"classify: --min-cosine needs a search run for {name}; run "
                          f"./wbg search {name} first")
+    gates = fitted_gates(name, data, taxonomy, qs) if min_cosine else {}
     bodies = []
     for p in paras:
         ask = qs if not min_cosine else {
             lid: q for lid, q in qs.items()
-            if cosines.get((lid, p["row"]["unit_id"]), 0.0) >= min_cosine}
+            if cosines.get((lid, p["row"]["unit_id"]), 0.0) >= gates.get(lid, min_cosine)}
         bodies.append((p, request_body(p["state"], ask, model)))
     # A sentence whose questions do not fit one request is asked in several
     # (answers.bodies_for); only a sentence too long for a single question
@@ -380,7 +382,7 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
     h = hashlib.sha256(f"min_cosine={min_cosine}\nunit=sentence\nprior={prior.VERSION}\n"
-                       .encode())
+                       f"gates={skip.digest(gates)}\n".encode())
     for p, sha in zip(paras, shas):
         h.update(f"{p['row']['unit_id']}:{sha}\n".encode())
     out = where(data, "classify", f"{prefix}{name}-{h.hexdigest()[:12]}")
@@ -433,7 +435,21 @@ def _plan_key(name, data, taxonomy, min_cosine, projects, model):
     if min_cosine:
         import search
         h.update(os.path.basename(search.run_folder(name, data, taxonomy=taxonomy)[0]).encode())
+        p = skip.path(data, name)
+        h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
     return h.hexdigest()[:24]
+
+
+def fitted_gates(name, data, taxonomy, qs):
+    """{label_id: gate} the evaluation fitted by the skip rule (src/skip.py)
+    for the labels' current questions and the set's search run; a label
+    without one is gated at the panel's asset.gate_cosine."""
+    import search
+    try:
+        folder, _ = search.run_folder(name, data, taxonomy=taxonomy)
+    except SystemExit:
+        return {}
+    return skip.read(data, name, question_shas(qs), folder)
 
 
 def _plan_cache(data, key):

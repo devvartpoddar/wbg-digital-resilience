@@ -228,3 +228,18 @@ def test_a_check_sheet_is_drawn_from_a_run_with_the_sentence_and_its_paragraph(s
     assert row["sentence"].startswith("A site-specific hazard assessment")
     assert row["paragraph"] == PARAS[0] and row["component"] == "1 Connectivity"
     assert key[0]["stratum_size"] == 1
+
+
+def test_the_pool_reads_the_gate_the_skip_rule_fitted_for_its_question(store):
+    import skip
+    data, _ = store
+    run = measure.Run("cra", data, build=False, log=lambda *_: None)
+    assert run.settings["min_cosine"] == measure.MIN_COSINE and run.gate_fitted is None
+    skip.write(data, "cra", {"cra": {"gate": 0.31, "lost": 0.0, "positives": 12,
+                                     "question_sha256": run.question_sha,
+                                     "search_run": os.path.basename(run.search_run)}})
+    fitted = measure.Run("cra", data, build=False, log=lambda *_: None)
+    assert fitted.settings["min_cosine"] == 0.31 and fitted.out != run.out
+    skip.write(data, "cra", {"cra": {"gate": 0.31, "question_sha256": "another wording",
+                                     "search_run": os.path.basename(run.search_run)}})
+    assert measure.Run("cra", data, build=False, log=lambda *_: None).out == run.out

@@ -281,10 +281,22 @@ def state_for(row, para, unit_text, names):
 class Run:
     """Everything one measure run needs, loaded once."""
 
-    def __init__(self, name, data, *, model=MODEL, top=TOP, min_cosine=MIN_COSINE, batch=BATCH,
+    def __init__(self, name, data, *, model=MODEL, top=TOP, min_cosine=None, batch=BATCH,
                  min_yield=MIN_YIELD, max_rounds=MAX_ROUNDS, build=True, log=print,
                  projects=None):
         self.name, self.data, self.log = name, data, log
+        self.search_run, _ = search.run_folder(name, data)
+        self.labels, self.scale = classify.load_labels(name, None)
+        self.qs = questions(self.labels, self.scale)
+        self.question_sha = classify.question_shas(self.qs)[self.labels[0]["id"]]
+        # The skip rule (src/skip.py): the gate the evaluation fitted for this
+        # question and search run, else the panel's starting gate.
+        self.gate_fitted = None
+        if min_cosine is None:
+            import skip
+            self.gate_fitted = skip.read(data, name, classify.question_shas(self.qs),
+                                         self.search_run).get(self.labels[0]["id"])
+            min_cosine = self.gate_fitted if self.gate_fitted is not None else MIN_COSINE
         self.settings = {"model": model, "top": top, "min_cosine": min_cosine,
                          "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
@@ -300,14 +312,11 @@ class Run:
         self.floor = labels_mod.commit_floor(name)
         if self.floor is not None:
             self.settings["commit_floor"] = self.floor
-        self.search_run, _ = search.run_folder(name, data)
         if not os.path.exists(os.path.join(self.search_run, "manifest.json")):
             raise SystemExit(f"measure: {name} has no search run for the current index; "
                              f"run ./wbg search {name} first")
         self.patterns = labels_mod.load_patterns(name)
-        self.labels, self.scale = classify.load_labels(name, None)
         self.assets = [a for a in labels_mod.load_set(ASSET_SET) if a["active"] == "true"]
-        self.qs = questions(self.labels, self.scale)
         asset_folder = classify.current_run(ASSET_SET, data, projects=self.projects)
         self.asset_run = os.path.basename(asset_folder) if asset_folder else ""
         # The asset layers change each sentence's asset, so they are part of the key.
@@ -318,7 +327,6 @@ class Run:
         # reads. Part of the version, so new grades give a new run (from the
         # store, free). The fit is keyed on the exact question (AGENTS.md rule
         # 9): a revised definition starts without one.
-        self.question_sha = classify.question_shas(self.qs)[self.labels[0]["id"]]
         self.layer_path = where(data, "labels", f"{name}_posterior.json")
         self.calibration = posterior.digest(posterior.read_spec(self.layer_path, self.question_sha))
         h = hashlib.sha256()

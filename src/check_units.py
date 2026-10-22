@@ -621,6 +621,48 @@ def fit_layer(name, data):
     return lines + [""]
 
 
+def fit_gate(name, data):
+    """The skip rule's gate for the measure (src/skip.py): from the sentences
+    a person graded yes under the current question (pool, feedback and
+    elusion sheets alike), each at its design weight, the highest best-cosine
+    gate that loses at most skip.max_loss of them; written for the next run.
+    Returns report lines."""
+    import panel, skip
+    lo = min(panel.grades())
+    run = measure.Run(name, data, build=False, log=lambda *_: None)
+    graded = graded_labels(name, data, run.question_sha)
+    lines = ["## Skip rule (what the pool leaves out)", ""]
+    yes = {u: w for u, (g, _, w) in graded.items() if g >= lo}
+    if not yes:
+        return lines + ["- no sentence graded yes under the current question: the panel's "
+                        f"gate ({measure.MIN_COSINE}) stands", ""]
+    run.load_corpus()
+    lid = run.labels[0]["id"]
+    mine = [p for p in run.patterns if p["label_id"] == lid]
+    pos = []
+    for u, w in sorted(yes.items()):
+        if u not in run.best_cosine:
+            continue
+        text = run.texts.get(u, "")
+        pos.append((run.best_cosine[u], any(p["regex"].search(text) for p in mine), w))
+    got = skip.fit(pos)
+    path = skip.path(data, name)
+    if got is None:
+        if os.path.exists(path):
+            os.remove(path)
+        return lines + [f"- {len(pos)} graded yes, too few or all matched by a pattern: the "
+                        f"panel's gate ({measure.MIN_COSINE}) stands", ""]
+    gate, lost, n = got
+    skip.write(data, name, {lid: {"gate": gate, "lost": lost, "positives": n,
+                                  "question_sha256": run.question_sha,
+                                  "search_run": os.path.basename(run.search_run)}})
+    return lines + [f"- gate {gate:.4f} on the best cosine to the phrases: of {n} graded yes "
+                    f"({sum(1 for p in pos if p[1])} matched by a pattern, always asked), "
+                    f"{lost:.1%} of their weight falls below it (rule: at most "
+                    f"{skip.settings()['max_loss']:.0%}); the panel's starting gate was "
+                    f"{measure.MIN_COSINE}. The next run's pool uses it.", ""]
+
+
 def fit_asset_layers(data):
     """One probability layer per asset (src/posterior.py), fitted on the
     assets people gave the sentences they graded for any measure (yes = the
@@ -664,6 +706,27 @@ def fit_asset_layers(data):
         posterior.write(path, out)
     elif os.path.exists(path):
         os.remove(path)
+    # The skip rule for each asset (src/skip.py): the asset map's gate on a
+    # sentence's own cosine; no pattern route, so every yes is exposed.
+    import search, skip
+    cos = classify.best_cosines("assets", data)
+    folder_s, _ = search.run_folder("assets", data)
+    gates = {}
+    for asset in sorted(scores):
+        pos = [(cos[(asset, u)], False, weight[u]) for u in named
+               if named[u] == asset and (asset, u) in cos]
+        got = skip.fit(pos)
+        if got:
+            gates[asset] = {"gate": got[0], "lost": got[1], "positives": got[2],
+                            "question_sha256": man["question_sha256"].get(asset, ""),
+                            "search_run": os.path.basename(folder_s)}
+            lines.append(f"- {asset}: skip-rule gate {got[0]:.4f} ({got[2]} graded yes, "
+                         f"{got[1]:.1%} below)")
+    gpath = skip.path(data, "assets")
+    if gates:
+        skip.write(data, "assets", gates)
+    elif os.path.exists(gpath):
+        os.remove(gpath)
     return lines + [""]
 
 
@@ -785,6 +848,7 @@ def evaluate(name, data, seed=1, elusion=False, **kw):
     lines.append("")
     write_quality(data, name, key[0], rows, top)
     lines += fit_layer(name, data)
+    lines += fit_gate(name, data)
     out = where(data, "reports", f"evaluate_units_{name}.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
@@ -931,6 +995,7 @@ def evaluate_elusion(name, data, seed=1, **kw):
                   f"so the pool's recall of the corpus is about "
                   f"{in_pool / (in_pool + est_total):.0%} if the model's count inside is right; "
                   f"a zero count in a stratum bounds it only by the interval's upper end.", ""]
+    lines += fit_gate(name, data)
     out = where(data, "reports", f"evaluate_elusion_{name}.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:
