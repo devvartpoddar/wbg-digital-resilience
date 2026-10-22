@@ -34,8 +34,10 @@ import labels  # noqa: E402
 
 SCHEMA = "wbg_requests"
 TABLE = f"{SCHEMA}.measure_requests"
-REQUEST_CAP_USD = 1.0       # the most one request may spend on models
-DAILY_CAP_USD = 3.0         # the most all requests together may spend in a UTC day
+import panel  # noqa: E402
+# Control panel: requests.cap_per_request_usd, requests.cap_per_day_usd.
+REQUEST_CAP_USD = float(panel.get("requests.cap_per_request_usd", 1.0))
+DAILY_CAP_USD = float(panel.get("requests.cap_per_day_usd", 3.0))
 NAME_RULE = re.compile(r"^[a-z][a-z0-9_]{2,40}$")
 SCALE_TEMPLATE = os.path.join(labels.ROOT, "analysis", "labels", "backup_power_scale.csv")
 STAGES = (("search", ["search.py", "{set}"]),

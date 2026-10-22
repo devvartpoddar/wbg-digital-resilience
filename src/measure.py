@@ -125,7 +125,7 @@ def firmness(text):
 LINK_MIN = float(panel.get("asset.floor", 0.3))   # a sentence has an asset at or above this
 DECAY = float(panel.get("asset.decay", 0.4))      # per sentence back, for a sentence naming none
 TOP = int(panel.get("measure.top", 0))            # round 0 by count; 0 = off (the cosine gate is the pool)
-MIN_COSINE = float(panel.get("measure.gate_cosine", 0.45))  # the starting gate, until the
+MIN_COSINE = float(panel.get("measure.gate_cosine", 0.2))  # the starting gate, until the
                       # skip rule (src/skip.py) has fitted the measure's own
 BATCH = int(panel.get("feedback.batch", 500))      # units per feedback round
 MIN_YIELD = int(panel.get("feedback.min_yield", 10))  # a round yielding fewer is the last

@@ -167,3 +167,19 @@ def test_evaluation_rows_never_fit_a_layer_or_a_gate(tmp_path):
         w.writerows(rows)
     assert set(check_units.graded_labels("cra", str(tmp_path), "q", fitting=True)) == {"u1"}
     assert set(check_units.graded_labels("cra", str(tmp_path), "q")) == {"u1", "u2"}
+
+
+def test_a_grade_follows_its_sentence_when_a_re_parse_moves_the_ids(tmp_path):
+    import check_units
+    lab = tmp_path / "labels"
+    lab.mkdir()
+    key = check_units.text_key("The project will finance backup generators.")
+    with open(lab / "cra_units.csv", "w", newline="") as fh:
+        w = csv.DictWriter(fh, fieldnames=check_units.LABEL_COLS, restval="")
+        w.writeheader()
+        w.writerow(dict(label_set="cra", label_id="cra", unit_id="D:p00007:s002",
+                        text_sha256=key, question_sha256="q", grade="3"))
+        w.writerow(dict(label_set="cra", label_id="cra", unit_id="D:p00008:s001",
+                        text_sha256="gone", question_sha256="q", grade="0"))
+    got = check_units.graded_labels("cra", str(tmp_path), "q", units_by_text={key: "D:p00009:s002"})
+    assert got == {"D:p00009:s002": (3, "", 1.0)}                # moved; the vanished one dropped

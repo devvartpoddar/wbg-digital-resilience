@@ -67,13 +67,13 @@ MAX_REQUEST_CHARS = 30_000
 # against the label's phrases (control panel asset.gate_cosine; 0 = ask
 # every label of every sentence). The skip rule (src/skip.py) replaces it
 # per asset once fitted.
-MIN_COSINE = float(panel.get("asset.gate_cosine", 0.25))
+MIN_COSINE = float(panel.get("asset.gate_cosine", 0.2))
 # The map grades each search unit (a sentence) with its section and
 # component, asked the same graded question the measures ask.
 WORKERS = 10
 SCORE_COLS = ["unit_id", "paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
               "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
-              "p3", "p4", "model_served", *prior.COLS]
+              "p3", "model_served", *prior.COLS]
 
 
 # What each run actually asked for is appended to data/reports/spend.csv, so
@@ -329,7 +329,7 @@ def score_rows(p, response, labels, cosines=None, asked=None):
                     "expected": f"{sum(i * q for i, q in enumerate(probs)) / total:.3f}",
                     "confidence": f"{float(a.get('confidence', 0)):.3f}",
                     **{f"p{i}": (f"{probs[i]:.4f}" if i < len(probs) else "")
-                       for i in range(5)},
+                       for i in range(4)},
                     "model_served": response.get("model", "")})
     return out
 

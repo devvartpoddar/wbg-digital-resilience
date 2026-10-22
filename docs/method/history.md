@@ -86,3 +86,5 @@ A review found: the layer was fitted without design weights, chose floors on the
 ## The architecture proposal (2026-10-19)
 
 `docs/architecture-next.md` proposed the measure stages as built in sections 5a to 5d (pool, asset map, funnel, check sheets, types); it was removed on 2026-10-22, the method files being the record of what was built.
+
+**Readiness for the clean run (2026-10-22, later).** The same-project rule in the vote was dropped: with a measure's graded yes in a few projects it left their yes rows voting only among noes, and the out-of-fold check by project already stops leakage between projects; near-copies still do not vote. Grades are now matched to sentences by text checksum, since the re-parse moves unit ids. Both starting gates were set to 0.2 (from 0.25 for assets and 0.45 for measures) so the first run covers the whole range once (about four in five sentences a measure; about US$18 to 22 for the model stages against US$3 to 4); later gates, fitted by the skip rule, ask nothing new. The request spend caps moved to the control panel; view 19 still read the most likely grade, and the loader refused numbers read from JSON manifests: both fixed.

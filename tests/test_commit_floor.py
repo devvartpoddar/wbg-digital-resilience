@@ -51,3 +51,11 @@ def test_panel_values_are_typed():
     assert panel._parse("0.25") == 0.25 and panel._parse("6") == 6
     assert panel._parse("true") is True and panel._parse("") is None
     assert panel._parse("unit|paragraph") == "unit|paragraph"
+
+
+def test_every_control_panel_row_has_its_five_columns():
+    import csv
+    rows = list(csv.reader(open(panel.PATH, newline="", encoding="utf-8")))
+    assert rows[0] == ["setting", "value", "stage", "what_it_does", "how_to_tune"]
+    assert [r[0] for r in rows if len(r) != 5] == []
+    assert len({r[0] for r in rows}) == len(rows)                # no setting twice

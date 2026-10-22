@@ -48,4 +48,4 @@ The dashboards (Metabase collection "WBG v2": Overview, Measure, Project, Commit
 
 **Asset map agreement.** `asset_in_asset_map` says whether a sentence of the project names the commitment's asset (`project_assets.sentences_naming_it`): a commitment whose asset no sentence names is worth a second look.
 
-**Requested measures (later, not now).** `src/measure_requests.py` and `./wbg requests` run a queue in `wbg_requests.measure_requests` one at a time under a US$1 cap a request and US$3 a day. Nothing schedules it: the write-only Metabase connection, its role and a timer are yggdrasil changes.
+**Requested measures (later, not now).** `src/measure_requests.py` and `./wbg requests` run a queue in `wbg_requests.measure_requests` one at a time under a spend cap a request and a day (control panel `requests.cap_per_request_usd`, 1.0, and `requests.cap_per_day_usd`, 3.0; at the 0.2 starting gate a new measure costs about US$1.2 to 1.5, so it finishes over two runs of the queue). Nothing schedules it: the write-only Metabase connection, its role and a timer are yggdrasil changes.
