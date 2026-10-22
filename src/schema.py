@@ -380,7 +380,10 @@ TABLES = {
         foreign=[("paragraph_id", "paragraphs", "paragraph_id")],
         comment="The asset map: one sentence per label (since 2026-10-22; one paragraph before) "
                 "with the decision model's probability of each grade: how the sentence relates "
-                "to the asset (0 not about it, 1 background, 2 supported, 3 financed). The "
+                "to the asset. The sentence map asks one choice (which asset, or none): the chosen asset is "
+                "graded 3 and the others 0, and probability_grade_3 is the option's probability; the "
+                "paragraph map graded each asset (0 not about it, 1 background, 2 supported, 3 "
+                "financed). The "
                 "table keeps its name so the dashboards' questions keep working.",
         columns=dict(PROBABILITY_GRADES, **{
             "unit_id": "The sentence graded (search_units.unit_id); for a paragraph map, the paragraph's id.",

@@ -195,8 +195,8 @@ reaches `floor.target_precision`. Put the floors you accept into the panel, then
 the measures (from the store, free).
 
 **First run after the change of 2026-10-22 (not yet run).** The sentence asset map is
-new, so `./wbg classify assets --dry-run` first: it asks every sentence again (a few
-times the paragraph map's US$1.0 to 1.2). The measure questions are unchanged and come
+new, so `./wbg classify assets --dry-run` first: it asks every sentence again, one choice
+question each (about US$1 to 2 at the test rate, near the paragraph map's US$1.0 to 1.2). The measure questions are unchanged and come
 from the store; the kind and facet questions are asked again (now on the sentence).
 Every floor is `floor.default` 0.5 until the evaluation suggests better ones, so the
 published counts will move.

@@ -83,9 +83,9 @@ def _run(store, **kw):
                              workers=1, **kw)
 
 
-def test_each_label_is_one_graded_question_naming_it():
+def test_each_label_is_one_graded_question_naming_it_in_the_paragraph_map():
     labels = [{"id": "towers", "name": "Mobile networks", "definition": "masts"}]
-    q = classify.questions(labels, ["Not about {name}.", "{name} financed."])
+    q = classify.questions(labels, ["Not about {name}.", "{name} financed."], "paragraph")
     assert q["towers"]["type"] == "score"
     assert "Mobile networks means: masts" in q["towers"]["instructions"]
     assert q["towers"]["criteria"] == ["Not about Mobile networks.", "Mobile networks financed."]

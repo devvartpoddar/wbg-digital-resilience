@@ -677,7 +677,8 @@ def fit_asset_layers(data):
     out, lines = {}, ["## Asset probability layers", ""]
     for asset, sc in sorted(scores.items()):
         ys = [(u, 1 if named[u] == asset else 0) for u in sc]
-        layer = posterior.fit(ys, sc, vecs, man["question_sha256"].get(asset, ""), asset)
+        shas = man["question_sha256"]
+        layer = posterior.fit(ys, sc, vecs, shas.get(asset) or shas.get(classify.CHOICE, ""), asset)
         if layer:
             out[asset] = layer
             lines.append(f"- {asset}: fitted on {layer['n_yes']} yes, {layer['n_no']} no")

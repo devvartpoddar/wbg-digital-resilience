@@ -232,8 +232,22 @@ def test_the_asset_map_grades_each_sentence_with_the_measure_questions_form(stor
     st = items[1]["state"]
     assert st["sentence"] == "The project will finance ten towers."
     assert st["section"] == "Project Components" and st["component"] == "1 Connectivity"
-    # One form of graded question for assets and measures alike.
+    # One choice question per sentence, whatever the number of assets.
     lab = {"id": "towers", "name": "Mobile networks", "definition": "masts"}
-    q = classify.graded_question(lab, ["Not {name}.", "{name}."], "sentence")
-    m = measure.questions([dict(lab, id="cra")], ["Not {name}.", "{name}."], "sentence")["cra"]
-    assert q["instructions"] == m["instructions"] and q["criteria"] == m["criteria"]
+    qs = classify.questions([lab, dict(lab, id="fiber")], ["Not {name}.", "{name}."], "sentence")
+    assert list(qs) == ["asset"] and qs["asset"]["type"] == "choice"
+    assert set(qs["asset"]["criteria"]) == {"towers", "fiber", "none"}
+
+
+def test_a_choice_answer_becomes_one_row_per_asset(monkeypatch):
+    monkeypatch.setattr(classify, "UNIT", "sentence")
+    labs = [{"id": "towers"}, {"id": "fiber"}]
+    p = {"row": {"unit_id": "D:p1:s1", "paragraph_id": "D:p1", "doc_id": "D",
+                 "project_ids": "P1"}}
+    resp = {"model": "m", "answers": {"asset": {"probabilities": {
+        "towers": 0.7, "fiber": 0.2, "none": 0.1}, "confidence": 0.8}}}
+    rows = {r["label_id"]: r for r in classify.score_rows(p, resp, labs)}
+    assert rows["towers"]["grade"] == 3 and rows["fiber"]["grade"] == 0
+    assert measure.score_of(rows["towers"]) == 0.7 and measure.score_of(rows["fiber"]) == 0.2
+    unasked = classify.score_rows(p, {"answers": {}}, labs)
+    assert all(r["asked"] == "false" for r in unasked)
