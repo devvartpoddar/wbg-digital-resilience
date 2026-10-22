@@ -803,14 +803,15 @@ def fit_asset_layers(data):
     Returns report lines."""
     import labels
     import panel, posterior
-    folder = classify.current_run("assets", data)
+    folder = classify.current_run("assets", data) or classify.last_run("assets", data)
     if not folder:
         return ["- asset layers: no sentence asset map yet"]
     with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
         man = json.load(fh)
     import csv as _csv
     with open(where(data, "embeddings", "sentence_index.csv"), newline="", encoding="utf-8") as fh:
-        by_text = {text_key(t): u for u, t in measure.unit_texts(data, list(_csv.DictReader(fh))).items()}
+        texts = measure.unit_texts(data, list(_csv.DictReader(fh)))
+    by_text = {text_key(t): u for u, t in texts.items()}
     named, weight = {}, {}
     for name in labels.label_sets():
         for u, (_, asset, w) in graded_labels(name, data, fitting=True,
@@ -842,15 +843,18 @@ def fit_asset_layers(data):
         posterior.write(path, out)
     elif os.path.exists(path):
         os.remove(path)
-    # The skip rule for each asset (src/skip.py): the asset map's gate on a
-    # sentence's own cosine; no pattern route, so every yes is exposed.
+    # The skip rule for each asset (src/skip.py), as for a measure: the gate
+    # on a sentence's own cosine; a yes a word pattern of the asset matches
+    # is always asked, so it sets no bound.
     import search, skip
     cos = classify.best_cosines("assets", data)
     folder_s, _ = search.run_folder("assets", data)
+    pats = labels.load_patterns("assets", taxonomy=classify.TAXONOMY)
     gates = {}
     for asset in sorted(scores):
-        pos = [(cos[(asset, u)], False, weight[u]) for u in named
-               if named[u] == asset and (asset, u) in cos]
+        mine = [p["regex"] for p in pats if p["label_id"] == asset]
+        pos = [(cos[(asset, u)], any(rx.search(texts.get(u, "")) for rx in mine), weight[u])
+               for u in named if named[u] == asset and (asset, u) in cos]
         got = skip.fit(pos)
         if got:
             bound = skip.loss_bound(got[1], [p[2] for p in pos])

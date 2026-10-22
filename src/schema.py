@@ -389,6 +389,8 @@ TABLES = {
             "unit_id": "The sentence graded (search_units.unit_id).",
             "was_asked": "False when the skip rule's gate (the asset's fitted gate, else the control panel's asset.gate_cosine) kept the question from being asked of this sentence; the grades are then NULL.",
             "best_cosine": "The sentence's cosine against the asset's phrases.",
+            "route": "Why the asset's question was asked: embedding (the cosine reached the gate), pattern (a word pattern of the asset matched), both, or feedback (a relevance-feedback round below the gate); NULL when not asked.",
+            "round": "0 for the first pass; 1 and up for the feedback round that asked it.",
             **PRIOR_INPUTS,
         })),
     "measure_findings": dict(

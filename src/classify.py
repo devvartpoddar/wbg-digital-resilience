@@ -13,13 +13,17 @@ decision model: it returns a probability for each grade, not text. Default:
 TypeSafe's Jev, pinned to a dated snapshot, through OpenRouter's decisions
 endpoint with the project's own key (embed.read_key). Every answer is stored
 per question (src/answers.py), so a changed definition re-asks one question.
-A label's question goes only to the sentences whose cosine to the label's
-phrases reaches its gate: the skip rule's fitted gate (src/skip.py), else
-the control panel's starting gate (asset.gate_cosine; 0 asks every label of
-every sentence).
+What is asked follows the measures' method: a label's question goes to the
+sentences whose cosine to the label's phrases reaches its gate (the skip
+rule's fitted gate, src/skip.py, else the control panel's asset.gate_cosine;
+0 asks every label of every sentence) or that a word pattern of the label
+matches (<set>_patterns.csv, optional); then feedback rounds (src/feedback.py)
+look below the gate, asking the sentences nearest those whose posterior
+reaches asset.floor, until a round yields too few.
 
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
-       inputs/taxonomy/<set>.csv, <set>_scale.csv
+       inputs/taxonomy/<set>.csv, <set>_scale.csv, <set>_patterns.csv (optional)
+       data/embeddings/sentence_emb.npy (the feedback rounds)
 Writes data/classify/answers/<model>/<aa>/<sha>.json one stored answer per question
        data/classify/<set>-<version>/scores.csv      sentence x label: the
                                                      probability of each grade
@@ -67,12 +71,12 @@ MAX_REQUEST_CHARS = 30_000
 # against the label's phrases (control panel asset.gate_cosine; 0 = ask
 # every label of every sentence). The skip rule (src/skip.py) replaces it
 # per asset once fitted.
-MIN_COSINE = float(panel.get("asset.gate_cosine", 0.2))
+MIN_COSINE = float(panel.get("asset.gate_cosine", 0.3))
 # The map grades each search unit (a sentence) with its section and
 # component, asked the same graded question the measures ask.
 WORKERS = 10
 SCORE_COLS = ["unit_id", "paragraph_id", "doc_id", "project_ids", "component_number", "label_id",
-              "asked", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
+              "asked", "route", "round", "best_cosine", "grade", "expected", "confidence", "p0", "p1", "p2",
               "p3", "model_served", *prior.COLS]
 
 
@@ -182,7 +186,7 @@ def sentences(data):
     every = {u["unit_id"]: u for u in units.search_units(data)}
     index = _rows(where(data, "embeddings", "sentence_index.csv"))
     texts, out = {}, []
-    for r in index:
+    for i, r in enumerate(index):
         u = every.get(r["unit_id"])
         if u is None:
             continue
@@ -204,7 +208,7 @@ def sentences(data):
         row = {"unit_id": r["unit_id"], "paragraph_id": r["paragraph_id"], "doc_id": did,
                "project_ids": r.get("project_ids", ""),
                "component_number": r.get("component_number", "")}
-        out.append({"row": row, "state": state})
+        out.append({"row": row, "state": state, "i": i})
     return out
 
 
@@ -341,13 +345,20 @@ def in_scope(row, projects):
 
 def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_COSINE,
          projects=None):
-    """Everything a run would send, without sending it: (labels, scale,
-    questions, [(sentence, request body)], request SHA-256s, run folder,
-    cosines). With min_cosine, a sentence's request holds only the labels
-    whose cosine reaches the threshold; a sentence with none is not sent.
-    `projects` limits the run to the sentences of those
-    projects (a cohort set, say); the run is keyed on the sentences it
-    covers, so a scope is its own run and a wider one later reads the store."""
+    """Everything the first pass would send, without sending it: (labels,
+    scale, questions, [(sentence, request body)], request SHA-256s, run
+    folder, cosines, routes). A label's question goes to a sentence when the
+    sentence's cosine to the label's phrases reaches the label's gate or a
+    word pattern of the label matches it (inputs/taxonomy/<set>_patterns.csv,
+    the measures' rule); a sentence with no question is not sent. routes =
+    {(unit_id, label_id): embedding | pattern | both}. The feedback rounds
+    (classify) follow from the stored answers, so the folder is keyed on what
+    they read too: the feedback settings, asset.floor and the asset layers.
+    `projects` limits the run to the sentences of those projects (a cohort
+    set, say); the run is keyed on the sentences it covers, so a scope is its
+    own run and a wider one later reads the store."""
+    import feedback
+    import labels as labels_mod
     labels, scale = load_labels(name, taxonomy)
     qs = questions(labels, scale)
     paras = [p for p in sentences(data) if in_scope(p["row"], projects)]
@@ -358,11 +369,20 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
         raise SystemExit(f"classify: a cosine gate needs a search run for {name}; run "
                          f"./wbg search {name} first")
     gates = fitted_gates(name, data, taxonomy, qs) if min_cosine else {}
-    bodies = []
+    pats = {}
+    for pt in labels_mod.load_patterns(name, taxonomy=taxonomy):
+        if pt["label_id"] in qs:
+            pats.setdefault(pt["label_id"], []).append(pt)
+    bodies, routes = [], {}
     for p in paras:
-        ask = qs if not min_cosine else {
-            lid: q for lid, q in qs.items()
-            if cosines.get((lid, p["row"]["unit_id"]), 0.0) >= gates.get(lid, min_cosine)}
+        uid, text = p["row"]["unit_id"], p["state"]["sentence"]
+        ask = {}
+        for lid, q in qs.items():
+            near = not min_cosine or cosines.get((lid, uid), 0.0) >= gates.get(lid, min_cosine)
+            hit = any(pt["regex"].search(text) for pt in pats.get(lid, ()))
+            if near or hit:
+                ask[lid] = q
+                routes[(uid, lid)] = "both" if near and hit else ("pattern" if hit else "embedding")
         bodies.append((p, request_body(p["state"], ask, model)))
     # A sentence whose questions do not fit one request is asked in several
     # (answers.bodies_for); only a sentence too long for a single question
@@ -374,12 +394,116 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
                              f"{MAX_REQUEST_CHARS:,} characters with one question; not truncated")
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
+    fb = feedback.settings() if rounds_apply(min_cosine, limit) else {}
     h = hashlib.sha256(f"min_cosine={min_cosine}\nunit=sentence\nprior={prior.VERSION}\n"
                        f"gates={skip.digest(gates)}\n".encode())
+    if pats or fb:
+        h.update(json.dumps({"patterns": {l: [[x["pattern_id"], x["pattern"]] for x in v]
+                                          for l, v in sorted(pats.items())},
+                             "feedback": fb,
+                             "floor": float(panel.get("asset.floor", 0.3)) if fb else None,
+                             "layers": layers_digest_for(data, question_shas(qs)) if fb else ""},
+                            sort_keys=True).encode())
     for p, sha in zip(paras, shas):
         h.update(f"{p['row']['unit_id']}:{sha}\n".encode())
     out = where(data, "classify", f"{prefix}{name}-{h.hexdigest()[:12]}")
-    return labels, scale, qs, bodies, shas, out, cosines
+    return labels, scale, qs, bodies, shas, out, cosines, routes
+
+
+def rounds_apply(min_cosine, limit):
+    """Feedback rounds run after a gated pass (with no gate every sentence
+    is asked already), not on a smoke test, and while feedback.max_rounds is
+    above 0."""
+    import feedback
+    return bool(min_cosine) and not limit and feedback.settings()["max_rounds"] > 0
+
+
+def feedback_rounds(name, data, qs, bodies, merged, asked, routes, round_of, *, model,
+                    api_key, log, workers):
+    """The asset map's second look below the gate, the measures' method
+    (src/feedback.py): for each asset, the sentences whose own posterior
+    reaches asset.floor (through the asset's layer, when fitted) against
+    those asked that do not; the next feedback.batch sentences nearest that
+    query and not yet asked the asset's question are asked it. One read of
+    the embedding matrix serves every asset in a round. Updates merged,
+    asked, routes and round_of in place. Returns (calls, cost, seconds,
+    failures, {asset: [{asked, yes}] per round})."""
+    import answers
+    import feedback
+    import numpy
+    import posterior
+    fb = feedback.settings()
+    floor = float(panel.get("asset.floor", 0.3))
+    vector_of, projects_of = posterior.lookups(data)
+    layers = layers_for(data, question_shas(qs), vector_of, projects_of)
+    matrix = numpy.load(where(data, "embeddings", "sentence_emb.npy"), mmap_mode="r")
+    item_of = {p["row"]["unit_id"]: p for p, _ in bodies}
+    by_i = {p["i"]: p["row"]["unit_id"] for p, _ in bodies}
+    yes_memo = {}
+
+    def yes(uid, lid):
+        k = (uid, lid)
+        if k not in yes_memo:
+            probs = merged[uid][lid]["answer"]["probabilities"]
+            sc = sum(float(probs.get(str(g), 0)) for g in panel.grades())
+            if lid in layers:
+                sc = layers[lid].probability(uid, sc)
+            yes_memo[k] = sc >= floor
+        return yes_memo[k]
+
+    calls, cost, seconds, history = 0, 0.0, 0.0, {lid: [] for lid in qs}
+    going = set(qs)
+    for rnd in range(1, fb["max_rounds"] + 1):
+        lids, queries = [], []
+        for lid in sorted(going):
+            mine = [u for u, ls in asked.items() if lid in ls]
+            q = feedback.query(matrix, [item_of[u]["i"] for u in mine if yes(u, lid)],
+                               [item_of[u]["i"] for u in mine if not yes(u, lid)],
+                               fb["negative_weight"])
+            if q is None:
+                going.discard(lid)
+                continue
+            lids.append(lid)
+            queries.append(q)
+        if not lids:
+            break
+        new = {}
+        for lid, (order, _) in zip(lids, feedback.ranked(matrix, queries)):
+            for i in feedback.next_rows(order, lambda i: i in by_i and
+                                        lid not in asked.get(by_i[i], ()), fb["batch"]):
+                new.setdefault(by_i[i], {})[lid] = qs[lid]
+        if not new:
+            break
+        order_ = sorted(new, key=lambda u: item_of[u]["i"])
+        requests_ = [(item_of[u]["state"], new[u]) for u in order_]
+        _, pre = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                             dry_run=True, aliases=ALIASES)
+        if pre["to_ask"] and not api_key:
+            raise SystemExit(f"classify: no credential for the feedback round: set "
+                             f"${embed.KEY_VAR} or put the key in {embed.KEY_FILE}")
+        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                              aliases=ALIASES)
+        calls += st["calls"]
+        cost += st["cost_usd"]
+        seconds += st["seconds"]
+        if st["failures"] or not all(got):
+            return calls, cost, seconds, st["failures"] or [("", "missing answers")], history
+        found = {lid: 0 for lid in lids}
+        for u, g in zip(order_, got):
+            merged.setdefault(u, {}).update(g)
+            for lid in new[u]:
+                asked.setdefault(u, set()).add(lid)
+                routes[(u, lid)] = "feedback"
+                round_of[(u, lid)] = rnd
+                found[lid] += yes(u, lid)
+        for lid in lids:
+            n = sum(1 for u in new if lid in new[u])
+            history[lid].append({"round": rnd, "asked": n, "yes": found[lid]})
+            if found[lid] < fb["min_yield"]:
+                going.discard(lid)
+        log(f"  feedback round {rnd}: {sum(len(v) for v in new.values()):,} questions, "
+            f"{sum(found.values())} at asset.floor or more")
+    return calls, cost, seconds, [], history
 
 
 def _marker(data, name, projects):
@@ -418,9 +542,15 @@ def _plan_key(name, data, taxonomy, min_cosine, projects, model):
     p = where(data, "embeddings", "sentence_index.csv")
     h.update((file_sha256(p) if os.path.exists(p) else "-").encode())
     folder = taxonomy or labels.folder(name)
-    for f in (f"{name}.csv", f"{name}_scale.csv"):
+    for f in (f"{name}.csv", f"{name}_scale.csv", f"{name}_patterns.csv"):
         p = os.path.join(folder, f)
         h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
+    # what the feedback rounds read (plan() keys the folder on them too)
+    h.update(json.dumps([panel.items("feedback."), panel.get("asset.floor"),
+                         panel.get("posterior.on", True), panel.get("read.grades")],
+                        sort_keys=True, default=str).encode())
+    p = layers_path(data)
+    h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
     src = os.path.dirname(os.path.abspath(__file__))
     for f in sorted(os.listdir(src)):
         if f.endswith(".py"):
@@ -481,6 +611,19 @@ def planned_run(name, data, *, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, project
     return out
 
 
+def last_run(name, data, projects=None):
+    """The run folder last written for the set and scope (its marker), even
+    when what it was keyed on has since moved (a refitted asset layer, say),
+    or None. For a report on the run the grades were drawn against; a stage
+    reads current_run."""
+    marker = _marker(data, name, projects)
+    if not os.path.exists(marker):
+        return None
+    with open(marker, encoding="utf-8") as fh:
+        out = where(data, "classify", json.load(fh)["run"])
+    return out if os.path.exists(os.path.join(out, "manifest.json")) else None
+
+
 def current_run(name, data, taxonomy=TAXONOMY, min_cosine=None, projects=None):
     """The run folder for the label set and sentences as they stand now, or
     None if that run has not been written. With min_cosine None (the
@@ -513,7 +656,7 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
              dry_run=False, log=print, workers=WORKERS, min_cosine=MIN_COSINE, projects=None):
     """Classify the label set; returns the run folder (None on a dry run or
     when requests failed - run again to resume)."""
-    labels, scale, qs, bodies, shas, out, cosines = plan(
+    labels, scale, qs, bodies, shas, out, cosines, routes = plan(
         name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine,
         projects=projects)
     if not limit:
@@ -537,9 +680,16 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
                           dry_run=True, aliases=ALIASES)
     log(f"  answers stored already for {sum(1 for g in got if g):,} sentences; calls to make: "
         f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
+    rounds = rounds_apply(min_cosine, limit)
+    if rounds:
+        import feedback
+        fb = feedback.settings()
+        log(f"  then feedback rounds: at most {fb['max_rounds']} of {fb['batch']} sentences an "
+            f"asset ({len(qs) * fb['max_rounds'] * fb['batch']:,} questions at most)")
     if dry_run:
-        log("  --dry-run: no request made, nothing written")
+        log("  --dry-run: first pass only; no request made, nothing written")
         return None
+    calls, cost, secs = 0, 0.0, 0.0
     if st["to_ask"]:
         if not api_key:
             raise SystemExit(f"classify: no credential: set ${embed.KEY_VAR} or put the "
@@ -547,29 +697,54 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         log(f"  spent today before this run: US${spend_today(data)[1]:.2f}")
         got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
                               aliases=ALIASES)
-        record_spend(data, "classify", name, model, st["calls"], st["cost_usd"], st["seconds"],
-                     os.path.basename(out))
+        calls, cost, secs = st["calls"], st["cost_usd"], st["seconds"]
     if st["failures"] or not all(got):
+        if calls:
+            record_spend(data, "classify", name, model, calls, cost, secs, "failed")
         log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
         for sha, err in st["failures"][:5]:
             log(f"    {sha[:12]}: {err}")
         return None
+    merged, asked = {}, {}
+    it = iter(got)
+    for p, b in bodies:
+        if b["questions"]:
+            uid = p["row"]["unit_id"]
+            merged[uid] = dict(next(it))
+            asked[uid] = set(b["questions"])
+    round_of = {k: 0 for k in routes}
+    history = {}
+    if rounds:
+        c2, k2, s2, failures, history = feedback_rounds(
+            name, data, qs, bodies, merged, asked, routes, round_of, model=model,
+            api_key=api_key, log=log, workers=workers)
+        calls, cost, secs = calls + c2, cost + k2, secs + s2
+        if failures:
+            record_spend(data, "classify", name, model, calls, cost, secs, "failed")
+            log(f"  {len(failures)} request(s) failed in a feedback round; nothing written. "
+                f"Run again to resume.")
+            return None
+    if calls:
+        record_spend(data, "classify", name, model, calls, cost, secs, os.path.basename(out))
 
     rows, served = [], {}
     prior_of = prior_inputs(name, data, taxonomy, [p for p, _ in bodies], cosines, min_cosine)
-    it = iter(got)
     for p, b in bodies:
-        if not b["questions"]:
+        uid = p["row"]["unit_id"]
+        if uid not in merged:
             rows += score_rows(p, {"answers": {}}, labels, cosines, asked=set())
             continue
-        g = next(it)
+        g = merged[uid]
         response = {"answers": {qid: e["answer"] for qid, e in g.items()},
                     "model": "|".join(sorted({e["model"] for e in g.values()}))}
         served[response["model"]] = served.get(response["model"], 0) + 1
         rows += score_rows(p, response, labels, cosines,
-                           asked=set(b["questions"]) if min_cosine else None)
+                           asked=asked[uid] if min_cosine else None)
     for r in rows:
         r.update(prior_of(r["label_id"], r["unit_id"]))
+        k = (r["unit_id"], r["label_id"])
+        if r["asked"] == "true":
+            r["route"], r["round"] = routes.get(k, "embedding"), round_of.get(k, 0)
     part = out + ".part"
     os.makedirs(part, exist_ok=True)
     with open(os.path.join(part, "scores.csv"), "w", newline="", encoding="utf-8") as fh:
@@ -577,7 +752,9 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
         w.writeheader()
         w.writerows(rows)
     manifest = {"label_set": name, "model_requested": model, "models_served": served,
-                "min_cosine": min_cosine, "questions_asked": n_q,
+                "min_cosine": min_cosine,
+                "questions_asked": sum(len(v) for v in asked.values()) if min_cosine else n_q,
+                "first_pass_questions": n_q, "feedback_rounds": history,
                 "endpoint": ENDPOINT, "labels": [lab["id"] for lab in labels],
                 "scale": scale, "unit": "sentence", "items": len(bodies), "paragraphs": len(bodies),
                 "questions": qs,
@@ -612,35 +789,49 @@ def layers_path(data):
     return where(data, "labels", "assets_posterior.json")
 
 
-def asset_layers(data, folder, vector_of, projects_of=None):
+def layers_for(data, shas, vector_of, projects_of=None):
     """{asset: posterior.Layer} for the assets whose probability layer
-    (fitted by ./wbg check all --evaluate) was fitted on the question the
-    map at `folder` asked; {} when none."""
+    (fitted by ./wbg check all --evaluate) was fitted on the question now
+    asked (shas = {asset: question SHA-256}); {} when none."""
     import posterior
     path = layers_path(data)
     if not panel.get("posterior.on", True) or not os.path.exists(path):
         return {}
-    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
-        shas = json.load(fh).get("question_sha256", {})
     with open(path, encoding="utf-8") as fh:
         specs = json.load(fh)
     return {a: posterior.Layer(spec, vector_of, projects_of) for a, spec in specs.items()
             if spec.get("question_sha256") == shas.get(a)}
 
 
-def asset_layers_digest(data, folder):
-    """A short hash of the asset layers that apply to the map at `folder`
-    ('' for none): part of every reader's run key, so a refit gives a new run."""
+def layers_digest_for(data, shas):
+    """A short hash of the asset layers that apply to these questions ('' for none)."""
     import posterior
     path = layers_path(data)
-    if not folder or not panel.get("posterior.on", True) or not os.path.exists(path):
+    if not panel.get("posterior.on", True) or not os.path.exists(path):
         return ""
-    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
-        shas = json.load(fh).get("question_sha256", {})
     with open(path, encoding="utf-8") as fh:
         specs = json.load(fh)
     return posterior.digest({a: spec for a, spec in sorted(specs.items())
                              if spec.get("question_sha256") == shas.get(a)})
+
+
+def _shas(folder):
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
+        return json.load(fh).get("question_sha256", {})
+
+
+def asset_layers(data, folder, vector_of, projects_of=None):
+    """{asset: posterior.Layer} for the assets whose layer was fitted on the
+    question the map at `folder` asked; {} when none."""
+    return layers_for(data, _shas(folder), vector_of, projects_of)
+
+
+def asset_layers_digest(data, folder):
+    """A short hash of the asset layers that apply to the map at `folder`
+    ('' for none): part of every reader's run key, so a refit gives a new run."""
+    if not folder:
+        return ""
+    return layers_digest_for(data, _shas(folder))
 
 
 def question_shas(qs):

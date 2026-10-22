@@ -435,7 +435,7 @@ ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "projec
 # The model's raw answer (p0-p3, confidence) is loaded as the record; the
 # decision is the posterior (p_committed_calibrated -> posterior_probability).
 CLASSIFY_COLS = ["label_set", "run", "unit_id", "paragraph_id", "doc_id", "project_ids",
-                 "component_number", "label_id", "asked", "best_cosine",
+                 "component_number", "label_id", "asked", "route", "round", "best_cosine",
                  "confidence", "p0", "p1", "p2", "p3", "p_committed_calibrated", "model_served",
                  *prior.COLS]
 MEASURE_COLS = ["label_set", "run", "label_id", "unit_id", "kind", "paragraph_id", "doc_id",

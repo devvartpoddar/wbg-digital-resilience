@@ -95,3 +95,5 @@ A review found: the layer was fitted without design weights, chose floors on the
 - *Gate:* 22 per cent of the earlier runs' commitments came only from feedback rounds below the 0.45 gate. Their paragraph best cosine was 0.30 or more, and only 3 were under 0.35. The measure gate starts at 0.3. Assets keep 0.2: a 0.30 gate lost 9 per cent of paragraph asset links.
 - *Ridge:* the penalty was already a normal prior with standard deviation 1 on each standardised weight. The fit now uses Newton's method in place of fixed gradient steps.
 - *Skip rule:* a 1 per cent loss target cannot be vouched for with tens of graded yes. The rule of three gives 30 yes a 10 per cent bound. The rule is unchanged, and its report now gives the bound.
+
+**Assets take the measures' method (2026-10-22, last).** The asset map now has the measures' second look: word patterns (`inputs/taxonomy/assets_patterns.csv`, once a person adds it) and feedback rounds below the gate (`src/feedback.py`, one module for both). The asset gate therefore moves to 0.3, like the measures'. The rounds add at most 39,000 questions (13 assets × 6 rounds × 500) at about US$0.0000026 each, about US$0.10.
