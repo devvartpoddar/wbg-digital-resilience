@@ -110,7 +110,7 @@ def write_files(req, folder):
         os.replace(path + ".part", path)
     put(f"{name}.csv", ["measure_id", "measure_name", "definition", "active", "version", "note"],
         [{"measure_id": name, "measure_name": " ".join(req["measure_name"].split()),
-          "definition": " ".join(req["definition"].split()), "active": "true", "version": "v1",
+          "definition": " ".join(req["definition"].split()), "active": "true", "version": "v1.0",
           "note": f"Requested from the dashboard (request {req['request_id']})."}])
     phrases = [p.strip() for p in req["phrases"].splitlines() if p.strip()]
     put(f"{name}_queries.csv", ["measure_id", "query_id", "query", "active"],
