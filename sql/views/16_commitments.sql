@@ -56,13 +56,13 @@ WITH f AS (
     AND f.posterior_probability >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
-    -- a pair check whose posterior that the unit is not this measure (only
-    -- the other, or neither) reaches the pair check's floor (floor.pair_check)
+    -- a pair check whose posterior that the unit is this measure, with the
+    -- other beside it, falls short of the pair check's floor (floor.pair_check)
     AND NOT (s.apply_measure_pair_checks AND EXISTS (
       SELECT 1 FROM wbg.unit_pair_checks c
       WHERE c.unit_id = f.unit_id
-        AND ((c.set_a = f.label_set AND c.p_drop_a >= s.pair_check_floor)
-          OR (c.set_b = f.label_set AND c.p_drop_b >= s.pair_check_floor))))
+        AND ((c.set_a = f.label_set AND c.p_keep_a < s.pair_check_floor)
+          OR (c.set_b = f.label_set AND c.p_keep_b < s.pair_check_floor))))
 ),
 u AS (
   SELECT f.label_set, f.label_id, f.project_id, f.unit_id, f.unit_kind, f.paragraph_id,

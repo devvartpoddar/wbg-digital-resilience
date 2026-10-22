@@ -40,6 +40,8 @@ def store(tmp_path, monkeypatch):
                                         "active"],
              [{"measure_id": name, "measure_name": name.replace("_", " ").title(),
                "definition": "a definition", "boundary": b, "active": "true"}])
+        _csv(str(lab / f"{name}_scale.csv"), ["grade", "description"],
+             [{"grade": g, "description": f"grade {g}"} for g in range(4)])
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
 
     def fake_committed(name, data, **kw):
@@ -51,12 +53,11 @@ def store(tmp_path, monkeypatch):
         calls.append(body)
         s = body["state"]["sentence"]
         out = {}
-        for qid, q in body["questions"].items():
-            opts = list(q["criteria"])
-            pick = "only_b" if "off-grid" in s else "both"
-            out[qid] = {"type": "choice", "choice": pick,
-                        "probabilities": {o: (0.8 if o == pick else 0.2 / (len(opts) - 1))
-                                          for o in opts}}
+        for qid in body["questions"]:
+            # off-grid solar is renewable energy, not backup power (side a)
+            yes = not (qid == "keep_a" and "off-grid" in s)
+            out[qid] = {"type": "score", "score": 3 if yes else 0, "confidence": 0.9,
+                        "probabilities": {"0": 0.05, "1": 0.05, "2": 0.0, "3": 0.9} if yes else {"0": 0.95, "1": 0.0, "2": 0.0, "3": 0.05}}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
     monkeypatch.setattr(classify, "decide", fake_decide)
     return str(tmp_path / "data"), calls
@@ -68,15 +69,15 @@ def test_a_unit_two_measures_commit_gets_one_pair_answer_and_nothing_else_is_ask
     pairs = list(csv.DictReader(open(os.path.join(out, "pairs.csv"))))
     assert [(p["unit_id"], p["set_a"], p["set_b"], p["decision"]) for p in pairs] == [
         ("u1", "backup_power", "renewable_energy", "only_b")]
-    # With no pair layer, each side's drop posterior is the model's answer:
-    # only the other measure plus neither.
+    # With no pair layer, each side's posterior is the model's score.
     p = pairs[0]
-    assert abs(float(p["p_drop_a"]) - float(p["p_only_b"]) - float(p["p_neither"])) < 0.002
-    assert abs(float(p["p_drop_b"]) - float(p["p_only_a"]) - float(p["p_neither"])) < 0.002
-    q = next(c for c in calls if "pair" in c["questions"])["questions"]["pair"]
-    assert q["type"] == "choice" and set(q["criteria"]) == set(commit_checks.PAIR_OPTIONS)
-    assert "main supply fails" in q["instructions"] and "renewable electricity" in q["instructions"]
-    assert all(list(c["questions"]) == ["pair"] for c in calls)
+    assert p["p_keep_a"] == p["score_a"] == "0.050" and p["p_keep_b"] == "0.900"
+    qs = next(c for c in calls if "keep_a" in c["questions"])["questions"]
+    assert all(q["type"] == "score" for q in qs.values())
+    # each side is the measure's own question, the other's boundary beside it
+    assert "renewable electricity" in qs["keep_a"]["instructions"]
+    assert "main supply fails" in qs["keep_b"]["instructions"]
+    assert all(set(c["questions"]) == {"keep_a", "keep_b"} for c in calls)
     assert not os.path.exists(os.path.join(out, "scope.csv"))
     # The prior inputs: each measure's probability for the unit, known before the pair is asked.
     assert pairs[0]["prior_probability_a"] == "0.0000" and "prior_phrase_cosine_b" in pairs[0]

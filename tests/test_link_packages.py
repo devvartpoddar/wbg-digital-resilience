@@ -68,6 +68,8 @@ def store(tmp_path, monkeypatch):
     _csv(str(lab / "assets.csv"), ["asset_id", "asset_name", "definition", "active"],
          [{"asset_id": a, "asset_name": a.replace("_", " ").title(),
            "definition": f"{a} as infrastructure", "active": "true"} for a in AXIS])
+    _csv(str(lab / "assets_scale.csv"), ["grade", "description"],
+         [{"grade": g, "description": f"grade {g}"} for g in range(4)])
     _csv(str(lab / "assets_queries.csv"), ["asset_id", "query_id", "query", "active"],
          [{"asset_id": a, "query_id": "q", "query": f"{a} phrase", "active": "true"}
           for a in AXIS])
@@ -115,7 +117,9 @@ def store(tmp_path, monkeypatch):
             else:
                 word = qid.split("_")[0]
                 yes = word in s["package"].lower() or (qid == "fiber" and "fibre" in s["package"])
-            out[qid] = {"type": "noul", "noul": 0.9 if yes else 0.1}
+            out[qid] = {"type": "score", "score": 3 if yes else 0, "confidence": 0.9,
+                        "probabilities": {"0": 0.1, "1": 0.0, "2": 0.0, "3": 0.9} if yes else
+                        {"0": 0.9, "1": 0.0, "2": 0.0, "3": 0.1}}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
     monkeypatch.setattr(classify, "decide", fake_decide)
     import prior

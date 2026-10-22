@@ -13,7 +13,7 @@ stored like every other decision here (docs/methodology.md, section 5e):
   1. Package -> asset. Every package description is embedded once (the same
      model and cache as the sentences) and ranked against the asset
      taxonomy's phrases; its best ASSET_TOP assets by cosine go to the
-     decision model, one yes/no each ("does this package buy, build,
+     decision model, the asset map's graded question each ("how does this package relate to
      install, connect or operate fiber networks? Fiber networks means: ...").
      Every answer is kept, with its cosine rank, so the report can say how
      many yes answers sat at the last rank: the measure of whether ASSET_TOP
@@ -23,7 +23,7 @@ stored like every other decision here (docs/methodology.md, section 5e):
      committed unit (measure.is_committed: the posterior at the floor) is
      paired with the packages of its project that share an asset with the
      unit's own asset (assets_yes, else its linked asset). Each pair goes to
-     the decision model with one yes/no question: would carrying out this
+     the decision model with one graded question (LINK_LABEL, LINK_SCALE): would carrying out this
      package be where this commitment is delivered or applied? A commitment
      may link to several packages and a package to several commitments.
 
@@ -85,32 +85,44 @@ PAIR_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_i
 
 # ------------------------------------------------------------------ questions
 
-def asset_questions(assets):
-    """One yes/no per active asset, of a package description."""
-    return {a["id"]: {
-        "type": "noul",
-        "instructions": (f"Does the procurement package in the 'package' field buy, build, "
-                         f"install, connect, operate or design {a['name']}? {a['name']} "
-                         f"means: {a['definition']}"),
-        "criteria": {"true": f"Yes: what the package procures is {a['name']}, or equipment, "
-                             f"works, systems or services for infrastructure of that kind, "
-                             f"named or clearly implied.",
-                     "false": f"No: the package procures something else."}}
+PACKAGE = "the procurement package in the 'package' field"
+
+
+def asset_scale():
+    """The asset map's scale (inputs/taxonomy/assets_scale.csv): a package
+    is graded against an asset on the same 0-3 scale as a sentence."""
+    return classify.load_labels(ASSET_SET, labels.folder(ASSET_SET))[1]
+
+
+def asset_questions(assets, scale=None):
+    """The asset map's graded question for each active asset, asked of a
+    package description (classify.graded_question; the package as subject)."""
+    scale = asset_scale() if scale is None else scale
+    return {a["id"]: classify.graded_question(
+        {"id": a["id"], "name": a["name"], "definition": a["definition"]}, scale, PACKAGE)
         for a in assets}
 
 
-PAIR_QUESTION = {
-    "type": "noul",
-    "instructions": ("Would carrying out the procurement package in the 'package' field be "
-                     "where the commitment in the 'commitment' field is delivered or "
-                     "applied? Both come from the same World Bank project: the commitment "
-                     "from its appraisal document, the package from its procurement plan."),
-    "criteria": {"true": "Yes: the package procures, builds, installs or contracts the asset, "
-                         "works, equipment, system or service the commitment concerns, or the "
-                         "study or service the commitment itself requires, so the commitment "
-                         "applies to what the package delivers.",
-                 "false": "No: the package concerns something else, or the connection is "
-                          "only that both belong to the same project."}}
+# Commitment to package: the same graded form. The label and its scale are
+# a person's judgement written here until they move to a file of their own.
+LINK_LABEL = {"id": "pair", "name": "carrying out the commitment in the 'commitment' field",
+              "definition": ("the package procures, builds, installs or contracts the asset, "
+                             "works, equipment, system or service the commitment concerns, or "
+                             "the study or service the commitment itself requires, so the "
+                             "commitment is delivered or applied through what the package "
+                             "delivers. Both come from the same World Bank project: the "
+                             "commitment from its appraisal document, the package from its "
+                             "procurement plan. Belonging to the same project is not enough.")}
+LINK_SCALE = [
+    "The package has nothing to do with the commitment.",
+    "The package concerns the same project, sector or area, but the commitment is not carried "
+    "out through it.",
+    "The package may be where the commitment is carried out: it procures related works, "
+    "equipment, systems or services, but the link is not explicit.",
+    "Carrying out the package delivers or applies the commitment: it procures what the "
+    "commitment concerns, or the study or service the commitment requires.",
+]
+PAIR_QUESTION = classify.graded_question(LINK_LABEL, LINK_SCALE, PACKAGE)
 
 
 # ------------------------------------------------------------------- inputs
@@ -343,7 +355,7 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
         pw = set(prior.words(p["text"]))
         for a, cos, rank in top:
             e = g[a]
-            raw = float(e["answer"]["noul"])
+            raw = classify.graded_score(e)
             prob = judged.calibrated(alays, a, p["package_id"], raw)
             asset_rows.append({"package_id": p["package_id"], "project_id": p["project_id"],
                                "label_id": a, "cosine": f"{cos:.4f}", "cosine_rank": rank,
@@ -424,7 +436,7 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
             unit_vec(item.split("|")[1]), pvec.get(item.split("|")[2])))
     for (name, run, u, pid, p, shared, route, mrank, mcos), g in zip(pairs, got2):
         e = g["pair"]
-        raw = float(e["answer"]["noul"])
+        raw = classify.graded_score(e)
         prob = judged.calibrated(llays, "link", f"{name}|{u['unit_id']}|{p['package_id']}", raw)
         # The prior inputs: the package's cosine to the measure's phrases, and
         # how much of the package description the commitment sentence holds.

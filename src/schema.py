@@ -109,7 +109,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "unit_best_asset_probability", "linked_asset_probability",
            "template_wording_share",
            "cosine", "probability", "p_only_a", "p_only_b", "p_both", "p_neither",
-           "p_drop_a", "p_drop_b",
+           "p_keep_a", "p_keep_b", "score_a", "score_b",
            "prior_phrase_cosine", "prior_phrase_match", "prior_probability_a",
            "prior_probability_b", "prior_phrase_cosine_a", "prior_phrase_cosine_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
@@ -422,7 +422,7 @@ TABLES = {
             "linked_asset_level": "unit, paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
-            "type_ids_above_threshold": "The unit's types (one choice among the measure's types in analysis/labels/<set>_types.csv): every type whose probability, through the types' layer once fitted, reaches the control panel's floor.types (the likeliest only without types.multiple); empty when none does or no list exists yet.",
+            "type_ids_above_threshold": "The unit's types (one graded question per type in analysis/labels/<set>_types.csv): every type whose score, through the types' layer once fitted, reaches the control panel's floor.types (the likeliest only without types.multiple); empty when none does or no list exists yet.",
             "best_type_id": "The likeliest type.",
             "best_type_probability": "Its probability.",
             "template_project_count": "As in search_units: other projects printing the same words.",
@@ -435,7 +435,7 @@ TABLES = {
         schema=PUBLIC, key=("label_set", "label_id", "type_id"), foreign=[],
         comment="A measure's approved types (its clusters): proposed by a generative model "
                 "from the committed units, approved by a person in analysis/labels/"
-                "<set>_types.csv, assigned by the decision model in one choice question over the types and none (src/kinds.py); a unit has every type whose probability reaches floor.types.",
+                "<set>_types.csv, assigned by the decision model with one graded question per type (src/kinds.py); a unit has every type whose probability reaches floor.types.",
         columns={"type_name": "The name shown (display_name in the file when given, else "
                               "the name the model was asked with).",
                  "definition": "The definition the decision model was given.",
@@ -522,19 +522,17 @@ TABLES = {
                  "prior_para_measures": "Other sentences of the paragraph committed for any measure (each measure's floor)."}),
     "unit_pair_checks": dict(
         schema=PUBLIC, key=("unit_id", "set_a", "set_b"), foreign=[],
-        comment="For a unit two measures both commit: the decision model's choice of only the "
-                "first measure, only the second, both or neither, each measure stated by its "
-                "boundary (src/commit_checks.py). The commitment views drop a unit from a "
-                "measure an answer says it is not (dashboard_settings.apply_measure_pair_checks).",
+        comment="For a unit two measures both commit: each measure's graded question again, "
+                "the other measure's boundary beside it (src/commit_checks.py). The commitment "
+                "views keep the unit in a measure when its side's posterior reaches "
+                "floor.pair_check (dashboard_settings.apply_measure_pair_checks).",
         columns={"set_a": "The first measure's set (alphabetical).",
                  "set_b": "The second measure's set.",
-                 "decision": "only_a, only_b, both or neither: the most likely answer.",
-                 "probability": "The probability of that answer.",
-                 "p_only_a": "Probability of only the first measure.",
-                 "p_drop_a": "The posterior that the sentence is not the first measure (the model's only-the-second plus neither, through that measure's pair layer when fitted); the views drop it from the first measure at floor.pair_check.",
-                 "p_drop_b": "The same for the second measure.",
-                 "p_only_b": "Probability of only the second measure.",
-                 "p_both": "Probability of both.", "p_neither": "Probability of neither.",
+                 "decision": "only_a, only_b, both or neither: which sides reach floor.pair_check.",
+                 "score_a": "The model's score for the first measure (grades 2 and 3).",
+                 "score_b": "The same for the second measure.",
+                 "p_keep_a": "The posterior that the sentence is the first measure (the score through that measure's pair layer when fitted); the views keep it there at floor.pair_check.",
+                 "p_keep_b": "The same for the second measure.",
                  "prior_probability_a": "Prior input: the first measure's probability for the unit (its probability layer's, else the model's score).",
                  "prior_phrase_cosine_a": "Prior input: the unit's cosine to the first measure's phrases.",
                  "prior_probability_b": "Prior input: the second measure's probability for the unit.",

@@ -44,6 +44,10 @@ def store(tmp_path, monkeypatch):
     _csv(str(lab / "cra.csv"), ["measure_id", "measure_name", "definition", "active"],
          [{"measure_id": "cra", "measure_name": "Climate risk assessment",
            "definition": "an assessment of hazards", "active": "true"}])
+    _csv(str(lab / "cra_scale.csv"), ["grade", "description"],
+         [{"grade": g, "description": f"grade {g} of {{name}}"} for g in range(4)])
+    _csv(str(lab / "cra_types_scale.csv"), ["grade", "description"],
+         [{"grade": g, "description": f"kind grade {g} of {{name}}"} for g in range(4)])
     import labels
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
     gen_calls, dec_calls = [], []
@@ -64,14 +68,11 @@ def store(tmp_path, monkeypatch):
         dec_calls.append(body)
         s = body["state"]["sentence"]
         out = {}
-        for qid, q in body["questions"].items():
-            opts = list(q["criteria"])
-            pick = next((o for o in opts if o.split(".")[-1] in ("mapping",) and "map" in s),
-                        None) or next((o for o in opts if o.split(".")[-1] == "site"
-                                       and "site-specific" in s), None) or "none"
-            out[qid] = {"type": "choice", "choice": pick,
-                        "probabilities": {o: (0.9 if o == pick else 0.1 / (len(opts) - 1))
-                                          for o in opts}}
+        for qid in body["questions"]:
+            kind = qid.split(".")[-1]
+            yes = (kind == "mapping" and "map" in s) or (kind == "site" and "site-specific" in s)
+            out[qid] = {"type": "score", "score": 3 if yes else 0, "confidence": 0.9,
+                        "probabilities": {"0": 0.05, "1": 0.05, "2": 0.0, "3": 0.9} if yes else {"0": 0.95, "1": 0.0, "2": 0.0, "3": 0.05}}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
     monkeypatch.setattr(types_stage, "generate", fake_generate)
     monkeypatch.setattr(classify, "decide", fake_decide)
@@ -91,7 +92,7 @@ def test_proposals_are_asked_once_per_run_with_only_committed_units(store):
     assert len(gen_calls) == 2
 
 
-def test_assignment_needs_an_approved_list_and_asks_one_yes_no_per_type(store):
+def test_assignment_needs_an_approved_list_and_asks_one_graded_question_per_type(store):
     data, lab, _, dec_calls = store
     monkeypatch_data = os.environ.get("WBG_DATA")
     os.environ["WBG_DATA"] = data           # no proposal written yet: nothing to assign
@@ -112,8 +113,9 @@ def test_assignment_needs_an_approved_list_and_asks_one_yes_no_per_type(store):
     out = types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
     assert len(dec_calls) == 2
     qs = dec_calls[0]["questions"]
-    assert list(qs) == ["type"] and qs["type"]["type"] == "choice"
-    assert list(qs["type"]["criteria"]) == ["mapping", "site", "none"]
+    assert list(qs) == ["mapping", "site"] and all(q["type"] == "score" for q in qs.values())
+    assert "Hazard mapping means: maps of hazards" in qs["mapping"]["instructions"]
+    assert qs["mapping"]["criteria"][3] == "kind grade 3 of Hazard mapping"   # the set's types scale
     rows = list(csv.DictReader(open(os.path.join(out, "assignments.csv"))))
     assert [(r["unit_id"], r["types_yes"]) for r in rows] == [("u1", "mapping"), ("u2", "site")]
     # The prior inputs: each type's name and definition matched against the sentence.

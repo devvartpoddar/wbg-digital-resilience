@@ -5,8 +5,8 @@ layer fitted on grades (src/posterior.py), a floor, and the tuning report.
 The four decisions after them go through the same loop:
 
   kind            item graded            label (one layer each)     score the layer reads
-  types           a committed sentence   <set>:<type>               P(type) of the choice
-  pairs           a sentence, one side   drop:<set>                 P(only the other) + P(neither)
+  types           a committed sentence   <set>:<type>               the type's graded score
+  pairs           a sentence, one side   keep:<set>                 the side's graded score
   package_assets  a package              <asset>                    P(yes)
   package_links   a commitment-package   link                       P(yes)
 
@@ -163,7 +163,7 @@ def draw(rows, score, seed, bands=BANDS):
 # ------------------------------------------------------------ the pair checks tab
 
 PAIR_KEY_COLS = ["row_id", "unit_id", "set_a", "set_b", "text_sha256", "question_sha256",
-                 "p_drop_a", "p_drop_b", "stratum", "stratum_size", "stratum_drawn", "run"]
+                 "p_keep_a", "p_keep_b", "stratum", "stratum_size", "stratum_drawn", "run"]
 PAIR_SHEET = [("row_id", 8), ("project", 12), ("measure A", 30), ("measure B", 30),
               ("sentence", 90), ("answer", 12), ("note", 24)]
 PAIR_LABEL_COLS = ["unit_id", "set_a", "set_b", "text_sha256", "question_sha256", "answer",
@@ -187,15 +187,14 @@ def pair_rows(data, seed, projects=None):
     for p in pairs:
         for s in (p["set_a"], p["set_b"]):
             names.setdefault(s, commit_checks.boundary_of(s)[0])
-    drop = lambda p: max(float(p.get("p_drop_a") or 0), float(p.get("p_drop_b") or 0))
+    keep = lambda p: min(float(p.get("p_keep_a") or 0), float(p.get("p_keep_b") or 0))
     key, sheet = [], []
-    for i, (p, st, size, n) in enumerate(draw(pairs, drop, seed), 1):
-        q = commit_checks.pair_question(commit_checks.boundary_of(p["set_a"]),
-                                        commit_checks.boundary_of(p["set_b"]))
+    for i, (p, st, size, n) in enumerate(draw(pairs, keep, seed), 1):
+        q = commit_checks.pair_question(p["set_a"], p["set_b"])
         key.append({"row_id": i, "unit_id": p["unit_id"], "set_a": p["set_a"],
                     "set_b": p["set_b"], "text_sha256": check_units.text_key(texts[p["unit_id"]]),
-                    "question_sha256": sha(q), "p_drop_a": p.get("p_drop_a", ""),
-                    "p_drop_b": p.get("p_drop_b", ""), "stratum": st, "stratum_size": size,
+                    "question_sha256": sha(q), "p_keep_a": p.get("p_keep_a", ""),
+                    "p_keep_b": p.get("p_keep_b", ""), "stratum": st, "stratum_size": size,
                     "stratum_drawn": n, "run": os.path.basename(folder)})
         sheet.append({"row_id": i, "project": proj.get(p["unit_id"], ""),
                       "measure A": names[p["set_a"]], "measure B": names[p["set_b"]],
@@ -359,24 +358,24 @@ def read_type_grades(data, name):
 
 
 def type_question_shas(name, data):
-    """{<set>:<type>: SHA-256 of the type choice question the set asks now}."""
+    """{<set>:<type>: SHA-256 of the type's graded question as asked now}."""
     import kinds
     try:
         approved = kinds.load_approved(name)
+        mname, scale = kinds.measure_scale(name)
     except SystemExit:
-        approved = {}
+        return {}
     out = {}
     for lid, ts in approved.items():
-        q = sha(kinds.assign_questions(ts))
-        for t in ts:
-            out[f"{name}:{t['type_id']}"] = q
+        for t, q in kinds.assign_questions(ts, scale, mname).items():
+            out[f"{name}:{t}"] = sha(q)
     return out
 
 
 def pair_blocks(data):
     """The pair checks' graded blocks: per measure, the sentences a person
-    answered for a pair it is in (yes = the person says the sentence is not
-    that measure), scored by the model's P(only the other) + P(neither)."""
+    answered for a pair it is in (yes = the person says the sentence is that
+    measure: only it, or both), scored by the side's graded score."""
     import commit_checks
     folder = commit_checks.current_run(data)
     if not folder:
@@ -395,27 +394,26 @@ def pair_blocks(data):
         if not p or r["question_sha256"] != qsha.get((r["set_a"], r["set_b"])):
             continue
         ans = r["answer"].lower()
-        for side, s, other in (("a", r["set_a"], "only b"), ("b", r["set_b"], "only a")):
-            label = f"drop:{s}"
+        for side, s, mine in (("a", r["set_a"], "only a"), ("b", r["set_b"], "only b")):
+            label = f"keep:{s}"
             rows, score, vecs, _ = blocks.setdefault(label, ([], {}, {}, label_sha(s, data)))
             item = f"{uid}#{r['set_a']}|{r['set_b']}"
             v = vector_of(uid)
             if v is None:
                 continue
-            rows.append((item, int(ans in (other, "neither")), float(r.get("weight") or 1.0),
+            rows.append((item, int(ans in (mine, "both")), float(r.get("weight") or 1.0),
                          projects_of(uid)))
-            # the model's answer, not the stored posterior: the layer reads it
-            score[item] = float(p.get(f"p_{'only_b' if side == 'a' else 'only_a'}") or 0) + \
-                float(p.get("p_neither") or 0)
+            # the model's score, not the stored posterior: the layer reads it
+            score[item] = float(p.get(f"score_{side}") or 0)
             vecs[item] = v
     return blocks
 
 
 def label_sha(name, data):
-    """The SHA-256 of a measure's boundary as the pair question states it:
-    a pair layer for a measure applies while its boundary is unchanged."""
+    """The SHA-256 of a measure's own graded question: a pair layer for a
+    measure applies while its definition and scale are unchanged."""
     import commit_checks
-    return commit_checks.drop_shas([name])[f"drop:{name}"]
+    return commit_checks.keep_shas([name])[f"keep:{name}"]
 
 
 def pair_question_shas(data):
@@ -427,8 +425,7 @@ def pair_question_shas(data):
     for i, a in enumerate(sorted(sets)):
         for b in sorted(sets)[i + 1:]:
             try:
-                out[(a, b)] = sha(commit_checks.pair_question(commit_checks.boundary_of(a),
-                                                              commit_checks.boundary_of(b)))
+                out[(a, b)] = sha(commit_checks.pair_question(a, b))
             except SystemExit:
                 continue
     return out
