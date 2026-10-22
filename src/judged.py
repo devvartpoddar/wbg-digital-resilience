@@ -5,8 +5,8 @@ layer fitted on grades (src/posterior.py), a floor, and the tuning report.
 The four decisions after them go through the same loop:
 
   kind            item graded            label (one layer each)     score the layer reads
-  types           a committed sentence   <set>:<type>               the type's graded score
-  pairs           a sentence, one side   keep:<set>                 the side's graded score
+  types           a committed sentence   <set>:<type>               P(yes) of the type's fit question
+  pairs           a sentence, one side   keep:<set>                 P(yes) of the side's fit question
   package_assets  a package              <asset>                    P(yes)
   package_links   a commitment-package   link                       P(yes)
 
@@ -358,16 +358,16 @@ def read_type_grades(data, name):
 
 
 def type_question_shas(name, data):
-    """{<set>:<type>: SHA-256 of the type's graded question as asked now}."""
+    """{<set>:<type>: SHA-256 of the type's fit question as asked now}."""
     import kinds
     try:
         approved = kinds.load_approved(name)
-        mname, scale = kinds.measure_scale(name)
+        mname = kinds.measure_name(name)
     except SystemExit:
         return {}
     out = {}
     for lid, ts in approved.items():
-        for t, q in kinds.assign_questions(ts, scale, mname).items():
+        for t, q in kinds.assign_questions(ts, mname).items():
             out[f"{name}:{t}"] = sha(q)
     return out
 
@@ -410,7 +410,7 @@ def pair_blocks(data):
 
 
 def label_sha(name, data):
-    """The SHA-256 of a measure's own graded question: a pair layer for a
+    """The SHA-256 of a measure's fit question: a pair layer for a
     measure applies while its definition and scale are unchanged."""
     import commit_checks
     return commit_checks.keep_shas([name])[f"keep:{name}"]

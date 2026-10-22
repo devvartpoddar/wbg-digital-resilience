@@ -118,8 +118,8 @@ def store(tmp_path, monkeypatch):
                 word = qid.split("_")[0]
                 yes = word in s["package"].lower() or (qid == "fiber" and "fibre" in s["package"])
             out[qid] = {"type": "score", "score": 3 if yes else 0, "confidence": 0.9,
-                        "probabilities": {"0": 0.1, "1": 0.0, "2": 0.0, "3": 0.9} if yes else
-                        {"0": 0.9, "1": 0.0, "2": 0.0, "3": 0.1}}
+                        "probabilities": {"0": 0.1, "1": 0.0, "2": 0.9} if yes else
+                        {"0": 0.9, "1": 0.0, "2": 0.1}}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
     monkeypatch.setattr(classify, "decide", fake_decide)
     import prior

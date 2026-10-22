@@ -46,8 +46,6 @@ def store(tmp_path, monkeypatch):
            "definition": "an assessment of hazards", "active": "true"}])
     _csv(str(lab / "cra_scale.csv"), ["grade", "description"],
          [{"grade": g, "description": f"grade {g} of {{name}}"} for g in range(4)])
-    _csv(str(lab / "cra_types_scale.csv"), ["grade", "description"],
-         [{"grade": g, "description": f"kind grade {g} of {{name}}"} for g in range(4)])
     import labels
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
     gen_calls, dec_calls = [], []
@@ -72,7 +70,7 @@ def store(tmp_path, monkeypatch):
             kind = qid.split(".")[-1]
             yes = (kind == "mapping" and "map" in s) or (kind == "site" and "site-specific" in s)
             out[qid] = {"type": "score", "score": 3 if yes else 0, "confidence": 0.9,
-                        "probabilities": {"0": 0.05, "1": 0.05, "2": 0.0, "3": 0.9} if yes else {"0": 0.95, "1": 0.0, "2": 0.0, "3": 0.05}}
+                        "probabilities": {"0": 0.05, "1": 0.05, "2": 0.9} if yes else {"0": 0.9, "1": 0.05, "2": 0.05}}
         return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
     monkeypatch.setattr(types_stage, "generate", fake_generate)
     monkeypatch.setattr(classify, "decide", fake_decide)
@@ -115,7 +113,8 @@ def test_assignment_needs_an_approved_list_and_asks_one_graded_question_per_type
     qs = dec_calls[0]["questions"]
     assert list(qs) == ["mapping", "site"] and all(q["type"] == "score" for q in qs.values())
     assert "Hazard mapping means: maps of hazards" in qs["mapping"]["instructions"]
-    assert qs["mapping"]["criteria"][3] == "kind grade 3 of Hazard mapping"   # the set's types scale
+    assert qs["mapping"]["criteria"][2].startswith("Yes") and len(qs["mapping"]["criteria"]) == 3
+    assert "already counted as a commitment to Climate risk assessment" in qs["mapping"]["instructions"]
     rows = list(csv.DictReader(open(os.path.join(out, "assignments.csv"))))
     assert [(r["unit_id"], r["types_yes"]) for r in rows] == [("u1", "mapping"), ("u2", "site")]
     # The prior inputs: each type's name and definition matched against the sentence.
