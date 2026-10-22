@@ -77,10 +77,10 @@ YES = float(panel.get("link.asset_yes", 0.5))  # an asset at or above it is one 
 # sentence, so the paragraph counts do not apply.
 PRIOR_COLS = ["prior_phrase_cosine", "prior_phrase_match"]
 ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
-              "model_served", "cost", *PRIOR_COLS]
+              "p_calibrated", "model_served", "cost", *PRIOR_COLS]
 PAIR_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "project_id",
              "shared_asset_ids", "route", "measure_rank", "measure_cosine",
-             "probability", "model_served", "cost", *PRIOR_COLS]
+             "probability", "p_calibrated", "model_served", "cost", *PRIOR_COLS]
 
 
 # ------------------------------------------------------------------ questions
@@ -193,8 +193,9 @@ def unit_assets(u, levels=None):
     ids = set()
     if "unit" in levels:
         ids = {x for x in (u.get("assets_yes") or "").split("|") if x}
-    if not ids and u.get("asset_link") and (u.get("asset_link_level") or "unit") in levels:
-        ids.add(u["asset_link"])
+    if not ids and (u.get("asset_link_level") or "unit") in levels:
+        # every asset the sentence links to (asset.multiple), else the one
+        ids = {x for x in (u.get("asset_links") or u.get("asset_link") or "").split("|") if x}
     return ids
 
 
@@ -228,6 +229,12 @@ class Plan:
         h.update(json.dumps(PAIR_QUESTION, sort_keys=True).encode())
         for name, (run, _) in sorted(self.runs.items()):
             h.update(f"{name}\t{run}\n".encode())
+        # the layers the decisions read (src/judged.py)
+        import judged
+        self.asset_shas = {a: judged.sha(q) for a, q in self.asset_qs.items()}
+        self.link_shas = {"link": judged.sha(PAIR_QUESTION)}
+        h.update(f"{judged.digest(data, 'package_assets', self.asset_shas)}\t"
+                 f"{judged.digest(data, 'package_links', self.link_shas)}\n".encode())
         if projects:
             h.update(("\n".join(sorted(projects))).encode())
         self.version = h.hexdigest()[:12]
@@ -326,15 +333,22 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
         if q["kind"] == "phrase":
             asset_phrases[q["label_id"]].append(q["text"])
     asset_phrases = {a: prior.phrases(ts, weight) for a, ts in asset_phrases.items()}
+    # The decisions' probability layers (src/judged.py): a package's asset
+    # and a commitment's package are read at their posterior.
+    import judged
+    pvec = {p["package_id"]: plan.vecs[i] for i, p in enumerate(plan.packages)}
+    alays = judged.layers(data, "package_assets", plan.asset_shas, pvec.get)
     asset_rows, has = [], defaultdict(set)
     for (p, top), g in zip(cands, got):
         pw = set(prior.words(p["text"]))
         for a, cos, rank in top:
             e = g[a]
-            prob = float(e["answer"]["noul"])
+            raw = float(e["answer"]["noul"])
+            prob = judged.calibrated(alays, a, p["package_id"], raw)
             asset_rows.append({"package_id": p["package_id"], "project_id": p["project_id"],
                                "label_id": a, "cosine": f"{cos:.4f}", "cosine_rank": rank,
-                               "probability": f"{prob:.3f}", "model_served": e["model"],
+                               "probability": f"{raw:.3f}", "p_calibrated": f"{prob:.3f}",
+                               "model_served": e["model"],
                                "cost": f"{float(e.get('cost_usd') or 0):.6f}",
                                "prior_phrase_cosine": f"{cos:.4f}",
                                "prior_phrase_match": prior.fmt(prior.phrase_match(
@@ -402,8 +416,16 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
             log(f"  {len(st2['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
     pair_rows = []
+    llays = {}
+    if os.path.exists(judged.layer_path(data, "package_links")):
+        import posterior
+        unit_vec = posterior.lookups(data)[0]
+        llays = judged.layers(data, "package_links", plan.link_shas, lambda item: judged.pair_vector(
+            unit_vec(item.split("|")[1]), pvec.get(item.split("|")[2])))
     for (name, run, u, pid, p, shared, route, mrank, mcos), g in zip(pairs, got2):
         e = g["pair"]
+        raw = float(e["answer"]["noul"])
+        prob = judged.calibrated(llays, "link", f"{name}|{u['unit_id']}|{p['package_id']}", raw)
         # The prior inputs: the package's cosine to the measure's phrases, and
         # how much of the package description the commitment sentence holds.
         own = prior.phrases([p["text"]], weight)
@@ -411,7 +433,7 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
                           "unit_id": u["unit_id"], "package_id": p["package_id"],
                           "project_id": pid, "shared_asset_ids": "|".join(sorted(shared)),
                           "route": route, "measure_rank": mrank, "measure_cosine": mcos,
-                          "probability": f"{float(e['answer']['noul']):.3f}",
+                          "probability": f"{raw:.3f}", "p_calibrated": f"{prob:.3f}",
                           "model_served": e["model"],
                           "cost": f"{float(e.get('cost_usd') or 0):.6f}",
                           "prior_phrase_cosine": prior.fmt(
@@ -427,7 +449,7 @@ def link(data, *, api_key="", dry_run=False, log=print, workers=classify.WORKERS
 
 
 def report_lines(plan, asset_rows, pair_rows):
-    yes = [r for r in asset_rows if float(r["probability"]) >= YES]
+    yes = [r for r in asset_rows if float(r.get("p_calibrated") or r["probability"]) >= YES]
     pk_yes = {r["package_id"] for r in yes}
     by_rank = defaultdict(int)
     for r in yes:
@@ -450,7 +472,7 @@ def report_lines(plan, asset_rows, pair_rows):
     lines.append(f"  commitment-package pairs asked: {len(pair_rows):,}")
     for route in ("asset", "measure"):
         rs = [r for r in pair_rows if r.get("route", "asset") == route]
-        ys = [r for r in rs if float(r["probability"]) >= YES]
+        ys = [r for r in rs if float(r.get("p_calibrated") or r["probability"]) >= YES]
         line = f"    by {route}: {len(rs):,} pairs, {len(ys):,} at {YES}"
         if route == "measure" and ys:
             by = defaultdict(int)
@@ -461,8 +483,8 @@ def report_lines(plan, asset_rows, pair_rows):
         lines.append(line)
     for name, (run, units) in sorted(plan.runs.items()):
         ps = [r for r in pair_rows if r["label_set"] == name]
-        linked = {r["unit_id"] for r in ps if float(r["probability"]) >= YES}
-        pks = {r["package_id"] for r in ps if float(r["probability"]) >= YES}
+        linked = {r["unit_id"] for r in ps if float(r.get("p_calibrated") or r["probability"]) >= YES}
+        pks = {r["package_id"] for r in ps if float(r.get("p_calibrated") or r["probability"]) >= YES}
         lines.append(f"    {name:<28} committed units {len(units):>5,}; pairs {len(ps):>6,}; "
                      f"at {YES}: {len(linked):>5,} units linked to {len(pks):,} packages")
     return lines

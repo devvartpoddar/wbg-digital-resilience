@@ -184,20 +184,23 @@ def asset_grid(data):
     for name in labels.label_sets():
         for u, (_, asset, w) in check_units.graded_labels(name, data, fitting=True,
                                                          units_by_text=by_text).items():
-            if asset and asset != "other" and u in before:
-                named[u] = (asset, w)
-    real = {u: v for u, v in named.items() if v[0] != "none"}
-    none = {u: v for u, v in named.items() if v[0] == "none"}
+            given = set(asset.split("|")) - {"", "other"}
+            if given and u in before:
+                named[u] = (given, w)
+    real = {u: (a - {"none"}, w) for u, (a, w) in named.items() if a - {"none"}}
+    none = {u: v for u, v in named.items() if v[0] == {"none"}}
     if not real:
         return lines + ["- no graded sentence names an asset yet", ""]
     lines += [f"On {len(real)} graded sentences a person gave an asset and {len(none)} where "
-              "they said none, weighted. Agree = the pipeline gives the person's asset; given = "
-              "the pipeline gives some asset; on 'none' = the pipeline gives an asset at the "
+              "they said none, weighted, at the panel's asset.multiple. Agree = the person's "
+              "assets are among the pipeline's (any one of them); other assets given = assets the "
+              "pipeline gives a sentence that the person did not, per sentence; "
+              "on 'none' = the pipeline gives an asset at the "
               "sentence's own level where the person said the sentence names none (an asset "
               "from the paragraph is not counted against it: the sheet asks about the sentence). "
               "In sample: the asset layers were fitted on the same grades.", "",
-              "| rank | floor | paragraph floor | decay | agree | given | wrong asset | on 'none' |",
-              "|---|---|---|---|---|---|---|---|"]
+              "| rank | floor | paragraph floor | decay | agree | other assets given | on 'none' |",
+              "|---|---|---|---|---|---|---|"]
     rw = sum(w for _, w in real.values())
     nw = sum(w for _, w in none.values()) or 1.0
     now = (float(panel.get("asset.floor", 0.3)),
@@ -206,44 +209,42 @@ def asset_grid(data):
     results = []
     for fl in FLOORS:
         onnone = sum(w for u, (_, w) in none.items()
-                     if measure.sentence_asset(amap.get(u, {}), [], 0.0, fl)[0])
+                     if measure.sentence_assets(amap.get(u, {}), [], 0.0, fl)[0])
         for pf in FLOORS:
             for d in DECAYS:
                 if d == 0 and pf != fl:
                     continue                 # no paragraph rule: its floor reads nothing
-                agree = given = 0.0
+                agree = given = extra = 0.0
                 for u, (a, w) in real.items():
-                    got = measure.sentence_asset(amap.get(u, {}),
-                                                 [amap.get(x, {}) for x in before[u]],
-                                                 d, fl, pf)[0]
-                    given += w if got else 0.0
-                    agree += w if got == a else 0.0
-                results.append((agree / rw, -(onnone / nw), (fl, pf, d), given / rw, onnone / nw))
+                    win = {x for x, _ in measure.sentence_assets(
+                        amap.get(u, {}), [amap.get(x, {}) for x in before[u]], d, fl, pf)[0]}
+                    given += w if win else 0.0
+                    agree += w if a & win else 0.0
+                    extra += w * len(win - a)
+                results.append((agree / rw, -(onnone / nw), (fl, pf, d), extra / rw, onnone / nw))
     results.sort(key=lambda r: (-r[0], -r[1], r[2]))
-    for k, (ag, _, (fl, pf, d), gv, on) in enumerate(results, 1):
+    for k, (ag, _, (fl, pf, d), ex, on) in enumerate(results, 1):
         mark = " (panel)" if (fl, pf, d) == now else ""
         if k <= 20 or mark:
-            lines.append(f"| {k}{mark} | {fl} | {pf} | {d} | {ag:.2f} | {gv:.2f} | {gv - ag:.2f} "
-                         f"| {on:.2f} |")
+            lines.append(f"| {k}{mark} | {fl} | {pf} | {d} | {ag:.2f} | {ex:.2f} | {on:.2f} |")
     return lines + ["", "Read it: the highest agree with a low 'on none'; decay 0 is the "
                     "sentence alone.", ""]
 
 
 NOT_YET = [
-    ("floor.types", "a type on committed sentences of the training or evaluation sheet "
-     "(the measure report counts agreement)"),
-    ("floor.pair_check", "a sheet of sentences two measures both commit, graded for which "
-     "measure they are (not drawn yet)"),
-    ("link.asset_yes, link.asset_top, link.measure_top", "the package-links tab graded at a "
-     "spread of probabilities (./wbg check all draws it)"),
-    ("dashboard.package_link_min_probability", "the same package-links tab (set from it "
-     "on 2026-10-21)"),
+    ("floor.types, floor.types_also, floor.pair_check, link.asset_yes, "
+     "dashboard.package_link_min_probability", "data/reports/evaluate_after_measures.md, from "
+     "the type column and the pair checks, package assets and package links tabs "
+     "(src/judged.py)"),
+    ("link.asset_top, link.measure_top", "the yes answers at the last rank asked "
+     "(data/reports/link_packages.txt): many there means ask deeper"),
     ("measure.gate_cosine, asset.gate_cosine", "starting values only: the skip rule fits each "
      "label's gate from its graded yes; the elusion sheet (./wbg check <set> --elusion) checks "
      "below it"),
-    ("feedback.*", "the elusion sheet: what the rounds miss shows below the gate"),
-    ("dashboard.near_copy_share", "a person reading the near-identical sentences the view "
-     "flags"),
+    ("feedback.*, asset_feedback.*", "the elusion sheet: what the rounds miss shows below the "
+     "gate"),
+    ("dashboard.near_copy_share, text.shingle_words", "a person reading the near-identical "
+     "sentences the view flags"),
     ("parser and sentence rules (src/pdf_layout.py, src/units.py, src/sentences.py)",
      "not from grades: the parser's regression tests and the corpus-quality report"),
 ]
@@ -265,8 +266,8 @@ def report(data, log=print):
         lines += asset_grid(data)
     except SystemExit as exc:
         lines += ["## Asset floor and decay", "", f"- {exc}", ""]
-    lines += ["## Settings these grades cannot set yet", ""]
-    lines += [f"- {k}: needs {v}" for k, v in NOT_YET] + [""]
+    lines += ["## Settings set elsewhere", ""]
+    lines += [f"- {k}: {v}" for k, v in NOT_YET] + [""]
     out = where(data, "reports", "tune.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
     with open(out, "w", encoding="utf-8") as fh:

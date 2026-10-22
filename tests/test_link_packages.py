@@ -136,6 +136,7 @@ def test_each_package_is_asked_its_best_assets_by_cosine(store):
     a = {r["label_id"]: r for r in rows if r["package_id"] == "P1:A"}
     assert len(a) == 2 and a["fiber"]["cosine_rank"] == "1"
     assert float(a["fiber"]["probability"]) == 0.9
+    assert a["fiber"]["p_calibrated"] == a["fiber"]["probability"]   # no layer fitted yet
     assert all(float(r["cosine"]) <= 1.0 for r in rows)
     # The prior inputs: the cosine again, and the phrase match weighted by rarity.
     assert a["fiber"]["prior_phrase_cosine"] == a["fiber"]["cosine"]

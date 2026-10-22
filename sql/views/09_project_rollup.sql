@@ -12,11 +12,11 @@ WITH u AS (
 ),
 lists AS (
   SELECT u.label_set, u.label_id, u.project_id,
-         ARRAY_AGG(DISTINCT linked_asset_id ORDER BY linked_asset_id)
-           FILTER (WHERE linked_asset_id IS NOT NULL) AS linked_asset_ids,
+         ARRAY_AGG(DISTINCT a ORDER BY a) FILTER (WHERE a IS NOT NULL) AS linked_asset_ids,
          ARRAY_AGG(DISTINCT t ORDER BY t) FILTER (WHERE t IS NOT NULL) AS type_ids
   FROM u
   LEFT JOIN LATERAL UNNEST(u.type_ids_above_threshold) t ON true
+  LEFT JOIN LATERAL UNNEST(coalesce(u.linked_asset_ids, ARRAY[u.linked_asset_id])) a ON true
   WHERE u.is_committed
   GROUP BY u.label_set, u.label_id, u.project_id
 )

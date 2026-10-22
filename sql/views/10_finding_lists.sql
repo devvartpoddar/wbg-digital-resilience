@@ -10,7 +10,8 @@ JOIN wbg.paragraph_projects pp ON pp.paragraph_id = m.paragraph_id
 CROSS JOIN LATERAL (
   SELECT 'asset' AS kind, a AS member FROM UNNEST(m.asset_ids_above_threshold) a
   UNION ALL SELECT 'type', t FROM UNNEST(m.type_ids_above_threshold) t
-  UNION ALL SELECT 'linked_asset', m.linked_asset_id WHERE m.linked_asset_id IS NOT NULL
+  UNION ALL SELECT 'linked_asset', la FROM UNNEST(coalesce(m.linked_asset_ids,
+                                          ARRAY[m.linked_asset_id])) la WHERE la IS NOT NULL
 ) x
 WHERE m.was_sent_to_model;
 COMMENT ON VIEW wbg.measure_finding_lists IS

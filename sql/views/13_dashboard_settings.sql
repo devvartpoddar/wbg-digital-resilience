@@ -27,7 +27,7 @@ SELECT
   -- is not (only the other measure, or neither; src/commit_checks.py).
   {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks,
   -- and only when the check's chosen answer has at least this probability
-  -- (control panel floor.pair_check; 0 = its most likely answer, always).
+  -- (control panel floor.pair_check: the posterior that a unit is not the measure).
   {{panel:floor.pair_check}}::numeric AS pair_check_floor;
 COMMENT ON VIEW wbg.dashboard_settings IS
   'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and the probability a pair check''s answer needs to do so.';

@@ -298,7 +298,12 @@ def test_a_graded_training_sheet_fits_the_layer_and_the_gate_for_the_next_run(st
     monkeypatch.setattr(tune, "GRID", {"sharpness": [20.0], "near_copy": ["off"], "ridge": [1.0],
                                        "centroid": [True], "pool": [False, True]})
     report = open(tune.report(data, log=lambda *_: None)).read()
-    assert "## Probability layer settings" in report and "cannot set yet" in report
+    assert "## Probability layer settings" in report and "Settings set elsewhere" in report
+    # The decisions after the measures run their loop on the same store: no
+    # tab graded yet, so no layer, and a report that says so.
+    import judged
+    after = open(judged.evaluate(data, 1)).read()
+    assert "types" in after and not os.path.exists(judged.layer_path(data, "types"))
 
 
 def test_a_run_publishes_its_findings_assets_and_record_to_postgres(store, monkeypatch):
@@ -328,3 +333,17 @@ def test_a_run_publishes_its_findings_assets_and_record_to_postgres(store, monke
         assert conn.execute("SELECT count(*) FROM wbg.answers").fetchone()[0] == len(got)
         stages = {r[0] for r in conn.execute("SELECT stage FROM wbg.runs")}
         assert {"measures", "classify"} <= stages
+
+
+def test_a_sentence_takes_every_asset_at_the_floor_best_first():
+    own = {"fiber": 0.8, "data_hosting": 0.4, "geospatial": 0.1}
+    assert measure.sentence_assets(own, [], floor=0.3, multiple=True) == (
+        [("fiber", 0.8), ("data_hosting", 0.4)], "unit")
+    assert measure.sentence_assets(own, [], floor=0.3, multiple=False) == ([("fiber", 0.8)], "unit")
+    # none of its own: the paragraph sums, each at the paragraph floor
+    win, level = measure.sentence_assets({"fiber": 0.2}, [{"fiber": 0.5, "dpi": 0.9}],
+                                         decay=0.4, floor=0.3, paragraph_floor=0.3,
+                                         multiple=True)
+    assert level == "paragraph" and [a for a, _ in win] == ["fiber", "dpi"]
+    assert measure.sentence_asset({"fiber": 0.2}, [{"fiber": 0.5, "dpi": 0.9}], decay=0.4,
+                                  floor=0.3, paragraph_floor=0.3)[:2] == ("fiber", 0.4)

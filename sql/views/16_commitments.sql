@@ -56,13 +56,13 @@ WITH f AS (
     AND f.posterior_probability >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
-    -- a pair check that says the unit is only the other measure, or neither,
-    -- at the pair check's floor (control panel floor.pair_check)
+    -- a pair check whose posterior that the unit is not this measure (only
+    -- the other, or neither) reaches the pair check's floor (floor.pair_check)
     AND NOT (s.apply_measure_pair_checks AND EXISTS (
       SELECT 1 FROM wbg.unit_pair_checks c
-      WHERE c.unit_id = f.unit_id AND c.probability >= s.pair_check_floor
-        AND ((c.set_a = f.label_set AND c.decision IN ('only_b', 'neither'))
-          OR (c.set_b = f.label_set AND c.decision IN ('only_a', 'neither')))))
+      WHERE c.unit_id = f.unit_id
+        AND ((c.set_a = f.label_set AND c.p_drop_a >= s.pair_check_floor)
+          OR (c.set_b = f.label_set AND c.p_drop_b >= s.pair_check_floor))))
 ),
 u AS (
   SELECT f.label_set, f.label_id, f.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
@@ -72,12 +72,18 @@ u AS (
          CASE coalesce(f.linked_asset_level, 'none')
            WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph' ELSE 'none' END
            AS asset_from,
-         coalesce(f.linked_asset_id, '(no asset)') AS asset_id,
-         CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0 THEN '(no type)'
-              ELSE f.best_type_id END AS type_id,
+         a.asset_id, t.type_id,
          -- the wording, for collapsing word-for-word copies
          regexp_replace(lower(f.text), '\s+', ' ', 'g') AS wording
   FROM f
+  -- a unit with several assets or types (asset.multiple, types.multiple)
+  -- is a unit of each of those commitments
+  CROSS JOIN LATERAL unnest(CASE WHEN coalesce(cardinality(f.linked_asset_ids), 0) = 0
+                                 THEN ARRAY[coalesce(f.linked_asset_id, '(no asset)')]
+                                 ELSE f.linked_asset_ids END) AS a(asset_id)
+  CROSS JOIN LATERAL unnest(CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0
+                                 THEN ARRAY['(no type)']
+                                 ELSE f.type_ids_above_threshold END) AS t(type_id)
 )
 SELECT md5(project_id || '|' || label_set || '|' || asset_id || '|' || type_id) AS commitment_id,
        u.*
@@ -87,7 +93,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not (src/commit_checks.py).';
+  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. A unit two measures commit is dropped from a measure its pair check says it is not (src/commit_checks.py).';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$
@@ -106,13 +112,13 @@ $do$;
 -- every link (47 s for a count).
 CREATE MATERIALIZED VIEW wbg.commitment_package_status AS
 WITH l AS MATERIALIZED (
-  SELECT u.commitment_id, u.unit_id, cp.package_id, cp.probability
+  SELECT u.commitment_id, u.unit_id, cp.package_id, cp.posterior_probability AS probability
   FROM wbg.commitment_units u
   JOIN wbg.commitment_packages cp
     ON cp.label_set = u.label_set AND cp.label_id = u.label_id
    AND cp.unit_id = u.unit_id AND cp.project_id = u.project_id
   CROSS JOIN wbg.dashboard_settings ds
-  WHERE cp.probability >= ds.package_link_min_probability
+  WHERE cp.posterior_probability >= ds.package_link_min_probability
 )
 SELECT l.commitment_id, l.package_id, max(l.probability) AS link_probability,
        count(DISTINCT l.unit_id) AS units_linked,
