@@ -41,14 +41,17 @@ not to save money at the price of recall.
 - `prior_table_row`, `prior_position` (the sentence's place in its
   paragraph, 0 for a table row), `prior_words`, `prior_has_component`:
   where and what the sentence is.
-- `prior_para_assets`, `prior_para_measures`: how many other sentences in
-  the same paragraph look like an asset (their best cosine over every
-  asset's phrases reaches `asset.gate_cosine`) and like a measure (over every
-  measure's phrases, `measure.gate_cosine`). A paragraph about data centres
-  with two measure sentences raises each of its sentences, whichever asset
-  or measure is asked about; a measure added later counts from its first
-  search. Counted once per corpus from every set's search run
-  (`data/prior/paragraphs-<key>.json`; the key is in every stage's run key).
+- `prior_para_assets_mean`, `prior_para_assets_max`,
+  `prior_para_measures_mean`, `prior_para_measures_max`: how dense the
+  paragraph is in assets and measures. Among the other sentences of the
+  paragraph, the average and the highest of their best cosine over every
+  asset's phrases, and over every measure's phrases. No cut-off goes in
+  (the cosine gates are not used here): the fit decides what level counts.
+  A paragraph about data centres with two measure sentences raises each of
+  its sentences, whichever asset or measure is asked about; a measure added
+  later counts from its first search. Made once per corpus from every set's
+  search run (`data/prior/paragraphs-<key>.json`; the key is in every
+  stage's run key).
   Only the neighbours' similarity is used, never their model answers, so no
   sentence depends on the order the others were asked.
 
@@ -79,7 +82,10 @@ The stored inputs were tested on Dev's graded sentences (742 measure, 555
 asset sentences x 13 assets), held-out halves, computed with the functions in
 `src/prior.py`. For assets the paragraph count of asset-like sentences was
 approximated (sentence-level asset cosines are not in Postgres); the measure
-count was exact. Ranking quality is on a 0 to 1 scale (0.5 is chance); R@.85
+count was exact. These counts used the cosine gates as cut-offs; they were
+replaced the same day by the cut-off-free average and highest similarity,
+which could not be tested off the box (the sentences' similarities to every
+phrase are only in the search runs there). Ranking quality is on a 0 to 1 scale (0.5 is chance); R@.85
 is recall at 0.85 precision.
 
 | | prior before the answer: ranking, R@.85 | after the answer: R@.85, R@.90 |

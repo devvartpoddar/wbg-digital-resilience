@@ -100,7 +100,7 @@ answers; their version is in each stage's key (`prior.VERSION`, and
 new folder at every stage, rebuilt from the store at no cost. The word
 frequencies they weigh words by are counted once per sentence index
 (`data/prior/word_df-<key>.json`: a pass over the corpus text, no model call).
-The paragraph counts (`data/prior/paragraphs-<key>.json`) read every set's
+The paragraph inputs (`data/prior/paragraphs-<key>.json`) read every set's
 search run, so a change to any set's phrases is a new key for every stage
 (again rebuilt from the store, at no cost).
 

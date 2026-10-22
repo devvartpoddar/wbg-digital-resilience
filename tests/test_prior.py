@@ -44,10 +44,11 @@ def test_structure_reads_the_unit_id_and_component():
     assert t["prior_has_component"] == "false"
 
 
-def test_paragraph_counts_are_other_sentences_with_any_asset_or_any_measure(tmp_path, monkeypatch):
-    """Two measure sets and the assets, each a search run: a sentence counts in
-    its paragraph when its best cosine over a set reaches that set's gate
-    (assets 0.25, measures 0.45); the sentence itself never counts."""
+def test_paragraph_context_is_the_other_sentences_similarity_to_any_asset_or_measure(
+        tmp_path, monkeypatch):
+    """Two measure sets and the assets, each a search run: for each sentence,
+    the average and the highest best cosine of the OTHER sentences of its
+    paragraph, over every asset and over every measure. No cut-off."""
     import numpy
     import labels
     import search
@@ -71,14 +72,18 @@ def test_paragraph_counts_are_other_sentences_with_any_asset_or_any_measure(tmp_
         calls.append(folder)
         return [], numpy.array(scores[os.path.basename(folder)[:-2]], dtype="float32"), []
     monkeypatch.setattr(search, "load_run", load_run)
-    key, counts = prior.paragraph_counts(str(tmp_path))
-    assert counts == {"a1": (1, 1), "a2": (2, 1), "a3": (1, 2), "b1": (0, 0)}
-    assert prior.paragraph_inputs(counts, "a2") == {"prior_para_assets": 2,
-                                                    "prior_para_measures": 1}
-    assert prior.paragraph_inputs(counts, "unknown") == {"prior_para_assets": 0,
-                                                         "prior_para_measures": 0}
+    key, ctx = prior.paragraph_context(str(tmp_path))
+    # best asset cosine: a1 0.30, a2 0.20, a3 0.26; best measure cosine: a1 0.50, a2 0.46, a3 0.10
+    assert ctx["a1"] == (0.23, 0.26, 0.28, 0.46)
+    assert ctx["a2"] == (0.28, 0.3, 0.3, 0.5)
+    assert ctx["a3"] == (0.25, 0.3, 0.48, 0.5)
+    assert ctx["b1"] == (None, None, None, None)              # alone in its paragraph
+    assert prior.paragraph_inputs(ctx, "a2") == {
+        "prior_para_assets_mean": "0.2800", "prior_para_assets_max": "0.3000",
+        "prior_para_measures_mean": "0.3000", "prior_para_measures_max": "0.5000"}
+    assert set(prior.paragraph_inputs(ctx, "unknown").values()) == {""}
     n = len(calls)
-    assert prior.paragraph_counts(str(tmp_path)) == (key, counts) and len(calls) == n  # kept
+    assert prior.paragraph_context(str(tmp_path)) == (key, ctx) and len(calls) == n  # kept
     assert prior.paragraph_key(str(tmp_path))[0] == key
 
 
@@ -104,8 +109,8 @@ def test_the_asset_map_stores_every_input_for_every_sentence_and_asset(monkeypat
     import classify
     import search
     monkeypatch.setattr(prior, "word_df", lambda data: (100, {"fibre": 2, "tower": 3}))
-    monkeypatch.setattr(prior, "paragraph_counts",
-                        lambda data, sets=None: ("k", {"D:p1:s001": (1, 0), "D:p1:s002": (0, 2)}))
+    monkeypatch.setattr(prior, "paragraph_context", lambda data, sets=None: (
+        "k", {"D:p1:s001": (0.2, 0.2, 0.5, 0.5), "D:p1:s002": (0.6, 0.6, 0.1, 0.1)}))
     monkeypatch.setattr(search, "load_queries", lambda name, taxonomy=None: [
         {"label_id": "fiber", "kind": "definition", "text": "fibre optic cables"},
         {"label_id": "fiber", "kind": "phrase", "text": "national fibre backbone"},
@@ -125,7 +130,7 @@ def test_the_asset_map_stores_every_input_for_every_sentence_and_asset(monkeypat
     f1 = got[("fiber", "D:p1:s001")]
     assert set(f1) == set(prior.COLS)
     assert f1["prior_phrase_cosine"] == "0.6000" and 0.2 < float(f1["prior_phrase_match"]) < 0.4   # "fibre" of three rare words
-    assert f1["prior_para_assets"] == 1 and f1["prior_para_measures"] == 0
+    assert f1["prior_para_assets_max"] == "0.2000" and f1["prior_para_measures_mean"] == "0.5000"
     assert got[("towers", "D:p1:s001")]["prior_phrase_match"] == "0.0000"
-    assert got[("towers", "D:p1:s002")]["prior_para_measures"] == 2
+    assert got[("towers", "D:p1:s002")]["prior_para_assets_mean"] == "0.6000"
     assert got[("fiber", "D:p1:s002")]["prior_has_component"] == "false"

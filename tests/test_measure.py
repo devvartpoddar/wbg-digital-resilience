@@ -151,8 +151,8 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     # The prior inputs (src/prior.py): stored, read by nothing yet.
     assert r["prior_phrase_cosine"] == "0.9000" and float(r["prior_phrase_match"]) >= 0
     assert r["prior_table_row"] == "false" and int(r["prior_words"]) > 0
-    assert r["prior_has_component"] == "true" and r["prior_para_measures"].isdigit()
-    assert r["prior_para_assets"] == "0"                     # the assets have no search run here
+    assert r["prior_has_component"] == "true"
+    assert r["prior_para_assets_mean"] == ""                 # the assets have no search run here
     # No delivery, conditional or actor question: their columns stay empty.
     assert r["kinds_yes"] == r["kind_best"] == r["actors_yes"] == r["conditional_p"] == ""
     assert "paragraph" not in calls[0]["state"]              # sentence design by default

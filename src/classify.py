@@ -352,8 +352,9 @@ def prior_inputs(name, data, taxonomy, items_, cosines, gate):
     """of(label_id, unit_id) -> the prior inputs (src/prior.py) of a
     sentence of the map for a label: its best cosine over the label's
     phrases, the phrase match weighted by word rarity, its structure, and
-    how many other sentences in its paragraph look like an asset and like a
-    measure (prior.paragraph_counts, over every label set).
+    how asset-like and measure-like the other sentences of its paragraph are
+    (prior.paragraph_context: the other sentences' similarity to
+    every asset and every measure, no cut-off).
     Computed per row as it is written: the map has a row per sentence and
     label, and a second table of them would double the stage's memory."""
     import search
@@ -365,7 +366,7 @@ def prior_inputs(name, data, taxonomy, items_, cosines, gate):
             phrases.setdefault(q["label_id"], []).append(q["text"])
     phrases = {lid: prior.phrases(ts, weight) for lid, ts in phrases.items()}
     labs = set(lab["id"] for lab in load_labels(name, taxonomy)[0])
-    _, counts = prior.paragraph_counts(data)
+    _, context = prior.paragraph_context(data)
     item = {p["row"]["unit_id"]: p for p in items_}
     last = {}                   # the rows of one sentence are written together
 
@@ -377,7 +378,7 @@ def prior_inputs(name, data, taxonomy, items_, cosines, gate):
             text = p["state"]["sentence"]
             last.update(uid=uid, words=set(prior.words(text)),
                         common={**prior.structure(uid, text, p["row"].get("component_number")),
-                                **prior.paragraph_inputs(counts, uid)})
+                                **prior.paragraph_inputs(context, uid)})
         return {"prior_phrase_cosine": prior.fmt(cosines.get((lid, uid))),
                 "prior_phrase_match": prior.fmt(prior.phrase_match(last["words"],
                                                                    phrases.get(lid, []))),

@@ -304,7 +304,7 @@ class Run:
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
                          # the prior inputs stored with every unit (src/prior.py),
-                         # and the paragraph counts they read (every label set)
+                         # and the paragraph context they read (every label set)
                          "prior": prior.VERSION,
                          "prior_paragraphs": prior.paragraph_key(data)[0],
                          "projects": sorted(projects) if projects else None,
@@ -383,15 +383,15 @@ class Run:
 
     def load_prior(self):
         """What the prior inputs read (src/prior.py): each unit's best cosine
-        over the measure's phrases, how many other sentences in its paragraph
-        look like an asset and like a measure, and the phrases weighted by
-        how rare their words are."""
+        over the measure's phrases, how asset-like and measure-like the other
+        sentences of its paragraph are, and the phrases weighted by how rare
+        their words are."""
         lid = self.labels[0]["id"]
         cols = [j for j, q in enumerate(self.queries) if q["label_id"] == lid]
         best = numpy.asarray(self.scores[:, cols]).max(axis=1) if cols else \
             numpy.zeros(len(self.index), dtype="float32")
         self.best_cosine = {r["unit_id"]: float(b) for r, b in zip(self.index, best)}
-        _, self.para_counts = prior.paragraph_counts(self.data)
+        _, self.para_context = prior.paragraph_context(self.data)
         weight = prior.Weights(*prior.word_df(self.data))
         self.phrases = prior.phrases([q["text"] for q in self.queries
                                       if q["label_id"] == lid and q["kind"] == "phrase"], weight)
@@ -403,7 +403,7 @@ class Run:
                 "prior_phrase_match": prior.fmt(prior.phrase_match(set(prior.words(text)),
                                                                    self.phrases)),
                 **prior.structure(uid, text, r.get("component_number")),
-                **prior.paragraph_inputs(self.para_counts, uid)}
+                **prior.paragraph_inputs(self.para_context, uid)}
 
     # ---- units
 
