@@ -178,10 +178,22 @@ def committed_units(data, projects=None, sets=None):
     return out
 
 
-def unit_assets(u):
-    """The assets a committed unit names: its yes answers, else its link."""
-    ids = {x for x in (u.get("assets_yes") or "").split("|") if x}
-    if not ids and u.get("asset_link"):
+def link_levels():
+    """Where a commitment's asset may come from (dashboard.commitment_link_levels,
+    'unit|paragraph'): the same reading the dashboards use."""
+    return {x.strip() for x in str(panel.get("dashboard.commitment_link_levels",
+                                             "unit|paragraph")).split("|") if x.strip()}
+
+
+def unit_assets(u, levels=None):
+    """The assets a committed unit names: its own (level unit), else its
+    linked asset when that link's level is one the panel counts
+    (dashboard.commitment_link_levels), as the dashboards do."""
+    levels = link_levels() if levels is None else levels
+    ids = set()
+    if "unit" in levels:
+        ids = {x for x in (u.get("assets_yes") or "").split("|") if x}
+    if not ids and u.get("asset_link") and (u.get("asset_link_level") or "unit") in levels:
         ids.add(u["asset_link"])
     return ids
 
@@ -195,14 +207,16 @@ class Plan:
                  dim=embed.DEFAULT_DIM, log=print):
         self.data, self.log, self.dim = data, log, dim
         self.settings = {"model": model, "asset_top": asset_top, "yes": YES,
-                         "measure_top": MEASURE_TOP, "link_version": LINK_VERSION}
+                         "measure_top": MEASURE_TOP, "link_version": LINK_VERSION,
+                         "link_levels": "|".join(sorted(link_levels()))}
         self.packages = load_packages(data, projects)
         self.assets = [a for a in labels.load_set(ASSET_SET) if a["active"] == "true"]
         self.queries = search.load_queries(ASSET_SET, labels.folder(ASSET_SET))
         self.asset_qs = asset_questions(self.assets)
         self.runs = committed_units(data, projects, sets)
         h = hashlib.sha256()
-        h.update(f"{LINK_VERSION}\t{model}\t{asset_top}\t{MEASURE_TOP}\t{YES}\n".encode())
+        h.update(f"{LINK_VERSION}\t{model}\t{asset_top}\t{MEASURE_TOP}\t{YES}\t"
+                 f"{sorted(link_levels())}\n".encode())
         for name in sorted(self.runs):
             for q in search.load_queries(name, labels.folder(name)):
                 h.update(f"{name}\t{q['query_id']}\t{q['text']}\n".encode())

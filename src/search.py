@@ -82,8 +82,11 @@ def _active(r):
 
 
 def load_queries(name, folder=TAXONOMY):
-    """[{query_id, label_id, kind, text, text_sha256}] for a label set: each
-    active label's definition, then its active phrases."""
+    """[{query_id, label_id, kind, text, text_sha256, type_ids}] for a label
+    set: each active label's definition, then its active phrases. A phrase
+    may name the types it is written for (type_id, 'a|b'; optional): that
+    only feeds the coverage check (type_coverage), never a score, so it is
+    not part of the run's version."""
     folder = folder or labels.folder(name)
     path = os.path.join(folder, f"{name}.csv")
     rows = _rows(path)
@@ -120,10 +123,45 @@ def load_queries(name, folder=TAXONOMY):
                 raise SystemExit(f"search: {qpath} repeats query {qid}")
             seen.add(qid)
             out.append({"query_id": qid, "label_id": lid, "kind": "phrase",
-                        "text": " ".join(r["query"].split())})
+                        "text": " ".join(r["query"].split()),
+                        "type_ids": [t.strip() for t in (r.get("type_id") or "").split("|")
+                                     if t.strip()]})
     for q in out:
         q["text_sha256"] = hashlib.sha256(q["text"].encode("utf-8")).hexdigest()
     return out
+
+
+def type_coverage(name, queries=None, folder=TAXONOMY):
+    """The active types of a measure that no active phrase is written for
+    (phrases carry type_id): [(label_id, type_id, type_name)]. A type no
+    phrase finds has to clear the gate on the definition alone, and is
+    under-counted when it does not. A phrase naming a type the set does
+    not have is an error."""
+    folder = folder or labels.folder(name)
+    types = [t for t in labels.load_types(name, taxonomy=folder) if not t.get("merge_into")] \
+        if os.path.exists(os.path.join(folder, f"{name}_types.csv")) else []
+    if not types:
+        return []
+    queries = load_queries(name, folder) if queries is None else queries
+    known = {(t["label_id"], t["type_id"]) for t in types}
+    tagged = set()
+    for q in queries:
+        for t in q.get("type_ids", []):
+            if (q["label_id"], t) not in known:
+                raise SystemExit(f"search: {name}_queries.csv: {q['query_id']} names type "
+                                 f"{t!r}, which is not an active type of {q['label_id']}")
+            tagged.add((q["label_id"], t))
+    return [(t["label_id"], t["type_id"], t["type_name"]) for t in types
+            if (t["label_id"], t["type_id"]) not in tagged]
+
+
+def coverage_lines(name, queries=None, folder=TAXONOMY):
+    """Log lines for the types no phrase is written for ([] when all are)."""
+    gaps = type_coverage(name, queries, folder)
+    if not gaps:
+        return []
+    return [f"  {len(gaps)} type(s) with no phrase written for them (type_id in "
+            f"{name}_queries.csv): " + ", ".join(f"{t} ({n})" for _, t, n in gaps)]
 
 
 def run_version(queries, model, dim, index_path):
@@ -194,6 +232,8 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
         # Before the first embedding run there is no index to version against:
         # say what the label set holds and what its queries would cost.
         queries = load_queries(name, taxonomy)
+        for line in coverage_lines(name, queries, taxonomy):
+            log(line)
         root = embed.cache_root(data, model, dim)
         new = sum(1 for q in queries if embed.read_cached(root, q["text_sha256"], dim) is None)
         log(f"{name}: {len({q['label_id'] for q in queries})} labels, {len(queries)} queries; "
@@ -202,6 +242,8 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
     out, queries = run_folder(name, data, model, dim, taxonomy)
     labels = len({q["label_id"] for q in queries})
     log(f"{name}: {labels} labels, {len(queries)} queries -> {out}")
+    for line in coverage_lines(name, queries, taxonomy):
+        log(line)
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already scored")
         return out

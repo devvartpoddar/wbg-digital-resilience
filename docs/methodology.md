@@ -32,12 +32,12 @@ Any model that meets all three may be used, including an external one. For an ex
 | Clean procurement packages, notices and awards; link notices and awards to their package | Built |
 | Releases, Postgres loads, each stage writing its own rows (section 4) | Built |
 | Embed the search units; search every label set; the pool of a measure (sections 5, 5a) | Built |
-| The asset map: every sentence graded against each asset; each sentence's asset by its own posterior or the decayed paragraph sum (5b) | Built; the sentence map not yet run on the box |
+| The asset map: sentences asked about each asset through the gate, word patterns and feedback rounds; each sentence's asset by its own posterior or the decayed paragraph sum (5b) | Built; not yet run on the box; the asset word patterns wait on a person |
 | A measure through the funnel; cross-measure pair checks (5c) | Built for 12 measures |
 | Types: one choice per committed sentence, with gap types (5d) | Built |
 | Packages to assets and to commitments (5e) | Built |
 | The dashboards' views, all reading one decision (5f) | Built; Metabase cards that read dropped or renamed columns need an edit after the next load (runbook) |
-| One decision system: the control panel, the skip rule, the probability layer (weighted, out of sample, no same-project or near-copy votes, current-question grades only), the floor (5g) | Built 2026-10-22; no layer or fitted gate exists yet, because no sheet has been graded under the current questions |
+| One decision system for assets and measures alike: the control panel, the gate with word patterns and feedback rounds below it, the skip rule, the probability layer (weighted, out of sample, every graded sentence but itself votes, current-question grades only, optionally pooled), the floor, and the tuning report that compares every dial on the grades (5g) | Built 2026-10-22; no layer or fitted gate exists yet, because no sheet has been graded under the current questions |
 | Training and evaluation sheets (`./wbg check --design train`, `--design eval`), elusion sheets | Built; the next sheets to grade |
 | The record of judgement in Postgres: grades, draws, layers, gates, runs, spend, answers (4) | Built 2026-10-22, not yet loaded |
 
