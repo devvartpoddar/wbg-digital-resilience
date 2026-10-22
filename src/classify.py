@@ -152,18 +152,31 @@ def load_labels(name, folder=TAXONOMY):
     return active, scale
 
 
-def graded_question(lab, scale):
-    """The one form of graded question every stage asks (the measures and the
-    assets alike): how the sentence relates to the label, with the label's
-    name and definition and its scale. The question id is never shown to the
-    model, so the name and definition go in the wording."""
-    # Word for word the measure question since 2026-10-20, so its stored
-    # answers stay valid.
-    lead = ("How does the sentence from a World Bank project appraisal document in the "
-            "'sentence' field, relate to")
+SUBJECT = "the sentence from a World Bank project appraisal document in the 'sentence' field"
+
+
+def graded_question(lab, scale, subject=SUBJECT):
+    """The one form of question every decision asks (assets, measures,
+    types, pair checks, packages to assets, commitments to packages): how
+    the item relates to the label, with the label's name and definition and
+    a 0-3 scale; its score is the probability of the grades the panel
+    counts (graded_score). The question id is never shown to the model, so
+    the name and definition go in the wording. subject names the item and
+    its field (a package, a commitment and a package)."""
+    # Word for word the measure question since 2026-10-20 for a sentence,
+    # so its stored answers stay valid.
     return {"type": "score",
-            "instructions": f"{lead} {lab['name']}? {lab['name']} means: {lab['definition']}",
+            "instructions": f"How does {subject}, relate to {lab['name']}? {lab['name']} "
+                            f"means: {lab['definition']}",
             "criteria": [g.replace("{name}", lab["name"]) for g in scale]}
+
+
+def graded_score(entry):
+    """The score of a stored answer to a graded question: the sum of its
+    probabilities for the grades the control panel counts (read.grades)."""
+    a = entry.get("answer", entry)
+    probs = a["probabilities"]
+    return sum(float(probs.get(str(g), 0)) for g in panel.grades())
 
 
 def questions(labels, scale):

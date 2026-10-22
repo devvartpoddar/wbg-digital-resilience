@@ -24,11 +24,11 @@ Every row has the whole loop: a graded source, a probability layer, a floor read
 | Decision | Graded on | Layer (one fit per decision, pooled by `posterior.pool`) |
 |---|---|---|
 | Type | the type column of each measure tab (several joined by \|) | one label per measure and type, on the sentence's vector |
-| Pair check | tab `pair checks` (only A, only B, both, neither) | one label per measure (`drop:<set>`), on the sentence's vector |
+| Pair check | tab `pair checks` (only A, only B, both, neither: each side yes or no) | one label per measure (`keep:<set>`), on the sentence's vector |
 | Package to asset | tab `package assets` (yes, no) | one label per asset, on the package's vector |
 | Commitment to package | tab `package links` (yes, no) | one label, on the pair's vector (sentence and package averaged) |
 
-Each layer is keyed on the exact question its label asks (a type list, a measure's boundary, an asset or link question), so a changed wording starts without one, and each stage's run key holds the layers it read. With no grades the posterior is the model's answer. Several winners are allowed everywhere: a sentence may count for several measures, several assets (`asset.multiple`) and several types (`types.multiple`); a package may have several assets.
+Each layer is keyed on the exact question its label asks (a type list, a measure's boundary, an asset or link question), so a changed wording starts without one, and each stage's run key holds the layers it read. With no grades the posterior is the model's answer. Every decision asks one form of question (`classify.graded_question`: the item, the label's name and definition, a 0-3 scale), read as P(2)+P(3) (`classify.graded_score`). Several winners are allowed everywhere: a sentence may count for several measures, several assets (`asset.multiple`) and several types (`types.multiple`); a package may have several assets.
 
 ## The probability layer
 

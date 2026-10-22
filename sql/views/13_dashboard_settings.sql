@@ -27,11 +27,11 @@ SELECT
   -- A unit two measures both commit leaves a measure the pair check says it
   -- is not (only the other measure, or neither; src/commit_checks.py).
   {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks,
-  -- when the posterior that the unit is not the measure (p_drop_a or
-  -- p_drop_b: only the other, or neither) reaches this (floor.pair_check).
+  -- when its side's posterior (p_keep_a or p_keep_b: the measure's graded
+  -- question again, the other beside it) falls short of this (floor.pair_check).
   {{panel:floor.pair_check}}::numeric AS pair_check_floor;
 COMMENT ON VIEW wbg.dashboard_settings IS
-  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and the posterior of not-this-measure at which they do.';
+  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and the posterior each side needs to stay.';
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the

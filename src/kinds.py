@@ -14,21 +14,22 @@ Two steps, each repeatable and stored:
             person's and this step does nothing (the gap step below finds what
             the list misses).
 
-  assign    Each committed unit is put to the decision model with ONE choice
-            question: which of the measure's types it is, or none of them. The
-            types are written to exclude each other, so one choice per unit is
-            the reading; asked as separate yes/no questions the model said yes
-            to every plausible type (2.7 a sentence on climate-informed
-            siting, 2026-10-21). On a test of 225 committed units the choice
-            came out the same in three option orders for every unit, so it is
-            asked in one order.
+  assign    Each committed unit is asked the form every decision asks
+            (classify.graded_question), once per type, on the types' scale
+            (TYPE_SCALE, or the set's own); a type counts at floor.types (through the types' layer
+            once fitted), several with types.multiple. From 2026-10-22; until
+            then one choice over the types and none, because asked as
+            separate yes/no questions the model said yes to every plausible
+            type (2.7 a sentence on climate-informed siting, 2026-10-21): the
+            floor, the layer and types.multiple are what hold that now, and
+            the types report counts types per sentence.
 
-  gaps      The units the choice puts in "none" (at least OTH_MIN of them)
+  gaps      The units no type reaches (at least types.gap_min_units of them)
             go to the generative model with the existing types, which proposes
             only new kinds the list does not cover (not by asset, by scope or
             by another measure, and within the measure's definition). Each is
-            named with the prefix "OTH." and assigned straight away by a second
-            choice question over the OTH types and none: nothing waits on an
+            named with the prefix "OTH." and assigned straight away by their own
+            graded questions: nothing waits on an
             approval, and a person promotes an OTH type by writing it into
             the list. The OTH types are written to data/types/<set>_oth_types.csv
             and loaded with the approved ones.
@@ -68,25 +69,24 @@ GEN_ENDPOINT = "https://openrouter.ai/api/v1/chat/completions"
 RUNS = 3
 MAX_UNITS = 400          # more than this is sampled by seed, and reported
 PROPOSAL_COLS = ["run", "type_id", "type_name", "definition", "example_units"]
-TYPE_NONE = "none"
 OTH_PREFIX = "OTH."
 # fewer "none" units than this are reported, not proposed from (control panel)
 OTH_MIN = int(panel.get("types.gap_min_units", 5))
-# A type counts for a sentence when its probability (through the types'
-# layer once fitted, src/judged.py) reaches floor.types, as an asset counts
-# at asset.floor: every such type with types.multiple, the likeliest only
-# without. The answer is one choice whose probabilities sum to 1, so 'none'
-# needs no floor of its own: it wins when no type reaches the floor.
-TYPE_FLOOR = float(panel.get("floor.types", 0.3))
+# A type counts for a sentence when its score (P(2)+P(3) of its own graded
+# question, through the types' layer once fitted, src/judged.py) reaches
+# floor.types, as a measure counts at its floor: every such type with
+# types.multiple, the likeliest only without. A sentence no type reaches
+# has none.
+TYPE_FLOOR = float(panel.get("floor.types", 0.9))
 TYPE_MULTIPLE = bool(panel.get("types.multiple", True))
 
 
 def type_winners(probs, floor=None, multiple=None):
-    """The types that count, likeliest first: every type (never 'none')
-    whose probability reaches the floor; the first only without multiple."""
+    """The types that count, likeliest first: every type whose score
+    reaches the floor; the first only without multiple."""
     floor = TYPE_FLOOR if floor is None else floor
     multiple = TYPE_MULTIPLE if multiple is None else multiple
-    win = sorted((t for t, q in probs.items() if t != TYPE_NONE and q >= floor),
+    win = sorted((t for t, q in probs.items() if q >= floor),
                  key=lambda t: (-probs[t], t))
     return win if multiple else win[:1]
 ASSIGN_COLS = ["label_id", "unit_id", "paragraph_id", "doc_id", "project_ids",
@@ -363,21 +363,46 @@ def load_approved(name):
     return dict(out)
 
 
-def assign_questions(types):
-    """One choice question: which type the unit is, or none of them."""
-    crit = {t["type_id"]: f"{t['type_name']}: {t['definition']}" for t in types}
-    crit[TYPE_NONE] = "None of these: the sentence is none of these kinds."
-    return {"type": {
-        "type": "choice",
-        "instructions": ("Which one kind best describes what the sentence in the 'sentence' "
-                         "field commits the project to? Choose exactly one; choose 'none' if "
-                         "no kind fits."),
-        "criteria": crit}}
+def assign_questions(types, scale, measure_name=""):
+    """One graded question per type, the form every decision asks
+    (classify.graded_question) on the types' scale (measure_scale): how the
+    sentence relates to the type. Each type is its own question, as each measure and
+    each asset is, so several may count."""
+    kind = f" It is a kind of {measure_name}." if measure_name else ""
+    return {t["type_id"]: classify.graded_question(
+        {"id": t["type_id"], "name": t["type_name"], "definition": t["definition"] + kind}, scale)
+        for t in types}
 
 
-def choice_probs(entry):
-    """{option: probability} of a stored choice answer."""
-    return {k: float(v) for k, v in entry["answer"]["probabilities"].items()}
+def type_scores(got, types):
+    """{type_id: score} of a unit's stored answers (classify.graded_score)."""
+    return {t: classify.graded_score(got[t]) for t in types if t in got}
+
+
+# The scale a type is graded on: whether the commitment is of that kind (the
+# sentence is already committed for the measure, so the measure's own scale,
+# which grades commitment, put 6 of 7 risk-assessment types on almost every
+# committed sentence at 0.5 in a test of 43 sentences, 2026-10-22; this one
+# about 4 at 0.5 and 1 at 0.9). A person's judgement, kept here until a set
+# writes its own in analysis/labels/<set>_types_scale.csv (grade,description).
+TYPE_SCALE = [
+    "The sentence's commitment is not of this kind.",
+    "The sentence does not say the commitment takes this form: it is another kind, or its "
+    "form is not stated.",
+    "Among the things the sentence commits the project to, one is explicitly of this kind.",
+    "What the sentence commits the project to is explicitly and mainly of this kind.",
+]
+
+
+def measure_scale(name):
+    """(measure name, the scale its types are graded on): the set's own
+    analysis/labels/<set>_types_scale.csv when written, else TYPE_SCALE."""
+    labs, _ = classify.load_labels(name, labels.folder(name))
+    path = os.path.join(labels.folder(name), f"{name}_types_scale.csv")
+    if os.path.exists(path):
+        rows_ = sorted(labels.rows(path), key=lambda r: int(r["grade"]))
+        return labs[0]["name"], [r["description"] for r in rows_]
+    return labs[0]["name"], TYPE_SCALE
 
 
 def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
@@ -387,12 +412,13 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
     type list or a new measure run is a new folder."""
     run_folder, units = committed_units(name, data, **kw)
     approved = load_approved(name)
+    mname, scale = measure_scale(name)
     shas, rows = [], []
     for lid, us in sorted(units.items()):
         if lid not in approved:
             log(f"  {lid}: no approved types; skipped")
             continue
-        qs = assign_questions(approved[lid])
+        qs = assign_questions(approved[lid], scale, mname)
         for u in us:
             body = classify.request_body({"sentence": u["text"]}, qs, model)
             shas.append(classify.request_sha(body))
@@ -464,14 +490,14 @@ def gaps(name, lid, label, approved, none_units, data, *, api_key, dry_run, log,
 
 def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=print,
            workers=classify.WORKERS, **kw):
-    """Each committed unit's type: one choice over the approved types and
-    none; then the gap step (OTH types from the none units, assigned by a
-    second choice)."""
+    """Each committed unit's types: one graded question per approved type,
+    every type at floor.types counting; then the gap step (OTH types from
+    the units no type reaches, asked the same way)."""
     if no_run_yet(name, data, dry_run, "assignment", log, **kw):
         return "no measure run"
     run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log,
                                                   **kw)
-    log(f"{name}: {len(rows):,} committed units x one type question -> {out}")
+    log(f"{name}: {len(rows):,} committed units x one graded question per type -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
         return out
@@ -511,18 +537,18 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     type_phrases = {lid: {t["type_id"]: prior.phrases([t["type_name"], t["definition"]], weight)
                           for t in ts + oth.get(lid, [])} for lid, ts in approved.items()}
     for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
-        raw = choice_probs(g["type"])       # the model's answer, kept for the next fit
+        raw = type_scores(g, qs)            # the model's scores, kept for the next fit
         probs = calibrate(lays, name, u["unit_id"], raw)
         yes = type_winners(probs)
-        entries = [g["type"]]
+        entries = list(g.values())
         if not yes and i in oth_got:
-            # no approved type counts: the gap types' choice (no layer yet)
-            second = choice_probs(oth_got[i]["type"])
-            entries.append(oth_got[i]["type"])
+            # no approved type counts: the gap types' questions (no layer yet)
+            second = type_scores(oth_got[i], oth_got[i])
+            entries += list(oth_got[i].values())
             raw = {**raw, **second}
             probs = {**probs, **second}
             yes = type_winners(second)
-        best = yes[0] if yes else max(probs, key=probs.get)
+        best = yes[0] if yes else (max(probs, key=probs.get) if probs else "")
         counts[lid][best if yes else "other"] += 1
         model_served = "|".join(sorted({e["model"] for e in entries}))
         served.add(model_served)
@@ -556,8 +582,9 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
             w.writeheader()
             w.writerows(oth_rows)
         os.replace(path + ".tmp", path)
-    lines = [f"{name}: {len(out_rows):,} committed units, their types by {model} (choice over "
-             f"the approved types and none; OTH types from the none units; stored responses "
+    lines = [f"{name}: {len(out_rows):,} committed units, their types by {model} (one graded "
+             f"question per type, each at floor.types; OTH types from the units no type "
+             f"reaches; stored responses "
              f"US${cost:.4f}; served {sorted(served)})"]
     for lid, ts in sorted(counts.items()):
         n = sum(1 for r in out_rows if r["label_id"] == lid)
@@ -591,14 +618,12 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
 
 
 def calibrate(lays, name, unit_id, probs):
-    """Each type's probability through its layer (src/judged.py), when one
-    is fitted; 'none' as the model gave it (it has no floor: it wins when no
-    type reaches floor.types)."""
+    """Each type's score through its layer (src/judged.py), when one is
+    fitted."""
     if not lays:
         return dict(probs)
     import judged
-    return {t: (q if t == TYPE_NONE else judged.calibrated(lays, f"{name}:{t}", unit_id, q))
-            for t, q in probs.items()}
+    return {t: judged.calibrated(lays, f"{name}:{t}", unit_id, q) for t, q in probs.items()}
 
 
 def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, workers,
@@ -611,7 +636,7 @@ def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, wor
     none_by = defaultdict(list)
     for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
         if g:
-            if not type_winners(calibrate(lays, name, u["unit_id"], choice_probs(g["type"]))):
+            if not type_winners(calibrate(lays, name, u["unit_id"], type_scores(g, qs))):
                 none_by[lid].append((i, u))
     oth, spent = {}, 0.0
     for lid, items in sorted(none_by.items()):
@@ -623,8 +648,9 @@ def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, wor
     if spent:
         classify.record_spend(data, "types-gaps", name, GEN_MODEL, len(oth), spent, 0.0, "")
     reqs, idx = [], []
+    mname, scale = measure_scale(name)
     for lid, ts in oth.items():
-        qs = assign_questions(ts)
+        qs = assign_questions(ts, scale, mname)
         for i, u in none_by[lid]:
             reqs.append(({"sentence": u["text"]}, qs))
             idx.append(i)

@@ -2,22 +2,21 @@
 """One question about the committed units of every measure, asked once the
 measures have run.
 
-  pairs  A unit two measures both commit is asked one choice question per
-         pair: does it commit the project to only A, only B, both, or
-         neither, each measure stated by its one-line boundary (the
-         `boundary` column of analysis/labels/<set>.csv). Each measure is
+  pairs  A unit two measures both commit is asked, for each side, the form
+         every decision asks (classify.graded_question) on that measure's
+         scale: how the sentence relates to the measure, with the other
+         measure's boundary beside it (the `boundary` column of
+         analysis/labels/<set>.csv, else its definition). Each measure is
          graded on its own, so nothing else holds the boundaries between
-         neighbours. For each side the posterior that the unit is not that
-         measure (only the other, or neither, through the measure's pair
-         layer once fitted, src/judged.py) is written as p_drop_a and
-         p_drop_b; the views drop the unit from a measure when it reaches
-         floor.pair_check (dashboard.apply_measure_pair_checks). On Dev's graded sentences
-         (2026-10-22, 249 with a pair answer) the answer raised recall at 0.90
-         precision on those sentences from 0.78 to 0.87 over the probability
-         layer alone, where the other measures' scores and the rank among
-         measures added nothing.
+         neighbours. Each side's score goes through the measure's pair layer
+         once fitted (src/judged.py): p_keep_a and p_keep_b; the views keep
+         the unit in a measure when its side reaches floor.pair_check
+         (dashboard.apply_measure_pair_checks). Until 2026-10-22 one choice
+         of four (only A, only B, both, neither); on Dev's graded sentences
+         that choice raised recall at 0.90 precision from 0.78 to 0.87 over
+         the probability layer alone, untested in the graded form.
 
-A choice question to the decision model, stored like every answer
+Graded questions to the decision model, stored like every answer
 (src/answers.py) and re-read on a re-run.
 
 Reads  data/measures/<set>-<version>/units.csv (via src/kinds.py)
@@ -39,8 +38,8 @@ import prior  # noqa: E402
 
 ASSET_SET = "assets"
 PAIR_OPTIONS = ("only_a", "only_b", "both", "neither")
-PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_only_a", "p_only_b",
-             "p_both", "p_neither", "p_drop_a", "p_drop_b", "model_served", "cost",
+PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "score_a", "score_b", "p_keep_a",
+             "p_keep_b", "model_served", "cost",
              "prior_probability_a", "prior_phrase_cosine_a", "prior_probability_b",
              "prior_phrase_cosine_b"]
 
@@ -58,14 +57,20 @@ def boundary_of(name):
 
 
 def pair_question(a, b):
-    (na, ba), (nb, bb) = a, b
-    return {"pair": {
-        "type": "choice",
-        "instructions": (f"A is {na}: {ba} B is {nb}: {bb} Which does the sentence in the "
-                         f"'sentence' field commit the project to? Choose exactly one."),
-        "criteria": {"only_a": f"Only A ({na}).", "only_b": f"Only B ({nb}).",
-                     "both": f"Both: it commits separately to {na} and to {nb}.",
-                     "neither": "Neither."}}}
+    """The form every decision asks (classify.graded_question), once per side
+    on the side's own scale: how the sentence relates to the measure, with
+    its definition and the other measure's boundary beside it. keep_a and
+    keep_b."""
+    out = {}
+    for key, s, o in (("keep_a", a, b), ("keep_b", b, a)):
+        labs, scale = classify.load_labels(s, labels.folder(s))
+        on, ob = boundary_of(o)
+        lab = labs[0]
+        out[key] = classify.graded_question(
+            {"id": lab["id"], "name": lab["name"],
+             "definition": f"{lab['definition']} The sentence is also counted for {on}: {ob} "
+                           f"Grade only {lab['name']}."}, scale)
+    return out
 
 
 def committed(data, projects=None):
@@ -95,25 +100,41 @@ def plan(data, projects=None, model=classify.MODEL):
         for uid, u in us.items():
             by_unit[uid].add(name)
             text[uid] = u["text"]
-    bound = {name: boundary_of(name) for name in sets}
     pairs = []
     for uid in sorted(by_unit):
         for a, b in combinations(sorted(by_unit[uid]), 2):
-            pairs.append((uid, a, b, ({"sentence": text[uid]}, pair_question(bound[a], bound[b]))))
+            pairs.append((uid, a, b, ({"sentence": text[uid]}, pair_question(a, b))))
     import judged
     h = hashlib.sha256(f"{model}\t{sorted(runs)}\nprior={prior.VERSION}\n"
-                       f"layers={judged.digest(data, 'pairs', drop_shas(sets))}\n".encode())
+                       f"layers={judged.digest(data, 'pairs', keep_shas(sets))}\n"
+                       f"floor={floor()}\n".encode())
     for _, _, _, (state, qs) in pairs:
         h.update(classify.request_sha(classify.request_body(state, qs, model)).encode())
     known = {(name, uid): u for name, us in sets.items() for uid, u in us.items()}
     return pairs, where(data, "checks", f"checks-{h.hexdigest()[:12]}"), known
 
 
-def drop_shas(sets):
-    """{drop:<set>: SHA-256 of the set's boundary}: a pair layer for a
-    measure applies while its boundary reads the same."""
+def keep_shas(sets):
+    """{keep:<set>: SHA-256 of the set's own graded question}: a pair layer
+    for a measure applies while its definition and scale read the same."""
     import judged
-    return {f"drop:{s}": judged.sha(boundary_of(s)) for s in sets}
+    out = {}
+    for s in sets:
+        labs, scale = classify.load_labels(s, labels.folder(s))
+        out[f"keep:{s}"] = judged.sha(classify.graded_question(labs[0], scale))
+    return out
+
+
+def floor():
+    import panel
+    return float(panel.get("floor.pair_check", 0.5))
+
+
+def decision(keep_a, keep_b, at=None):
+    """only_a, only_b, both or neither, from the two sides' posteriors."""
+    at = floor() if at is None else at
+    return {(True, True): "both", (True, False): "only_a", (False, True): "only_b",
+            (False, False): "neither"}[(keep_a >= at, keep_b >= at)]
 
 
 def current_run(data, projects=None):
@@ -136,10 +157,6 @@ def prior_of(known, uid, name, side):
     p = u.get("p_committed_calibrated") or (f"{measure.score_of(u):.4f}" if u else "")
     return {f"prior_probability_{side}": p,
             f"prior_phrase_cosine_{side}": u.get("prior_phrase_cosine", "")}
-
-
-def _probs(entry):
-    return {k: float(v) for k, v in entry["answer"]["probabilities"].items()}
 
 
 def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=classify.WORKERS,
@@ -167,24 +184,22 @@ def run(data, *, api_key="", projects=None, dry_run=False, log=print, workers=cl
         if st["failures"] or not all(got):
             log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
             return None
-    # The pair layers (src/judged.py): for each side, the probability that
-    # the sentence is not that measure (only the other, or neither), through
-    # the side's layer when fitted; the views drop at floor.pair_check.
+    # Each side's score through the side's pair layer (src/judged.py) when
+    # fitted: the posterior that the sentence is that measure, with the other
+    # beside it; the views keep it in the measure at floor.pair_check.
     import judged
-    lays = judged.layers(data, "pairs", drop_shas({s for _, a, b, _ in pairs for s in (a, b)}))
+    lays = judged.layers(data, "pairs", keep_shas({s for _, a, b, _ in pairs for s in (a, b)}))
     pair_rows = []
     for (uid, a, b, _), g in zip(pairs, got):
-        p = _probs(g["pair"])
-        best = max(p, key=p.get)
+        sa, sb = classify.graded_score(g["keep_a"]), classify.graded_score(g["keep_b"])
         item = f"{uid}#{a}|{b}"
-        drop_a = judged.calibrated(lays, f"drop:{a}", item, p.get("only_b", 0) + p.get("neither", 0))
-        drop_b = judged.calibrated(lays, f"drop:{b}", item, p.get("only_a", 0) + p.get("neither", 0))
-        pair_rows.append({"unit_id": uid, "set_a": a, "set_b": b, "decision": best,
-                          "probability": f"{p[best]:.3f}",
-                          **{f"p_{k}": f"{p.get(k, 0.0):.3f}" for k in PAIR_OPTIONS},
-                          "p_drop_a": f"{drop_a:.3f}", "p_drop_b": f"{drop_b:.3f}",
-                          "model_served": g["pair"]["model"],
-                          "cost": f"{float(g['pair'].get('cost_usd') or 0):.6f}",
+        ka = judged.calibrated(lays, f"keep:{a}", item, sa)
+        kb = judged.calibrated(lays, f"keep:{b}", item, sb)
+        pair_rows.append({"unit_id": uid, "set_a": a, "set_b": b, "decision": decision(ka, kb),
+                          "score_a": f"{sa:.3f}", "score_b": f"{sb:.3f}",
+                          "p_keep_a": f"{ka:.3f}", "p_keep_b": f"{kb:.3f}",
+                          "model_served": "|".join(sorted({g[k]["model"] for k in g})),
+                          "cost": f"{sum(float(g[k].get('cost_usd') or 0) for k in g):.6f}",
                           **prior_of(known, uid, a, "a"), **prior_of(known, uid, b, "b")})
     part = out + ".part"
     os.makedirs(part, exist_ok=True)

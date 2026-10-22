@@ -741,8 +741,8 @@ PAIR_LINK_COLS = ["label_set", "run", "label_id", "unit_id", "package_id", "proj
                   "prior_phrase_cosine", "prior_phrase_match"]
 
 
-CHECK_PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "probability", "p_only_a",
-                   "p_only_b", "p_both", "p_neither", "p_drop_a", "p_drop_b", "model_served", "cost",
+CHECK_PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "score_a", "score_b", "p_keep_a",
+                   "p_keep_b", "model_served", "cost",
                    "prior_probability_a", "prior_phrase_cosine_a", "prior_probability_b",
                    "prior_phrase_cosine_b"]
 
