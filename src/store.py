@@ -138,11 +138,7 @@ def _publish(conn, data, sets, projects, links, log, written):
         if sha is not None and load_pg._last_sha(conn, table) != sha:
             written[table] = load_pg.replace_rows(conn, table, cols, rows, "label_set", None,
                                                   sha, types=types)[0]
-    sha, ans = load_pg.answer_rows(data)
-    if sha is not None and load_pg._last_sha(conn, "answers") != sha:
-        written["answers"] = load_pg.replace_rows(conn, "answers", load_pg.ANSWER_COLS, ans,
-                                                  "answer_sha256", None, sha,
-                                                  types={"answer": "jsonb"})[0]
+    written["answers"] = load_pg.sync_answers(conn, data)
     if links:
         sha, assets_, pairs_ = load_pg.link_rows(data, projects)
         if sha is not None:

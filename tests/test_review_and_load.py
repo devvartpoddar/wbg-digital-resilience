@@ -180,9 +180,16 @@ def test_the_record_of_judgement_is_read_for_postgres(tmp_path):
     assert got["runs"][1][0]["stage"] == "measures" and got["runs"][1][0]["calls"] == 3
     assert got["spend"][1][0]["stage"] == "measure"
     assert got["graded_package_links"][0] is None            # no source: not loaded
-    key, rows = load_pg.answer_rows(str(d))
-    rows = list(rows)
-    assert key and rows[0]["answer_sha256"] == "abcd" and rows[0]["model"] == "typesafe/jev"
+    dsn = os.environ.get("WBG_PG_TEST")
+    if dsn:                                   # the answer store only grows in Postgres
+        import psycopg
+        with psycopg.connect(dsn, autocommit=True) as conn:
+            load_pg.prepare(conn)
+            conn.execute("DROP TABLE IF EXISTS wbg.answers")
+            assert load_pg.sync_answers(conn, str(d)) == 1
+            assert load_pg.sync_answers(conn, str(d)) == 0
+            got = conn.execute("SELECT model, answer->>'type' FROM wbg.answers").fetchone()
+            assert got == ("typesafe/jev", "score")
 
 
 def test_every_sentence_gets_its_asset_as_the_measure_stage_decides_it(tmp_path, monkeypatch):

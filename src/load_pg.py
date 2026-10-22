@@ -652,33 +652,44 @@ def judgement_tables(data):
     return out
 
 
-def answer_rows(data):
-    """(key, rows) of every stored decision-model answer, or (None, []).
-    The key is over the store's file names, so an unchanged store is not
-    reloaded; rows are read only when it changed."""
+def sync_answers(conn, data, release_id=""):
+    """Add to wbg.answers every stored decision-model answer it does not hold
+    yet (data/classify/answers/). An answer is never changed once stored, so
+    the table only grows: a publish after a run copies that run's new
+    answers, not the whole store. Returns the rows added."""
     root_ = os.path.join(data, "classify", "answers")
     if not os.path.isdir(root_):
-        return None, []
-    names = []
+        return 0
+    if not _exists(conn, "answers"):
+        load_rows(conn, "answers", ANSWER_COLS, [], "", release_id, types={"answer": "jsonb"})
+    have = {r[0] for r in conn.execute(f"SELECT answer_sha256 FROM {S.qualified('answers')}")}
+    new = []
     for model in sorted(os.listdir(root_)):
-        for shard in sorted(os.listdir(os.path.join(root_, model))):
-            d = os.path.join(root_, model, shard)
-            if os.path.isdir(d):
-                names.extend(os.path.join(model, shard, f) for f in sorted(os.listdir(d))
-                             if f.endswith(".json"))
-    key = hashlib.sha256("\n".join(names).encode()).hexdigest() if names else None
-
-    def rows():
-        for n in names:
-            with open(os.path.join(root_, n), encoding="utf-8") as fh:
-                e = json.load(fh)
-            yield {"answer_sha256": os.path.basename(n)[:-5],
-                   "model": os.path.dirname(os.path.dirname(n)).replace("__", "/"),
-                   "model_served": e.get("model", ""),
-                   "answer": json.dumps(e.get("answer"), sort_keys=True),
-                   "cost_usd": e.get("cost_usd", ""), "asked_at": e.get("asked_at", ""),
-                   "call_sha256": e.get("call", "")}
-    return key, rows()
+        mdir = os.path.join(root_, model)
+        if not os.path.isdir(mdir):
+            continue
+        for shard in sorted(os.listdir(mdir)):
+            d = os.path.join(mdir, shard)
+            if not os.path.isdir(d):
+                continue
+            for f in sorted(os.listdir(d)):
+                if f.endswith(".json") and f[:-5] not in have:
+                    new.append((model, os.path.join(d, f)))
+    if not new:
+        return 0
+    names = [S.rename("answers", c) for c in ANSWER_COLS]
+    with conn.transaction(), conn.cursor() as cur:
+        with cur.copy(f"COPY {S.qualified('answers')} ({', '.join(names)}) FROM STDIN") as cp:
+            for model, path in new:
+                with open(path, encoding="utf-8") as fh:
+                    e = json.load(fh)
+                cp.write_row([os.path.basename(path)[:-5], model.replace("__", "/"),
+                              e.get("model", ""), json.dumps(e.get("answer"), sort_keys=True),
+                              e.get("cost_usd"), e.get("asked_at") or None, e.get("call", "")])
+        cur.execute(f"INSERT INTO {LOADS} (table_name, source_sha256, row_count, loaded_at, "
+                    f"release_id) VALUES (%s, %s, %s, %s, %s)",
+                    ("answers", f"+{len(new)}", len(new), _now(), release_id))
+    return len(new)
 
 
 def measure_rows(data, projects=None, sets=None):
@@ -1145,8 +1156,9 @@ def main():
         derived(conn, "unit_assets", sha, UNIT_ASSET_COLS, ua)
         for table, cols, sha, rows_, types in judgement_tables(args.data):
             derived(conn, table, sha, cols, rows_, types=types)
-        sha, ans = answer_rows(args.data)
-        derived(conn, "answers", sha, ANSWER_COLS, ans, types={"answer": "jsonb"})
+        t0 = time.time()
+        print(f"  {'answers':<20} {sync_answers(conn, args.data, release_id):>8} rows added"
+              f"{took(t0)}")
 
         lab = label_rows()
         derived(conn, "labels", hashlib.sha256(repr(lab).encode()).hexdigest(),
