@@ -461,7 +461,7 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
         return "no measure run"
     run_folder, approved, rows, out = assign_plan(name, data, model=model, log=log,
                                                   **kw)
-    log(f"{name}: {len(rows):,} committed units x one type choice -> {out}")
+    log(f"{name}: {len(rows):,} committed units x one type question -> {out}")
     if os.path.exists(os.path.join(out, "manifest.json")):
         log("  already written")
         return out
@@ -556,7 +556,7 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
             w.writeheader()
             w.writerows(oth_rows)
         os.replace(path + ".tmp", path)
-    lines = [f"{name}: {len(out_rows):,} committed units, one type each by {model} (choice over "
+    lines = [f"{name}: {len(out_rows):,} committed units, their types by {model} (choice over "
              f"the approved types and none; OTH types from the none units; stored responses "
              f"US${cost:.4f}; served {sorted(served)})"]
     for lid, ts in sorted(counts.items()):

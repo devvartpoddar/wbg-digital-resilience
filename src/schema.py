@@ -569,10 +569,10 @@ TABLES = {
         comment="The assets of every sentence the search reads, one row per asset (asset_rank "
                 "1 the best; with asset.multiple every asset at its floor; rank 0 a sentence "
                 "with none), decided as the measure stage "
-                "decides it: the sentence's own best asset when its posterior reaches the "
-                "control panel's asset.floor (level unit); else the asset with the highest "
-                "sum of its own score and the earlier sentences' scores in its paragraph, each "
-                "weighted by asset.decay per sentence back, when that reaches asset.paragraph_floor (level "
+                "decides it: the sentence's own assets whose posterior reaches the "
+                "control panel's asset.floor (level unit); else the assets whose sum of their "
+                "own score and the earlier sentences' scores in its paragraph, each weighted by "
+                "asset.decay per sentence back, reaches asset.paragraph_floor (level "
                 "paragraph); else none. Rebuilt at every publish from the current asset map "
                 "and its probability layers.",
         columns={"asset_id": "The sentence's asset; empty at level none.",

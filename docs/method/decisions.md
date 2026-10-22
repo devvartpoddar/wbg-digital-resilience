@@ -21,7 +21,7 @@ Every question the pipeline puts to the decision model (TypeSafe's Jev) is handl
 
 Every row has the whole loop: a graded source, a probability layer, a floor read on the posterior, and a suggested floor. Assets and measures have theirs here and in the tuning report; types, pair checks and both package links have theirs in `src/judged.py` and `data/reports/evaluate_after_measures.md`:
 
-| Decision | Graded on | Layer (one pooled fit per decision, one intercept per label) |
+| Decision | Graded on | Layer (one fit per decision, pooled by `posterior.pool`) |
 |---|---|---|
 | Type | the type column of each measure tab (several joined by \|) | one label per measure and type, on the sentence's vector |
 | Pair check | tab `pair checks` (only A, only B, both, neither) | one label per measure (`drop:<set>`), on the sentence's vector |
@@ -36,7 +36,7 @@ A logistic regression stacked on three inputs: the logit of the model's score; a
 
 - **Design weights.** Sheets are drawn by stratum, not at random, so every graded row carries its stratum's size over the rows drawn (`weight` in `data/labels/<set>_units.csv`) into the fit, the vote, the centroids and every precision and recall reported.
 - **Who votes.** Every graded sentence but the sentence itself: its own grade is left out of its features when fitting, as an ungraded sentence's never include one. Near-copies and sentences of the same project vote (word-for-word copies are already merged; only 6 of 1,383 committed sentences had a neighbour in another project above 0.95; a rule leaving out the same project starved measures whose yes sit in a few projects). `posterior.near_copy` can leave near-copies out again; it is off. Leakage between projects is the out-of-sample check's job.
-- **Pooled or per measure.** `posterior.pool` fits every measure's layer at once: one intercept per measure, the weights on the score, vote and centroid shared. A measure has about 40 graded rows, few for four weights of its own; per measure (false) is the default until the tuning report says otherwise.
+- **Pooled or per label.** `posterior.pool` (on) fits each decision's labels at once: the measures together, the assets together, and likewise the types, the pair checks, the package assets and the package links. One intercept per label, the weights on the score, vote and centroid shared. A measure has about 40 graded rows and a type or an asset fewer, few for four weights of its own; the tuning report compares pooled and per label on the measures' grades.
 - **Grades follow the text.** A grade is matched to the sentence whose text it was given for (`text_sha256`), never to the stored unit id, which a re-parse moves; a grade whose text is no longer in the corpus is left out.
 - **Out of sample.** The evaluation scores each graded sentence with a layer fitted on the other folds (`posterior.folds`, whole projects to a fold) and suggests the floor from those out-of-fold probabilities: the floor with the most recall whose weighted precision reaches `floor.target_precision`. The panel's floor is set by a person.
 - **Current question only.** The layer learns only from grades given under the exact question now asked; a revised definition starts without one.

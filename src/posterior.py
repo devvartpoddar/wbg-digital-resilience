@@ -26,10 +26,12 @@ can leave near-copies out too (off by default; the tuning report,
 src/tune.py, compares). Leakage between projects is the out-of-fold check's
 job (folds by whole project), not the vote's.
 
-With posterior.pool the labels share the weights on the score and the
-similarities, each label keeping its own intercept (its base rate) and its
-own graded sentences: a label has 40 or so graded rows, few for four
-weights of its own.
+With posterior.pool (on) the labels of one decision share the weights on
+the score and the similarities, each label keeping its own intercept (its
+base rate) and its own graded sentences: a measure has 40 or so graded
+rows, a type or an asset fewer, few for four weights of its own. The same
+setting governs every decision: measures, assets, and the four after them
+(src/judged.py).
 
 The grades come from sheets drawn by band, not at random, so each graded
 sentence carries its design weight (the stratum's size over the rows drawn
@@ -86,7 +88,7 @@ def settings():
             "min_graded": int(panel.get("posterior.min_graded", 20)),
             "min_each": int(panel.get("posterior.min_each", 5)),
             "near_copy": _near(panel.get("posterior.near_copy", "off")),
-            "pool": bool(panel.get("posterior.pool", False)),
+            "pool": bool(panel.get("posterior.pool", True)),
             "folds": int(panel.get("posterior.folds", 5))}
 
 

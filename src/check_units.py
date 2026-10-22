@@ -851,9 +851,14 @@ def fit_asset_layers(data):
     vecs = {u: vector_of(u) for u in named}
     vecs = {u: v for u, v in vecs.items() if v is not None}
     out, lines = {}, ["## Asset probability layers", ""]
-    for asset, sc in sorted(scores.items()):
-        ys = [(u, 1 if asset in named[u] else 0, weight[u], projects_of(u)) for u in sc]
-        layer = posterior.fit(ys, sc, vecs, man["question_sha256"].get(asset, ""), asset)
+    blocks = {asset: ([(u, 1 if asset in named[u] else 0, weight[u], projects_of(u)) for u in sc],
+                      sc, vecs, man["question_sha256"].get(asset, ""))
+              for asset, sc in sorted(scores.items())}
+    # pooled across assets when posterior.pool is on, as the measures are
+    pooled = posterior.fit_pooled(blocks) if posterior.settings()["pool"] else None
+    for asset, (ys, sc, _, qsha) in blocks.items():
+        layer = pooled.get(asset) if pooled is not None else \
+            posterior.fit(ys, sc, vecs, qsha, asset)
         if layer:
             out[asset] = layer
             lines.append(f"- {asset}: fitted on {layer['n_yes']} yes, {layer['n_no']} no")
