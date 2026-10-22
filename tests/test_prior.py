@@ -44,13 +44,42 @@ def test_structure_reads_the_unit_id_and_component():
     assert t["prior_has_component"] == "false"
 
 
-def test_paragraph_context_counts_only_the_other_sentences():
-    rows = [("a1", "pA"), ("a2", "pA"), ("a3", "pA"), ("b1", "pB")]
-    best = {"a1": 0.6, "a2": 0.5, "a3": 0.2, "b1": 0.7}
-    likely = prior.paragraph_likely(rows, best, 0.45)
-    assert likely == {"a1": 1, "a2": 1, "a3": 2, "b1": 0}
-    pb = prior.paragraph_best(rows, best)
-    assert pb == {"a1": 0.5, "a2": 0.6, "a3": 0.6, "b1": None}
+def test_paragraph_counts_are_other_sentences_with_any_asset_or_any_measure(tmp_path, monkeypatch):
+    """Two measure sets and the assets, each a search run: a sentence counts in
+    its paragraph when its best cosine over a set reaches that set's gate
+    (assets 0.25, measures 0.45); the sentence itself never counts."""
+    import numpy
+    import labels
+    import search
+    emb = tmp_path / "embeddings"
+    emb.mkdir()
+    (emb / "sentence_index.csv").write_text(
+        "unit_id,paragraph_id\na1,pA\na2,pA\na3,pA\nb1,pB\n")
+    scores = {"assets": [[0.30, 0.1], [0.10, 0.2], [0.26, 0.0], [0.9, 0.9]],   # a1, a3 assets
+              "cra": [[0.50], [0.10], [0.10], [0.1]],                             # a1 a measure
+              "ews": [[0.10], [0.46], [0.10], [0.1]]}                             # a2 a measure
+    for name in scores:
+        d = tmp_path / "search" / f"{name}-x"
+        d.mkdir(parents=True)
+        (d / "manifest.json").write_text("{}")
+    monkeypatch.setattr(labels, "label_sets", lambda dirs=None: ["assets", "cra", "ews"])
+    monkeypatch.setattr(search, "run_folder",
+                        lambda name, data: (str(tmp_path / "search" / f"{name}-x"), []))
+    calls = []
+
+    def load_run(folder, data):
+        calls.append(folder)
+        return [], numpy.array(scores[os.path.basename(folder)[:-2]], dtype="float32"), []
+    monkeypatch.setattr(search, "load_run", load_run)
+    key, counts = prior.paragraph_counts(str(tmp_path))
+    assert counts == {"a1": (1, 1), "a2": (2, 1), "a3": (1, 2), "b1": (0, 0)}
+    assert prior.paragraph_inputs(counts, "a2") == {"prior_para_assets": 2,
+                                                    "prior_para_measures": 1}
+    assert prior.paragraph_inputs(counts, "unknown") == {"prior_para_assets": 0,
+                                                         "prior_para_measures": 0}
+    n = len(calls)
+    assert prior.paragraph_counts(str(tmp_path)) == (key, counts) and len(calls) == n  # kept
+    assert prior.paragraph_key(str(tmp_path))[0] == key
 
 
 def test_document_frequency_is_computed_once_and_kept(tmp_path, monkeypatch):
@@ -75,6 +104,8 @@ def test_the_asset_map_stores_every_input_for_every_sentence_and_asset(monkeypat
     import classify
     import search
     monkeypatch.setattr(prior, "word_df", lambda data: (100, {"fibre": 2, "tower": 3}))
+    monkeypatch.setattr(prior, "paragraph_counts",
+                        lambda data, sets=None: ("k", {"D:p1:s001": (1, 0), "D:p1:s002": (0, 2)}))
     monkeypatch.setattr(search, "load_queries", lambda name, taxonomy=None: [
         {"label_id": "fiber", "kind": "definition", "text": "fibre optic cables"},
         {"label_id": "fiber", "kind": "phrase", "text": "national fibre backbone"},
@@ -94,7 +125,7 @@ def test_the_asset_map_stores_every_input_for_every_sentence_and_asset(monkeypat
     f1 = got[("fiber", "D:p1:s001")]
     assert set(f1) == set(prior.COLS)
     assert f1["prior_phrase_cosine"] == "0.6000" and 0.2 < float(f1["prior_phrase_match"]) < 0.4   # "fibre" of three rare words
-    assert f1["prior_para_likely"] == 1 and f1["prior_para_best"] == "0.2000"
+    assert f1["prior_para_assets"] == 1 and f1["prior_para_measures"] == 0
     assert got[("towers", "D:p1:s001")]["prior_phrase_match"] == "0.0000"
-    assert got[("towers", "D:p1:s002")]["prior_para_best"] == "0.1000"
+    assert got[("towers", "D:p1:s002")]["prior_para_measures"] == 2
     assert got[("fiber", "D:p1:s002")]["prior_has_component"] == "false"

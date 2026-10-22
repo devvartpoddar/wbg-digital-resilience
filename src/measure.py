@@ -303,8 +303,10 @@ class Run:
                          "batch": batch,
                          "min_yield": min_yield, "max_rounds": max_rounds,
                          "negative_weight": NEGATIVE_WEIGHT,
-                         # the prior inputs stored with every unit (src/prior.py)
+                         # the prior inputs stored with every unit (src/prior.py),
+                         # and the paragraph counts they read (every label set)
                          "prior": prior.VERSION,
+                         "prior_paragraphs": prior.paragraph_key(data)[0],
                          "projects": sorted(projects) if projects else None,
                          # the control panel's readings this run applies
                          "panel": {**panel.items("read."), **panel.items("asset."),
@@ -381,17 +383,15 @@ class Run:
 
     def load_prior(self):
         """What the prior inputs read (src/prior.py): each unit's best cosine
-        over the measure's phrases, its paragraph's other units, and the
-        phrases weighted by how rare their words are."""
+        over the measure's phrases, how many other sentences in its paragraph
+        look like an asset and like a measure, and the phrases weighted by
+        how rare their words are."""
         lid = self.labels[0]["id"]
         cols = [j for j, q in enumerate(self.queries) if q["label_id"] == lid]
         best = numpy.asarray(self.scores[:, cols]).max(axis=1) if cols else \
             numpy.zeros(len(self.index), dtype="float32")
         self.best_cosine = {r["unit_id"]: float(b) for r, b in zip(self.index, best)}
-        pairs = [(r["unit_id"], r["paragraph_id"]) for r in self.index]
-        self.para_likely = prior.paragraph_likely(pairs, self.best_cosine,
-                                                  self.settings["min_cosine"])
-        self.para_best = prior.paragraph_best(pairs, self.best_cosine)
+        _, self.para_counts = prior.paragraph_counts(self.data)
         weight = prior.Weights(*prior.word_df(self.data))
         self.phrases = prior.phrases([q["text"] for q in self.queries
                                       if q["label_id"] == lid and q["kind"] == "phrase"], weight)
@@ -403,8 +403,7 @@ class Run:
                 "prior_phrase_match": prior.fmt(prior.phrase_match(set(prior.words(text)),
                                                                    self.phrases)),
                 **prior.structure(uid, text, r.get("component_number")),
-                "prior_para_likely": self.para_likely.get(uid, 0),
-                "prior_para_best": prior.fmt(self.para_best.get(uid))}
+                **prior.paragraph_inputs(self.para_counts, uid)}
 
     # ---- units
 

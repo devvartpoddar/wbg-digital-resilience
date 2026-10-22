@@ -14,10 +14,17 @@ answers, so one fit can later read them all:
                         row or a whole unit)
   prior_words           its length in words
   prior_has_component   it sits under a known component
-  prior_para_likely     other sentences in the paragraph whose best phrase
-                        cosine over the label set reaches the set's gate
-  prior_para_best       the best cosine to this label among those other
-                        sentences
+  prior_para_assets     other sentences in the paragraph that look like an
+                        asset: their best cosine over every asset's phrases
+                        reaches the asset gate (control panel
+                        asset.gate_cosine)
+  prior_para_measures   other sentences in the paragraph that look like a
+                        measure: their best cosine over every measure's
+                        phrases reaches the measure gate (measure.gate_cosine)
+
+A paragraph about data centres with two measure sentences raises every one of
+its sentences, whichever measure or asset is asked about; a measure added to
+analysis/labels/ counts in the paragraphs from its first search.
 
 Only text, structure and embeddings go in: never a model answer, so no item
 depends on the order others were asked. Nothing reads these yet; the weights
@@ -36,7 +43,8 @@ from paths import where
 # (its answers come from the store).
 VERSION = "1"
 COLS = ["prior_phrase_cosine", "prior_phrase_match", "prior_table_row", "prior_position",
-        "prior_words", "prior_has_component", "prior_para_likely", "prior_para_best"]
+        "prior_words", "prior_has_component", "prior_para_assets", "prior_para_measures"]
+ASSET_SET = "assets"
 WORD = re.compile(r"[a-z]{2,}")
 TABLE_ROW = re.compile(r":t\d+$")
 SENTENCE = re.compile(r":s(\d+)$")
@@ -128,31 +136,80 @@ def structure(unit_id, text, component_number):
 
 # --------------------------------------------------------- paragraph context
 
-def paragraph_likely(rows, best_any, gate):
-    """{unit_id: other units in its paragraph whose best cosine over the label
-    set reaches gate}. rows: [(unit_id, paragraph_id)]; best_any: {unit_id:
-    best cosine over every label of the set}."""
-    likely = defaultdict(int)
-    for uid, pid in rows:
-        if best_any.get(uid, -1.0) >= gate:
-            likely[pid] += 1
-    return {uid: likely[pid] - (best_any.get(uid, -1.0) >= gate) for uid, pid in rows}
+def paragraph_key(data, sets=None):
+    """(key, gates, [(set, search run folder)]): what the paragraph counts are
+    made from, without counting (a run key needs only this)."""
+    import labels
+    import panel
+    import search
+    from paths import file_sha256
+    gates = {"asset": float(panel.get("asset.gate_cosine", 0.25)),
+             "measure": float(panel.get("measure.gate_cosine", 0.45))}
+    index_path = where(data, "embeddings", "sentence_index.csv")
+    if not os.path.exists(index_path):          # nothing embedded: nothing to count
+        return "", gates, []
+    runs = []
+    for name in sorted(sets or labels.label_sets()):
+        try:
+            folder, _ = search.run_folder(name, data)
+        except SystemExit:
+            continue
+        if os.path.exists(os.path.join(folder, "manifest.json")):
+            runs.append((name, folder))
+    key = hashlib.sha256(json.dumps([VERSION, gates, file_sha256(index_path),
+                                     [os.path.basename(f) for _, f in runs]]).encode()
+                         ).hexdigest()[:16]
+    return key, gates, runs
 
 
-def paragraph_best(rows, cosine):
-    """{unit_id: the best cosine among the other units of its paragraph} for
-    one label (None when it has none). cosine: {unit_id: cosine}."""
-    top = defaultdict(list)
-    for uid, pid in rows:
-        if uid in cosine:
-            top[pid].append((cosine[uid], uid))
-    for pid in top:
-        top[pid] = sorted(top[pid], reverse=True)[:2]
-    out = {}
-    for uid, pid in rows:
-        others = [c for c, u in top.get(pid, []) if u != uid]
-        out[uid] = others[0] if others else None
-    return out
+def paragraph_counts(data, sets=None):
+    """(key, {unit_id: (other sentences in its paragraph that look like an
+    asset, that look like a measure)}) over every embedded unit, from every
+    label set's current search run (or `sets`). Kept in
+    data/prior/paragraphs-<key>.json; the key covers the search runs, the two
+    gates and the sentence index, so a new phrase or measure is a new count
+    and a new key in every stage that stores it."""
+    import csv
+    import numpy
+    import search
+    key, gates, runs = paragraph_key(data, sets)
+    if not key:
+        return "", {}
+    index_path = where(data, "embeddings", "sentence_index.csv")
+    cache = where(data, "prior", f"paragraphs-{key}.json")
+    try:
+        with open(cache, encoding="utf-8") as fh:
+            return key, {u: tuple(v) for u, v in json.load(fh).items()}
+    except (OSError, ValueError):
+        pass
+    with open(index_path, newline="", encoding="utf-8") as fh:
+        index = [(r["unit_id"], r["paragraph_id"]) for r in csv.DictReader(fh)]
+    looks = {"asset": numpy.zeros(len(index), dtype=bool),
+             "measure": numpy.zeros(len(index), dtype=bool)}
+    for name, folder in runs:
+        kind = "asset" if name == ASSET_SET else "measure"
+        _, scores, _ = search.load_run(folder, data)
+        for s in range(0, len(index), search.BLOCK):
+            block = numpy.asarray(scores[s:s + search.BLOCK]).max(axis=1)
+            looks[kind][s:s + len(block)] |= block >= gates[kind]
+    per = defaultdict(lambda: [0, 0])
+    for (uid, pid), a, m in zip(index, looks["asset"], looks["measure"]):
+        per[pid][0] += int(a)
+        per[pid][1] += int(m)
+    out = {uid: (per[pid][0] - int(a), per[pid][1] - int(m))
+           for (uid, pid), a, m in zip(index, looks["asset"], looks["measure"])}
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    with open(cache + ".part", "w", encoding="utf-8") as fh:
+        json.dump(out, fh, sort_keys=True)
+    os.replace(cache + ".part", cache)
+    return key, out
+
+
+def paragraph_inputs(counts, unit_id):
+    """{prior_para_assets, prior_para_measures} for a unit (0 and 0 when the
+    unit is not in the index)."""
+    a, m = counts.get(unit_id, (0, 0))
+    return {"prior_para_assets": a, "prior_para_measures": m}
 
 
 def fmt(x):

@@ -97,7 +97,7 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
            "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
-           "prior_position", "prior_words", "prior_para_likely"}
+           "prior_position", "prior_words", "prior_para_assets", "prior_para_measures"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "commitment_v2_usd_millions", "commitment_v3_usd_millions",
@@ -112,7 +112,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "best_activity_kind_probability", "conditional_probability", "template_wording_share",
            "best_actor_probability", "cosine", "probability", "p_only_a", "p_only_b", "p_both",
            "p_neither", "p_rule", "p_investment", "p_not_commitment",
-           "prior_phrase_cosine", "prior_phrase_match", "prior_para_best", "prior_probability_a",
+           "prior_phrase_cosine", "prior_phrase_match", "prior_probability_a",
            "prior_probability_b", "prior_phrase_cosine_a", "prior_phrase_cosine_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
@@ -164,8 +164,8 @@ PRIOR_INPUTS = {
     "prior_position": "Prior input: the sentence's place in its paragraph (0 for a table row or a whole unit).",
     "prior_words": "Prior input: length in words.",
     "prior_has_component": "Prior input: the unit sits under a known component.",
-    "prior_para_likely": "Prior input: other sentences in the paragraph whose best phrase cosine over the label set reaches the set's cosine gate.",
-    "prior_para_best": "Prior input: the best cosine to this label among the other sentences of the paragraph.",
+    "prior_para_assets": "Prior input: other sentences in the paragraph that look like an asset (best cosine over every asset's phrases at the control panel's asset.gate_cosine or more).",
+    "prior_para_measures": "Prior input: other sentences in the paragraph that look like a measure (best cosine over every measure's phrases at measure.gate_cosine or more)."
 }
 PROBABILITY_GRADES = {
     "most_likely_grade": "The grade with the highest probability, on the label set's scale "

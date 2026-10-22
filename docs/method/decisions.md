@@ -41,12 +41,16 @@ not to save money at the price of recall.
 - `prior_table_row`, `prior_position` (the sentence's place in its
   paragraph, 0 for a table row), `prior_words`, `prior_has_component`:
   where and what the sentence is.
-- `prior_para_likely`: how many other sentences in the same paragraph look
-  like the same label set (their best phrase cosine reaches the set's gate);
-  `prior_para_best`: the best cosine to this label among those other
-  sentences. A paragraph full of likely commitments makes each of its
-  sentences likelier. Only the neighbours' similarity is used, never their
-  model answers, so no sentence depends on the order the others were asked.
+- `prior_para_assets`, `prior_para_measures`: how many other sentences in
+  the same paragraph look like an asset (their best cosine over every
+  asset's phrases reaches `asset.gate_cosine`) and like a measure (over every
+  measure's phrases, `measure.gate_cosine`). A paragraph about data centres
+  with two measure sentences raises each of its sentences, whichever asset
+  or measure is asked about; a measure added later counts from its first
+  search. Counted once per corpus from every set's search run
+  (`data/prior/paragraphs-<key>.json`; the key is in every stage's run key).
+  Only the neighbours' similarity is used, never their model answers, so no
+  sentence depends on the order the others were asked.
 
 These are stored next to the model's answers and loaded into Postgres with
 them (`paragraph_grades`, `measure_findings`, the links and checks tables).
@@ -71,12 +75,27 @@ it, then test on graded items kept apart from those used to fit.
 
 ## Evidence so far (exploratory, 2026-10-22; not used to set anything)
 
-On Dev's graded sentences (742 measure, 555 asset sentences), held-out halves:
-the phrase match weighted by rarity and the sentence's structure made the
-measures' prior clearly better (ranking quality 0.74 to 0.80), but added
-nothing once the model had answered; for assets the similarity prior was
-already strong (0.95) and a richer prior added about 2 points of sentences
-given the right asset after the model's answer. A skip on the asset prior
-dropped about half the asset questions at about 1 per cent of graded asset
-pairs lost; for measures the cosine gate already removes most of what could
-be skipped.
+The stored inputs were tested on Dev's graded sentences (742 measure, 555
+asset sentences x 13 assets), held-out halves, computed with the functions in
+`src/prior.py`. For assets the paragraph count of asset-like sentences was
+approximated (sentence-level asset cosines are not in Postgres); the measure
+count was exact. Ranking quality is on a 0 to 1 scale (0.5 is chance); R@.85
+is recall at 0.85 precision.
+
+| | prior before the answer: ranking, R@.85 | after the answer: R@.85, R@.90 |
+|---|---|---|
+| Measures, similarity only | 0.741, 0.21 | 0.81, 0.66 |
+| + phrase match | 0.770, 0.33 | 0.81, 0.66 |
+| + structure | 0.750, 0.26 | 0.83, 0.65 |
+| + paragraph counts | 0.749, 0.22 | 0.83, 0.67 |
+| + all stored inputs | 0.776, 0.38 | 0.83, 0.65 |
+| Assets, similarity only | 0.934, 0.21 | 0.25, 0.19 |
+| + paragraph counts | 0.935, 0.23 | 0.27, 0.20 |
+| + all stored inputs | 0.936, 0.20 | 0.27, 0.17 |
+
+The inputs make the measures' prior clearly better, the phrase match most;
+once the model has answered, every input moves recall by a point or two,
+about the noise between splits. The skip a prior allows at 1 per cent of the
+graded yes lost did not change (measures about 6 per cent of questions,
+assets about a third). They are stored because they cost no model call and
+the graded evaluation sheet, not this sample, decides which the fit keeps.

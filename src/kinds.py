@@ -75,7 +75,7 @@ ASSIGN_COLS = ["label_id", "unit_id", "paragraph_id", "doc_id", "project_ids",
 # The sentence's prior inputs that do not depend on the label (src/prior.py),
 # copied from the measure's units.csv; the per-type phrase match is added.
 PRIOR_UNIT_COLS = ["prior_table_row", "prior_position", "prior_words", "prior_has_component",
-                   "prior_para_likely"]
+                   "prior_para_assets", "prior_para_measures"]
 
 PROMPT = """You are helping an analyst sort sentences from World Bank project appraisal documents.
 Every sentence below was judged to commit the project to the measure "{name}", defined as: {definition}

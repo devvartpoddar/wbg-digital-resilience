@@ -352,8 +352,8 @@ def prior_inputs(name, data, taxonomy, items_, cosines, gate):
     """of(label_id, unit_id) -> the prior inputs (src/prior.py) of a
     sentence of the map for a label: its best cosine over the label's
     phrases, the phrase match weighted by word rarity, its structure, and
-    its paragraph's other sentences (those whose best cosine over any label
-    reaches the gate, and the best cosine to this label among them).
+    how many other sentences in its paragraph look like an asset and like a
+    measure (prior.paragraph_counts, over every label set).
     Computed per row as it is written: the map has a row per sentence and
     label, and a second table of them would double the stage's memory."""
     import search
@@ -364,32 +364,24 @@ def prior_inputs(name, data, taxonomy, items_, cosines, gate):
         if q["kind"] == "phrase":
             phrases.setdefault(q["label_id"], []).append(q["text"])
     phrases = {lid: prior.phrases(ts, weight) for lid, ts in phrases.items()}
-    labs = [lab["id"] for lab in load_labels(name, taxonomy)[0]]
-    pairs = [(p["row"]["unit_id"], p["row"]["paragraph_id"]) for p in items_]
-    best_any, by_label = {}, {lid: {} for lid in labs}
-    for (lid, uid), c in cosines.items():
-        best_any[uid] = max(best_any.get(uid, -2.0), c)
-        if lid in by_label:
-            by_label[lid][uid] = c
-    likely = prior.paragraph_likely(pairs, best_any, gate or MIN_COSINE)
-    para_best = {lid: prior.paragraph_best(pairs, by_label[lid]) for lid in labs}
+    labs = set(lab["id"] for lab in load_labels(name, taxonomy)[0])
+    _, counts = prior.paragraph_counts(data)
     item = {p["row"]["unit_id"]: p for p in items_}
     last = {}                   # the rows of one sentence are written together
 
     def of(lid, uid):
         p = item.get(uid)
-        if p is None or lid not in para_best:
+        if p is None or lid not in labs:
             return {}
         if last.get("uid") != uid:
             text = p["state"]["sentence"]
             last.update(uid=uid, words=set(prior.words(text)),
                         common={**prior.structure(uid, text, p["row"].get("component_number")),
-                                "prior_para_likely": likely.get(uid, 0)})
+                                **prior.paragraph_inputs(counts, uid)})
         return {"prior_phrase_cosine": prior.fmt(cosines.get((lid, uid))),
                 "prior_phrase_match": prior.fmt(prior.phrase_match(last["words"],
                                                                    phrases.get(lid, []))),
-                **last["common"],
-                "prior_para_best": prior.fmt(para_best[lid].get(uid))}
+                **last["common"]}
     return of
 
 
@@ -463,8 +455,8 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     shas = [request_sha(b) for _, b in bodies]
     prefix = "smoke_" if limit else ""
     h = hashlib.sha256(f"min_cosine={min_cosine}\n".encode() +
-                       (f"unit=sentence\nprior={prior.VERSION}\n".encode()
-                        if UNIT == "sentence" else b""))
+                       (f"unit=sentence\nprior={prior.VERSION}:{prior.paragraph_key(data)[0]}\n"
+                        .encode() if UNIT == "sentence" else b""))
     for p, sha in zip(paras, shas):
         h.update(f"{p['row']['unit_id']}:{sha}\n".encode())
     out = where(data, "classify", f"{prefix}{name}-{h.hexdigest()[:12]}")
