@@ -136,21 +136,21 @@ LEFT JOIN LATERAL (
 COMMENT ON VIEW wbg.project_components IS
   'The components (and sub-components) of each project''s latest document that lists any, one row per number. The cost (US$ millions) is that document''s where it prints one, else the most recent document of the project that states a cost for the same component (by name, failing that by number); cost_document_id, cost_document_date and cost_matched_by say where it came from. The cost covers all funding sources, not the Bank''s financing alone (cost_covers). A component no document costs has none.';
 
--- Project x asset from the asset map: how many paragraphs the decision
--- model grades financed (3) or supported without paying for the asset (2).
+-- Project x asset from the asset map: the sentences the pipeline gives the
+-- asset (wbg.unit_assets: its posterior at asset.floor, the sentence's own
+-- or by the paragraph rule).
 DROP VIEW IF EXISTS wbg.project_assets CASCADE;
 CREATE VIEW wbg.project_assets AS
-SELECT pp.project_id, g.label_id AS asset_id, l.label_name AS asset_name,
-       count(DISTINCT g.paragraph_id) FILTER (WHERE g.most_likely_grade = 3)
-         AS paragraphs_financed,
-       count(DISTINCT g.paragraph_id) FILTER (WHERE g.most_likely_grade = 2)
-         AS paragraphs_supported,
-       CASE WHEN count(*) FILTER (WHERE g.most_likely_grade = 3) > 0 THEN 'Financed'
-            ELSE 'Supported only' END AS how
-FROM wbg.paragraph_grades g
-JOIN wbg.paragraph_projects pp ON pp.paragraph_id = g.paragraph_id
-LEFT JOIN wbg.labels l ON l.label_set = 'assets' AND l.label_id = g.label_id
-WHERE g.label_set = 'assets' AND g.most_likely_grade >= 2
-GROUP BY pp.project_id, g.label_id, l.label_name;
+SELECT pp.project_id, ua.asset_id, l.label_name AS asset_name,
+       count(DISTINCT ua.unit_id) FILTER (WHERE ua.asset_level = 'unit') AS sentences_naming_it,
+       count(DISTINCT ua.unit_id) FILTER (WHERE ua.asset_level = 'paragraph')
+         AS sentences_from_paragraph,
+       count(DISTINCT ua.paragraph_id) AS paragraphs,
+       max(ua.probability) FILTER (WHERE ua.asset_level = 'unit') AS best_probability
+FROM wbg.unit_assets ua
+JOIN wbg.paragraph_projects pp ON pp.paragraph_id = ua.paragraph_id
+LEFT JOIN wbg.labels l ON l.label_set = 'assets' AND l.label_id = ua.asset_id
+WHERE ua.asset_level <> 'none'
+GROUP BY pp.project_id, ua.asset_id, l.label_name;
 COMMENT ON VIEW wbg.project_assets IS
-  'One row per project and digital asset the asset map finds there: paragraphs the decision model grades financed (built, bought, installed, connected or operated) and paragraphs graded supported without paying for the asset (technical assistance, policy, studies). how is Financed if any paragraph is graded financed. The model''s grades; documented is not done.';
+  'One row per project and digital asset the asset map finds there: sentences that name it (their own posterior at the control panel''s asset.floor; grades 2 supported and 3 financed counted together) and sentences that take it from earlier sentences of their paragraph. The model''s reading, not a person''s; documented is not done.';

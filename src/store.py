@@ -123,11 +123,22 @@ def _publish(conn, data, sets, projects, links, log, written):
             conn, "unit_paragraph_context", load_pg.CONTEXT_COLS, ctx, "unit_id", None, sha)[0]
     # The commitment checks (src/commit_checks.py) span every measure: small,
     # written whole whenever a current run exists.
-    sha, cpairs, cscope = load_pg.check_rows(data, projects)
+    sha, cpairs = load_pg.check_rows(data, projects)
     if sha is not None:
-        for table, cols, rows in (("unit_pair_checks", load_pg.CHECK_PAIR_COLS, cpairs),
-                                  ("unit_scope", load_pg.CHECK_SCOPE_COLS, cscope)):
-            written[table] = load_pg.replace_rows(conn, table, cols, rows, "unit_id", None, sha)[0]
+        written["unit_pair_checks"] = load_pg.replace_rows(
+            conn, "unit_pair_checks", load_pg.CHECK_PAIR_COLS, cpairs, "unit_id", None, sha)[0]
+    # Every sentence's asset, decided as the measure stage decides it.
+    sha, ua = load_pg.unit_asset_rows(data, projects)
+    if sha is not None:
+        written["unit_assets"] = load_pg.replace_rows(
+            conn, "unit_assets", load_pg.UNIT_ASSET_COLS, ua, "unit_id", None, sha)[0]
+    # The record of judgement: grades, draws, layers, gates, runs, spend and
+    # the answer store, each replaced when its sources changed.
+    for table, cols, sha, rows, types in load_pg.judgement_tables(data):
+        if sha is not None and load_pg._last_sha(conn, table) != sha:
+            written[table] = load_pg.replace_rows(conn, table, cols, rows, "label_set", None,
+                                                  sha, types=types)[0]
+    written["answers"] = load_pg.sync_answers(conn, data)
     if links:
         sha, assets_, pairs_ = load_pg.link_rows(data, projects)
         if sha is not None:

@@ -131,3 +131,39 @@ def test_a_long_prose_table_row_is_searched_sentence_by_sentence_with_its_captio
     short = {"paragraph_id": "D:p00010", "char_start": "0", "char_end": "40", "n_tokens": "8",
              "text_sha256": "y"}
     assert [u["unit_id"] for u in units.table_units(short, "Results — Indicator: schools connected")] == ["D:p00010"]
+
+
+def test_a_list_item_in_any_enumerator_form_carries_its_lead_in():
+    text = "The project draws on: a) civil registration; b. national ID; ii. privacy law."
+    para = {"char_start": "0", "char_end": str(len(text)), "list_item": "false"}
+    spans = units.split_sentences(text)
+    sents = [{"sentence_id": f"s{i}", "char_start": str(a), "char_end": str(b)}
+             for i, (a, b) in enumerate(spans, 1)]
+    assert text[spans[0][0]:spans[0][1]] == "The project draws on:"
+    lead = (0, len("The project draws on:"))
+    assert units.lead_ins(para, sents, text) == {"s2": lead, "s3": lead, "s4": lead}
+    # A later line opening 'c. ...' after a sentence is an item too.
+    text = "The project draws on these systems.\nc. Civil registry, where records are kept."
+    para = dict(para, char_end=str(len(text)))
+    sents = [{"sentence_id": f"s{i}", "char_start": str(a), "char_end": str(b)}
+             for i, (a, b) in enumerate(units.split_sentences(text), 1)]
+    assert units.lead_ins(para, sents, text) == {"s2": (0, 35)}
+
+
+def test_a_long_table_row_of_unpunctuated_cells_is_cut_at_its_cells_and_bullets():
+    caption = "Climate Co-benefits — Activity"
+    cell = ("Activity: Resilient towers will be built in the flood-prone districts of the north "
+            "with raised plinths and backup power for every site in the programme area · "
+            "Adaptation: The data centre will be designed to the higher flood standard with "
+            "cooling sized for hotter summers and a second site in another region • A disaster "
+            "recovery plan will be tested every year with the operators and the regulator")
+    text = f"{caption}: {cell}"
+    p = {"paragraph_id": "D:p00011", "char_start": "0", "char_end": str(len(text)),
+         "n_tokens": "70", "text_sha256": "x"}
+    got = units.table_units(p, text)
+    bodies = [text[int(u["char_start"]):int(u["char_end"])] for u in got]
+    assert len(bodies) == 3
+    assert bodies[1].startswith("Adaptation: The data centre") and bodies[1].endswith("another region")
+    assert bodies[2].startswith("A disaster recovery plan")
+    assert all(text[int(u["lead_in_start"]):int(u["lead_in_end"])] == "Climate Co-benefits"
+               for u in got[1:])

@@ -20,15 +20,15 @@ stored like every other decision here (docs/methodology.md, section 5e):
      is deep enough.
 
   2. Commitment <-> package, many to many. For every measure run, each
-     committed unit (the top grade) is paired with the packages of its
-     project that share an asset with the assets the unit's own
-     answers named (assets_yes, else its linked asset). Each pair goes to
+     committed unit (measure.is_committed: the posterior at the floor) is
+     paired with the packages of its project that share an asset with the
+     unit's own asset (assets_yes, else its linked asset). Each pair goes to
      the decision model with one yes/no question: would carrying out this
      package be where this commitment is delivered or applied? A commitment
      may link to several packages and a package to several commitments.
 
 Nothing is cut here: the probabilities are stored and a dashboard chooses
-its threshold; YES (0.5) is only the reading threshold the report counts at
+its threshold; YES (control panel link.asset_yes) is only the reading threshold the report counts at
 and the pair step uses to say which assets a package "has".
 
   data/links/packages-<version>/package_assets.csv
@@ -168,13 +168,11 @@ def committed_units(data, projects=None, sets=None):
             continue
         if not folder:
             continue
-        with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
-            top = len(json.load(fh)["scale"]) - 1
-        floor = labels.commit_floor(name)
+        floor = panel.floor(name)
         rows = []
         with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
             for u in csv.DictReader(fh):
-                if measure.is_committed(u, top, floor):
+                if measure.is_committed(u, floor):
                     rows.append(u)
         out[name] = (os.path.basename(folder), rows)
     return out
@@ -204,7 +202,7 @@ class Plan:
         self.asset_qs = asset_questions(self.assets)
         self.runs = committed_units(data, projects, sets)
         h = hashlib.sha256()
-        h.update(f"{LINK_VERSION}\t{model}\t{asset_top}\t{MEASURE_TOP}\n".encode())
+        h.update(f"{LINK_VERSION}\t{model}\t{asset_top}\t{MEASURE_TOP}\t{YES}\n".encode())
         for name in sorted(self.runs):
             for q in search.load_queries(name, labels.folder(name)):
                 h.update(f"{name}\t{q['query_id']}\t{q['text']}\n".encode())
@@ -506,8 +504,6 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--model", default=MODEL)
-    ap.add_argument("--asset-top", type=int, default=ASSET_TOP,
-                    help="assets asked per package, its best by cosine")
     ap.add_argument("--projects", default="", help="comma-separated project ids (the scope)")
     ap.add_argument("--label-set", action="append", dest="sets",
                     help="measure set(s) to pair; default: every set with a current run")
@@ -516,7 +512,7 @@ def main():
     args = ap.parse_args()
     api_key = "" if args.dry_run else embed.read_key("")
     out = link(args.data, api_key=api_key, dry_run=args.dry_run, workers=args.workers,
-               model=args.model, asset_top=args.asset_top,
+               model=args.model,
                projects=classify.scope(args.projects), sets=args.sets)
     if out and not args.dry_run:
         import store

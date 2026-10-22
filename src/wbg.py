@@ -33,9 +33,6 @@ from collections import Counter, defaultdict
 SRC = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(SRC)
 sys.path.insert(0, SRC)
-import classify as _classify  # noqa: E402
-import measure as _measure  # noqa: E402
-import link_packages as _link  # noqa: E402
 from paths import data_root, where  # noqa: E402
 
 COHORT = os.path.join(ROOT, "inputs", "config", "cohort.csv")
@@ -892,26 +889,18 @@ def main(argv=None):
                    help="embed each sentence with its section title and component heading in "
                         "front (a re-embedding; the index, the search and every run keyed on "
                         "them are new)")
-    p = sub.add_parser("classify", help="grade every model paragraph against a label set "
-                                        "with the decision model (only what is not stored)")
+    p = sub.add_parser("classify", help="grade every sentence the search reads against a "
+                                        "label set with the decision model (only what is not "
+                                        "stored; gates and floors from the control panel)")
     p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
     _filters(p)
     p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
     p.add_argument("--limit", type=int, default=0, help="first N sentences (smoke test)")
-    p.add_argument("--min-cosine", type=float, default=_classify.MIN_COSINE,
-                   help="ask a label of a sentence only when it scores at least this")
-    p = sub.add_parser("measure", help="grade a measure's pool with the decision model, "
-                                       "with the asset map as columns (after ./wbg search "
-                                       "<set> and ./wbg classify assets)")
+    p = sub.add_parser("measure", help="grade a measure's pool with the decision model "
+                                       "(after ./wbg search <set> and ./wbg classify assets; "
+                                       "every threshold from the control panel)")
     p.add_argument("label_set", help="a set in analysis/labels/")
     _filters(p)
-    p.add_argument("--top", type=int, default=_measure.TOP, help="round 0 pool by count (0 = off)")
-    p.add_argument("--min-cosine", type=float, default=_measure.MIN_COSINE,
-                   help="round 0 pool: units whose best cosine reaches this")
-    p.add_argument("--batch", type=int, default=_measure.BATCH, help="units per feedback round")
-    p.add_argument("--min-yield", type=int, default=_measure.MIN_YIELD,
-                   help="a round yielding fewer committed units than this is the last")
-    p.add_argument("--max-rounds", type=int, default=_measure.MAX_ROUNDS)
     p.add_argument("--dry-run", action="store_true")
     p = sub.add_parser("run", help="the pipeline, or any stretch of it: fetch > prepare > embed "
                                    "> search > classify > measure > link > publish (> audit)")
@@ -953,8 +942,6 @@ def main(argv=None):
                                     "commitments it would carry out (decision model, stored; "
                                     "after ./wbg measure)")
     _filters(p)
-    p.add_argument("--asset-top", type=int, default=_link.ASSET_TOP,
-                   help="assets asked per package, its best by cosine")
     p.add_argument("--label-set", action="append", dest="sets",
                    help="measure set(s) to pair; default: every set with a current run")
     p.add_argument("--dry-run", action="store_true")
@@ -974,10 +961,10 @@ def main(argv=None):
     p.add_argument("--elusion", action="store_true",
                    help="draw (or evaluate) units the funnel never read, below the pool")
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--design", choices=("grade", "bands", "floor", "tune"),
-                   help="draw by the model's grade, or by band of its probability of the top "
-                        "grade (the default for `all`: every measure and the package links in "
-                        "one workbook)")
+    p.add_argument("--design", choices=("train", "eval", "bands", "floor", "tune"),
+                   help="train (the default): near each floor; eval: a random draw by the "
+                        "decision, kept out of every fit; bands, floor, tune: by band of the "
+                        "posterior or around the floor")
     p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
                                         "hand-labelled activities workbook")
     p.add_argument("label_set")
@@ -1027,23 +1014,19 @@ def main(argv=None):
         return 0
     if args.cmd == "classify":
         extra = (["--dry-run"] if args.dry_run else []) + \
-            (["--limit", str(args.limit)] if args.limit else []) + \
-            ["--min-cosine", str(args.min_cosine)]
+            (["--limit", str(args.limit)] if args.limit else [])
         _run("classify.py", args.label_set, *extra, *_scope(args), data=data)
         return 0
     if args.cmd == "measure":
-        _run("measure.py", args.label_set, "--top", str(args.top),
-             "--min-cosine", str(args.min_cosine), "--batch",
-             str(args.batch), "--min-yield", str(args.min_yield), "--max-rounds",
-             str(args.max_rounds), *(["--dry-run"] if args.dry_run else []), *_scope(args),
-             data=data)
+        _run("measure.py", args.label_set, *(["--dry-run"] if args.dry_run else []),
+             *_scope(args), data=data)
         return 0
     if args.cmd == "add":
         args.from_stage, args.to_stage, args.only = "search", "measure", None
         args.measures, args.update = args.label_set, False
         return run(args, data)
     if args.cmd == "link":
-        _run("link_packages.py", "--asset-top", str(args.asset_top),
+        _run("link_packages.py",
              *[x for st in (args.sets or []) for x in ("--label-set", st)],
              *(["--dry-run"] if args.dry_run else []), *_scope(args), data=data)
         return 0

@@ -113,15 +113,6 @@ def rows(path):
         return list(csv.DictReader(fh))
 
 
-def commit_floor(name):
-    """A measure's floor: the probability at or above which a sentence counts
-    as committed (or planned) for it. Read from the control panel
-    (inputs/config/control_panel.csv: floor.<set>, else floor.default), or
-    None where neither is written and the most likely grade decides."""
-    import panel
-    return panel.floor(name)
-
-
 def is_active(r):
     return (r.get("active") or "true").strip().lower() == "true"
 

@@ -234,3 +234,92 @@ def test_a_bulleted_line_hung_left_of_a_table_is_in_the_table():
     assert not PL._in_box({"x0": 0, "x1": 60, "top": 179, "bottom": 189}, box)
     # Nor one above it.
     assert not PL._in_box({"x0": 40, "x1": 500, "top": 50, "bottom": 60}, box)
+
+
+@pytest.mark.parametrize("text,expected", [
+    ("Training was given on: a) civil registration; b) national ID; and c) privacy law.",
+     ["Training was given on:", "a) civil registration;", "b) national ID; and",
+      "c) privacy law."]),
+    ("Training was given on: a. civil registration; b. national ID; and c. privacy law.",
+     ["Training was given on:", "a. civil registration;", "b. national ID; and",
+      "c. privacy law."]),
+    ("The unit will work on: i. data centres; ii. fibre routes; iv) towers.",
+     ["The unit will work on:", "i. data centres;", "ii. fibre routes;", "iv) towers."]),
+    ("The unit will work on: 1) data centres; 2) fibre routes.",
+     ["The unit will work on:", "1) data centres;", "2) fibre routes."]),
+])
+def test_every_enumerator_form_opens_an_inline_list_item(text, expected):
+    assert [text[a:b] for a, b in S.split(text)] == expected
+
+
+@pytest.mark.parametrize("text", [
+    "Mr. J. Smith of the U.S. office agreed on a budget of US$3.2 million.",
+    "The case Smith v. Jones was cited, and the ratio was 4.5 to 1 overall.",
+    "38. Component 3 seeks to enhance the data centres of the ministry.",
+])
+def test_initials_decimals_and_paragraph_numbers_are_not_list_markers(text):
+    assert [text[a:b] for a, b in S.split(text)] == [text]
+
+
+def test_every_enumerator_form_marks_a_list_item():
+    for item in ("(a) towers;", "a) towers;", "a. towers;", "ii. towers;", "iv) towers;",
+                 "1) towers;", "(xii) towers;"):
+        assert S.ITEM_MARKER.match(item), item
+    for not_item in ("J. Smith agreed.", "U.S. agencies", "3.2 million", "38. Component 3",
+                     "e.g. towers", "A. Background"):
+        assert not S.ITEM_MARKER.match(not_item), not_item
+
+
+def test_a_list_separated_by_commas_splits_when_its_markers_run_in_sequence():
+    t = ("The agency is responsible for (a) setting the toll tariff, (b) running the toll "
+         "stations and collecting tolls, and (c) raising revenue for maintenance.")
+    assert [t[a:b] for a, b in S.split(t)] == [
+        "The agency is responsible for (a) setting the toll tariff,",
+        "(b) running the toll stations and collecting tolls, and",
+        "(c) raising revenue for maintenance."]
+    t = "The project will (i) build towers, (ii) lay fibre, and (iii) train staff in the regions."
+    assert len(S.split(t)) == 3
+
+
+@pytest.mark.parametrize("text", [
+    # A cross-reference in brackets begins no list.
+    "This is covered elsewhere (see (a) above), (b) is not relevant to the towers.",
+    # Markers out of sequence are not a list.
+    "The unit will do (a) planning, (c) monitoring of works across the regions.",
+    # A single marker after a comma, with no list begun.
+    "The towers are listed in the annex, (b) refers to the fibre routes there.",
+])
+def test_a_comma_before_a_marker_out_of_a_list_is_not_a_boundary(text):
+    assert [text[a:b] for a, b in S.split(text)] == [text]
+
+
+def test_two_footnotes_printed_on_one_line_are_two_footnotes():
+    line = ("Data from the monthly report of the agency, February 2023 14 A joint study "
+            "conducted in the region has shown the effect.")
+    assert PL._footnote_pieces(line, 13) == [
+        ("Data from the monthly report of the agency, February 2023", 13),
+        ("14 A joint study conducted in the region has shown the effect.", 14)]
+    # A number that is not the next footnote, or not at a footnote's end, stays.
+    assert len(PL._footnote_pieces("There were 14 Member States in 2020.", 13)) == 1
+    assert len(PL._footnote_pieces("Report of 15 Agencies in 2020.", 13)) == 1
+    assert PL._footnote_pieces("See https://example.org/x 8 The survey covered it.", 7)[1] == \
+        ("8 The survey covered it.", 8)
+
+
+def test_footnotes_read_as_body_text_are_one_unit_each():
+    from collections import Counter
+    # The next footnote on a line of its own opens a new unit.
+    assert PL._starts_next_note("10 Average price data from 2021.",
+                                "9 Ministry of Transport Statistical Annual Report")
+    assert PL._starts_next_note("15 The third note.", "13 Data from 2023 14 A joint study")
+    assert not PL._starts_next_note("10 Average price.", "38. Component 3 will finance")
+    assert not PL._starts_next_note("11 Average price.", "9 Ministry of Transport")
+    # Footnotes joined inline into one body unit are cut apart.
+    units = [["body", "13 Data from the agency, February 2023 14 A joint study was done. "
+              "15 The third note is here.", 3, 3, {"src": [10, 90]}],
+             ["body", "The project will finance 14 Towers in 2023 15 Districts.", 3, 3, {}]]
+    got = PL._split_glued_notes(units, Counter())
+    assert [u[1] for u in got] == [
+        "13 Data from the agency, February 2023", "14 A joint study was done.",
+        "15 The third note is here.", "The project will finance 14 Towers in 2023 15 Districts."]
+    assert got[1][4]["src"] == [10, 90] and got[1][4]["src"] is not got[0][4]["src"]

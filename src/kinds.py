@@ -172,17 +172,15 @@ def parse_types(response, allow_empty=False):
 
 def committed_units(name, data, **kw):
     """The current measure run's committed units (measure.is_committed: the
-    measure's commit floor, else the top grade), per label."""
+    posterior at the measure's floor), per label."""
     folder = measure.current_run(name, data, **kw)
     if not folder:
         raise SystemExit(f"types: no measure run for {name}; run ./wbg measure {name} first")
-    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
-        top = len(json.load(fh)["scale"]) - 1
-    floor = labels.commit_floor(name)
+    floor = panel.floor(name)
     out = defaultdict(list)
     with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
         for u in csv.DictReader(fh):
-            if measure.is_committed(u, top, floor):
+            if measure.is_committed(u, floor):
                 out[u["label_id"]].append(u)
     return folder, dict(out)
 

@@ -135,7 +135,11 @@ def paragraph_classified(data, projects=None):
     index_path = where(data, "embeddings", "sentence_index.csv")
     if not os.path.exists(index_path):            # nothing embedded: nothing classified
         return None, []
-    unit_assets, asset_run = measure.asset_map(data, projects)
+    import posterior
+    # The same reading of the map the measure stage makes: through the asset
+    # layers when they are fitted.
+    vector_of, projects_of = posterior.lookups(data)
+    unit_assets, asset_run = measure.asset_map(data, projects, vector_of, projects_of)
     with_asset = {u for u, ps in unit_assets.items() if ps and max(ps.values()) >= floor}
     committed, runs = set(), [asset_run] if asset_run else []
     for name in labels.label_sets():

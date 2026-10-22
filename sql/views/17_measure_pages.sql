@@ -6,7 +6,7 @@
 -- measure_quality is loaded from data/labels/measure_quality.csv once a sheet
 -- has been evaluated; until then an empty table keeps the summary working.
 CREATE TABLE IF NOT EXISTS wbg.measure_quality (label_set text, version text, question_sha256 text,
-  run_id text, graded_units integer, precision numeric, recall numeric,
+  run_id text, sheet text, graded_units integer, precision numeric, recall numeric,
   evaluated_at timestamptz, report_path text);
 
 DROP VIEW IF EXISTS wbg.measure_summary CASCADE;
@@ -23,21 +23,24 @@ c AS (
   FROM wbg.commitments GROUP BY label_set
 ),
 q AS (
-  SELECT DISTINCT ON (label_set) label_set, version AS graded_version, graded_units, precision, recall,
+  -- an evaluation sheet (a random draw) before a training sheet, then the latest
+  SELECT DISTINCT ON (label_set) label_set, version AS graded_version, sheet AS graded_sheet,
+         graded_units, precision, recall,
          run_id AS graded_run_id, question_sha256 AS graded_question_sha256, evaluated_at
-  FROM wbg.measure_quality ORDER BY label_set, evaluated_at DESC
+  FROM wbg.measure_quality
+  ORDER BY label_set, (sheet = 'evaluation') DESC, evaluated_at DESC
 )
 SELECT m.label_set, m.measure_name, m.definition, m.version,
        coalesce(c.commitments, 0) AS commitments, coalesce(c.projects, 0) AS projects,
        coalesce(c.countries, 0) AS countries, coalesce(c.types, 0) AS types,
-       q.graded_units, q.precision, q.recall, q.graded_version, q.graded_run_id,
+       q.graded_sheet, q.graded_units, q.precision, q.recall, q.graded_version, q.graded_run_id,
        q.graded_question_sha256,
        q.evaluated_at AS graded_at
 FROM m
 LEFT JOIN c USING (label_set)
 LEFT JOIN q USING (label_set);
 COMMENT ON VIEW wbg.measure_summary IS
-  'One row per measure: its definition and version, how many commitments, projects, countries (regional operations not counted as countries) and types the model finds, and the latest graded sheet''s numbers (graded_units, precision, recall; null where no sheet is graded). A sheet graded under an earlier wording of the definition says so in graded_question_sha256: compare it with the current question before quoting.';
+  'One row per measure: its definition and version, how many commitments, projects, countries (regional operations not counted as countries) and types the model finds, and a graded sheet''s numbers (graded_units, precision, recall of the pipeline''s decision, weighted; null where no sheet is graded): an evaluation sheet (a random draw, the dashboards'' figures) when one exists, else the latest training sheet (the hard cases near the floor; graded_sheet says which). A sheet graded under an earlier wording of the definition says so in graded_question_sha256: compare it with the current question before quoting.';
 
 DROP VIEW IF EXISTS wbg.measure_asset_matrix CASCADE;
 CREATE VIEW wbg.measure_asset_matrix AS
@@ -116,7 +119,7 @@ DROP VIEW IF EXISTS wbg.measure_overlap CASCADE;
 CREATE VIEW wbg.measure_overlap AS
 WITH u AS (
   SELECT DISTINCT label_set, unit_id FROM wbg.measure_findings
-  WHERE was_sent_to_model AND most_likely_grade = 3
+  WHERE was_sent_to_model AND is_committed
 ),
 n AS (SELECT label_set, count(*) AS committed_units FROM u GROUP BY label_set)
 SELECT a.label_set AS label_set_a, b.label_set AS label_set_b,
@@ -129,7 +132,7 @@ JOIN n na ON na.label_set = a.label_set
 JOIN n nb ON nb.label_set = b.label_set
 GROUP BY a.label_set, b.label_set, na.committed_units, nb.committed_units;
 COMMENT ON VIEW wbg.measure_overlap IS
-  'For each pair of measures, how many committed units (the model''s grade 3, any asset link) both count, and that as a share of the smaller measure. A report only: nothing is deduplicated, and a unit committed to two measures counts under each everywhere else.';
+  'For each pair of measures, how many committed units (the posterior at each measure''s floor, any asset link) both count, and that as a share of the smaller measure. A report only: nothing is deduplicated, and a unit committed to two measures counts under each everywhere else.';
 
 -- Filter values, one view per dashboard filter.
 DROP VIEW IF EXISTS wbg.filter_measures CASCADE;
@@ -190,10 +193,10 @@ DROP VIEW IF EXISTS wbg.label_pattern_hits CASCADE;
 CREATE VIEW wbg.label_pattern_hits AS
 SELECT p.label_set, p.label_id, p.pattern_id, p.pattern, p.is_active, p.version, p.file_sha256,
        count(f.unit_id) AS units_matched,
-       count(f.unit_id) FILTER (WHERE f.most_likely_grade = 3) AS units_matched_committed
+       count(f.unit_id) FILTER (WHERE f.is_committed) AS units_matched_committed
 FROM wbg.label_patterns p
 LEFT JOIN wbg.measure_findings f
   ON f.label_set = p.label_set AND f.label_id = p.label_id AND p.pattern_id = ANY(f.matched_patterns)
 GROUP BY p.label_set, p.label_id, p.pattern_id, p.pattern, p.is_active, p.version, p.file_sha256;
 COMMENT ON VIEW wbg.label_pattern_hits IS
-  'Each word pattern of each set (label_patterns) with how many units of the measure''s current run it matched, and how many of those the decision model graded committed. A pattern only adds units to the pool; the model still grades every one.';
+  'Each word pattern of each set (label_patterns) with how many units of the measure''s current run it matched, and how many of those count as committed (the posterior at the floor). A pattern only adds units to the pool; the model still grades every one.';

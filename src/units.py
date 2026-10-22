@@ -159,6 +159,26 @@ def prose_row(text):
 
 
 TABLE_SPLIT_WORDS = 60   # a prose row longer than this is searched sentence by sentence
+# Inside a row, where one cell ends and the next begins (' · ' between named
+# cells, ' | ' between unnamed ones, pdf_layout._row_text), and a bullet
+# glyph left inside a cell: a stopping point even with no full stop, since
+# cells and bullets are rarely punctuated.
+CELL_BREAK = re.compile(r"\s+[·|]\s+|\s*[•●▪■◦]\s*")
+
+
+def _row_sentences(row):
+    """(start, end) of each sentence of a table row: the row is cut at its
+    cell boundaries and bullets, then each piece by sentence. Splitting by
+    sentence alone left a row of unpunctuated cells as one unit of hundreds
+    of words."""
+    out, at = [], 0
+    for m in list(CELL_BREAK.finditer(row)) + [None]:
+        end = m.start() if m else len(row)
+        piece = row[at:end]
+        out += [(at + s, at + e) for s, e in split_sentences(piece)]
+        if m:
+            at = m.end()
+    return out
 
 
 def table_units(p, text):
@@ -177,7 +197,7 @@ def table_units(p, text):
     cut = row.find(" — ")
     caption = (a, a + cut) if cut > 0 else None
     out = []
-    for n, (s, e) in enumerate(split_sentences(row), 1):
+    for n, (s, e) in enumerate(_row_sentences(row), 1):
         body = row[s:e]
         lead = caption if caption and s > cut else None
         out.append({"unit_id": f"{p['paragraph_id']}:t{n:03d}", "kind": "table",

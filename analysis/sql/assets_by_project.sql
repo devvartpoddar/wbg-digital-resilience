@@ -1,14 +1,15 @@
--- For each project and asset: how many graded paragraphs the asset map put
--- at each grade (0 not about it ... 3 financed). Grades are the model's most
--- likely grade, unmeasured until a graded sample has been evaluated; read
--- them as "where to look", not as counts of financed assets.
-SELECT pl.project_id, g.label_id AS asset_id, g.label_name AS asset,
-       count(*) FILTER (WHERE g.most_likely_grade = 3) AS financed,
-       count(*) FILTER (WHERE g.most_likely_grade = 2) AS supported,
-       count(*) FILTER (WHERE g.most_likely_grade = 1) AS mentioned,
-       count(*) AS paragraphs
-FROM wbg.paragraph_grades_with_text g
-JOIN wbg.paragraph_project_links pl USING (paragraph_id)
-WHERE g.label_set = 'assets' AND g.was_asked
-GROUP BY pl.project_id, g.label_id, g.label_name
-ORDER BY pl.project_id, financed DESC, supported DESC;
+-- For each project and asset: how many sentences the pipeline gives the
+-- asset (wbg.unit_assets: its posterior at the control panel's asset.floor,
+-- the sentence's own or from earlier sentences of its paragraph). The
+-- model's reading, unmeasured until a graded sample has been evaluated:
+-- "where to look", not counts of financed assets.
+SELECT pp.project_id, ua.asset_id, l.label_name AS asset,
+       count(*) FILTER (WHERE ua.asset_level = 'unit') AS sentences_naming_it,
+       count(*) FILTER (WHERE ua.asset_level = 'paragraph') AS sentences_from_paragraph,
+       count(DISTINCT ua.paragraph_id) AS paragraphs
+FROM wbg.unit_assets ua
+JOIN wbg.paragraph_projects pp ON pp.paragraph_id = ua.paragraph_id
+LEFT JOIN wbg.labels l ON l.label_set = 'assets' AND l.label_id = ua.asset_id
+WHERE ua.asset_level <> 'none'
+GROUP BY pp.project_id, ua.asset_id, l.label_name
+ORDER BY pp.project_id, sentences_naming_it DESC;

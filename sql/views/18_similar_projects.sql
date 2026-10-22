@@ -13,11 +13,11 @@ LANGUAGE sql STABLE AS $$
     SELECT * FROM wbg.commitments x WHERE x.commitment_id = similar_projects.commitment_id
   ),
   seeds AS (
-    SELECT DISTINCT ON (u.unit_id) u.unit_id, u.probability_grade_3
+    SELECT DISTINCT ON (u.unit_id) u.unit_id, u.posterior_probability
     FROM wbg.commitment_units u WHERE u.commitment_id = similar_projects.commitment_id
-    ORDER BY u.unit_id, u.probability_grade_3 DESC
+    ORDER BY u.unit_id, u.posterior_probability DESC
   ),
-  top3 AS (SELECT unit_id FROM seeds ORDER BY probability_grade_3 DESC, unit_id LIMIT 3),
+  top3 AS (SELECT unit_id FROM seeds ORDER BY posterior_probability DESC, unit_id LIMIT 3),
   near AS (
     SELECT s.unit_id AS near_unit, s.distance, unnest(s.project_ids) AS project_id
     FROM top3 t CROSS JOIN LATERAL wbg.similar_units(t.unit_id, 60) s

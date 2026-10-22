@@ -25,4 +25,7 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 - **Section headings in title case are not read.** A paper whose sections read "II. Project Description" rather than "II. PROJECT DESCRIPTION" is filed wholly as front matter and yields no unit (documents 34125635 and 34295176 on 2026-10-20). Changing the rule re-reads every PDF (the reader's cache is keyed on its code), so it waits for the next re-parse.
 - **Short activities are dropped**: a unit under five words ("Sites will be flood-proofed.") and a sentence whose words, counted without digits and with hyphens splitting them, fall under four ("Elevate 25 substations.").
 - **Copies ignore digits**: two sentences differing only in figures or component numbers are one text, searched through the first.
-
+- **The skip rule sees only graded yes some earlier step found.** A fitted gate can rise above sentences no person has seen; the elusion sheet is what looks below it, and a gate is only as good as the sheets behind it.
+- **Spanish and French sentences are searched and asked against English definitions** (about 2,200 searched units in 31 documents on 2026-10-22, a word-list estimate); how well they are read is unmeasured.
+- **A narrow column of prose beside a figure or box** can be read as one line with the figure's text (section 2.5): a known parser limit, not yet fixed.
+- **A fresh answer depends a little on its batch.** Items are asked many to a request; about one fresh yes/no answer in ten at 0.5 differs with its neighbours (history). Stored answers make re-runs repeatable, but a rebuilt store would not reproduce every answer.

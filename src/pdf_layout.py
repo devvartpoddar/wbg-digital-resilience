@@ -498,6 +498,82 @@ def _next_markers(marker):
     return out
 
 
+# A footnote as printed: its number, a space, then a capital, a quote or a
+# bracket ('13 Data from the monthly report ...').
+BARE_NOTE = re.compile(r"^(\d{1,3})\s+(?=[A-Z\"(“‘'])")
+# Where one footnote can end and the next begin on the same line: after a
+# sentence end or a closing bracket or quote, a year, or a web address.
+NOTE_END = re.compile(r"(?:[.!?;)\]\"”’]|\b(?:19|20)\d\d|(?:https?://|www\.)\S*)$")
+
+
+def _next_note(text, number, at):
+    """The next ' N+1 Capital' in text from `at`, or None."""
+    return re.compile(rf"\s({number + 1})\s+(?=[A-Z\"(“‘'])").search(text, at)
+
+
+def _footnote_pieces(text, number):
+    """Split text at each later footnote printed on the same line: the next
+    number in sequence after footnote `number`, where a footnote can end
+    (NOTE_END). '... February 2023 14 A joint study ...' under footnote 13 is
+    two footnotes. -> [(text, number)], the first piece first."""
+    if number is None:
+        return [(text, None)]
+    out, start, at = [], 0, 0
+    while True:
+        m = _next_note(text, number, at)
+        if not m:
+            break
+        at = m.end()
+        if NOTE_END.search(text[start:m.start()].rstrip()):
+            out.append((text[start:m.start()].strip(), number))
+            start, number = m.start() + 1, number + 1
+    out.append((text[start:].strip(), number))
+    return [(t, n) for t, n in out if t] or [(text, None)]
+
+
+def _last_note(text):
+    """A unit that opens like a footnote ('13 Data from ...'): the number of
+    the last footnote in sequence it holds (13, or 14 if '14 A ...' follows
+    in it), else None."""
+    m = BARE_NOTE.match(text)
+    if not m:
+        return None
+    number, at = int(m.group(1)), m.end()
+    while True:
+        nxt = _next_note(text, number, at)
+        if not nxt:
+            return number
+        number, at = number + 1, nxt.end()
+
+
+def _starts_next_note(line, before):
+    """Does this line open the next footnote after a run of footnotes read as
+    body text? The page's footnotes were set in the text's own type, so the
+    footnote area was not found, and '10 Average price data ...' would join
+    '9 Ministry of ... Annual Report' as one paragraph."""
+    last = _last_note(before)
+    m = BARE_NOTE.match(line)
+    return last is not None and m is not None and int(m.group(1)) == last + 1
+
+
+def _split_glued_notes(units, stats):
+    """A body unit that opens like a footnote and holds the next footnotes
+    joined inline ('13 Data from ..., February 2023 14 A joint study ...')
+    becomes one unit per footnote, each with the unit's pages and source."""
+    out = []
+    for u in units:
+        m = BARE_NOTE.match(u[1]) if u[0] == "body" else None
+        pieces = _footnote_pieces(u[1], int(m.group(1))) if m else [(u[1], None)]
+        for piece, _n in pieces:
+            meta = dict(u[4])
+            if "src" in meta:
+                meta["src"] = list(meta["src"])
+            out.append([u[0], piece if len(pieces) > 1 else u[1], u[2], u[3], meta])
+        if len(pieces) > 1:
+            stats["footnotes_split_inline"] += len(pieces) - 1
+    return out
+
+
 def _continues_inline_list(line, before):
     """Does this line carry on a list the paragraph began inline? '... best
     practices on: (a) civil registration systems;' then a new line '(b)
@@ -726,12 +802,21 @@ def extract(pdf, raw_out=None):
             opens = re.match(r"^\d{1,3}\s", text) or re.match(r"^\d{1,3}[A-Z\"(]", text)
             if units and units[-1][0] == "footnote" and not opens and prev == "footnote":
                 u = units[-1]
-                u[1] = _dehyphenate(u[1], text, vocab)
+                pieces = _footnote_pieces(text, u[4].get("fn"))
+                u[1] = _dehyphenate(u[1], pieces[0][0], vocab)
                 u[3] = pno
                 extend(u, l)
             else:
+                own = re.match(r"^(\d{1,3})(?!\d)", text)
+                pieces = _footnote_pieces(text, int(own.group(1)) if own else None)
                 # The footnote's own number goes; a year opening the text stays.
-                start("footnote", re.sub(r"^\d{1,3}(?!\d)\s*", "", text), pno, line=l)
+                start("footnote", re.sub(r"^\d{1,3}(?!\d)\s*", "", pieces[0][0]), pno,
+                      {"fn": pieces[0][1]}, line=l)
+            # Two footnotes printed on one line ('... 2023 14 A joint study
+            # ...'): each later one is a footnote of its own.
+            for piece, n in pieces[1:]:
+                start("footnote", re.sub(r"^\d{1,3}\s*", "", piece), pno, {"fn": n}, line=l)
+                stats["footnotes_split_inline"] += 1
             prev = "footnote"
             continue
         # Body. A paragraph continues when the next line follows at the normal
@@ -742,7 +827,8 @@ def extract(pdf, raw_out=None):
         joined = False
         if last_body is not None and last_body_line is not None:
             ppno, pl = last_body_line
-            opens_block = _opens_block(text, units[last_body][1])
+            opens_block = _opens_block(text, units[last_body][1]) \
+                or _starts_next_note(text, units[last_body][1])
             same_page = pno == ppno and prev == "body" and \
                 l["top"] - pl["top"] <= LINE_GAP * pitch
             unfinished = not re.search(r"[.!?:]\"?$", units[last_body][1])
@@ -785,6 +871,7 @@ def extract(pdf, raw_out=None):
             last_body = len(units) - 1
         last_body_line = (pno, l)
         prev = "body"
+    units = _split_glued_notes(units, stats)
 
     # 3. Sections, front matter and blocks, then the clean text.
     clean_parts, spans, cursor = [], [], 0

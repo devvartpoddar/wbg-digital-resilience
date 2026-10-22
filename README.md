@@ -17,25 +17,25 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
 ./wbg search assets                   # embed the units (only what is not cached) and score them against
                                       # every asset definition and phrase; --dry-run shows the cost
 ./wbg search cra                      # the same for any label set in analysis/labels/ (see analysis/README.md)
-./wbg classify assets                 # the asset map: grade every paragraph against each asset with the
-                                      # decision model (only what is not stored); --dry-run shows the cost;
-                                      # --min-cosine 0.3 asks only where the search sees the asset
+./wbg classify assets                 # the asset map: grade every sentence against each asset with the
+                                      # decision model (only what is not stored); --dry-run shows the cost
 ./wbg measure cra                     # a measure through the funnel: candidates by cosine, the decision
-                                      # model's grade, the asset and activity kind per unit, feedback rounds
+                                      # model's grade, the posterior at the floor, the asset, feedback rounds
 ./wbg evaluate cra --column "Adaptation" --text-regex "risk assessment"   # the funnel against the
                                       # hand-labelled activities workbook (data/labels/activities.xlsx)
 python3 src/cohort_build.py --from-fy 2020   # list the operations a cohort could hold (data/reports/);
                                       # inputs/config/cohort.csv stays hand-kept
-./wbg check cra                       # draw a measure's units for a person to grade; --evaluate reads
-                                      # the grades back: precision, recall, calibration; --elusion
-                                      # draws (and evaluates) what the pool never read
+./wbg check cra                       # draw a training sheet for a person to grade (--design eval: an
+                                      # evaluation sheet); --evaluate reads the grades back: weighted
+                                      # precision and recall, and fits the probability layer and the gate;
+                                      # --elusion draws (and evaluates) what the pool never read
 ./wbg types cra                       # propose the measure's types from its committed units; --assign
                                       # puts every committed unit to the approved list
 ./wbg requests                        # run the measures asked for from the dashboard (US$1 cap each)
 python -m pytest                      # tests (locally)
 ```
 
-`$PY` is the box's Python, `/opt/yggdrasil/venvs/work/bin/python` (`./wbg` finds it on its own). A check sheet already written is kept, since it may hold grades; `--seed` draws a fresh one.
+`$PY` is the box's Python, `/opt/yggdrasil/venvs/work/bin/python` (`./wbg` finds it on its own). A check sheet already written is kept, since it may hold grades; `--seed` draws a fresh one. Every threshold is a line of `inputs/config/control_panel.csv`; no command-line option overrides one.
 
 Selections filter the cohort (`inputs/config/cohort.csv`): `--set` (`digital` or `digital_contributor`, the cohort's two sets, carried into every findings view), `--project`, `--country`, `--region` (part of the name is enough), `--fy` (2024, FY24 or FY2024), `--practice` and `--unit`, each repeatable or comma-separated, combined with "and". The same functions are importable: `from wbg import select, prepare, summary, upcoming, open_notices, tables, export`.
 
@@ -62,6 +62,6 @@ sudo mkdir -p .secrets && sudo chown svc-hermes .secrets && sudo chmod 700 .secr
 sudo install -m 600 -o svc-hermes /dev/stdin .secrets/wbg-openrouter-key    # paste the key, then Ctrl-D
 ```
 
-Then copy the run note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` in the notes vault and add a line to that folder's `README.md`. An interrupted run restarts where it stopped: run the same command again.
+Then copy the run note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` in the notes vault and add a line to the "Report index" table in `Projects/WBG Digital Resilience/README.md` (AGENTS.md rule 8). An interrupted run restarts where it stopped: run the same command again.
 
 Start with `AGENTS.md`, then `docs/methodology.md`: an index to `docs/method/`, one file per stage.

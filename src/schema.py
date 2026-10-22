@@ -60,23 +60,18 @@ RENAME = {
     "units_hit": "units_hit_count",
     "grade": "most_likely_grade", "expected": "expected_grade", "confidence": "grade_confidence",
     "p0": "probability_grade_0", "p1": "probability_grade_1", "p2": "probability_grade_2",
-    "p3": "probability_grade_3", "p4": "probability_grade_4",
-    "p_committed_calibrated": "committed_probability_calibrated",
+    "p3": "probability_grade_3",
+    "p_committed_calibrated": "posterior_probability",
     "types_yes": "type_ids_above_threshold", "best_type": "best_type_id",
     "best_p": "best_type_probability",
     "patterns": "matched_patterns", "types": "matched_types",
     "round": "feedback_round", "cost": "model_cost_usd",
     "asset_para": "paragraph_best_asset_id", "asset_p_para": "paragraph_best_asset_probability",
-    "asset_comp": "component_best_asset_id", "asset_p_comp": "component_best_asset_probability",
     "asset_unit": "unit_best_asset_id", "asset_p_unit": "unit_best_asset_probability",
     "assets_yes": "asset_ids_above_threshold",
     "asset_link": "linked_asset_id", "asset_link_level": "linked_asset_level",
     "asset_link_p": "linked_asset_probability",
-    "kinds_yes": "activity_kinds_above_threshold", "kind_best": "best_activity_kind",
-    "kind_p": "best_activity_kind_probability",
     "template_projects": "template_project_count", "template_share": "template_wording_share",
-    "conditional_p": "conditional_probability", "actors_yes": "actor_ids_above_threshold",
-    "actor_best": "best_actor_id", "actor_p": "best_actor_probability",
 }
 # Renames that apply in one table only (csv name -> column name).
 RENAME_IN = {
@@ -86,6 +81,7 @@ RENAME_IN = {
     "packages": {"component": "component_name"},
     "labels": {"name": "label_name"},
     "label_scale": {"grade": "grade"},
+    "spend": {"at": "spent_at"},
 }
 
 # Types by column name (after renaming). Anything not here is text, except
@@ -97,6 +93,7 @@ INTEGER = {"ordinal", "text_start_offset", "text_end_offset", "pdf_text_start_of
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
            "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
+           "graded_yes", "graded_no", "positives", "calls", "units_seen", "units_graded",
            "prior_para_assets", "prior_para_measures"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
@@ -104,14 +101,14 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "embedding_score", "embedding_percentile",
            "best_embedding_score", "best_embedding_percentile", "best_cosine", "expected_grade",
            "grade_confidence", "probability_grade_0", "probability_grade_1",
-           "probability_grade_2", "probability_grade_3", "probability_grade_4",
-           "committed_probability_calibrated", "best_type_probability",
+           "probability_grade_2", "probability_grade_3",
+           "posterior_probability", "best_type_probability", "weight", "gate", "share_lost",
+           "cost_usd", "seconds", "stratum_size", "stratum_drawn",
            "model_cost_usd", "precision", "recall", "measure_cosine",
-           "paragraph_best_asset_probability", "component_best_asset_probability",
+           "paragraph_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
-           "best_activity_kind_probability", "conditional_probability", "template_wording_share",
-           "best_actor_probability", "cosine", "probability", "p_only_a", "p_only_b", "p_both",
-           "p_neither", "p_rule", "p_investment", "p_not_commitment",
+           "template_wording_share",
+           "cosine", "probability", "p_only_a", "p_only_b", "p_both", "p_neither",
            "prior_phrase_cosine", "prior_phrase_match", "prior_probability_a",
            "prior_probability_b", "prior_phrase_cosine_a", "prior_phrase_cosine_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
@@ -120,8 +117,8 @@ BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_lat
 # Pipe-joined lists in the CSV become arrays, which Metabase renders and
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
-         "matched_types", "asset_ids_above_threshold", "activity_kinds_above_threshold",
-         "actor_ids_above_threshold", "type_ids_above_threshold", "component_mentions",
+         "matched_types", "asset_ids_above_threshold", "type_ids_above_threshold",
+         "component_mentions",
          "shared_asset_ids"}
 INDEXED = {"document_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
            "award_id", "unit_id", "borrower_reference_normalised", "label_id", "label_set",
@@ -161,16 +158,12 @@ PRIOR_INPUTS = {
     "prior_phrase_match": "Prior input: the best phrase's share of information found in the text, each word weighted by how rare it is in the corpus (0 to 1).",
 }
 PROBABILITY_GRADES = {
-    "most_likely_grade": "The grade with the highest probability, on the label set's scale "
-                         "(0 not about it, up to 3 financed or committed). Unmeasured until a "
-                         "graded sample has been evaluated: where to look, not a count.",
-    "expected_grade": "Probability-weighted mean of the grades.",
-    "grade_confidence": "The model's own confidence in the most likely grade.",
+    "grade_confidence": "The model's own confidence in its answer.",
     "probability_grade_0": "Probability of grade 0 (the passage is not about the label).",
     "probability_grade_1": "Probability of grade 1 (mentioned as background or another party's work).",
     "probability_grade_2": "Probability of grade 2 (supported, planned or conditional).",
-    "probability_grade_3": "Probability of grade 3 (financed or committed).",
-    "probability_grade_4": "Probability of grade 4; NULL on a four-grade scale.",
+    "probability_grade_3": "Probability of grade 3 (financed or committed). The four grade probabilities are the model's raw answer, kept as the record: no decision reads them one by one; the decision reads posterior_probability.",
+    "posterior_probability": "The probability every decision reads: the model's probability of grades 2 and 3 through the label's probability layer (src/posterior.py), or that score itself until a sheet graded under the current question has been evaluated. A sentence counts at the label's floor (control panel) or above.",
     "model_served": "The exact decision-model snapshot that answered.",
     "run_id": "The run folder under data/, a hash of everything the answers depend on.",
 }
@@ -388,23 +381,24 @@ TABLES = {
     "paragraph_grades": dict(
         schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
         foreign=[("paragraph_id", "paragraphs", "paragraph_id")],
-        comment="The asset map: one sentence per label (since 2026-10-22; one paragraph before) "
-                "with the decision model's probability of each grade: how the sentence relates "
-                "to the asset (0 not about it, 1 background, 2 supported, 3 financed). The "
-                "table keeps its name so the dashboards' questions keep working.",
+        comment="The asset map: one row per sentence and asset with the decision model's "
+                "probability of each grade (0 not about it, 1 background, 2 supported, "
+                "3 financed) and the posterior probability of grades 2 and 3. Which asset a "
+                "sentence has is in unit_assets.",
         columns=dict(PROBABILITY_GRADES, **{
-            "unit_id": "The sentence graded (search_units.unit_id); for a paragraph map, the paragraph's id.",
-            "was_asked": "False when a cosine gate (control panel asset.gate_cosine) kept the question from being asked of this sentence; the grades are then NULL.",
-            "best_cosine": "The sentence's cosine against the label's phrases, when a cosine gate was used.",
+            "unit_id": "The sentence graded (search_units.unit_id).",
+            "was_asked": "False when the skip rule's gate (the asset's fitted gate, else the control panel's asset.gate_cosine) kept the question from being asked of this sentence; the grades are then NULL.",
+            "best_cosine": "The sentence's cosine against the asset's phrases.",
             **PRIOR_INPUTS,
         })),
     "measure_findings": dict(
         schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
         foreign=[("unit_id", "search_units", "unit_id"),
                  ("paragraph_id", "paragraphs", "paragraph_id")],
-        comment="One unit seen by a measure run, with the decision model's commitment grade "
-                "(0 not described, 1 background, 2 planned, 3 committed), the asset it links "
-                "to and how the commitment is delivered.",
+        comment="One unit seen by a measure run: the decision model's answer (the probability "
+                "of each grade: 0 not described, 1 background, 2 planned, 3 committed), the "
+                "posterior probability of grades 2 and 3 every decision reads, whether it "
+                "counts (is_committed), and the asset it links to.",
         columns=dict(PROBABILITY_GRADES, **{
             "route": "pattern, embedding, both, or feedback (found by a relevance-feedback round).",
             "feedback_round": "0 for the candidate pool; 1 and up for relevance-feedback rounds.",
@@ -413,29 +407,19 @@ TABLES = {
             "matched_patterns": "Pattern ids that matched.",
             "firmness": "activity, outcome or none, from wording lists.",
             "was_sent_to_model": "False when a gate kept the unit from being graded.",
-            "is_committed": "The unit counts as committed or planned: committed_probability_calibrated at or above the measure's floor (control panel inputs/config/control_panel.csv, floor.<set> else floor.default).",
-            "paragraph_best_asset_id": "For a sentence naming no asset: the last asset named earlier in its paragraph, its probability weighted down per sentence back (control panel asset.decay); empty otherwise.",
-            "paragraph_best_asset_probability": "Its weighted probability.",
-            "component_best_asset_id": "Empty since 2026-10-22 (the component level is no longer used).",
-            "component_best_asset_probability": "Empty since 2026-10-22.",
+            "is_committed": "The one decision: posterior_probability at or above the measure's floor (control panel inputs/config/control_panel.csv, floor.<set> else floor.default).",
+            "paragraph_best_asset_id": "For a sentence whose own best asset is under the control panel's asset.floor: the asset with the highest sum of its own score and the earlier sentences' scores in its paragraph, each weighted by asset.decay per sentence back; empty otherwise.",
+            "paragraph_best_asset_probability": "That decayed sum (at most 1).",
             "unit_best_asset_id": "The sentence asset map's best asset for the sentence itself.",
             "unit_best_asset_probability": "Its probability (grades 2 and 3, through the asset's probability layer when fitted).",
             "asset_ids_above_threshold": "The sentence's own asset when it reaches the control panel's asset.floor.",
-            "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the last one named earlier in its paragraph (level paragraph), at the control panel's asset.floor.",
+            "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the decayed sum over its paragraph's earlier sentences (level paragraph), at the control panel's asset.floor.",
             "linked_asset_level": "unit, paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
-            "activity_kinds_above_threshold": "Empty since 2026-10-22: the delivery question (govern, build, sustain, use) is no longer asked.",
-            "best_activity_kind": "Empty since 2026-10-22.",
-            "best_activity_kind_probability": "Empty since 2026-10-22.",
-            "conditional_probability": "Empty since 2026-10-22: the conditional question is no longer asked.",
-            "actor_ids_above_threshold": "Empty since 2026-10-22: who carries it out is no longer asked.",
-            "best_actor_id": "Empty since 2026-10-22.",
-            "best_actor_probability": "Empty since 2026-10-22.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
-            "type_ids_above_threshold": "The measure's types (clusters) this unit is an instance of, at 0.5 or more, from analysis/labels/<set>_types.csv; several allowed; empty when no type claims it ('other') or no list exists yet.",
+            "type_ids_above_threshold": "The unit's type (one choice among the measure's types in analysis/labels/<set>_types.csv) when its probability reaches the control panel's floor.types; empty when none does or no list exists yet.",
             "best_type_id": "The likeliest type.",
             "best_type_probability": "Its probability.",
-            "committed_probability_calibrated": "The probability the floor reads: the model's score for grades 2 and 3 through the probability layer (src/posterior.py: similarity to the sentences a person graded), or the score itself until a sheet has been evaluated.",
             "template_project_count": "As in search_units: other projects printing the same words.",
             "template_wording_share": "As in search_units: share of six-word runs shared with two or more other projects.",
             "copy_unit_ids": "Units in other documents that print the same text.",
@@ -453,22 +437,26 @@ TABLES = {
                  "merged_from": "Type ids the file merges into this one (merge_into), "
                                 "pipe-separated; their yes answers count as this type's."}),
     "measure_quality": dict(
-        schema=PUBLIC, key=("label_set", "question_sha256"), foreign=[],
-        comment="How well the decision model reads a measure, against a sheet a person graded "
-                "(./wbg check <set> --evaluate): one row per measure and exact question "
-                "wording, the latest evaluation. Precision and recall are of the model's most "
-                "likely grade 3 against the person's grade 3, unweighted, with recall within "
-                "the graded pool, not the corpus. Quote graded_units beside them.",
+        schema=PUBLIC, key=("label_set", "question_sha256", "sheet"), foreign=[],
+        comment="How well the pipeline decides a measure, against a sheet a person graded "
+                "(./wbg check <set> --evaluate): one row per measure, exact question wording "
+                "and kind of sheet, the latest evaluation. Precision and recall are of the "
+                "decision (posterior at the floor) against the person's grade 2 or more, "
+                "weighted back to the pool, with recall within the graded pool, not the "
+                "corpus. Only an evaluation sheet (a random draw) measures the dashboards; a "
+                "training sheet holds the hard cases. Quote graded_units beside them.",
         columns={"version": "The measure's version (its file's version column) when the "
                             "sheet was evaluated.",
                  "question_sha256": "SHA-256 of the exact question the sheet was graded "
                                     "under: a revised definition is a new row.",
                  "run_id": "The measure run the sheet was drawn from.",
+                 "sheet": "evaluation (a random draw by the decision, never used to fit) or "
+                          "training (drawn near the floor).",
                  "graded_units": "Rows the person graded.",
-                 "precision": "Of the units the model grades committed, the share the person "
-                              "graded committed.",
-                 "recall": "Of the units the person graded committed, the share the model "
-                           "grades committed (within the graded pool).",
+                 "precision": "Of the units the pipeline counts, the weighted share the person "
+                              "graded 2 or more.",
+                 "recall": "Of the units the person graded 2 or more, the weighted share the "
+                           "pipeline counts (within the graded pool).",
                  "report_path": "The evaluation report under data/reports/."}),
     "label_queries": dict(
         schema=PUBLIC, key=("label_set", "label_id", "query_id"), foreign=[],
@@ -543,15 +531,6 @@ TABLES = {
                  "prior_phrase_cosine_a": "Prior input: the unit's cosine to the first measure's phrases.",
                  "prior_probability_b": "Prior input: the second measure's probability for the unit.",
                  "prior_phrase_cosine_b": "Prior input: the unit's cosine to the second measure's phrases."}),
-    "unit_scope": dict(
-        schema=PUBLIC, key=("unit_id",), foreign=[],
-        comment="Empty since 2026-10-22: the scope question (a rule, one investment or not a "
-                "commitment) is no longer asked (src/commit_checks.py); kept so the views "
-                "keep their shape.",
-        columns={"scope": "rule, investment or not_commitment: the most likely answer.",
-                 "probability": "The probability of that answer.",
-                 "p_rule": "Probability of a rule.", "p_investment": "Probability of an investment.",
-                 "p_not_commitment": "Probability of not a commitment."}),
     "commitment_packages": dict(
         schema=PUBLIC, key=("label_set", "label_id", "unit_id", "package_id"),
         foreign=[("package_id", "packages", "package_id"),
@@ -576,6 +555,98 @@ TABLES = {
             "prior_phrase_cosine": "Prior input: the package description's best cosine to the measure's phrases.",
             "prior_phrase_match": "Prior input: the share of the package description's information found in the commitment sentence, words weighted by rarity.",
         }),
+    "unit_assets": dict(
+        schema=PUBLIC, key=("unit_id",),
+        foreign=[("unit_id", "search_units", "unit_id"),
+                 ("paragraph_id", "paragraphs", "paragraph_id")],
+        comment="The asset of every sentence the search reads, decided as the measure stage "
+                "decides it: the sentence's own best asset when its posterior reaches the "
+                "control panel's asset.floor (level unit); else the asset with the highest "
+                "sum of its own score and the earlier sentences' scores in its paragraph, each "
+                "weighted by asset.decay per sentence back, when that reaches the floor (level "
+                "paragraph); else none. Rebuilt at every publish from the current asset map "
+                "and its probability layers.",
+        columns={"asset_id": "The sentence's asset; empty at level none.",
+                 "probability": "The posterior (level unit) or the decayed sum (level paragraph).",
+                 "asset_level": "unit, paragraph or none.",
+                 "own_best_asset_id": "The sentence's own best asset, whatever its probability.",
+                 "own_best_probability": "Its posterior probability."}),
+    "graded_labels": dict(
+        schema=PUBLIC, key=("label_set", "label_id", "text_sha256", "question_sha256"),
+        foreign=[],
+        comment="Every grade a person gave a sentence (data/labels/<set>_units.csv, written "
+                "by ./wbg check <set> --evaluate): keyed by the text's SHA-256 and the exact "
+                "question, never by position (AGENTS.md rule 9). Only the evaluation reads "
+                "them; the layers and gates fit on the rows of training sheets under the "
+                "current question. No text is stored here: join search_units on unit_id.",
+        columns={"grade": "The person's grade on the measure's scale; 2 or more is yes.",
+                 "asset": "The asset the person gave the sentence, if any.",
+                 "type": "The type the person gave, if any.",
+                 "source": "The sheet the grade came from.",
+                 "stratum": "The draw's stratum; eval:* rows are an evaluation sheet's.",
+                 "weight": "The design weight: the stratum's size over the rows drawn from it."}),
+    "graded_package_links": dict(
+        schema=PUBLIC, key=("label_set", "unit_id", "package_id", "question_sha256"),
+        foreign=[],
+        comment="Every answer a person gave on a package-link sheet (data/labels/"
+                "package_links.csv): does carrying out the package deliver the commitment.",
+        columns={"applies": "yes, no or unsure."}),
+    "check_draws": dict(
+        schema=PUBLIC, key=("sheet", "row_id"), foreign=[],
+        comment="Every row ever drawn for a person to grade (data/review/*.key.csv), with its "
+                "stratum and the stratum's size: what makes a sheet's figures weightable.",
+        columns={"sheet": "The key file's name (the sheet and seed).",
+                 "measure_dir": "The measure run the row was drawn from."}),
+    "posterior_layers": dict(
+        schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
+        comment="The probability layer fitted for each label (data/labels/<set>_posterior.json, "
+                "assets_posterior.json): what turns the model's score into posterior_probability.",
+        columns={"question_sha256": "The exact question it was fitted on; it applies to no other.",
+                 "graded_yes": "Graded yes it was fitted on.",
+                 "graded_no": "Graded no.",
+                 "coefficients": "Intercept, then the weights on logit(score), the vote and the "
+                                 "centroid difference, on standardised inputs (JSON).",
+                 "settings": "The control-panel settings it was fitted with (JSON).",
+                 "file_sha256": "SHA-256 of the file."}),
+    "skip_gates": dict(
+        schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
+        comment="The skip rule's gate fitted for each label (data/labels/<set>_gate.json, "
+                "src/skip.py): the highest cosine that loses at most skip.max_loss of the "
+                "graded yes. A label with no row uses the control panel's starting gate.",
+        columns={"gate": "The cosine gate.",
+                 "share_lost": "The weighted share of graded yes below it.",
+                 "positives": "Graded yes it was fitted on.",
+                 "question_sha256": "The question the grades were given under.",
+                 "search_run": "The search run whose cosines it read."}),
+    "runs": dict(
+        schema=PUBLIC, key=("run_id",), foreign=[],
+        comment="Every model run's manifest (data/{classify,measures,links,types,checks}/*/"
+                "manifest.json): what was asked, of which model, at what cost. Unlike the run "
+                "tables, which hold the current run only, this keeps every run written.",
+        columns={"stage": "classify, measures, links, types or checks.",
+                 "label_set": "The set, where the run is for one.",
+                 "created_at": "When the run was written.",
+                 "calls": "Requests made by the run.",
+                 "cost_usd": "What those requests cost, US$.",
+                 "manifest": "The whole manifest (JSON): questions, their SHA-256, settings, "
+                             "models served."}),
+    "spend": dict(
+        schema=PUBLIC, key=None, foreign=[],
+        comment="The spend ledger (data/reports/spend.csv): one row per stage run that asked "
+                "the decision model or another paid model.",
+        columns={"spent_at": "When.", "stage": "Which stage.", "calls": "Requests.",
+                 "cost_usd": "US$.", "run": "The run folder written, or 'failed'."}),
+    "answers": dict(
+        schema=PUBLIC, key=("answer_sha256",), foreign=[],
+        comment="Every stored decision-model answer (data/classify/answers/): the record a "
+                "re-run reads instead of asking again. Keyed by the SHA-256 of the model, "
+                "the state and the question; the state's text is not repeated here.",
+        columns={"model": "The model asked (its pinned snapshot).",
+                 "model_served": "The snapshot that answered.",
+                 "answer": "The answer as returned (JSON): its probabilities.",
+                 "cost_usd": "Its share of the request's cost, US$.",
+                 "asked_at": "When it was asked.",
+                 "call_sha256": "SHA-256 of the whole request it came in."}),
     "sentence_vectors": dict(
         schema=INTERNAL, key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
         comment="Pipeline bookkeeping: one embedding per search unit (3,072 dimensions), used "

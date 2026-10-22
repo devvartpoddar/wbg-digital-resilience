@@ -23,16 +23,12 @@ CREATE TABLE IF NOT EXISTS wbg.unit_pair_checks (unit_id text, set_a text, set_b
   decision text, probability numeric, p_only_a numeric, p_only_b numeric, p_both numeric,
   p_neither numeric, model_served text, model_cost_usd numeric, prior_probability_a numeric,
   prior_phrase_cosine_a numeric, prior_probability_b numeric, prior_phrase_cosine_b numeric);
-CREATE TABLE IF NOT EXISTS wbg.unit_scope (unit_id text, scope text, probability numeric,
-  p_rule numeric, p_investment numeric, p_not_commitment numeric, model_served text,
-  model_cost_usd numeric);
 
--- One row per committed unit that counts, per project, asset and type: the
--- base of the views below. The asset is the one the sentence names (its
--- best) or, where it names none, its paragraph's; the type its best above
--- 0.5. With dashboard_settings.every_asset_and_type a unit counts instead
--- under every asset and type the model says yes to ("backup power for the
--- towers and the data centre" becomes a commitment for both assets).
+-- One row per committed unit that counts, per project: the base of the
+-- views below. Committed is the one decision (is_committed: the posterior of
+-- grades 2 and 3 at the measure's floor). The asset is the one the sentence
+-- names or, where it names none, its paragraph's (the decayed sum); the type
+-- its chosen one (control panel floor.types).
 -- Materialised: built once per load, not once per card, and indexed, so a
 -- dashboard read is milliseconds (as a plain view Postgres estimated 27
 -- committed units against thousands, chose nested loops and re-ran the
@@ -50,15 +46,14 @@ END
 $do$;
 CREATE MATERIALIZED VIEW wbg.commitment_units AS
 WITH f AS (
-  SELECT f.*, pp.project_id, s.every_asset_and_type
+  SELECT f.*, pp.project_id
   FROM wbg.measure_findings f
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
   JOIN wbg.project_info i ON i.project_id = pp.project_id
   CROSS JOIN wbg.dashboard_settings s
-  -- committed: P(grade 3) at the measure's commit floor, else most likely
-  -- grade 3 (measure_findings.is_committed, src/measure.py is_committed)
-  WHERE f.was_sent_to_model AND coalesce(f.is_committed, f.most_likely_grade = 3)
-    AND f.probability_grade_3 >= s.commitment_min_probability
+  -- committed: the posterior at the measure's floor (src/measure.py is_committed)
+  WHERE f.was_sent_to_model AND f.is_committed
+    AND f.posterior_probability >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
     -- a pair check that says the unit is only the other measure, or neither,
@@ -71,30 +66,18 @@ WITH f AS (
 ),
 u AS (
   SELECT f.label_set, f.label_id, f.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
-         f.document_id, f.text, f.probability_grade_3, f.conditional_probability, f.firmness,
+         f.document_id, f.text, f.posterior_probability, f.firmness,
          f.template_project_count, f.copy_unit_ids, f.linked_asset_level, f.component_key,
          f.component_number, f.subcomponent_number,
          CASE coalesce(f.linked_asset_level, 'none')
-           WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph'
-           WHEN 'component' THEN 'component' ELSE 'none' END AS asset_from,
-         a.asset_id, t.type_id,
-         coalesce(sc.scope, '(not checked)') AS scope,
+           WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph' ELSE 'none' END
+           AS asset_from,
+         coalesce(f.linked_asset_id, '(no asset)') AS asset_id,
+         CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0 THEN '(no type)'
+              ELSE f.best_type_id END AS type_id,
          -- the wording, for collapsing word-for-word copies
          regexp_replace(lower(f.text), '\s+', ' ', 'g') AS wording
   FROM f
-  CROSS JOIN LATERAL (
-    SELECT DISTINCT x AS asset_id FROM unnest(
-      CASE WHEN f.every_asset_and_type AND f.linked_asset_level = 'unit'
-                AND coalesce(cardinality(f.asset_ids_above_threshold), 0) > 0
-             THEN f.asset_ids_above_threshold
-           WHEN f.linked_asset_id IS NOT NULL THEN ARRAY[f.linked_asset_id]
-           ELSE ARRAY['(no asset)'] END) x) a
-  CROSS JOIN LATERAL (
-    SELECT DISTINCT x AS type_id FROM unnest(
-      CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0 THEN ARRAY['(no type)']
-           WHEN f.every_asset_and_type THEN f.type_ids_above_threshold
-           ELSE ARRAY[f.best_type_id] END) x) t
-  LEFT JOIN wbg.unit_scope sc ON sc.unit_id = f.unit_id
 )
 SELECT md5(project_id || '|' || label_set || '|' || asset_id || '|' || type_id) AS commitment_id,
        u.*
@@ -104,7 +87,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (at its measure''s commit floor, else grade 3; in an Investment Project Financing operation, its asset found in the sentence or its paragraph: dashboard_settings), once per project (and, with every_asset_and_type, per asset and type), with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not (src/commit_checks.py). scope is ''(not checked)'': the scope question was removed on 2026-10-22.';
+  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''. A unit two measures commit is dropped from a measure its pair check says it is not (src/commit_checks.py).';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$
@@ -162,7 +145,7 @@ WITH u AS (
   SELECT DISTINCT f.unit_id, pp.project_id, f.text
   FROM wbg.measure_findings f
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
-  WHERE f.was_sent_to_model AND coalesce(f.is_committed, f.most_likely_grade = 3)
+  WHERE f.was_sent_to_model AND f.is_committed
 ),
 w AS (
   SELECT unit_id, project_id,
@@ -244,19 +227,11 @@ WITH c AS (
          count(DISTINCT u.wording) AS sentences,
          count(DISTINCT u.paragraph_id) AS paragraphs,
          count(DISTINCT u.document_id) AS documents,
-         max(u.probability_grade_3) AS strongest_p,
+         max(u.posterior_probability) AS strongest_p,
          -- dropped only if every sentence under a known component was
          bool_and(ud.dropped) FILTER (WHERE ud.dropped IS NOT NULL) AS dropped_by_restructuring,
-         -- the conditional question was removed on 2026-10-22: kept, empty
-         NULL::numeric(4, 3) AS share_not_conditional,
          min(d.disclosure_date) AS first_seen_date,
-         coalesce(max(wo.near_copy_projects), 0) AS same_wording_projects,
-         -- a rule if any sentence is one, else an investment if any is, else
-         -- what the sentences are (not_commitment, or not checked)
-         CASE WHEN bool_or(u.scope = 'rule') THEN 'rule'
-              WHEN bool_or(u.scope = 'investment') THEN 'investment'
-              ELSE min(u.scope) END AS scope,
-         bool_and(u.scope = 'not_commitment') AS flagged_not_commitment
+         coalesce(max(wo.near_copy_projects), 0) AS same_wording_projects
   FROM wbg.commitment_units u
   LEFT JOIN wbg.documents d ON d.document_id = u.document_id
   LEFT JOIN wbg.unit_wording_overlap wo ON wo.unit_id = u.unit_id AND wo.project_id = u.project_id
@@ -299,13 +274,12 @@ SELECT c.commitment_id,
        i.commitment_usd_millions AS project_commitment_usd_m,
        cc.component_cost_usd_m,
        c.sentences, c.paragraphs, c.documents, c.strongest_p,
-       c.share_not_conditional, c.first_seen_date, c.same_wording_projects,
-       c.scope, c.flagged_not_commitment,
+       c.first_seen_date, c.same_wording_projects,
        c.dropped_by_restructuring,
        CASE WHEN c.asset_id = '(no asset)' THEN NULL
             ELSE EXISTS (SELECT 1 FROM wbg.project_assets pa
                          WHERE pa.project_id = c.project_id AND pa.asset_id = c.asset_id
-                           AND pa.paragraphs_financed > 0) END AS asset_in_asset_map,
+                           AND pa.sentences_naming_it > 0) END AS asset_in_asset_map,
        coalesce(p.linked_packages, 0) AS linked_packages,
        p.linked_package_estimate_usd, coalesce(p.linked_packages_with_estimate, 0)
          AS linked_packages_with_estimate,
@@ -325,15 +299,14 @@ CREATE UNIQUE INDEX ON wbg.commitments (commitment_id);
 CREATE INDEX ON wbg.commitments (label_set);
 ANALYZE wbg.commitments;
 COMMENT ON MATERIALIZED VIEW wbg.commitments IS
-  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest P(committed); share_not_conditional is empty (the conditional question was removed on 2026-10-22); first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether the project''s asset map grades a paragraph as financing this asset. status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen (Dev): project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms disagree on 30 of 131 projects), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names the asset, else paragraph.';
+  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest posterior probability; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether a sentence of the project names this asset in the asset map (wbg.project_assets). status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen (Dev): project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms disagree on 30 of 131 projects), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names the asset, else paragraph.';
 
 -- The commitment's sentences, one row per distinct wording (the strongest
 -- unit printing it).
 DROP VIEW IF EXISTS wbg.commitment_sentences CASCADE;
 CREATE VIEW wbg.commitment_sentences AS
 SELECT DISTINCT ON (u.commitment_id, u.wording)
-       u.commitment_id, u.unit_id, u.text, u.probability_grade_3, u.conditional_probability,
-       u.firmness, pa.section_title, d.document_kind, d.disclosure_date AS document_date,
+       u.commitment_id, u.unit_id, u.text, u.posterior_probability, u.firmness, pa.section_title, d.document_kind, d.disclosure_date AS document_date,
        u.document_id, u.paragraph_id, pa.page_from AS page_number,
        wbg.https(d.pdf_url) || CASE WHEN pa.page_from IS NOT NULL THEN '#page=' || pa.page_from ELSE '' END
          AS pdf_url,
@@ -342,9 +315,9 @@ SELECT DISTINCT ON (u.commitment_id, u.wording)
 FROM wbg.commitment_units u
 LEFT JOIN wbg.paragraphs pa ON pa.paragraph_id = u.paragraph_id
 LEFT JOIN wbg.documents d ON d.document_id = u.document_id
-ORDER BY u.commitment_id, u.wording, u.probability_grade_3 DESC, u.unit_id;
+ORDER BY u.commitment_id, u.wording, u.posterior_probability DESC, u.unit_id;
 COMMENT ON VIEW wbg.commitment_sentences IS
-  'One row per commitment and distinct sentence (word-for-word copies collapsed to the strongest unit): the text, P(committed), the conditional probability, the wording''s firmness, its section, document kind and date, and in how many other documents the same words are printed.';
+  'One row per commitment and distinct sentence (word-for-word copies collapsed to the strongest unit): the text, its posterior probability, the wording''s firmness, its section, document kind and date, and in how many other documents the same words are printed.';
 
 -- The commitment's paragraphs, each with its sentences marked by offset.
 DROP VIEW IF EXISTS wbg.commitment_evidence CASCADE;
@@ -375,8 +348,8 @@ marked AS (
 ),
 agg AS (
   SELECT u.commitment_id, u.paragraph_id, count(DISTINCT u.wording) AS sentences,
-         max(u.probability_grade_3) AS strongest_p,
-         (array_agg(u.text ORDER BY u.probability_grade_3 DESC, u.unit_id))[1] AS key_sentence
+         max(u.posterior_probability) AS strongest_p,
+         (array_agg(u.text ORDER BY u.posterior_probability DESC, u.unit_id))[1] AS key_sentence
   FROM wbg.commitment_units u GROUP BY u.commitment_id, u.paragraph_id
 )
 SELECT a.commitment_id, a.paragraph_id, pa.document_id, d.document_kind,
@@ -392,4 +365,4 @@ JOIN wbg.paragraphs pa ON pa.paragraph_id = a.paragraph_id
 LEFT JOIN wbg.documents d ON d.document_id = pa.document_id
 LEFT JOIN marked mk ON mk.commitment_id = a.commitment_id AND mk.paragraph_id = a.paragraph_id;
 COMMENT ON VIEW wbg.commitment_evidence IS
-  'One row per commitment and paragraph holding its sentences: the document, its kind and date, section, component, page and a PDF link to that page, how many of the commitment''s sentences the paragraph holds, the strongest P(committed), the key sentence, and the paragraph text with each of the commitment''s sentences wrapped in 【 】 (placed by character offsets, not by search).';
+  'One row per commitment and paragraph holding its sentences: the document, its kind and date, section, component, page and a PDF link to that page, how many of the commitment''s sentences the paragraph holds, the strongest posterior probability, the key sentence, and the paragraph text with each of the commitment''s sentences wrapped in 【 】 (placed by character offsets, not by search).';

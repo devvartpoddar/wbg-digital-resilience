@@ -5,21 +5,17 @@
 DROP VIEW IF EXISTS wbg.dashboard_settings CASCADE;
 CREATE VIEW wbg.dashboard_settings AS
 SELECT
-  -- A unit counts towards a commitment when it is committed (its probability
-  -- at its measure's floor, control panel floor.*), its probability is at
+  -- A unit counts towards a commitment when it is committed (its posterior
+  -- at its measure's floor, control panel floor.*), its posterior is at
   -- least this (a further floor over every measure; 0),
   {{panel:dashboard.commitment_min_probability}}::numeric AS commitment_min_probability,
   -- and its asset is found at one of these levels: 'unit', the sentence's
   -- own words name it; 'paragraph', the sentence names none and an earlier
-  -- sentence of its paragraph does (the last one named, control panel
-  -- asset.decay). 'none' widens.
+  -- sentences of its paragraph do (their scores summed, each weighted by
+  -- control panel asset.decay per sentence back). 'none' widens.
   {{panel:dashboard.commitment_link_levels}} AS commitment_link_levels,
   -- Only Investment Project Financing operations (Dev, 2026-10-20).
   {{panel:dashboard.ipf_only}} AS ipf_only,
-  -- A sentence counts under its one best asset and one best type (false), or
-  -- under every asset and type the model says yes to (true; on the test
-  -- slice that made about seven commitments of each sentence). Undecided.
-  {{panel:dashboard.every_asset_and_type}} AS every_asset_and_type,
   -- A package is linked to a commitment at this probability or more. On Dev's
   -- graded sheet (2026-10-21, 70 pairs) links from 0.5 to 0.7 were 3 yes, 7
   -- no, 5 unsure; from 0.7 up, 25 yes of 26.
@@ -34,7 +30,7 @@ SELECT
   -- (control panel floor.pair_check; 0 = its most likely answer, always).
   {{panel:floor.pair_check}}::numeric AS pair_check_floor;
 COMMENT ON VIEW wbg.dashboard_settings IS
-  'The readings the dashboard views apply (one row): the floor on P(committed) for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, whether a sentence counts under every asset and type it is given or only its best, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and the probability a pair check''s answer needs to do so.';
+  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and the probability a pair check''s answer needs to do so.';
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the

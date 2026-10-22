@@ -6,7 +6,7 @@ The part of this repository that changes often. `src/` is the pipeline: it fetch
 
 | Folder | Holds | Changed |
 |---|---|---|
-| `inputs/taxonomy/` | The pipeline's own label set: the nine assets, their phrases and grades. | Rarely, deliberately: a changed wording invalidates every grade a person gave under the old one. |
+| `inputs/taxonomy/` | The pipeline's own label set: the 13 assets, their phrases and grades. | Rarely, deliberately: a changed wording invalidates every grade a person gave under the old one. |
 | `analysis/labels/` | Analysis label sets: the measures, and any set being tried (`<set>.csv`, `<set>_queries.csv`, `<set>_scale.csv`, same shape as the assets). | Freely. Each run is keyed on the set's exact wording, so a revised phrase embeds only itself and never disturbs another set's results. |
 | `analysis/labels/` (optional, per set) | `<set>_patterns.csv` (whole-word patterns per label: the candidates stage takes every unit one matches) and `<set>_types.csv` (the measure's approved types: `type_id`, `type_name`, `definition`, written by a person from `./wbg types` proposals; a `pattern` column is optional and only tags candidates; `merge_into` folds a type into another and `display_name` renames it, both at load time with no model call). | Freely. |
 | `analysis/sql/` | Questions for Metabase and `psql`, over the `wbg` schema. One file per question, with a comment saying what it answers and what it does not. | Freely. Nothing in `src/` reads them. |
@@ -15,7 +15,7 @@ A label set's name is its file name without `.csv`, and the same name must not e
 
 ```
 ./wbg search cra               # score the sentences against analysis/labels/cra*.csv
-./wbg measure cra              # the funnel: candidates, the asset map's columns, the decision model's grade
+./wbg measure cra              # the funnel: candidates, the decision model's grade, the posterior at the floor, the asset
 ./wbg evaluate cra --column "Resilient telecom"   # the funnel against the hand-labelled activities workbook
 ./wbg types cra                # propose the measure's types from its committed units (read, then approve)
 ./wbg types cra --assign       # assign every committed unit to the approved types
@@ -30,5 +30,5 @@ The load (`src/load_pg.py`) puts every set with a current run into the same Post
 ## What stays out
 
 - Nothing under `data/`: results live on the box and in Postgres.
-- No cut-offs written into code beyond the named constants `docs/methodology.md` lists (the pool and link thresholds). A cut-off is chosen from `src/evaluate.py`'s or `./wbg check --evaluate`'s report against graded examples; a SQL question may filter on one, and should say which report it came from.
+- No cut-offs in code: every threshold is a line of `inputs/config/control_panel.csv`. A cut-off is chosen from `./wbg check --evaluate`'s report against graded examples; a SQL question may filter on one, and should say which report it came from.
 - No document text.

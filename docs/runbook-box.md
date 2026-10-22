@@ -39,14 +39,12 @@ each prints its estimate before asking anything (`--dry-run`).
    | Fetch PDFs, plans, notices, awards, records | hours | overnight (the interface is rate-limited; `./wbg prepare` resumes) | a day or more |
    | Read PDFs (0.3 s a page on a fast core; three workers) | minutes | about 3 hours on the N150 | about 15 hours |
    | Embed the units | US$0.30 | about US$1 | about US$6 |
-   | Asset map, 13 assets, cosine gate 0.25 | about US$1.60 | about US$6 | about US$32 |
-   | Asset map without the gate | about US$2.70 | about US$10 | about US$55 |
-   | One measure (pool plus feedback, two passes) | US$0.13 | about US$0.50 | about US$2.60 |
+   | Asset map, 13 assets, every sentence (starting gate) | about US$2 to 3 (estimate) | about US$8 to 11 | about US$45 to 60 |
+   | One measure (pool plus feedback) | about US$0.10 | about US$0.40 | about US$2 |
 
-   At 250 projects the whole run fits well inside the key's cap of US$50
-   with or without the gate; the gate is still the setting to use, since
-   its loss was measured (section 5b) and the saving is real at every
-   later run.
+   The asset-map row is an estimate from the test rate on graded sentences;
+   the dry run gives the figure. At 250 projects the whole run fits well
+   inside the key's cap of US$50.
 
 ## The run
 
@@ -71,7 +69,7 @@ keyed: **answers** (what costs money) and **run folders** (what is current).
 
 **Answers cost money; folders do not.** Every model answer is stored under
 `sha256(model, state, question)` (`answers.key`): the exact state dict sent
-(section, sentence, component, paragraph where asked) and the exact question
+(section, sentence, component) and the exact question
 (its text, criteria and options, not its id), in
 `data/classify/answers/<model>/`. A stage asks only the keys that are
 missing. Batching does not change keys. So a new run folder is usually
@@ -88,11 +86,11 @@ now.
 |---|---|---|
 | embed | one vector per text: `cache/<model>.<dim>/<sha of text>.f32`; `sentence_index.csv` is rebuilt every run | the text, model or dim changes |
 | search | query ids and texts (definitions and phrases), model:dim, and the **bytes of `sentence_index.csv`** | never (query vectors are cached) |
-| classify (asset map) | the gate, the prior-input version (`prior.VERSION`), and every sentence's request (model, section, sentence, component, questions) | a paragraph's text or a question changes |
-| measure | the search and asset-map run names, the settings (model, context, gate, top, min_cosine, rounds, projects, `commit_floor` if written, the prior-input version), the patterns, the question (scale, definitions), the probability layer | a question or state changes, or new units enter |
+| classify (asset map) | the starting gate, the fitted gates that apply (`data/labels/assets_gate.json`), the prior-input version (`prior.VERSION`), and every sentence's request (model, section, sentence, component, questions) | a sentence's text or a question changes, or a gate lets new sentences in |
+| measure | the search and asset-map run names, the asset layers that apply, the settings (model, gate (fitted or starting), top, feedback, floor, projects, the prior-input version, the `read.`, `asset.` and `posterior.` panel settings), the patterns, the question (scale, definitions), the measure's probability layer | a question or state changes, or new units enter |
 | types | the measure run name, model, the prior-input version, and every committed unit's request | a type list changes or new units are committed |
 | checks | the measure run names, model, the prior-input version, and every pair request | new committed pairs |
-| links | `LINK_VERSION`, model, `asset_top`, `MEASURE_TOP`, measure query texts, the bytes of `packages.csv`, the asset and pair questions, the measure run names, projects | new pairs or packages |
+| links | `LINK_VERSION`, model, `link.asset_top`, `link.measure_top`, `link.asset_yes`, measure query texts, the bytes of `packages.csv`, the asset and pair questions, the measure run names, projects | new pairs or packages |
 
 The prior inputs (section 5g, `src/prior.py`) are stored with every stage's
 answers; their version is in each stage's key (`prior.VERSION`, and
@@ -110,9 +108,9 @@ run new (it does count in the prepare stages' fingerprints, below).
 that changes `sentence_index.csv` (re-embedding, re-cleaning, a component or
 copy change in the unit metadata) gives a new search version, so new measure
 folders, so new types, checks and links folders, all rebuilt from stored
-answers. A written or changed `commit_floor`, any measure setting, a pattern,
-the calibration file or the project scope does the same from the measure
-stage down.
+answers. A changed floor, any measure setting, a pattern, a refitted
+probability layer or gate, or the project scope does the same from the
+measure stage down.
 
 **What `./wbg status` prints.**
 
@@ -152,28 +150,29 @@ section 5f: `commitments` (the grain of every page), `commitment_evidence`,
 `commitment_status_by_quarter`, `type_procurement_profile`,
 `measure_overlap`, the `filter_*` views, and the functions `commitments_under()`,
 `similar_projects()` and `try_phrase()`. Their readings (link levels, package-link threshold,
-near-copy share) are one edit in `sql/views/13_dashboard_settings.sql`, and
+near-copy share) are `dashboard.*` lines of the control panel, filled in at publish, and
 the due-date rule one edit in `wbg.due_date()` (`03_procurement_links.sql`). Earlier cards read:
 
 - `measure_findings_by_project`: one row per project and measure, with the
-  assets linked, how delivered, by whom (the project list and map);
-- `measure_findings_in_context`: every unit a measure read, with its grade,
-  calibrated probability, asset, kind, actor, conditionality, type (the
-  measure's cluster) and the text around it (filter `most_likely_grade = 3`);
-- `measure_finding_lists`: one row per unit and asset, kind, actor or type,
-  for dashboard filters on what the array columns hold;
+  units that count, the assets linked and the types (the project list and map);
+- `measure_findings_in_context`: every unit a measure read, with
+  `is_committed`, `posterior_probability`, asset, type and the text around
+  it (filter `is_committed`);
+- `measure_finding_lists`: one row per unit and asset or type, for
+  dashboard filters on what the array columns hold;
 - `packages_with_commitments`: one row per package with the assets it buys,
-  the measures linked to it and how many commitments (at 0.5); the pairs
-  themselves are `commitment_packages_in_context`, the package-asset answers
-  `package_assets_in_context`;
+  the measures linked to it and how many commitments (at the panel's
+  thresholds); the pairs themselves are `commitment_packages_in_context`,
+  the package-asset answers `package_assets_in_context`;
 - `asset_map`, `search_paragraphs_with_text`, `paragraphs_with_document`,
   `packages_with_project`, `upcoming_packages`, `notices_with_package`,
   `awards_with_package`, `data_as_of`.
 
 Hide `loads`, `data_release` and `paragraph_projects` in Metabase's table
-settings; they are bookkeeping. Every count in the findings is the decision
-model's grade, not a person's: the graded sheet's precision and recall
-(`data/reports/evaluate_units_<set>.md`) is the number to quote beside it.
+settings; they are bookkeeping. Every count in the findings is the
+pipeline's decision, not a person's: an evaluation sheet's weighted precision
+and recall (`data/reports/evaluate_units_<set>.md`, `wbg.measure_quality`
+with `sheet` = evaluation) is the number to quote beside it.
 
 ## The control panel
 
@@ -188,28 +187,63 @@ person merges.
 
 What a change costs:
 
-- **A floor, `asset.floor`, `asset.decay`, `posterior.*`, `link.asset_yes`**: nothing. The
-  stage reads the stored answers again under the new number: `./wbg run --from measure`
-  (or `--from link`); `./wbg status` shows those runs as "would be new" until then.
+- **A floor, `asset.floor`, `asset.decay`, `posterior.*`**: nothing. The
+  stage reads the stored answers again under the new number: `./wbg run --from measure`;
+  `./wbg status` shows those runs as "would be new" until then.
 - **`dashboard.*`**: nothing; `./wbg publish` rebuilds the views with the new value.
-- **A gate (`asset.gate_cosine`, `measure.gate_cosine`) or the feedback settings**: the
-  sentences newly let in are asked; the rest come from the store. Dry-run first.
+- **A gate (`asset.gate_cosine`, `measure.gate_cosine`, `skip.*`), the feedback settings,
+  `link.*`**: the sentences or pairs newly let in are asked; the rest come from the
+  store. Dry-run first.
 
-Tuning the floors: after a run, `./wbg check all --seed <n> --evaluate` fits each
-measure's probability layer (`data/labels/<set>_posterior.json`) and each asset's
-(`data/labels/assets_posterior.json`) from the graded sentences, and writes into each
-`data/reports/evaluate_units_<set>.md` the floor whose precision on those sentences
-reaches `floor.target_precision`. Put the floors you accept into the panel, then re-run
-the measures (from the store, free).
+No command-line option overrides a panel setting.
 
-**First run after the change of 2026-10-22 (not yet run).** The sentence asset map is
-new, so `./wbg classify assets --dry-run` first: it asks every sentence again, the same
-graded question (0 to 3) per asset as the measures ask (about US$2 to 3 at the test rate,
-against the paragraph map's US$1.0 to 1.2). The measure questions are unchanged and come
-from the store. Nothing else is asked of a measure's units: the delivery, conditional,
-actor and scope questions were removed (their columns stay, empty).
-Every floor is `floor.default` 0.5 until the evaluation suggests better ones, so the
-published counts will move.
+## Clean run from scratch
+
+The order once this branch is on the box, with nothing graded yet under the
+current questions:
+
+1. `./wbg run --to search` (fetch, prepare, embed, search): the parser and the
+   sentence splitter changed, so every PDF is read again (hours) and the sentence
+   index is new; embeddings come from the cache where the text is unchanged.
+2. `./wbg run --from classify --dry-run`, read the estimates, then without
+   `--dry-run`. The first run has **no probability layer and no fitted gate**: the
+   floors read the model's score and the pools use the panel's starting gates
+   (`asset.gate_cosine`, `measure.gate_cosine`). Stored answers are reused wherever
+   the exact question and state were asked before.
+3. Grade a training sheet: `./wbg check all --design train --seed <n>`
+   (about 40 rows a measure, near each floor), then `./wbg check all --seed <n>
+   --evaluate`. That stores the grades, fits each measure's layer and gate (and the
+   assets', from the assets given on the sheet), and reports each measure out of
+   sample with a suggested floor.
+4. `./wbg run --from classify` again: the runs are new (their keys hold the layers
+   and gates); answers come from the store, and only sentences a gate newly lets in
+   are asked. Repeat 3 and 4 while definitions are being tuned.
+5. When definitions are settled: an evaluation sheet, drawn fresh,
+   `./wbg check all --design eval --seed <m>` (90 rows a measure: 60 that count, 30
+   that do not), graded and evaluated the same way. Its weighted precision and recall
+   are the dashboards' figures; its rows never fit anything. Add elusion sheets
+   (`./wbg check <set> --elusion`) for recall outside the pool.
+
+## After the first load
+
+The load of 2026-10-22's schema drops or renames columns some Metabase cards may
+read. Update any card that uses:
+
+- `most_likely_grade`, `expected_grade`, or `probability_grade_3` as a decision
+  (read `is_committed` and `posterior_probability`);
+- `committed_probability_calibrated` (now `posterior_probability`);
+- the kind, actor and conditional columns (`activity_kinds_above_threshold`,
+  `best_activity_kind`, `conditional_probability`, `actor_ids_above_threshold`,
+  `best_actor_id`, and their probabilities), `component_best_asset_*`,
+  `probability_grade_4`;
+- `wbg.unit_scope`, and `scope`, `flagged_not_commitment`, `share_not_conditional`
+  in `commitments` and `commitment_sentences`;
+- `project_assets.paragraphs_financed`, `paragraphs_supported`, `how` (now
+  `sentences_naming_it`, `sentences_from_paragraph`, `paragraphs`), and the
+  paragraph-level `asset_map` (now one row per sentence with an asset);
+- `measure_findings_by_project.planned_units`, `activity_kinds`, `actors`,
+  `conditional_committed_units`, `best_committed_probability_calibrated`;
+- the `kind` and `actor` arguments of `findings_under()`.
 
 ## Changing what the dashboards show, without a model call
 
@@ -267,9 +301,9 @@ US$0.02), after which the measure appears in every dashboard filter.
 
 ## After the run
 
-- Grade one check sheet per measure (`./wbg check <set>`, then
-  `--evaluate`): that is the only precision and recall figure there is for
-  the new cohort, and it refits the calibration.
+- Grade a training sheet per measure (`./wbg check <set>`, then
+  `--evaluate`): it refits the probability layer and the gate. Only an
+  evaluation sheet (`--design eval`) gives the precision and recall to quote.
 - The elusion sheet (`./wbg check <set> --elusion`) when there is time.
 - Copy the run note to the vault (AGENTS.md rule 8).
 
