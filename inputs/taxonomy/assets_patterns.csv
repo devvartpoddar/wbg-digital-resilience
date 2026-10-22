@@ -21,7 +21,7 @@ institutional_networks,search_02,\bNRENs?\b|\bresearch and education networks?\b
 institutional_networks,search_03,"\blocal area networks?\b|\bLANs?\b|(?:\b(?:health|education|government|institutional)\b[^.;]{0,90}\b(?:WANs?|VPNs?|wide area networks?|virtual private networks?)\b|\b(?:WANs?|VPNs?|wide area networks?|virtual private networks?)\b[^.;]{0,90}\b(?:health|education|government|institutional)\b)",IGNORECASE,true
 institutional_networks,search_04,\bnetwork operations? cent(?:re|er)s?\b|\bunified communications\b,IGNORECASE,true
 cybersecurity,search_01,\bsecurity operations? cent(?:re|er)s?\b|\b(?:CSIRTs?|CERTs?|computer (?:security incident|emergency) response teams?)\b,IGNORECASE,true
-cybersecurity,search_02,"\bcyber[- ]?secur\w*|\bpenetration testing\b|(?:\b(?:security audits?|threat monitoring)\b[^.;]{0,80}\b(?:cyber|network|information systems?|digital|IT|ICT)\b|\b(?:cyber|network|information systems?|digital|IT|ICT)\b[^.;]{0,80}\b(?:security audits?|threat monitoring)\b)",IGNORECASE,true
+cybersecurity,search_02,"\bcyber[- ]?secur\w*|\bpenetration testing\b|(?:\b(?:security audits?|threat monitoring)\b[^.;]{0,80}\b(?:cyber|network|information systems?|digital|(?-i:IT)|ICT)\b|\b(?:cyber|network|information systems?|digital|(?-i:IT)|ICT)\b[^.;]{0,80}\b(?:security audits?|threat monitoring)\b)",IGNORECASE,true
 cybersecurity,search_03,"\bcyber[^.;]{0,40}(?:standards?|incident response|regulations?)",IGNORECASE,true
 dpi,search_01,\b(?:digital identi\w*|foundational ID|civil registration|CRVS|unique identification)\b,IGNORECASE,true
 dpi,search_02,\b(?:interoperable|fast|instant) payments?\b|\b(?:payment rails?|national payment switch\w*)\b,IGNORECASE,true
