@@ -152,7 +152,7 @@ def test_round_zero_grades_every_candidate_with_the_asset_answers(store):
     assert r["asset_unit"] == "towers" and r["asset_p_unit"] == "0.9000" and r["assets_yes"] == "towers"
     assert (r["asset_link"], r["asset_link_level"]) == ("towers", "unit")
     assert r["p_committed_calibrated"] == "0.9000" and r["committed"] == "true"
-    assert r["kinds_yes"] == "build" and r["kind_best"] == "build"
+    assert r["kinds_yes"] == "" and r["kind_best"] == ""          # no delivery question
     assert r["actors_yes"] == "borrower" and r["actor_best"] == "borrower"
     assert float(r["conditional_p"]) < 0.5
     assert "paragraph" not in calls[0]["state"]              # sentence design by default

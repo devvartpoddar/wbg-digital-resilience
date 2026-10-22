@@ -10,9 +10,9 @@ feedback.batch,500,measure feedback rounds,"Sentences sent per relevance-feedbac
 feedback.min_yield,10,measure feedback rounds,"A round that finds fewer committed sentences than this is the last.",
 feedback.max_rounds,6,measure feedback rounds,"At most this many feedback rounds.",
 feedback.negative_weight,0.5,measure feedback rounds,"How much of the rejected sentences' average is subtracted when choosing the next round.",
-measure.second_pass_min_grade,2,measure second pass,"The kind and facet questions (how it is delivered; conditional; who carries it out) are asked of sentences whose most likely grade is at least this, and of every committed sentence.",
-measure.second_pass_context,sentence,measure second pass,"What the kind and facet questions read: sentence (with its section and component, as every other question) or paragraph.",
-kinds.yes,0.5,measure second pass,"A kind or actor at or above this probability is listed for the sentence.",
+measure.second_pass_min_grade,2,measure second pass,"The facet questions (conditional; who carries it out) are asked of sentences whose most likely grade is at least this, and of every committed sentence.",
+measure.second_pass_context,sentence,measure second pass,"What the facet questions read: sentence (with its section and component, as every other question) or paragraph.",
+kinds.yes,0.5,measure second pass,"An actor (who carries out the commitment) at or above this probability is listed for the sentence.",
 posterior.on,true,every graded question,"After each model answer, combine the model's score with how similar the sentence is to the sentences a person graded for the same label (src/posterior.py). Off = the model's score alone.",
 posterior.sharpness,20,every graded question,"How sharply similarity counts in the weighted vote of graded sentences: higher = only the closest count.",Tested 2026-10-22: 10 to 20 best of 2 to 160.
 posterior.centroid,true,every graded question,"Also use similarity to the average graded commitment minus similarity to the average graded non-commitment.",

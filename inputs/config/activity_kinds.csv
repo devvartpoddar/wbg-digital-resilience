@@ -1,6 +1,0 @@
-kind_id,kind_name,definition,active,version
-govern,Governing,"The commitment is delivered as technical assistance, policy, regulation, standards, guidelines, strategies, studies, assessments or institutional capacity: it shapes how the asset is planned, procured or run, without paying for the asset itself.",true,v1
-build,Building,"The commitment is delivered by financing, constructing, installing, upgrading, procuring or deploying the asset or the physical and technical measure itself.",true,v1
-sustain,Sustaining,"The commitment is delivered by operating, maintaining, monitoring, repairing or funding the upkeep of an asset that exists or is being built: maintenance contracts, spare parts, operating budgets, service-level agreements, training of operators.",true,v1
-use,Using,"The commitment is delivered by applying a digital asset to deliver a service or a response: using connectivity, data or a platform to reach people, run a programme or respond to an event, rather than building or governing the asset.",true,v1
-require,Requiring in procurement,"The commitment is delivered by writing it into tender documents, bidding documents, technical specifications, contracts, terms of reference or service agreements that the project issues, so that a supplier, contractor or operator must provide it.",true,v1

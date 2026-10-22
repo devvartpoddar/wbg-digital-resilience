@@ -14,7 +14,8 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      form as the measure's.
   3. The decision model reads each unit in two passes: the measure's graded
      question for every unit, then, for the units graded 2 or more, one
-     yes/no question per activity kind (govern, build, sustain, use) and
+     yes/no question per facet (the delivery question, govern, build, sustain or
+     use, was removed 2026-10-22) and
      the facets (conditional; who carries it out). The second pass runs in
      the background while the next round's first pass goes out. Each score
      (the probabilities of the grades the control panel counts, 2 and 3) goes
@@ -91,10 +92,9 @@ import search  # noqa: E402
 # served it; a mismatch is reported.
 MODEL = "typesafe/jev-1.13-20260917"
 ASSET_SET = "assets"
-# How a commitment is delivered (govern, build, sustain, use): a hand-kept
-# list in inputs/config/, not a label set, so nothing searches or grades it
-# on its own; the measure stage asks it alongside the measure.
-KINDS_FILE = os.path.join(labels_mod.ROOT, "inputs", "config", "activity_kinds.csv")
+# How a commitment is delivered (govern, build, sustain, use) was asked here
+# until 2026-10-22, from inputs/config/activity_kinds.csv; nothing decided on
+# it, so it was removed (Dev) and its columns stay empty.
 # Two more things a TTL conversation turns on, asked of the same units as
 # the kinds: whether the commitment is conditional (group "condition") and
 # who carries it out (group "actor": the Bank, the borrower, an operator, a
@@ -371,10 +371,7 @@ class Run:
         self.patterns = labels_mod.load_patterns(name)
         self.labels, self.scale = classify.load_labels(name, None)
         self.assets = [a for a in labels_mod.load_set(ASSET_SET) if a["active"] == "true"]
-        self.kinds = [{"id": k["kind_id"].strip(), "name": k["kind_name"].strip(),
-                       "definition": " ".join(k["definition"].split())}
-                      for k in (labels_mod.rows(KINDS_FILE) if os.path.exists(KINDS_FILE) else [])
-                      if labels_mod.is_active(k)]
+        self.kinds = []           # the delivery question, removed 2026-10-22
         self.facets = load_facets()
         self.qs = questions(self.labels, self.scale, context, self.assets, self.kinds,
                             self.facets)
@@ -524,7 +521,7 @@ class Run:
             {**row, "sent": "true", "committed": ""}, len(self.scale) - 1, self.floor) else "false"
 
     def extras_into(self, row, entries):
-        """The activity-kind and facet answers from the second pass."""
+        """The facet answers from the second pass (no kinds since 2026-10-22)."""
         ks = {k["id"]: float(entries[f"kind:{k['id']}"]["answer"]["noul"]) for k in self.kinds}
         kb = max(ks, key=ks.get) if ks else ""
         row.update({"kinds_yes": "|".join(k for k in ks if ks[k] >= ASSET_YES),

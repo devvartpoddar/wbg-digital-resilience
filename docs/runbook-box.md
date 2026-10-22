@@ -185,7 +185,7 @@ What a change costs:
 - **`dashboard.*`**: nothing; `./wbg publish` rebuilds the views with the new value.
 - **A gate (`asset.gate_cosine`, `measure.gate_cosine`) or the feedback settings**: the
   sentences newly let in are asked; the rest come from the store. Dry-run first.
-- **`measure.second_pass_context`**: the kind and facet questions are asked again.
+- **`measure.second_pass_context`**: the facet questions are asked again.
 
 Tuning the floors: after a run, `./wbg check all --seed <n> --evaluate` fits each
 measure's probability layer (`data/labels/<set>_posterior.json`) and each asset's
@@ -197,7 +197,8 @@ the measures (from the store, free).
 **First run after the change of 2026-10-22 (not yet run).** The sentence asset map is
 new, so `./wbg classify assets --dry-run` first: it asks every sentence again, one choice
 question each (about US$1 to 2 at the test rate, near the paragraph map's US$1.0 to 1.2). The measure questions are unchanged and come
-from the store; the kind and facet questions are asked again (now on the sentence).
+from the store; the facet questions (conditional, who carries it out) are asked again (now on
+the sentence). The delivery question (govern, build, sustain, use) is no longer asked.
 Every floor is `floor.default` 0.5 until the evaluation suggests better ones, so the
 published counts will move.
 
