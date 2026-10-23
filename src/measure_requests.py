@@ -146,8 +146,8 @@ def committed(data, name, projects):
     folder = measure.current_run(name, data, projects=projects)
     if not folder:
         return None
-    with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
-        return sum(1 for u in csv.DictReader(fh) if u["sent"] == "true" and u["committed"] == "true")
+    return sum(1 for u in measure.read_units(folder, data, links=False)
+               if u["sent"] == "true" and u["committed"] == "true")
 
 
 def run_one(conn, data, log=print, runner=subprocess.run):

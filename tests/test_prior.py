@@ -53,8 +53,8 @@ def test_paragraph_counts_are_other_sentences_classified_with_an_asset_or_a_meas
     for name, committed in (("cra", {"a1"}), ("ews", {"a1", "a3"})):
         d = tmp_path / "measures" / f"{name}-x"
         d.mkdir(parents=True)
-        (d / "units.csv").write_text("unit_id,committed\n" + "".join(
-            f"{u},{'true' if u in committed else 'false'}\n" for u in ("a1", "a2", "a3", "b1")))
+        (d / "units.csv").write_text("unit_id,sent,p_committed_calibrated\n" + "".join(
+            f"{u},true,{'0.9' if u in committed else '0.1'}\n" for u in ("a1", "a2", "a3", "b1")))
         runs[name] = str(d)
     monkeypatch.setattr(labels, "label_sets", lambda dirs=None: ["assets", "cra", "ews"])
     monkeypatch.setattr(measure, "current_run", lambda name, data, projects=None: runs[name])

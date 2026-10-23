@@ -94,8 +94,9 @@ def committed(data, projects=None):
 
 def plan(data, projects=None, model=classify.MODEL):
     """(pairs [(unit_id, set_a, set_b, request)], out folder, {(set, unit_id):
-    unit row}). The folder is keyed on the measure runs, the model and every
-    request, so a changed boundary or a new run is a new folder."""
+    unit row}). The folder is keyed on the model, the layers and every
+    request, so a changed boundary or a new pair is a new folder; a moved
+    floor is not."""
     sets, runs = committed(data, projects)
     by_unit, text = defaultdict(set), {}
     for name, us in sets.items():
@@ -107,13 +108,46 @@ def plan(data, projects=None, model=classify.MODEL):
         for a, b in combinations(sorted(by_unit[uid]), 2):
             pairs.append((uid, a, b, ({"sentence": text[uid]}, pair_question(a, b))))
     import judged
-    h = hashlib.sha256(f"{model}\t{sorted(runs)}\nprior={prior.VERSION}\n"
-                       f"layers={judged.digest(data, 'pairs', keep_shas(sets))}\n"
-                       f"floor={floor()}\n".encode())
+    # keyed on what is asked (every pair's request, below), the model and the
+    # layers: not on the measure runs' names nor floor.pair_check, which the
+    # dashboards apply to p_keep_a and p_keep_b (16_commitments.sql)
+    h = hashlib.sha256(f"{model}\nprior={prior.VERSION}\n"
+                       f"layers={judged.digest(data, 'pairs', keep_shas(sets))}\n".encode())
     for _, _, _, (state, qs) in pairs:
-        h.update(classify.request_sha(classify.request_body(state, qs, model)).encode())
+        h.update(classify.request_sha_of(state, qs, model).encode())
     known = {(name, uid): u for name, us in sets.items() for uid, u in us.items()}
-    return pairs, where(data, "checks", f"checks-{h.hexdigest()[:12]}"), known
+    out = _adopt(data, where(data, "checks", f"checks-{h.hexdigest()[:12]}"), pairs, model)
+    return pairs, out, known
+
+
+def _adopt(data, out, pairs, model):
+    """out, or a written checks run that holds exactly these pairs, each
+    with the scores the stored answers to today's questions give
+    (src/adopt.py): the same work, so it is reused, not rebuilt."""
+    import adopt
+    got = adopt.resolve(data, "checks", out)
+    if got != out or os.path.exists(os.path.join(out, "manifest.json")):
+        return got
+    want = {(uid, a, b): req for uid, a, b, req in pairs}
+    for folder, m in adopt.manifests(data, "checks", "checks-"):
+        if m.get("model") != model or m.get("pairs") != len(want):
+            continue
+        with open(os.path.join(folder, "pairs.csv"), newline="", encoding="utf-8") as fh:
+            rows = {(r["unit_id"], r["set_a"], r["set_b"]): r for r in csv.DictReader(fh)}
+        if set(rows) != set(want):
+            continue
+        import answers
+        keys = list(want)
+        got_, st = answers.ask(model, [want[k] for k in keys], data, dry_run=True)
+        if st["to_ask"] or not all(got_):
+            continue
+        same = all(abs(classify.fit_score(g["keep_a"]) - float(rows[k]["score_a"])) < 5e-4 and
+                   abs(classify.fit_score(g["keep_b"]) - float(rows[k]["score_b"])) < 5e-4
+                   for k, g in zip(keys, got_))
+        if same:
+            return adopt.record(data, "checks", out, folder,
+                                "same pairs, each score the stored answer to today's question")
+    return out
 
 
 def keep_shas(sets):

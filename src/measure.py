@@ -15,10 +15,12 @@ The funnel, each level cheaper than the next and each one's loss measurable:
   3. The decision model reads each unit once: the measure's graded question
      about the sentence. Nothing else is asked here. Each score (the probabilities of the grades the control panel counts,
      2 and 3) goes through the probability layer (src/posterior.py) when one
-     is fitted, and the measure's floor (control panel) reads the result:
-     the one decision (is_committed).
+     is fitted. The run asks at floor.ask; the measure's floor (control
+     panel floor.<set>) is applied when the units are read (read_units):
+     the one decision (is_committed). A decision floor is in no run key, so
+     moving it asks and rebuilds nothing.
   4. Relevance feedback (src/feedback.py, the asset map's too): the vectors
-     of the committed units are averaged
+     of the units at floor.ask are averaged
      into a centroid (minus feedback.negative_weight times the centroid of
      the units that do not count); the corpus is re-ranked by cosine to it;
      the next feedback.batch unseen units are graded in one parallel batch;
@@ -33,7 +35,8 @@ The funnel, each level cheaper than the next and each one's loss measurable:
      their own score and every earlier sentence's in the paragraph, each
      weighted by asset.decay per sentence back, reaches asset.paragraph_floor
      (level paragraph); else none. Every winner with asset.multiple, the best
-     only without.
+     only without. Applied when the units are read (read_units, from the
+     asset map cached once per run), never stored in the run.
 
 Every threshold here is a control-panel setting
 (inputs/config/control_panel.csv, src/panel.py).
@@ -62,16 +65,17 @@ Writes data/classify/answers/<model>/...                 every answer, once
        and, with --publish (the default from the command line), its rows in
        Postgres (src/store.py)
 
-<version> is a SHA-256 over the search run, the patterns, the asset map
-version, the exact questions, the model, the prior inputs' version and the
-feedback settings. The units a feedback round reads depend on the
+<version> is a SHA-256 over what decides which units are asked: the search
+run, the gate, the patterns, the exact questions, the model, the prior
+inputs' version, the feedback settings and floor.ask. No decision floor and
+no asset setting is in it. The units a feedback round reads depend on the
 stored answers, which are the record, so an unchanged run reads the store
 and asks nothing.
 
   ./wbg measure cra                      cosine pool, feedback rounds
   ./wbg measure cra --dry-run            round 0 only, no request
 """
-import argparse, csv, hashlib, json, os, re, sys, time
+import argparse, csv, hashlib, json, os, pickle, re, sys, time
 from collections import defaultdict
 
 import numpy
@@ -160,6 +164,11 @@ def is_committed(u, floor=None):
 
 
 DEFAULT_FLOOR = float(panel.get("floor.default", 0.5))
+# The floor the stages ask at: what the feedback rounds count as a yes, and
+# which units the stages after this one (types, pair checks, package links)
+# ask about. At or below every decision floor, so a decision floor moves
+# without a new run or a new question (control panel floor.ask).
+ASK_FLOOR = float(panel.get("floor.ask", 0.5))
 # grade, expected and p0-p3 are the model's raw answer, kept as the record;
 # no decision reads them (is_committed reads the posterior).
 UNIT_COLS = ["label_id", "unit_id", "kind", "paragraph_id", "doc_id", "project_ids",
@@ -193,6 +202,19 @@ def asset_map(data, projects=None, vector_of=None, projects_of=None, folder=None
     if not folder:
         return {}, ""
     layers = classify.asset_layers(data, folder, vector_of, projects_of) if vector_of else {}
+    run = os.path.basename(folder)
+    # scores.csv is large (13 rows a sentence): parsed once per run and
+    # layers, then read from a pickle beside the other caches
+    key = (run, classify.asset_layers_digest(data, folder) if layers else "raw",
+           "|".join(map(str, panel.grades())))
+    if key in _ASSET_MAPS:
+        return _ASSET_MAPS[key], run
+    cache = where(data, "cache", "asset_map-" + hashlib.sha256(
+        json.dumps(key).encode()).hexdigest()[:16] + ".pickle")
+    if os.path.exists(cache):
+        with open(cache, "rb") as fh:
+            _ASSET_MAPS[key] = pickle.load(fh)
+        return _ASSET_MAPS[key], run
     out = {}
     with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
@@ -202,7 +224,88 @@ def asset_map(data, projects=None, vector_of=None, projects_of=None, folder=None
             if r["label_id"] in layers:
                 p = layers[r["label_id"]].probability(r["unit_id"], p)
             out.setdefault(r["unit_id"], {})[r["label_id"]] = p
-    return out, os.path.basename(folder)
+    os.makedirs(os.path.dirname(cache), exist_ok=True)
+    with open(cache + ".tmp", "wb") as fh:
+        pickle.dump(out, fh, protocol=pickle.HIGHEST_PROTOCOL)
+    os.replace(cache + ".tmp", cache)
+    _ASSET_MAPS[key] = out
+    return out, run
+
+
+_ASSET_MAPS = {}
+_LINKS = {}
+
+
+def unit_links(data, projects=None):
+    """{unit_id: the asset columns of units.csv} for every indexed sentence,
+    as the control panel reads the asset map now (sentence_assets: asset.floor,
+    asset.decay, asset.paragraph_floor, asset.multiple), through the asset
+    layers when posterior.on. Computed once per process; {} without an asset
+    map (None without one: the rows keep their stored columns)."""
+    folder = classify.current_run(ASSET_SET, data, projects=projects)
+    if not folder or not os.path.exists(where(data, "embeddings", "sentence_index.csv")):
+        return None                     # no asset map: the stored columns stand
+    key = (os.path.abspath(str(data)), tuple(sorted(projects or [])), os.path.basename(folder),
+           LINK_MIN, DECAY, PARA_MIN, MULTIPLE, bool(panel.get("posterior.on", True)))
+    if key in _LINKS:
+        return _LINKS[key]
+    vector_of = projects_of = None
+    if panel.get("posterior.on", True):
+        vector_of, projects_of = posterior.lookups(data)
+    own_all, run = asset_map(data, projects, vector_of, projects_of, folder=folder)
+    out = {}
+    if run:
+        before = {}
+        for uid, para in index_order(data):
+            earlier = before.setdefault(para, [])
+            own = own_all.get(uid, {})
+            win, level = sentence_assets(own, [own_all.get(u, {}) for u in reversed(earlier)])
+            earlier.append(uid)
+            if not own and not win:
+                continue
+            best = max(own, key=own.get) if own else ""
+            ids = "|".join(a for a, _ in win)
+            a, p = win[0] if win else ("", 0.0)
+            out[uid] = {"asset_unit": best, "asset_p_unit": f"{own[best]:.4f}" if best else "",
+                        "assets_yes": ids if level == "unit" else "",
+                        "asset_para": a if level == "paragraph" else "",
+                        "asset_p_para": f"{p:.4f}" if level == "paragraph" else "",
+                        "asset_link": a, "asset_link_level": level,
+                        "asset_link_p": f"{p:.4f}" if a else "",
+                        "asset_links": ids,
+                        "asset_links_p": "|".join(f"{q:.4f}" for _, q in win)}
+    _LINKS[key] = out
+    return out
+
+
+NO_LINK = {"asset_unit": "", "asset_p_unit": "", "assets_yes": "", "asset_para": "",
+           "asset_p_para": "", "asset_link": "", "asset_link_level": "none", "asset_link_p": "",
+           "asset_links": "", "asset_links_p": ""}
+
+
+def index_order(data):
+    """[(unit_id, paragraph_id)] of the sentence index, in reading order."""
+    with open(where(data, "embeddings", "sentence_index.csv"), newline="", encoding="utf-8") as fh:
+        return [(r["unit_id"], r["paragraph_id"]) for r in csv.DictReader(fh)]
+
+
+def read_units(folder, data=None, links=True, name=None):
+    """A measure run's units.csv rows as the control panel reads them now:
+    committed at the measure's floor (floor.<set>, else floor.default; the
+    run itself asked at floor.ask) and, with links, each unit's assets from
+    the asset map (unit_links). Every reader of a measure run reads it here,
+    so a moved floor or asset setting needs no new run."""
+    name = name or os.path.basename(folder.rstrip("/")).rsplit("-", 1)[0]
+    floor = panel.floor(name)
+    floor = DEFAULT_FLOOR if floor is None else floor
+    with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    got = unit_links(data) if links and data is not None else None
+    for u in rows:
+        u["committed"] = "true" if is_committed({**u, "committed": ""}, floor) else "false"
+        if got is not None:
+            u.update(got.get(u["unit_id"], NO_LINK))
+    return rows
 
 
 def sentence_assets(own, earlier, decay=None, floor=None, paragraph_floor=None, multiple=None):
@@ -250,12 +353,37 @@ def sentence_asset(own, earlier, decay=None, floor=None, paragraph_floor=None, m
     return "", (max(total.values()) if total else 0.0), "none"
 
 
+def _stamp(*paths):
+    return tuple((os.path.getmtime(p), os.path.getsize(p)) if os.path.exists(p) else None
+                 for p in paths)
+
+
+_MEMO = {}
+
+
+def _memo(name, data, paths, make):
+    """make() once per process while the files it reads are unchanged: the
+    evaluation and the stages read the same corpus tables many times."""
+    key = (name, os.path.abspath(str(data)))
+    stamp = _stamp(*paths)
+    if _MEMO.get(key, (None,))[0] != stamp:
+        _MEMO[key] = (stamp, make())
+    return _MEMO[key][1]
+
+
 def unit_texts(data, index):
     """{unit_id: text as embedded} (a list item with its lead-in)."""
     import units
-    every = {u["unit_id"]: u for u in units.search_units(data)}
+    every = _memo("search_units", data, [where(data, "appraisal", f) for f in
+                                         ("paragraphs.csv", "sentences.csv")],
+                  lambda: {u["unit_id"]: u for u in units.search_units(data)})
+    texts = _memo("unit_texts", data, [where(data, "appraisal", f) for f in
+                                       ("paragraphs.csv", "sentences.csv")], dict)
     cache, out = {}, {}
     for r in index:
+        if r["unit_id"] in texts:
+            out[r["unit_id"]] = texts[r["unit_id"]]
+            continue
         u = every[r["unit_id"]]
         d = u["doc_id"]
         if d not in cache:
@@ -264,13 +392,17 @@ def unit_texts(data, index):
         body = cache[d][int(u["char_start"]):int(u["char_end"])]
         if u.get("lead_in_start"):
             body = cache[d][int(u["lead_in_start"]):int(u["lead_in_end"])] + "\n" + body
-        out[r["unit_id"]] = body
+        out[r["unit_id"]] = texts[r["unit_id"]] = body
     return out
 
 
 def paragraph_rows(data):
-    with open(where(data, "appraisal", "paragraphs.csv"), newline="", encoding="utf-8") as fh:
-        return {r["paragraph_id"]: r for r in csv.DictReader(fh)}
+    path = where(data, "appraisal", "paragraphs.csv")
+
+    def make():
+        with open(path, newline="", encoding="utf-8") as fh:
+            return {r["paragraph_id"]: r for r in csv.DictReader(fh)}
+    return _memo("paragraphs", data, [path], make)
 
 
 def _text(cache, data, doc_id):
@@ -331,24 +463,22 @@ class Run:
                          # the prior inputs stored with every unit (src/prior.py)
                          "prior": prior.VERSION,
                          "projects": sorted(projects) if projects else None,
-                         # the control panel's readings this run applies
-                         "panel": {**panel.items("read."), **panel.items("asset."),
-                                   **panel.items("posterior.")}}
+                         # what the score is read as (the grades counted)
+                         "panel": panel.items("read."),
+                         # the floor the feedback rounds count a yes at; the
+                         # measure's own floor is applied when units are read
+                         "ask_floor": ASK_FLOOR}
         self.projects = sorted(projects) if projects else None
-        # The floor is a reading, not a question (control panel, floor.*).
         self.floor = panel.floor(name)
         if self.floor is None:
             self.floor = DEFAULT_FLOOR
-        self.settings["floor"] = self.floor
         if not os.path.exists(os.path.join(self.search_run, "manifest.json")):
             raise SystemExit(f"measure: {name} has no search run for the current index; "
                              f"run ./wbg search {name} first")
         self.patterns = labels_mod.load_patterns(name)
         self.assets = [a for a in labels_mod.load_set(ASSET_SET) if a["active"] == "true"]
-        asset_folder = classify.current_run(ASSET_SET, data, projects=self.projects)
-        self.asset_run = os.path.basename(asset_folder) if asset_folder else ""
-        # The asset layers change each sentence's asset, so they are part of the key.
-        self.asset_layers = classify.asset_layers_digest(data, asset_folder)
+        # The asset map decides no unit's question: a unit's assets are read
+        # with its rows (read_units), so the asset run is in no key here.
         # The probability layer (src/posterior.py) fitted by the evaluation of a
         # graded sheet (./wbg check <set> --evaluate) on the same question:
         # applied to every score as p_committed_calibrated, which the floor
@@ -358,19 +488,47 @@ class Run:
         self.layer_path = where(data, "labels", f"{name}_posterior.json")
         self.calibration = posterior.digest(posterior.read_spec(self.layer_path, self.question_sha))
         h = hashlib.sha256()
-        h.update(f"{os.path.basename(self.search_run)}\t{self.asset_run}\t{self.asset_layers}\t"
+        h.update(f"{os.path.basename(self.search_run)}\t"
                  f"{json.dumps(self.settings, sort_keys=True)}\n".encode())
         for pt in self.patterns:
             h.update(f"p\t{pt['label_id']}\t{pt['pattern_id']}\t{pt['pattern']}\n".encode())
         h.update(json.dumps(self.qs, sort_keys=True).encode())
         h.update(json.dumps(self.calibration, sort_keys=True).encode())
-        self.out = where(data, "measures", f"{name}-{h.hexdigest()[:12]}")
+        self.out = self._adopt(where(data, "measures", f"{name}-{h.hexdigest()[:12]}"))
         # The run folder is known from the inputs' names alone. A reader
         # (the load, the types stage, the evaluation) stops here; what
         # follows reads the corpus and is only for a run or a check sheet.
         self._loaded = False
         if build:
             self.load_corpus()
+
+    def _adopt(self, out):
+        """out, or a written run of this measure that asked exactly what
+        this run would (src/adopt.py): the same search run, questions,
+        patterns, layer and settings, its feedback rounds counted at
+        floor.ask. Its units and answers are then what this run would
+        write, so it is reused, not rebuilt."""
+        import adopt
+        got = adopt.resolve(self.data, "measures", out)
+        if got != out or os.path.exists(os.path.join(out, "manifest.json")):
+            return got
+        same = ("model", "top", "min_cosine", "batch", "min_yield", "max_rounds",
+                "negative_weight", "prior", "projects")
+        for folder, m in adopt.manifests(self.data, "measures", f"{self.name}-"):
+            if os.path.basename(folder).rsplit("-", 1)[0] != self.name:
+                continue
+            ask = m.get("ask_floor", m.get("floor"))
+            read = {k: v for k, v in (m.get("panel") or {}).items() if k.startswith("read.")}
+            if (any(m.get(k) != self.settings[k] for k in same) or ask is None
+                    or float(ask) != ASK_FLOOR or read != self.settings["panel"]
+                    or m.get("search_run") != os.path.basename(self.search_run)
+                    or m.get("questions") != self.qs or m.get("calibration") != self.calibration
+                    or m.get("patterns") != len(self.patterns)):
+                continue
+            return adopt.record(self.data, "measures", out, folder,
+                                "same search run, questions, patterns, layer and settings; "
+                                "rounds counted at floor.ask")
+        return out
 
     def load_corpus(self):
         """The paragraphs, the index, the matrix, the texts, the commitment
@@ -387,15 +545,6 @@ class Run:
                                     if u in self.row_of else None)
         proj = {r["unit_id"]: r.get("project_ids", "") for r in self.index}
         self.projects_of = lambda u: proj.get(u, "")
-        self.unit_assets, _ = asset_map(data, self.projects, self.vector_of, self.projects_of)
-        # Each paragraph's sentences in reading order, for the asset of a
-        # sentence that names none (the decayed sum over those before it).
-        self.before = {}
-        seen = {}
-        for r in self.index:
-            prior = seen.setdefault(r["paragraph_id"], [])
-            self.before[r["unit_id"]] = list(reversed(prior))
-            prior.append(r["unit_id"])
         self.layer = posterior.load(self.layer_path, self.question_sha, self.vector_of,
                                     self.projects_of)
         self.texts = unit_texts(data, self.index)
@@ -440,7 +589,6 @@ class Run:
                 "sent": "false", "committed": "false",
                 **self.prior_of(r, text),
                 "text": text, "_para": para}
-        self.link_into(row)
         return row
 
     def candidate_rows(self):
@@ -492,87 +640,101 @@ class Run:
         if self.layer:
             sc = self.layer.probability(row["unit_id"], sc)
         row["p_committed_calibrated"] = f"{sc:.4f}"
+        # committed here is at floor.ask (what the feedback rounds count);
+        # readers apply the measure's own floor (read_units)
         row["committed"] = "true" if is_committed(
-            {**row, "sent": "true", "committed": ""}, self.floor) else "false"
-
-    def link_into(self, row):
-        """The sentence's assets from the sentence asset map (sentence_assets):
-        its own at asset.floor (assets_yes; level 'unit'), else the decayed
-        sums over the earlier sentences of its paragraph (asset_para; level
-        'paragraph'), else none; every winner with asset.multiple
-        (asset_links, best first), and the best one alone in asset_link."""
-        uid = row["unit_id"]
-        own = self.unit_assets.get(uid, {})
-        earlier = [self.unit_assets.get(u, {}) for u in self.before.get(uid, [])]
-        best = max(own, key=own.get) if own else ""
-        win, level = sentence_assets(own, earlier)
-        ids = "|".join(a for a, _ in win)
-        a, p = win[0] if win else ("", 0.0)
-        row.update({"asset_unit": best, "asset_p_unit": f"{own[best]:.4f}" if best else "",
-                    "assets_yes": ids if level == "unit" else "",
-                    "asset_para": a if level == "paragraph" else "",
-                    "asset_p_para": f"{p:.4f}" if level == "paragraph" else "",
-                    "asset_link": a, "asset_link_level": level,
-                    "asset_link_p": f"{p:.4f}" if a else "",
-                    "asset_links": ids,
-                    "asset_links_p": "|".join(f"{q:.4f}" for _, q in win)})
+            {**row, "sent": "true", "committed": ""}, ASK_FLOOR) else "false"
 
     # ---- a batch to the model
 
     def grade(self, rows, rnd, api_key, dry_run, workers):
         """The measure's question, through the answer store, for the rows
         in the pool. Returns (calls, cost, failures)."""
-        import answers
-        model = self.settings["model"]
-        sent = []
-        for row in rows:
-            row["sent"] = "true"
-            row["_state"] = self.state_of(row)
-            sent.append(row)
-        requests_ = [(r["_state"], self.qs) for r in sent]
-        got, st = answers.ask(model, requests_, self.data,
-                              api_key=api_key, log=self.log, workers=workers, dry_run=True)
-        self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} asked; measure "
-                 f"question: {st['to_ask']:,} to ask (about US${st['estimate_usd']:.3f})")
-        if dry_run:
-            return 0, 0.0, []
-        calls, cost = 0, 0.0
-        if st["to_ask"]:
-            if not api_key:
-                raise SystemExit("measure: no credential: set $WBG_OPENROUTER_KEY")
-            got, st = answers.ask(model, requests_, self.data,
-                                  api_key=api_key, log=self.log, workers=workers)
-            calls, cost = st["calls"], st["cost_usd"]
-            if st["failures"] or not all(got):
-                return calls, cost, st["failures"] or [("", "an answer is missing")]
-        for row, g in zip(sent, got):
-            self.grade_into(row, g)
-        return calls, cost, []
+        return grade_many([(self, rows, rnd)], api_key, dry_run, workers, self.log)[self.name]
 
     # ---- relevance feedback
 
-    def feedback_rows(self, graded, rnd):
-        """The next batch: the unseen units nearest the Rocchio query, in
-        index order on ties. The query is the centroid of the committed
-        units' vectors minus NEGATIVE_WEIGHT times the centroid of the units
-        asked and not committed: the first run showed the raw centroid pulls in the
-        measure's neighbourhood ("resilient infrastructure" in general), and
-        the rejected units are exactly what that neighbourhood looks like."""
+    def feedback_query(self, graded):
+        """The Rocchio query of the units graded so far, or None: the
+        centroid of the committed units' vectors minus NEGATIVE_WEIGHT times
+        the centroid of the units asked and not committed. The first run
+        showed the raw centroid pulls in the measure's neighbourhood
+        ("resilient infrastructure" in general), and the rejected units are
+        exactly what that neighbourhood looks like."""
         import feedback
         pos = [self.row_of[r["unit_id"]] for r in graded
                if r["sent"] == "true" and r["committed"] == "true"]
         neg = [self.row_of[r["unit_id"]] for r in graded
                if r["sent"] == "true" and r["committed"] != "true"]
-        q = feedback.query(self.matrix, pos, neg, NEGATIVE_WEIGHT)
-        if q is None:
-            return []
-        (order, sims), = feedback.ranked(self.matrix, [q])
+        return feedback.query(self.matrix, pos, neg, NEGATIVE_WEIGHT)
+
+    def feedback_pick(self, graded, rnd, order, sims):
+        """The next batch: the unseen units first in `order` (the corpus
+        ranked by the query, index order on ties)."""
+        import feedback
         seen = {r["unit_id"] for r in graded}
         pick = feedback.next_rows(
             order, lambda i: self.index[i]["unit_id"] not in seen and
             classify.in_scope(self.index[i], self.projects), self.settings["batch"])
         return [self.base_row(self.index[i], "feedback", rnd, k + 1, f"{float(sims[i]):.6f}")
                 for k, i in enumerate(pick)]
+
+    def feedback_rows(self, graded, rnd):
+        """The next batch of one measure on its own (measure_many ranks every
+        measure's query in one pass)."""
+        import feedback
+        q = self.feedback_query(graded)
+        if q is None:
+            return []
+        (order, sims), = feedback.ranked(self.matrix, [q])
+        return self.feedback_pick(graded, rnd, order, sims)
+
+
+def grade_many(batches, api_key, dry_run, workers, log=print):
+    """Every measure's batch [(run, rows, round)] through the answer store
+    in one ask, so the requests of all the measures share the workers.
+    Each measure's requests are the ones it would make alone (a batch holds
+    one question set), so the answers are the same. Returns {name: (calls,
+    cost, failures)}."""
+    import answers
+    if not batches:
+        return {}
+    model = batches[0][0].settings["model"]
+    data = batches[0][0].data
+    requests_, tags, sent = [], [], []
+    for run, rows, _ in batches:
+        assert run.settings["model"] == model
+        for row in rows:
+            row["sent"] = "true"
+            row["_state"] = run.state_of(row)
+            requests_.append((row["_state"], run.qs))
+            tags.append(run.name)
+            sent.append((run, row))
+    _, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                        dry_run=True, read_answers=False, tags=tags)
+    for run, rows, rnd in batches:
+        b = st["by_tag"].get(run.name) or {"to_ask": 0, "estimate_usd": 0.0}
+        run.log(f"  {run.name} round {rnd}: {len(rows):,} units, {len(rows):,} asked; measure "
+                f"question: {b['to_ask']:,} to ask (about US${b['estimate_usd']:.3f})")
+    if dry_run:
+        return {run.name: (0, 0.0, []) for run, _, _ in batches}
+    if st["to_ask"] and not api_key:
+        raise SystemExit("measure: no credential: set $WBG_OPENROUTER_KEY")
+    # asks only what is missing (none, often) and reads the answers
+    got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                          tags=tags)
+    out = {}
+    for run, _, _ in batches:
+        b = st["by_tag"].get(run.name) or {"calls": 0, "cost_usd": 0.0, "failures": []}
+        out[run.name] = (b["calls"], b["cost_usd"], list(b["failures"]))
+    for (run, row), g in zip(sent, got):
+        if g is None:
+            if not out[run.name][2]:
+                out[run.name][2].append(("", "an answer is missing"))
+            continue
+        if not out[run.name][2]:
+            run.grade_into(row, g)
+    return out
 
 
 def report_lines(run, rows, rounds, calls, cost, seconds, served):
@@ -589,7 +751,7 @@ def report_lines(run, rows, rounds, calls, cost, seconds, served):
              + (f" or top {s['top']}" if s["top"] else "")
              + f", batch {s['batch']}, min yield {s['min_yield']})",
              f"  search run {os.path.basename(run.search_run)}; {len(run.patterns)} pattern(s); "
-             f"asset map {run.asset_run or 'none'}; probability layer "
+             f"asked at floor.ask {ASK_FLOOR}; probability layer "
              f"{'fitted' if run.calibration else 'none (the model score stands)'}",
              f"  this run: {calls:,} calls, US${cost:.4f}, {seconds:.0f}s; models served: {served}",
              "  rounds (units graded / committed): " + ", ".join(
@@ -642,51 +804,95 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
             publish=False, **kw):
     """One measure through the funnel; with publish=True its rows go to
     Postgres as the last step (src/store.py)."""
-    run = Run(name, data, log=log, **kw)
-    if os.path.exists(os.path.join(run.out, "manifest.json")):
-        log(f"{name}: already written: {run.out}")
-        if publish:
-            import store
-            store.try_publish(data, sets=[name], projects=run.projects, log=log)
-        return run.out
-    log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades -> {run.out}")
-    t0 = time.time()
-    rows = run.candidate_rows()
-    rounds, calls, cost = {}, 0, 0.0
-    top = len(run.scale) - 1
-    rnd = 0
-    while True:
-        c, k, failures = run.grade(rows if rnd == 0 else batch, rnd, api_key, dry_run, workers)
-        calls += c
-        cost += k
-        if failures:
-            # Paid calls are paid whether or not the run completes: the
-            # ledger must match the provider's bill.
-            classify.record_spend(data, "measure", name, run.settings["model"], calls,
-                                  cost, time.time() - t0, "failed")
-            log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
-            for sha, err in failures[:5]:
-                log(f"    {sha[:12]}: {err}")
-            return None
-        if dry_run:
-            log("  --dry-run: round 0 only; no request made, nothing written")
-            return None
-        this = rows if rnd == 0 else batch
-        got = sum(1 for r in this if r["sent"] == "true" and r["committed"] == "true")
-        rounds[str(rnd)] = {"graded": sum(1 for r in this if r["sent"] == "true"),
-                            "committed": got}
-        log(f"    committed this round: {got}")
-        if rnd > 0 and got < run.settings["min_yield"]:
-            break
-        if rnd >= run.settings["max_rounds"]:
-            break
-        rnd += 1
-        batch = run.feedback_rows(rows, rnd)
-        if not batch:
-            break
-        rows.extend(batch)
-    seconds = time.time() - t0
-    classify.record_spend(data, "measure", name, run.settings["model"], calls, cost, seconds,
+    return measure_many([name], data, api_key=api_key, dry_run=dry_run, log=log,
+                        workers=workers, publish=publish, **kw).get(name)
+
+
+def measure_many(names, data, *, api_key="", dry_run=False, log=print,
+                 workers=classify.WORKERS, publish=False, **kw):
+    """Several measures through the funnel in one process: the corpus (the
+    paragraphs, the sentence index, the texts) is read once, every measure's
+    round is one ask (grade_many) and every measure's feedback query is
+    ranked in one pass over the matrix (feedback.ranked). Each measure's
+    rows, rounds and answers are what it would get alone. Returns {name:
+    run folder, or None where it failed or was a dry run}."""
+    import feedback
+    out, live = {}, []
+    for name in names:
+        # the run folder is known from the inputs' names: a run already
+        # written is found before the corpus (the matrix, 155,000 texts) is read
+        run = Run(name, data, log=log, build=False, **kw)
+        if os.path.exists(os.path.join(run.out, "manifest.json")):
+            log(f"{name}: already written: {run.out}")
+            if publish:
+                import store
+                store.try_publish(data, sets=[name], projects=run.projects, log=log)
+            out[name] = None if dry_run else run.out
+            continue
+        run.load_corpus()
+        log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades -> {run.out}")
+        rows = run.candidate_rows()
+        live.append({"run": run, "rows": rows, "batch": rows, "rnd": 0, "rounds": {},
+                     "calls": 0, "cost": 0.0, "t0": time.time()})
+    while live:
+        res = grade_many([(m["run"], m["batch"], m["rnd"]) for m in live], api_key, dry_run,
+                         workers, log)
+        going = []
+        for m in live:
+            run = m["run"]
+            c, k, failures = res[run.name]
+            m["calls"] += c
+            m["cost"] += k
+            if failures:
+                # Paid calls are paid whether or not the run completes: the
+                # ledger must match the provider's bill.
+                classify.record_spend(data, "measure", run.name, run.settings["model"],
+                                      m["calls"], m["cost"], time.time() - m["t0"], "failed")
+                log(f"  {run.name}: {len(failures)} request(s) failed; nothing written. "
+                    f"Run again to resume.")
+                for sha, err in failures[:5]:
+                    log(f"    {sha[:12]}: {err}")
+                out[run.name] = None
+                continue
+            if dry_run:
+                log(f"  {run.name} --dry-run: round 0 only; no request made, nothing written")
+                out[run.name] = None
+                continue
+            this = m["batch"]
+            got = sum(1 for r in this if r["sent"] == "true" and r["committed"] == "true")
+            m["rounds"][str(m["rnd"])] = {"graded": sum(1 for r in this if r["sent"] == "true"),
+                                          "committed": got}
+            log(f"    {run.name} committed this round: {got}")
+            if (m["rnd"] > 0 and got < run.settings["min_yield"]) or \
+                    m["rnd"] >= run.settings["max_rounds"]:
+                out[run.name] = _write(run, m, publish)
+                continue
+            m["q"] = run.feedback_query(m["rows"])
+            if m["q"] is None:
+                out[run.name] = _write(run, m, publish)
+                continue
+            going.append(m)
+        # every measure's next batch from one pass over the matrix
+        if going:
+            ranked = feedback.ranked(going[0]["run"].matrix, [m["q"] for m in going])
+        live = []
+        for m, (order, sims) in zip(going, ranked if going else []):
+            m["rnd"] += 1
+            m["batch"] = m["run"].feedback_pick(m["rows"], m["rnd"], order, sims)
+            if not m["batch"]:
+                out[m["run"].name] = _write(m["run"], m, publish)
+                continue
+            m["rows"].extend(m["batch"])
+            live.append(m)
+    return out
+
+
+def _write(run, m, publish):
+    """Write a finished measure's run folder, its report and its spend."""
+    data, log, rows = run.data, run.log, m["rows"]
+    rounds, calls, cost = m["rounds"], m["calls"], m["cost"]
+    seconds = time.time() - m["t0"]
+    classify.record_spend(data, "measure", run.name, run.settings["model"], calls, cost, seconds,
                           os.path.basename(run.out))
     served = defaultdict(int)
     for r in rows:
@@ -701,9 +907,8 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         w = csv.DictWriter(fh, fieldnames=UNIT_COLS, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
-    lines = report_lines(run, rows, rounds, calls, cost, seconds, dict(served))
-    manifest = dict(run.settings, label_set=name, search_run=os.path.basename(run.search_run),
-                    asset_map=run.asset_run, patterns=len(run.patterns), calibration=run.calibration, version=os.path.basename(run.out).rsplit("-", 1)[1],
+    manifest = dict(run.settings, label_set=run.name, search_run=os.path.basename(run.search_run),
+                    patterns=len(run.patterns), calibration=run.calibration, version=os.path.basename(run.out).rsplit("-", 1)[1],
                     units_seen=len(rows), graded=sum(1 for r in rows if r["sent"] == "true"),
                     rounds=rounds, questions=run.qs, question_sha256=classify.question_shas(run.qs),
                     scale=run.scale, models_served=dict(served), calls_this_run=calls,
@@ -713,18 +918,22 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
     with open(os.path.join(part, "manifest.json"), "w", encoding="utf-8") as fh:
         json.dump(manifest, fh, indent=1, ensure_ascii=False, sort_keys=True)
     os.replace(part, run.out)
-    report = where(data, "reports", f"measure_{name}.txt")
+    # the report reads the run as every reader does: the measure's floor and
+    # the assets as the panel reads them now
+    lines = report_lines(run, read_units(run.out, data), rounds, calls, cost, seconds,
+                         dict(served))
+    report = where(data, "reports", f"measure_{run.name}.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + f"\n  -> {run.out}\n")
     for line in lines:
         log(line)
-    if any(m != run.settings["model"] for m in served):
+    if any(x != run.settings["model"] for x in served):
         log(f"  warning: a snapshot other than the one requested served some units: {dict(served)}")
     log(f"  wrote {run.out}")
     if publish:
         import store
-        store.try_publish(data, sets=[name], projects=run.projects, log=log)
+        store.try_publish(data, sets=[run.name], projects=run.projects, log=log)
     return run.out
 
 

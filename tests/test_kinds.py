@@ -151,6 +151,7 @@ def test_units_no_type_claims_get_an_oth_type_from_the_gap_step(store, monkeypat
     data, lab, gen_calls, dec_calls = store
     monkeypatch.setenv("WBG_DATA", data)
     monkeypatch.setattr(types_stage, "OTH_MIN", 1)
+    monkeypatch.setattr(types_stage, "TYPE_GAPS", True)     # re-proposing is asked for
     _csv(os.path.join(lab, "cra_types.csv"),
          ["measure_id", "type_id", "type_name", "definition", "active"],
          [{"measure_id": "cra", "type_id": "mapping", "type_name": "Hazard mapping",
@@ -185,9 +186,10 @@ def test_every_type_at_the_floor_counts(store, monkeypatch):
            "definition": "assessment of one site", "active": "true"}])
     monkeypatch.setattr(types_stage, "TYPE_FLOOR", 0.04)     # the others answer 0.05
     out = types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
-    rows = {r["unit_id"]: r for r in csv.DictReader(open(os.path.join(out, "assignments.csv")))}
+    rows = {r["unit_id"]: r for r in types_stage.read_assignments(out, "cra", data)}
     assert rows["u1"]["types_yes"] == "mapping|site" and rows["u1"]["best_type"] == "mapping"
+    # the rule is a reading: the same run, read again, nothing asked or rebuilt
     monkeypatch.setattr(types_stage, "TYPE_MULTIPLE", False)
-    out = types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1)
-    rows = {r["unit_id"]: r for r in csv.DictReader(open(os.path.join(out, "assignments.csv")))}
+    assert types_stage.assign("cra", data, api_key="k", log=lambda *_: None, workers=1) == out
+    rows = {r["unit_id"]: r for r in types_stage.read_assignments(out, "cra", data)}
     assert rows["u1"]["types_yes"] == "mapping"

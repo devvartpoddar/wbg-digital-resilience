@@ -57,7 +57,7 @@ The method is split by stage so a change reads only its part. **When you change 
 | 4 | `docs/method/checks-and-postgres.md` | audits, sensitivity, Postgres load and publish, the record of judgement, releases (`audit*.py`, `sensitivity.py`, `load_pg.py`, `store.py`, `schema.py`, `release.py`, `sql/views/01-12`) |
 | 5, 5a | `docs/method/search.md` | search units, embedding, label sets, scoring, the pool (`units.py`, `embed.py`, `search.py`, `labels.py`) |
 | 5b | `docs/method/asset-map.md` | the asset map and how a sentence gets its asset (`classify.py`, `answers.py`) |
-| 5c, 5d | `docs/method/measures.md` | the funnel, pair checks, training and evaluation sheets, types (`measure.py`, `commit_checks.py`, `check_units.py`, `evaluate_activities.py`, `kinds.py`) |
+| 5c, 5d | `docs/method/measures.md` | the funnel, pair checks, training and evaluation sheets, types (`measure.py`, `measure_stage.py`, `commit_checks.py`, `check_units.py`, `evaluate_activities.py`, `kinds.py`) |
 | 5e | `docs/method/links.md` | packages to assets and commitments (`link_packages.py`) |
 | 5f | `docs/method/dashboards.md` | the dashboards' views, package status, requested measures (`sql/views/13-19`, `measure_requests.py`) |
 | 5g | `docs/method/decisions.md` | one decision system for every question: the control panel, the skip rule, the probability layer, the floor; the prior inputs, stored and not yet read (`panel.py`, `skip.py`, `posterior.py`, `prior.py`) |

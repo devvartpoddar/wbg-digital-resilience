@@ -26,6 +26,11 @@ Stored under data/classify/answers/<model>/<aa>/<sha>.json:
 
 An answer is stored only if complete for its type: a score answer with a
 probability for every criterion, a yes/no (noul) answer with its number.
+
+The JSON files are the record. A rebuild reads them through a cache,
+data/cache/answers-<model>.sqlite (sha, the file's text), filled the first
+time a file is read: one query per thousand answers instead of opening each
+file. The cache only ever holds a file's own bytes, and can be thrown away.
 """
 import argparse, glob, hashlib, json, os, sys, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -39,6 +44,63 @@ def _slug(model):
     return model.replace("/", "__").replace(":", "_")
 
 
+_DBS = {}
+
+
+def _db(root_):
+    """The read cache for a model's store (see the module docstring), or None
+    where it cannot be opened."""
+    if root_ in _DBS:
+        return _DBS[root_]
+    import sqlite3
+    try:
+        cache = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(root_))),
+                             "cache", f"answers-{os.path.basename(root_)}.sqlite")
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        con = sqlite3.connect(cache, timeout=60, check_same_thread=False)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("CREATE TABLE IF NOT EXISTS a (sha TEXT PRIMARY KEY, body TEXT NOT NULL)")
+    except Exception:                                  # noqa: BLE001 - a cache, never needed
+        con = None
+    _DBS[root_] = con
+    return con
+
+
+def read_many(root_, shas, bodies=True):
+    """{sha: entry (or True without bodies)} of the stored answers among
+    shas: from the cache, then the files for what it lacks (put in the cache
+    as they are read)."""
+    shas = list(dict.fromkeys(shas))
+    out, con = {}, _db(root_)
+    if con is not None:
+        col = "sha, body" if bodies else "sha"
+        for i in range(0, len(shas), 900):
+            part = shas[i:i + 900]
+            q = f"SELECT {col} FROM a WHERE sha IN ({','.join('?' * len(part))})"
+            for row in con.execute(q, part):
+                out[row[0]] = json.loads(row[1]) if bodies else True
+    fresh = []
+    for sha in shas:
+        if sha in out:
+            continue
+        path = _path(root_, sha)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            entry = json.loads(text)
+        except (OSError, ValueError):
+            continue
+        out[sha] = entry if bodies else True
+        fresh.append((sha, text))
+    if con is not None and fresh:
+        try:
+            with con:
+                con.executemany("INSERT OR IGNORE INTO a (sha, body) VALUES (?, ?)", fresh)
+        except Exception:                              # noqa: BLE001 - a cache, never needed
+            pass
+    return out
+
+
 def root(data, model):
     return where(data, "classify", "answers", _slug(model))
 
@@ -46,6 +108,28 @@ def root(data, model):
 def key(model, state, question):
     return hashlib.sha256(json.dumps({"model": model, "state": state, "question": question},
                                      sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+_PREFIX = {}
+
+
+def keys_of(model, state, qs):
+    """{qid: key(model, state, q)} for one state, byte for byte, serialising
+    the state once and each question once per process (keys over the asset
+    map serialised 443,740 questions of about a kilobyte each)."""
+    tail = (json.dumps(state, sort_keys=True, ensure_ascii=False) + "}").encode("utf-8")
+    out = {}
+    for qid, q in qs.items():
+        hit = _PREFIX.get((model, id(q)))
+        if hit is None or hit[0] is not q:
+            pre = ('{"model": ' + json.dumps(model, ensure_ascii=False) + ', "question": '
+                   + json.dumps(q, sort_keys=True, ensure_ascii=False) + ', "state": ')
+            hit = (q, hashlib.sha256(pre.encode("utf-8")))
+            _PREFIX[(model, id(q))] = hit
+        h = hit[1].copy()
+        h.update(tail)
+        out[qid] = h.hexdigest()
+    return out
 
 
 def _path(root_, sha):
@@ -287,16 +371,29 @@ class CapReached(SystemExit):
 
 
 def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False,
-        aliases=(), batch=None):
+        aliases=(), batch=None, read_answers=True, tags=None):
     """Answers for every request, asking only what is not stored.
     Returns (answers, stats): answers = [{qid: entry}] per request (None for
     a request with a missing answer when nothing could be asked), stats =
     {"to_ask": calls planned, "chars": request characters, "calls", "cost_usd",
-    "failures": [(call sha, error)], "seconds"}."""
+    "failures": [(call sha, error)], "seconds", "stored_items": requests with
+    every answer stored}. With read_answers False (an estimate) nothing stored
+    is opened: whether an answer is stored is a stat of its file, and
+    answers is [None] * len(requests). tags (one per request) split the
+    calls, cost and failures by tag in stats["by_tag"]: several label sets
+    asked in one call (src/measure.py, measure_many) keep their own ledger.
+    A request asked for several tags counts under the first."""
     import classify
     root_ = root(data, model)
-    keys = [{qid: key(model, state, q) for qid, q in qs.items()} for state, qs in requests]
+    keys = [keys_of(model, state, qs) for state, qs in requests]
     todo = {}
+    # every stored answer is looked up once per call, all together (the
+    # cache, then the files): the alias check, the missing check and the
+    # answers returned all read through this
+    memo = read_many(root_, [s for ks in keys for s in ks.values()], bodies=read_answers)
+
+    def stored(sha):
+        return memo.get(sha)
     # Answers asked under an alias of the model (the moving name the asset
     # map once used) count when the snapshot that served them is this model:
     # they are copied under this model's key, never asked again.
@@ -304,27 +401,34 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
         aroot = root(data, alias)
         for (state, qs), ks in zip(requests, keys):
             for qid, q in qs.items():
-                if read(root_, ks[qid]) is None:
+                if stored(ks[qid]) is None:
                     old = read(aroot, key(alias, state, q))
                     if old and old.get("model") == model:
                         write(root_, ks[qid], dict(old, migrated_from=alias))
+                        memo.update(read_many(root_, [ks[qid]], bodies=read_answers))
     batch = BATCH if batch is None else batch
     # what each body answers: [(state, qid, the body's own qid)]
     plan = {}
     groups, seen = {}, set()
-    for (state, qs), ks in zip(requests, keys):
-        missing = {qid: q for qid, q in qs.items() if read(root_, ks[qid]) is None}
+    complete_ = 0
+    tag_of, item_tag = {}, {}
+    tags = list(tags) if tags is not None else [None] * len(requests)
+    for (state, qs), ks, tag in zip(requests, keys, tags):
+        missing = {qid: q for qid, q in qs.items() if stored(ks[qid]) is None}
         if not missing:
+            complete_ += 1
             continue
         if batch > 1:
             k = json.dumps([state, missing], sort_keys=True, ensure_ascii=False)
             if k not in seen:                                  # the same item asks once
                 seen.add(k)
+                item_tag[k] = tag
                 groups.setdefault(json.dumps(missing, sort_keys=True), []).append((state, missing))
             continue
         for body in bodies_for(state, missing, model):
             sha = classify.request_sha(body)
             todo.setdefault(sha, body)                         # the same request asks once
+            tag_of.setdefault(sha, tag)
             plan.setdefault(sha, [(state, body["questions"][q], q) for q in body["questions"]])
     # Items sharing a question set go together, ordered by their state (a
     # sentence's section, component and text), so a batch holds neighbours
@@ -334,11 +438,23 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
         for body, members in batches_for(items, model, batch):
             sha = classify.request_sha(body)
             todo.setdefault(sha, body)
+            first = members[0][0]
+            tag_of.setdefault(sha, item_tag.get(json.dumps(list(first), sort_keys=True,
+                                                           ensure_ascii=False)))
             plan.setdefault(sha, [(it[0], it[1][qid], bq) for it, qid, bq in members])
     chars = sum(len(json.dumps(b, ensure_ascii=False)) for b in todo.values())
     stats = {"to_ask": len(todo), "chars": chars, "calls": 0, "cost_usd": 0.0, "failures": [],
-             "seconds": 0.0,
-             "estimate_usd": chars / 4 / 1e6 * classify.PRICE_PER_MTOK}
+             "seconds": 0.0, "stored_items": complete_,
+             "estimate_usd": chars / 4 / 1e6 * classify.PRICE_PER_MTOK, "by_tag": {}}
+    for t in dict.fromkeys(tags):
+        stats["by_tag"][t] = {"to_ask": 0, "chars": 0, "calls": 0, "cost_usd": 0.0,
+                              "failures": []}
+    for sha, body in todo.items():
+        b = stats["by_tag"][tag_of.get(sha)]
+        b["to_ask"] += 1
+        b["chars"] += len(json.dumps(body, ensure_ascii=False))
+    for b in stats["by_tag"].values():
+        b["estimate_usd"] = b["chars"] / 4 / 1e6 * classify.PRICE_PER_MTOK
     cap = spend_cap(data)
     if todo and not dry_run and cap is not None and \
             _spent_here[0] + stats["estimate_usd"] > cap:
@@ -369,6 +485,9 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                     paid = f.result()
                     stats["cost_usd"] += paid
                     stats["calls"] += 1
+                    b = stats["by_tag"][tag_of.get(futures[f])]
+                    b["cost_usd"] += paid
+                    b["calls"] += 1
                     _spent_here[0] += paid
                     if cap is not None and _spent_here[0] > cap:
                         pool.shutdown(wait=True, cancel_futures=True)
@@ -377,6 +496,8 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                                          f"stored")
                 except classify.TransportError as exc:
                     stats["failures"].append((futures[f], str(exc)[:200]))
+                    stats["by_tag"][tag_of.get(futures[f])]["failures"].append(
+                        (futures[f], str(exc)[:200]))
                 except classify.Refused as exc:
                     pool.shutdown(wait=True, cancel_futures=True)
                     raise SystemExit(f"answers: refused, stopping ({stats['calls']:,} stored so "
@@ -385,9 +506,13 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                     log(f"  {n:,}/{len(todo):,} asked, {stats['calls']:,} stored, "
                         f"{len(stats['failures'])} failed, US${stats['cost_usd']:.3f}")
         stats["seconds"] = time.time() - t0
+    if not read_answers:
+        return [None] * len(keys), stats
+    # what was missing may have been asked since: read those again
+    memo.update(read_many(root_, [s for ks in keys for s in ks.values() if s not in memo]))
     answers = []
     for ks in keys:
-        got = {qid: read(root_, sha) for qid, sha in ks.items()}
+        got = {qid: memo.get(sha) for qid, sha in ks.items()}
         answers.append(got if all(got.values()) else None)
     return answers, stats
 

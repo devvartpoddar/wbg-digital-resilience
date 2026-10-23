@@ -19,7 +19,7 @@ rule's fitted gate, src/skip.py, else the control panel's asset.gate_cosine;
 0 asks every label of every sentence) or that a word pattern of the label
 matches (<set>_patterns.csv, optional); then feedback rounds (src/feedback.py)
 look below the gate, asking the sentences nearest those whose posterior
-reaches asset.floor, until a round yields too few (asset_feedback.* on the
+reaches asset.ask_floor, until a round yields too few (asset_feedback.* on the
 control panel, apart from the measures' feedback.*).
 
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
@@ -254,6 +254,33 @@ def request_sha(body):
                           .encode("utf-8")).hexdigest()
 
 
+_PREFIX = {}
+
+
+def _questions_prefix(model, qs):
+    """The hash of a request's bytes up to its state, for these questions:
+    the same for every sentence asked them, so it is made once. Kept with
+    the question objects, so an id is never reused for others."""
+    items = sorted(qs.items())
+    k = (model, tuple((i, id(q)) for i, q in items))
+    hit = _PREFIX.get(k)
+    if hit is None or any(a is not b for a, (_, b) in zip(hit[0], items)):
+        pre = ('{"model": ' + json.dumps(model, ensure_ascii=False) + ', "questions": '
+               + json.dumps(qs, sort_keys=True, ensure_ascii=False) + ', "state": ')
+        hit = ([q for _, q in items], hashlib.sha256(pre.encode("utf-8")), len(pre))
+        _PREFIX[k] = hit
+    return hit
+
+
+def request_sha_of(state, qs, model):
+    """request_sha(request_body(state, qs, model)), byte for byte, without
+    serialising the questions again for every sentence (a key over 155,000
+    sentences serialised about 2 GB of question text)."""
+    h = _questions_prefix(model, qs)[1].copy()
+    h.update((json.dumps(state, sort_keys=True, ensure_ascii=False) + "}").encode("utf-8"))
+    return h.hexdigest()
+
+
 # ------------------------------------------------------------------- the store
 
 def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
@@ -386,7 +413,8 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     the measures' rule); a sentence with no question is not sent. routes =
     {(unit_id, label_id): embedding | pattern | both}. The feedback rounds
     (classify) follow from the stored answers, so the folder is keyed on what
-    they read too: asset_feedback.*, asset.floor and the asset layers.
+    they read too: asset_feedback.*, asset.ask_floor and the asset layers (asset.floor,
+    which decides a sentence's asset, is applied on reading: measure.read_units).
     `projects` limits the run to the sentences of those projects (a cohort
     set, say); the run is keyed on the sentences it covers, so a scope is its
     own run and a wider one later reads the store."""
@@ -420,12 +448,17 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     # A sentence whose questions do not fit one request is asked in several
     # (answers.bodies_for); only a sentence too long for a single question
     # is refused, never truncated.
+    shas = []
     for p, body in bodies:
-        one = request_body(p["state"], dict(list(body["questions"].items())[:1]), model)
-        if len(json.dumps(one, ensure_ascii=False)) > MAX_REQUEST_CHARS:
+        # the longest a request with one question gets: the state's length
+        # plus the fixed part for that question (lengths do not depend on
+        # the order of keys), so no request is serialised for the check
+        first = dict(list(body["questions"].items())[:1])
+        state_len = len(json.dumps(p["state"], ensure_ascii=False))
+        if first and state_len + _questions_prefix(model, first)[2] + 1 > MAX_REQUEST_CHARS:
             raise SystemExit(f"classify: {p['row']['unit_id']} makes a request over "
                              f"{MAX_REQUEST_CHARS:,} characters with one question; not truncated")
-    shas = [request_sha(b) for _, b in bodies]
+        shas.append(request_sha_of(body["state"], body["questions"], model))
     prefix = "smoke_" if limit else ""
     fb = feedback.settings(feedback.ASSET) if rounds_apply(min_cosine, limit) else {}
     h = hashlib.sha256(f"min_cosine={min_cosine}\nunit=sentence\nprior={prior.VERSION}\n"
@@ -434,7 +467,7 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
         h.update(json.dumps({"patterns": {l: [[x["pattern_id"], x["pattern"]] for x in v]
                                           for l, v in sorted(pats.items())},
                              "feedback": fb,
-                             "floor": float(panel.get("asset.floor", 0.3)) if fb else None,
+                             "floor": ask_floor() if fb else None,
                              "grades": list(panel.grades()) if fb else None,
                              "layers_on": bool(panel.get("posterior.on", True)) if fb else None,
                              "layers": layers_digest_for(data, question_shas(qs)) if fb else ""},
@@ -468,7 +501,7 @@ def feedback_rounds(name, data, qs, bodies, merged, asked, routes, round_of, *, 
     import numpy
     import posterior
     fb = feedback.settings(feedback.ASSET)
-    floor = float(panel.get("asset.floor", 0.3))
+    floor = ask_floor()
     vector_of, projects_of = posterior.lookups(data)
     layers = layers_for(data, question_shas(qs), vector_of, projects_of)
     matrix = numpy.load(where(data, "embeddings", "sentence_emb.npy"), mmap_mode="r")
@@ -512,7 +545,7 @@ def feedback_rounds(name, data, qs, bodies, merged, asked, routes, round_of, *, 
         order_ = sorted(new, key=lambda u: item_of[u]["i"])
         requests_ = [(item_of[u]["state"], new[u]) for u in order_]
         _, pre = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                             dry_run=True, aliases=ALIASES)
+                             dry_run=True, aliases=ALIASES, read_answers=False)
         if pre["to_ask"] and not api_key:
             raise SystemExit(f"classify: no credential for the feedback round: set "
                              f"${embed.KEY_VAR} or put the key in {embed.KEY_FILE}")
@@ -561,6 +594,20 @@ def write_marker(data, name, projects, out, min_cosine):
     os.replace(marker + ".part", marker)
 
 
+# The modules plan() reads requests through (its key hashes their code).
+PLAN_CODE = ("classify.py", "embed.py", "feedback.py", "labels.py", "panel.py", "prior.py", "search.py",
+             "skip.py", "units.py", "paths.py", "common.py")
+
+
+def ask_floor():
+    """What the asset map's feedback rounds count as a sentence having an
+    asset (control panel asset.ask_floor): it decides which sentences the next
+    round asks, so it is in the run key. asset.floor, which decides a
+    sentence's asset, is read when the map is read (measure.read_units) and is
+    in no key."""
+    return float(panel.get("asset.ask_floor", 0.3))
+
+
 def _plan_key(name, data, taxonomy, min_cosine, projects, model):
     """A cheap fingerprint of everything plan() reads: the corpus tables (by
     their remembered checksums), the label set's files, the pipeline's code,
@@ -582,15 +629,17 @@ def _plan_key(name, data, taxonomy, min_cosine, projects, model):
         h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
     # what the feedback rounds read (plan() keys the folder on them too)
     h.update(json.dumps([panel.items("feedback."), panel.items("asset_feedback."),
-                         panel.get("asset.floor"),
+                         ask_floor(),
                          panel.get("posterior.on", True), panel.get("read.grades")],
                         sort_keys=True, default=str).encode())
     p = layers_path(data)
-    h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
+    if panel.get("posterior.on", True):         # a layer file is read only when layers are on
+        h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
+    # the code plan() runs, not every module: an edit elsewhere (the tuning
+    # report, a docstring in wbg.py) names the same run
     src = os.path.dirname(os.path.abspath(__file__))
-    for f in sorted(os.listdir(src)):
-        if f.endswith(".py"):
-            h.update(file_sha256(os.path.join(src, f), remember=False).encode())
+    for f in PLAN_CODE:
+        h.update(file_sha256(os.path.join(src, f), remember=False).encode())
     if min_cosine:
         import search
         h.update(os.path.basename(search.run_folder(name, data, taxonomy=taxonomy)[0]).encode())
@@ -627,9 +676,10 @@ def remember_plan(data, key, out):
 
 
 def planned_run(name, data, *, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, projects=None,
-                model=MODEL):
+                model=MODEL, plan_if_unknown=True):
     """The run folder plan() would name, from the fingerprint cache when it
-    has seen these inputs before, else by planning (and remembering)."""
+    has seen these inputs before, else by planning (and remembering), or
+    None with plan_if_unknown False."""
     try:
         key = _plan_key(name, data, taxonomy, min_cosine, projects, model)
     except (OSError, SystemExit):
@@ -640,6 +690,8 @@ def planned_run(name, data, *, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, project
                 return where(data, "classify", json.load(fh)["run"])
         except (OSError, ValueError, KeyError):
             pass
+    if not plan_if_unknown:
+        return None
     out = plan(name, data, model=model, taxonomy=taxonomy, min_cosine=min_cosine,
                projects=projects)[5]
     if key:
@@ -692,6 +744,19 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
              dry_run=False, log=print, workers=WORKERS, min_cosine=MIN_COSINE, projects=None):
     """Classify the label set; returns the run folder (None on a dry run or
     when requests failed - run again to resume)."""
+    if not limit:
+        # a run already written is found from the fingerprint cache, without
+        # building every sentence's request (minutes on the box)
+        try:
+            done = planned_run(name, data, taxonomy=taxonomy, min_cosine=min_cosine,
+                               projects=projects, model=model, plan_if_unknown=False)
+        except SystemExit:
+            done = None
+        if done and os.path.exists(os.path.join(done, "manifest.json")):
+            log(f"{name}: already written: {done}")
+            if not dry_run:
+                write_marker(data, name, projects, done, min_cosine)   # a run made before markers
+            return None if dry_run else done
     try:
         labels, scale, qs, bodies, shas, out, cosines, routes = plan(
             name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine,
@@ -724,8 +789,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     import answers
     requests_ = [(p["state"], b["questions"]) for p, b in bodies if b["questions"]]
     got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                          dry_run=True, aliases=ALIASES)
-    log(f"  answers stored already for {sum(1 for g in got if g):,} sentences; calls to make: "
+                          dry_run=True, aliases=ALIASES, read_answers=False)
+    log(f"  answers stored already for {st['stored_items']:,} sentences; calls to make: "
         f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
     rounds = rounds_apply(min_cosine, limit)
     if rounds:
@@ -736,15 +801,15 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     if dry_run:
         log("  --dry-run: first pass only; no request made, nothing written")
         return None
-    calls, cost, secs = 0, 0.0, 0.0
     if st["to_ask"]:
         if not api_key:
             raise SystemExit(f"classify: no credential: set ${embed.KEY_VAR} or put the "
                              f"key in {embed.KEY_FILE} in the main checkout")
         log(f"  spent today before this run: US${spend_today(data)[1]:.2f}")
-        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                              aliases=ALIASES)
-        calls, cost, secs = st["calls"], st["cost_usd"], st["seconds"]
+    # asks only what is missing and reads the answers (the estimate opened none)
+    got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                          aliases=ALIASES)
+    calls, cost, secs = st["calls"], st["cost_usd"], st["seconds"]
     if st["failures"] or not all(got):
         if calls:
             record_spend(data, "classify", name, model, calls, cost, secs, "failed")

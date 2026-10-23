@@ -75,6 +75,7 @@ def _publish(conn, data, sets, projects, links, log, written):
     """The writes of publish(), inside its transaction."""
     load_pg.prepare(conn)
     sets = sorted(sets) if sets else None
+    remade = [False]          # a table made again drops its views: build them
     for table, cols, rows in (
             ("labels", ["label_set", "label_id", "name", "definition", "active", "version",
                         "folder"], load_pg.label_rows()),
@@ -86,6 +87,7 @@ def _publish(conn, data, sets, projects, links, log, written):
         n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", None,
                                              f"publish:{_now()}")
         written[table] = n
+        remade[0] |= made
     for table, cols, finder in (
             ("search_paragraphs", load_pg.ROLLUP_COLS,
              lambda: load_pg.search_tables(data, sets)),
@@ -96,6 +98,10 @@ def _publish(conn, data, sets, projects, links, log, written):
         sha, rows = finder()
         if sha is None:
             continue
+        # the key is made before any row is read: an unchanged table is left
+        # as it is (two million rows for the asset map)
+        if load_pg._last_sha(conn, table) == sha:
+            continue
         # Only the sets with a current run are replaced; a set named but
         # not found (being re-run, or run over another scope) keeps its
         # rows, and says so.
@@ -104,6 +110,8 @@ def _publish(conn, data, sets, projects, links, log, written):
         if missing:
             log(f"  {table}: no current run for {', '.join(missing)}; their rows are kept")
         n, bad, made = load_pg.replace_rows(conn, table, cols, rows, "label_set", keys, sha)
+        remade[0] |= made
+        _record(conn, table, sha, n)
         load_pg.purge_removed_sets(conn, table)
         written[table] = n
         if bad:
@@ -117,21 +125,19 @@ def _publish(conn, data, sets, projects, links, log, written):
                                                         "labels/measure_quality.csv")[0]
     # The paragraph counts read every stage's classification (src/prior.py):
     # rebuilt whole at every publish, so a set re-run moves every sentence's.
-    sha, ctx = load_pg.context_rows(data, projects)
-    if sha is not None:
-        written["unit_paragraph_context"] = load_pg.replace_rows(
-            conn, "unit_paragraph_context", load_pg.CONTEXT_COLS, ctx, "unit_id", None, sha)[0]
-    # The commitment checks (src/commit_checks.py) span every measure: small,
-    # written whole whenever a current run exists.
-    sha, cpairs = load_pg.check_rows(data, projects)
-    if sha is not None:
-        written["unit_pair_checks"] = load_pg.replace_rows(
-            conn, "unit_pair_checks", load_pg.CHECK_PAIR_COLS, cpairs, "unit_id", None, sha)[0]
-    # Every sentence's asset, decided as the measure stage decides it.
-    sha, ua = load_pg.unit_asset_rows(data, projects)
-    if sha is not None:
-        written["unit_assets"] = load_pg.replace_rows(
-            conn, "unit_assets", load_pg.UNIT_ASSET_COLS, ua, "unit_id", None, sha)[0]
+    # The paragraph counts, the commitment checks (every measure) and every
+    # sentence's asset: each written whole, and only when its key moved.
+    for table, cols, finder in (
+            ("unit_paragraph_context", load_pg.CONTEXT_COLS,
+             lambda: load_pg.context_rows(data, projects)),
+            ("unit_pair_checks", load_pg.CHECK_PAIR_COLS,
+             lambda: load_pg.check_rows(data, projects)),
+            ("unit_assets", load_pg.UNIT_ASSET_COLS,
+             lambda: load_pg.unit_asset_rows(data, projects))):
+        sha, rows = finder()
+        if sha is not None and load_pg._last_sha(conn, table) != sha:
+            written[table] = load_pg.replace_rows(conn, table, cols, rows, "unit_id", None,
+                                                  sha)[0]
     # The record of judgement: grades, draws, layers, gates, runs, spend and
     # the answer store, each replaced when its sources changed.
     for table, cols, sha, rows, types in load_pg.judgement_tables(data):
@@ -141,15 +147,29 @@ def _publish(conn, data, sets, projects, links, log, written):
     written["answers"] = load_pg.sync_answers(conn, data)
     if links:
         sha, assets_, pairs_ = load_pg.link_rows(data, projects)
-        if sha is not None:
+        if sha is not None and load_pg._last_sha(conn, "commitment_packages") != sha:
             for table, cols, rows in (("package_assets", load_pg.ASSET_LINK_COLS, assets_),
                                       ("commitment_packages", load_pg.PAIR_LINK_COLS, pairs_)):
                 n, _bad, made = load_pg.replace_rows(conn, table, cols, rows, "package_id",
                                                      None, sha)
                 written[table] = n
-    # Keys, comments, views and functions, every time: sql/views/ is
-    # code, and a publish is when a changed view or function lands.
-    load_pg.finish(conn, log=log)
+    # Keys, comments, views and functions when anything they read moved: a
+    # table written, a view file changed, or a control-panel value a view
+    # reads ({{panel:...}}). With nothing moved the views stand as they are.
+    views = load_pg.views_key()
+    changed = any(n for t, n in written.items()
+                  if t not in ("labels", "measure_types", "label_queries", "label_patterns",
+                               "label_scale", "answers", "measure_quality"))
+    if changed or remade[0] or load_pg.last_key(conn, "views") != views:
+        load_pg.finish(conn, log=log)
+        _record(conn, "views", views, 0)
+
+
+def _record(conn, table, sha, n):
+    """The table's whole-table source key, as load_pg.main records it: what
+    the next publish compares to skip an unchanged table."""
+    conn.execute(f"INSERT INTO {load_pg.LOADS} (table_name, source_sha256, row_count, loaded_at, "
+                 f"release_id) VALUES (%s, %s, %s, %s, %s)", (table, sha, n, _now(), ""))
 
 
 def _now():

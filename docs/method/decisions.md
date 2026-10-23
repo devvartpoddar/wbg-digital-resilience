@@ -8,7 +8,7 @@ Every question the pipeline puts to the decision model (TypeSafe's Jev) is handl
 2. **Ask.** The decision model answers one graded question about the sentence alone (no paragraph), in the same form for assets and measures (`classify.graded_question`). Every answer is stored and re-read (`src/answers.py`).
 3. **Score.** The model's probability of grades 2 and 3 together (`read.grades`).
 4. **Posterior** (`src/posterior.py`). The score goes through the label's probability layer, when one is fitted; otherwise the score stands. In v1.0 the layer is off (`posterior.on` false; next section), so the posterior is the score.
-5. **Decision.** A sentence counts when its posterior reaches the label's floor (`floor.<set>`, else `floor.default`, 0.5): `measure.is_committed`, loaded as `measure_findings.is_committed`. No stage and no view reads a single grade or the most likely grade; the grade probabilities are kept as the model's record only.
+5. **Decision.** A sentence counts when its posterior reaches the label's floor (`floor.<set>`, else `floor.default`): `measure.is_committed`, loaded as `measure_findings.is_committed`. Every decision floor is applied when a run is read, never stored in it: the stages ask at `floor.ask` and `asset.ask_floor`, so moving a decision floor is a publish, not a run (`docs/runbook-box.md`, "How runs and caches are keyed"). No stage and no view reads a single grade or the most likely grade; the grade probabilities are kept as the model's record only.
 
 | Level | Skip | Decision |
 |---|---|---|

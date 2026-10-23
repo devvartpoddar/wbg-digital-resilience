@@ -301,3 +301,21 @@ def test_assets_get_the_measures_routes_patterns_and_feedback_rounds(store, monk
     off = _run(store, min_cosine=0.3)
     rows = {r["unit_id"]: r for r in csv.DictReader(open(os.path.join(off, "scores.csv")))}
     assert off != out and rows[ids[1]]["asked"] == "false" and rows[ids[4]]["asked"] == "true"
+
+
+def test_the_fast_request_and_answer_keys_are_the_same_bytes():
+    """request_sha_of and answers.keys_of serialise each question once; the
+    hashes must be the very ones request_sha and answers.key give, or every
+    run folder and stored answer would be renamed."""
+    import random
+    import answers
+    rng = random.Random(1)
+    qs = {f"q{i}": {"type": "score", "instructions": "Hów “much” " * rng.randint(1, 5),
+                    "criteria": ["a", "b é"]} for i in range(6)}
+    for _ in range(50):
+        sub = {k: v for k, v in qs.items() if rng.random() < 0.5}
+        state = {"sentence": f"ü {rng.random()}", "section": "S" * rng.randint(0, 3)}
+        assert classify.request_sha_of(state, sub, "m/x") == classify.request_sha(
+            classify.request_body(state, sub, "m/x"))
+        assert answers.keys_of("m/x", state, sub) == {k: answers.key("m/x", state, q)
+                                                      for k, q in sub.items()}

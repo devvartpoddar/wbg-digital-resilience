@@ -130,8 +130,8 @@ def store(tmp_path, monkeypatch):
 
 
 def _rows(out):
-    with open(os.path.join(out, "units.csv"), newline="") as fh:
-        return list(csv.DictReader(fh))
+    """The run's rows as every reader reads them (measure.read_units)."""
+    return measure.read_units(out, os.path.dirname(os.path.dirname(out)))
 
 
 RUN = dict(api_key="k", log=lambda *_: None, workers=1, top=1, max_rounds=0)
@@ -222,7 +222,7 @@ def test_a_check_sheet_is_drawn_from_a_run_with_the_sentence_and_its_paragraph(s
     data, _ = store
     measure.measure("cra", data, **RUN)
     kw = {k: v for k, v in RUN.items() if k in ("top", "max_rounds")}
-    key, sheet, scale, assets = check_units.sheet_rows("cra", data, design="bands", **kw)
+    key, sheet, scale, assets = check_units.sheet_rows("cra", data, **kw)
     assert len(key) == len(sheet) == 1
     row = sheet[0]
     assert row["sentence"].startswith("A site-specific hazard assessment")
@@ -335,6 +335,68 @@ def test_a_run_publishes_its_findings_assets_and_record_to_postgres(store, monke
         assert {"measures", "classify"} <= stages
 
 
+def test_a_moved_floor_is_a_publish_not_a_run(store, monkeypatch, tmp_path):
+    """With a scratch database (WBG_PG_TEST): publishing again with nothing
+    moved writes no run table and builds no view; moving the measure's floor
+    names the same measure run and rewrites measure_findings alone."""
+    dsn = os.environ.get("WBG_PG_TEST")
+    if not dsn:
+        pytest.skip("set WBG_PG_TEST to a scratch database")
+    import psycopg
+    import load_pg
+    import store as st
+    data, _ = store
+    first = measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    monkeypatch.setattr(load_pg, "found_sets", lambda sha: ["cra", "assets"])
+    amap = os.path.join(data, "classify", "assets-abc")
+    monkeypatch.setattr(classify, "current_run",
+                        lambda name, d, **kw: amap if name == "assets" else None)
+    built = []
+    real_finish = load_pg.finish
+    monkeypatch.setattr(load_pg, "finish", lambda conn, log=print: built.append(1) or
+                        real_finish(conn, log=log))
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("DROP SCHEMA IF EXISTS wbg CASCADE")
+        st.publish(data, sets=["cra", "assets"], log=lambda *_: None, conn=conn)
+        assert built == [1]
+        again = st.publish(data, sets=["cra", "assets"], log=lambda *_: None, conn=conn)
+        assert "measure_findings" not in again and "paragraph_grades" not in again
+        assert built == [1]                                # nothing moved: no view built
+        panel_file = tmp_path / "panel.csv"
+        with open(os.environ["WBG_PANEL"], encoding="utf-8") as fh:
+            panel_file.write_text(fh.read().replace("floor.default,0.5,", "floor.default,0.95,"))
+        monkeypatch.setenv("WBG_PANEL", str(panel_file))
+        assert measure.current_run("cra", data) == first   # the same run: nothing asked
+        moved = st.publish(data, sets=["cra", "assets"], log=lambda *_: None, conn=conn)
+        assert "measure_findings" in moved and "paragraph_grades" not in moved
+        assert built == [1, 1]
+        assert not any(r[0] for r in conn.execute(
+            "SELECT is_committed FROM wbg.measure_findings").fetchall())    # 0.9 < 0.95
+
+
+def test_a_run_written_under_an_older_key_is_reused_not_rebuilt(store):
+    """A run whose folder name an older key made, holding the same work, is
+    adopted for the new name: the same folder, nothing asked or written."""
+    import json
+    data, _ = store
+    first = measure.measure("cra", data, **RUN)
+    old = os.path.join(os.path.dirname(first), "cra-0ldf0rmat000")
+    os.rename(first, old)
+    m = json.load(open(os.path.join(old, "manifest.json")))
+    m["floor"] = m.pop("ask_floor")                       # the older manifest's field
+    json.dump(m, open(os.path.join(old, "manifest.json"), "w"))
+    assert measure.measure("cra", data, **RUN) == old     # adopted: no new run
+    assert not os.path.exists(first)
+    got = json.load(open(os.path.join(data, "measures", "adopted.json")))
+    assert got[os.path.basename(first)]["folder"] == "cra-0ldf0rmat000"
+    # a run that asked differently is never adopted
+    m["max_rounds"] = 99
+    json.dump(m, open(os.path.join(old, "manifest.json"), "w"))
+    os.remove(os.path.join(data, "measures", "adopted.json"))
+    assert measure.Run("cra", data, build=False, log=lambda *_: None,
+                       **{k: v for k, v in RUN.items() if k in ("top", "max_rounds")}).out == first
+
+
 def test_a_sentence_takes_every_asset_at_the_floor_best_first():
     own = {"fiber": 0.8, "data_hosting": 0.4, "geospatial": 0.1}
     assert measure.sentence_assets(own, [], floor=0.3, multiple=True) == (
@@ -347,3 +409,68 @@ def test_a_sentence_takes_every_asset_at_the_floor_best_first():
     assert level == "paragraph" and [a for a, _ in win] == ["fiber", "dpi"]
     assert measure.sentence_asset({"fiber": 0.2}, [{"fiber": 0.5, "dpi": 0.9}], decay=0.4,
                                   floor=0.3, paragraph_floor=0.3)[:2] == ("fiber", 0.4)
+
+
+def test_measures_run_together_write_what_each_writes_alone(store, tmp_path, monkeypatch):
+    """One process, one ask a round and one ranking pass for every measure
+    (measure_many): each measure's run folder and rows are byte for byte
+    those of the measure run on its own."""
+    import shutil
+    import search
+    data, calls = store
+    lab = tmp_path / "labels"
+    _csv(str(lab / "ews.csv"), ["measure_id", "measure_name", "definition", "active"],
+         [{"measure_id": "ews", "measure_name": "Early warning",
+           "definition": "a warning before a hazard", "active": "true"}])
+    shutil.copy(lab / "cra_scale.csv", lab / "ews_scale.csv")
+    _csv(str(lab / "ews_patterns.csv"), ["measure_id", "pattern_id", "pattern", "active"],
+         [{"measure_id": "ews", "pattern_id": "fl", "pattern": r"\bfloods\b", "active": "true"}])
+    queries = search.load_queries("ews")
+    folder, _ = search.run_folder("ews", data)
+    os.makedirs(folder)
+    search._write(os.path.join(folder, "queries.csv"), search.QUERY_COLS, queries)
+    numpy.save(os.path.join(folder, "scores.npy"), numpy.zeros((4, len(queries)), dtype="float32"))
+    shutil.copy(os.path.join(search.run_folder("cra", data)[0], "manifest.json"),
+                os.path.join(folder, "manifest.json"))
+
+    def fake(body, **kw):
+        calls.append(body)
+        out = {}
+        for qid in body["questions"]:
+            item, _, mid = qid.rpartition(" | ")
+            text = body["state"][item] if item else body["state"]["sentence"]
+            hit = ("hazard assessment" if (mid or qid) == "cra" else "floods") in text
+            out[qid] = {"type": "score", "confidence": 0.7, "probabilities":
+                        {"0": 0.05, "1": 0.05, "2": 0.1, "3": 0.8} if hit else
+                        {"0": 0.9, "1": 0.1, "2": 0.0, "3": 0.0}}
+        return {"model": measure.MODEL, "usage": {"cost": 0.00001}, "answers": out}
+    monkeypatch.setattr(classify, "decide", fake)
+    alone = str(tmp_path / "alone")
+    shutil.copytree(data, alone)
+    kw = dict(RUN, max_rounds=3, batch=2, min_yield=1)
+    together = measure.measure_many(["cra", "ews"], data, **kw)
+    for name in ("cra", "ews"):
+        own = measure.measure(name, alone, **kw)
+        assert os.path.basename(own) == os.path.basename(together[name])
+        assert open(os.path.join(own, "units.csv"), "rb").read() == \
+            open(os.path.join(together[name], "units.csv"), "rb").read()
+    assert len({r["round"] for r in _rows(together["cra"])}) > 1    # the rounds ran
+
+
+def test_the_measure_stage_runs_a_measure_its_types_and_the_checks_in_one_process(store,
+                                                                                  monkeypatch):
+    import measure_stage
+    data, calls = store
+    monkeypatch.setenv("WBG_OPENROUTER_KEY", "k")
+    monkeypatch.setattr(sys, "argv", ["measure_stage.py", "cra", "--data", data, "--dry-run"])
+    assert measure_stage.main() == 0 and calls == []          # a dry run asks nothing
+    import commit_checks
+    import kinds
+    ran = []
+    monkeypatch.setattr(kinds, "propose", lambda name, d, **kw: ran.append(("propose", name)) or "p")
+    monkeypatch.setattr(kinds, "assign", lambda name, d, **kw: ran.append(("assign", name)) or "a")
+    monkeypatch.setattr(commit_checks, "run", lambda d, **kw: ran.append(("checks",)) or "c")
+    monkeypatch.setattr(sys, "argv", ["measure_stage.py", "cra", "--data", data])
+    assert measure_stage.main() == 0
+    assert measure.current_run("cra", data) is not None       # the funnel wrote its run
+    assert ran == [("propose", "cra"), ("assign", "cra"), ("checks",)]

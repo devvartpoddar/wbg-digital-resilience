@@ -370,9 +370,24 @@ def vector_lookup(data):
     return lookups(data)[0]
 
 
+_LOOKUPS = {}
+
+
 def lookups(data):
     """(vector_of, projects_of) over the sentence index: a unit's embedding
-    (None when not embedded) and its projects ('P1|P2')."""
+    (None when not embedded) and its projects ('P1|P2'). Read once per
+    process for an unchanged index (it is called by many readers)."""
+    from paths import where
+    path = where(data, "embeddings", "sentence_index.csv")
+    npy = where(data, "embeddings", "sentence_emb.npy")
+    stamp = tuple((os.path.getmtime(p), os.path.getsize(p)) if os.path.exists(p) else None
+                  for p in (path, npy))
+    if _LOOKUPS.get(path, (None,))[0] != stamp:
+        _LOOKUPS[path] = (stamp, _lookups(data))
+    return _LOOKUPS[path][1]
+
+
+def _lookups(data):
     import csv
     from paths import where
     row_of, proj = {}, {}

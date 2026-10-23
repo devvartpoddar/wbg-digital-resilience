@@ -148,7 +148,9 @@ def paragraph_classified(data, projects=None):
     import posterior
     # The same reading of the map the measure stage makes: through the asset
     # layers when they are fitted.
-    vector_of, projects_of = posterior.lookups(data)
+    vector_of = projects_of = None
+    if panel.get("posterior.on", True):
+        vector_of, projects_of = posterior.lookups(data)
     unit_assets, asset_run = measure.asset_map(data, projects, vector_of, projects_of)
     with_asset = {u for u, ps in unit_assets.items() if ps and max(ps.values()) >= floor}
     committed, runs = set(), [asset_run] if asset_run else []
@@ -162,8 +164,8 @@ def paragraph_classified(data, projects=None):
         if not folder:
             continue
         runs.append(os.path.basename(folder))
-        with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
-            committed |= {u["unit_id"] for u in csv.DictReader(fh) if u.get("committed") == "true"}
+        committed |= {u["unit_id"] for u in measure.read_units(folder, data, links=False)
+                      if u.get("committed") == "true"}
     if not runs:
         return None, []
     with open(index_path, newline="", encoding="utf-8") as fh:
@@ -180,7 +182,9 @@ def paragraph_classified(data, projects=None):
         out.append({"unit_id": uid, "paragraph_id": pid,
                     "prior_para_assets": per[pid][0] - (uid in with_asset),
                     "prior_para_measures": per[pid][1] - (uid in committed)})
-    key = f"{VERSION}:{floor}:" + "|".join(sorted(runs))
+    # the measures' floors are applied on reading (measure.read_units): in the key
+    key = (f"{VERSION}:{floor}:{sorted(panel.items('floor.').items())}:"
+           + "|".join(sorted(runs)))
     return key, out
 
 

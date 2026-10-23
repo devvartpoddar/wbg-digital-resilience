@@ -164,16 +164,26 @@ def coverage_lines(name, queries=None, folder=TAXONOMY):
             f"{name}_queries.csv): " + ", ".join(f"{t} ({n})" for _, t, n in gaps)]
 
 
+_VERSIONS = {}
+
+
 def run_version(queries, model, dim, index_path):
-    """A SHA-256 over everything a run's scores depend on."""
-    h = hashlib.sha256()
-    for q in queries:
-        h.update(f"{q['query_id']}\t{q['text']}\n".encode())
-    h.update(f"{model}:{dim}\n".encode())
-    with open(index_path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()[:12]
+    """A SHA-256 over everything a run's scores depend on. The index's
+    bytes are hashed once per process for an unchanged file (every stage
+    looks a search run up, once per set and reader)."""
+    st = os.stat(index_path)
+    memo = (tuple((q["query_id"], q["text"]) for q in queries), model, dim, index_path,
+            st.st_size, st.st_mtime_ns)
+    if memo not in _VERSIONS:
+        h = hashlib.sha256()
+        for q in queries:
+            h.update(f"{q['query_id']}\t{q['text']}\n".encode())
+        h.update(f"{model}:{dim}\n".encode())
+        with open(index_path, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+        _VERSIONS[memo] = h.hexdigest()[:12]
+    return _VERSIONS[memo]
 
 
 # ----------------------------------------------------------------- the scoring
@@ -282,15 +292,29 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
 
 
 
+_INDEX = {}
+
+
+def _index(idx):
+    """(rows, sha256) of the sentence index, read once per process while the
+    file is unchanged: every set's run reads the same index (the measure
+    stage runs every set in one process). The rows are shared: read them,
+    never change them."""
+    st = os.stat(idx)
+    stamp = (os.path.abspath(idx), st.st_mtime, st.st_size)
+    if _INDEX.get("stamp") != stamp:
+        _INDEX.update(stamp=stamp, rows=_rows(idx), sha=_sha_file(idx))
+    return _INDEX["rows"], _INDEX["sha"]
+
+
 def load_run(folder, data):
     """(queries, scores, index) of a scored run, refusing one scored against
     another sentence index: its rows would be read against the wrong units."""
     with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
         manifest = json.load(fh)
     idx = _paths(data)[1]
-    index = _rows(idx)
+    index, idx_sha = _index(idx)
     scores = numpy.load(os.path.join(folder, "scores.npy"), mmap_mode="r")
-    idx_sha = _sha_file(idx)
     if scores.shape[0] != len(index) or manifest.get("index_sha256", idx_sha) != idx_sha:
         raise SystemExit(f"search: {os.path.basename(folder)} was scored against another "
                          f"sentence index; run ./wbg search again")

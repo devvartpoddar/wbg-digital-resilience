@@ -166,12 +166,9 @@ def committed_units(data, projects=None, sets=None):
             continue
         if not folder:
             continue
-        floor = panel.floor(name)
-        rows = []
-        with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
-            for u in csv.DictReader(fh):
-                if measure.is_committed(u, floor):
-                    rows.append(u)
+        # asked at floor.ask; the measure's floor picks what counts on reading
+        rows = [u for u in measure.read_units(folder, data)
+                if measure.is_committed({**u, "committed": ""}, measure.ASK_FLOOR)]
         out[name] = (os.path.basename(folder), rows)
     return out
 
@@ -225,8 +222,13 @@ class Plan:
             h.update(f"{q['query_id']}\t{q['text']}\n".encode())
         h.update(json.dumps(self.asset_qs, sort_keys=True).encode())
         h.update(json.dumps(PAIR_QUESTION, sort_keys=True).encode())
-        for name, (run, _) in sorted(self.runs.items()):
-            h.update(f"{name}\t{run}\n".encode())
+        # keyed on the committed units themselves (their text and the assets
+        # that pair them), not the measure runs' names: a new measure run
+        # with the same units is the same link run
+        for name, (_, units) in sorted(self.runs.items()):
+            for u in sorted(units, key=lambda x: x["unit_id"]):
+                h.update(f"{name}\t{u['unit_id']}\t{hashlib.sha256(u['text'].encode()).hexdigest()}"
+                         f"\t{sorted(unit_assets(u))}\n".encode())
         # the layers the decisions read (src/judged.py)
         import judged
         self.asset_shas = {a: judged.sha(q) for a, q in self.asset_qs.items()}
@@ -236,7 +238,26 @@ class Plan:
         if projects:
             h.update(("\n".join(sorted(projects))).encode())
         self.version = h.hexdigest()[:12]
-        self.out = where(data, "links", f"packages-{self.version}")
+        self.out = self._adopt(where(data, "links", f"packages-{self.version}"), projects)
+
+    def _adopt(self, out, projects):
+        """out, or a written link run over the whole cohort that read the same
+        measure runs with the same settings, packages and questions
+        (src/adopt.py): its pairs follow from those, so it is reused."""
+        import adopt
+        got = adopt.resolve(self.data, "links", out)
+        if got != out or os.path.exists(os.path.join(out, "manifest.json")) or projects:
+            return got
+        runs = {n: r for n, (r, _) in self.runs.items()}
+        for folder, m in adopt.manifests(self.data, "links", "packages-"):
+            if (any(m.get(k) != v for k, v in self.settings.items())
+                    or m.get("packages") != len(self.packages)
+                    or m.get("measure_runs") != runs or m.get("asset_questions") != self.asset_qs
+                    or m.get("pair_question") != PAIR_QUESTION):
+                continue
+            return adopt.record(self.data, "links", out, folder,
+                                "same measure runs, settings, packages and questions")
+        return out
 
     # ---- step 1: the assets each package is asked about
 

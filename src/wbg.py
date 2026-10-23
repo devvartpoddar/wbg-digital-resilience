@@ -262,8 +262,8 @@ def run(args, data):
       search    every label set's phrases against the vectors (assets and the
                 measures, side by side)
       classify  the asset map
-      measure   each measure through the funnel, its types proposed and
-                assigned, side by side
+      measure   every measure through the funnel together, its types proposed
+                and assigned, then the pair checks: one process
       link      which asset each package buys, which commitments it carries out
       publish   every current run into Postgres (the stages do this themselves;
                 this is the catch-up)
@@ -317,20 +317,21 @@ def run(args, data):
         elif stage == "classify":
             _run("classify.py", "assets", *dry, *scope, data=data)
         elif stage == "measure":
-            # Each set's three steps leave Postgres alone; the stage writes
-            # every set once at the end (a publish rebuilds every view).
-            quiet = dry or ["--no-publish"]
-            failed = _parallel(args.jobs, sets, lambda n: [
-                ["measure.py", n, "--workers", str(args.workers), *quiet, *scope],
-                ["kinds.py", n, *dry, *scope],
-                ["kinds.py", n, "--assign", *quiet, *scope]], data)
-            done = [n for n in sets if n not in failed]
-            # The checks span every measure (src/commit_checks.py): a unit two
-            # measures commit. Asked once the sets are in; a dry run's estimate reads the runs as they stand.
-            if not failed:
-                _run("commit_checks.py", *dry, *scope, data=data)
-            if done and not args.dry_run:
-                _run("store.py", *done, *scope, data=data)
+            # One process for every set (src/measure_stage.py): the funnel of
+            # every measure together, then each set's types, then the pair
+            # checks across them; the corpus and the answer store are read
+            # once. It leaves Postgres alone. The workers are shared by
+            # every measure, so they are the sets' requests at once.
+            print(f"== measure_stage.py {' '.join(sets)}", flush=True)
+            done = subprocess.run(
+                [_python(), os.path.join(SRC, "measure_stage.py"), *sets, "--workers",
+                 str(args.workers * max(1, args.jobs)), *dry, *scope],
+                env=dict(os.environ, WBG_DATA=data), cwd=ROOT)
+            failed = ["measure"] if done.returncode else []
+            # one publish a run: the publish stage writes every table that
+            # moved; only a run that stops here publishes here
+            if not failed and not args.dry_run and "publish" not in stages:
+                _run("store.py", *sets, *scope, data=data)
         elif stage == "link":
             _run("link_packages.py", *dry, *scope, data=data)
         elif stage == "publish":
@@ -912,7 +913,9 @@ def main(argv=None):
     p.add_argument("--only", choices=RUN_STAGES, default=None, help="one stage alone")
     p.add_argument("--measures", nargs="*", default=None,
                    help="measure sets (default: every set in analysis/labels/)")
-    p.add_argument("--jobs", type=int, default=3, help="sets run at once (one core each)")
+    p.add_argument("--jobs", type=int, default=3,
+                   help="search: sets run at once (one core each); measure: --workers times "
+                        "this many requests at once, over every measure")
     p.add_argument("--workers", type=int, default=ADD_WORKERS,
                    help="parallel requests to the decision model per set")
     p.add_argument("--update", action="store_true", help="fetch the selected projects again")
@@ -1049,7 +1052,7 @@ def main(argv=None):
              *(["--elusion"] if args.elusion else []), "--seed", str(args.seed),
              *(["--design", args.design] if args.design else []),
              *(["--near-gate"] if args.near_gate else []),
-             *(["--dry-run"] if args.dry_run else []), data=data)
+             *(["--dry-run"] if args.dry_run else []), *_scope(args), data=data)
         return 0
     if args.cmd == "evaluate":
         _run("evaluate_activities.py", args.label_set, "--column", args.column,
