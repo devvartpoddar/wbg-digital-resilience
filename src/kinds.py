@@ -419,7 +419,7 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
         qs = assign_questions(approved[lid], mname)
         for u in us:
             body = classify.request_body({"sentence": u["text"]}, qs, model)
-            shas.append(classify.request_sha(body))
+            shas.append(classify.request_sha_of(body["state"], body["questions"], model))
             rows.append((lid, u, qs))
     h = hashlib.sha256()
     h.update(f"{model}\n".encode())

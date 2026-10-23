@@ -719,6 +719,20 @@ def sync_answers(conn, data, release_id=""):
         return 0
     if not _exists(conn, "answers"):
         load_rows(conn, "answers", ANSWER_COLS, [], "", release_id, types={"answer": "jsonb"})
+    # a stored answer is a new file, and a new file moves its folder's
+    # modification time: with no folder moved since the last sync there is
+    # nothing to add (listing half a million files and reading as many ids
+    # from Postgres was every publish)
+    h = hashlib.sha256()
+    for model in sorted(os.listdir(root_)):
+        mdir = os.path.join(root_, model)
+        if os.path.isdir(mdir):
+            for e in sorted(os.scandir(mdir), key=lambda e: e.name):
+                if e.is_dir():
+                    h.update(f"{model}/{e.name}:{e.stat().st_mtime_ns}\n".encode())
+    stamp = h.hexdigest()
+    if last_key(conn, "answers:store") == stamp:
+        return 0
     have = {r[0] for r in conn.execute(f"SELECT answer_sha256 FROM {S.qualified('answers')}")}
     new = []
     for model in sorted(os.listdir(root_)):
@@ -733,6 +747,9 @@ def sync_answers(conn, data, release_id=""):
                 if f.endswith(".json") and f[:-5] not in have:
                     new.append((model, os.path.join(d, f)))
     if not new:
+        conn.execute(f"INSERT INTO {LOADS} (table_name, source_sha256, row_count, loaded_at, "
+                     f"release_id) VALUES (%s, %s, %s, %s, %s)",
+                     ("answers:store", stamp, 0, _now(), release_id))
         return 0
     names = [S.rename("answers", c) for c in ANSWER_COLS]
     with conn.transaction(), conn.cursor() as cur:
@@ -746,6 +763,9 @@ def sync_answers(conn, data, release_id=""):
         cur.execute(f"INSERT INTO {LOADS} (table_name, source_sha256, row_count, loaded_at, "
                     f"release_id) VALUES (%s, %s, %s, %s, %s)",
                     ("answers", f"+{len(new)}", len(new), _now(), release_id))
+        cur.execute(f"INSERT INTO {LOADS} (table_name, source_sha256, row_count, loaded_at, "
+                    f"release_id) VALUES (%s, %s, %s, %s, %s)",
+                    ("answers:store", stamp, len(new), _now(), release_id))
     return len(new)
 
 

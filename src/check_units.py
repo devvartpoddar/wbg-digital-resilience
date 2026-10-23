@@ -1131,7 +1131,11 @@ def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
         lines.append(f"- {st}: {len(rs)} rows, graded yes {sum(1 for r in rs if r['yes'])}")
     lines.append("")
     write_quality(data, name, key[0], rows, floor)
-    lines += fit_layer(name, data) if layer else []
+    import panel as _panel
+    if layer and not _panel.get("posterior.on", True):
+        lines += ["## Probability layer", "", "- posterior.on is false: no layer is fitted or tuned; the model's score stands", ""]
+    else:
+        lines += fit_layer(name, data) if layer else []
     lines += fit_gate(name, data)
     out = where(data, "reports", f"evaluate_units_{name}.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)
@@ -1166,15 +1170,19 @@ def evaluate_all(data, seed, **kw):
         report[name] = out
         n += k
     # Pooled, the layer is fitted once every sheet's grades are stored, and
-    # its section is added to each measure's report.
-    if pool:
+    # its section is added to each measure's report. With the layer off
+    # (posterior.on false) nothing is fitted: the code stays, the work is
+    # not done.
+    import panel as _panel
+    layers_on = bool(_panel.get("posterior.on", True))
+    if pool and layers_on:
         for name, lines in fit_pooled_layers(data).items():
             if name in report:
                 with open(report[name], "a", encoding="utf-8") as fh:
                     fh.write("\n".join(lines) + "\n")
     try:
-        lines = fit_asset_layers(data)
-        print("\n".join(lines))
+        if layers_on:
+            print("\n".join(fit_asset_layers(data)))
     except SystemExit as exc:
         print(f"  asset layers: {exc}")
     if os.path.exists(where(data, "review", f"check_links_s{seed}.key.csv")):

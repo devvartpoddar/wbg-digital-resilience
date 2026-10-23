@@ -114,7 +114,7 @@ def plan(data, projects=None, model=classify.MODEL):
     h = hashlib.sha256(f"{model}\nprior={prior.VERSION}\n"
                        f"layers={judged.digest(data, 'pairs', keep_shas(sets))}\n".encode())
     for _, _, _, (state, qs) in pairs:
-        h.update(classify.request_sha(classify.request_body(state, qs, model)).encode())
+        h.update(classify.request_sha_of(state, qs, model).encode())
     known = {(name, uid): u for name, us in sets.items() for uid, u in us.items()}
     out = _adopt(data, where(data, "checks", f"checks-{h.hexdigest()[:12]}"), pairs, model)
     return pairs, out, known

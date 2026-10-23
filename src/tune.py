@@ -315,9 +315,14 @@ def report(data, log=print):
     lines = ["# What the grades say each setting should be", "",
              f"Measures with graded sentences under their current question: {len(blocks)}. "
              "Nothing here changes the panel.", ""]
+    import panel
     if blocks:
         lines += score_table(blocks)
-        lines += layer_grid(blocks, log)
+        # the layer's settings are compared only while the layer is on
+        if panel.get("posterior.on", True):
+            lines += layer_grid(blocks, log)
+        else:
+            lines += ["## The probability layer", "", "- posterior.on is false: not compared", ""]
     else:
         lines += ["- no measure has graded sentences under its current question yet", ""]
     try:

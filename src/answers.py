@@ -26,6 +26,11 @@ Stored under data/classify/answers/<model>/<aa>/<sha>.json:
 
 An answer is stored only if complete for its type: a score answer with a
 probability for every criterion, a yes/no (noul) answer with its number.
+
+The JSON files are the record. A rebuild reads them through a cache,
+data/cache/answers-<model>.sqlite (sha, the file's text), filled the first
+time a file is read: one query per thousand answers instead of opening each
+file. The cache only ever holds a file's own bytes, and can be thrown away.
 """
 import argparse, glob, hashlib, json, os, sys, time
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -39,6 +44,63 @@ def _slug(model):
     return model.replace("/", "__").replace(":", "_")
 
 
+_DBS = {}
+
+
+def _db(root_):
+    """The read cache for a model's store (see the module docstring), or None
+    where it cannot be opened."""
+    if root_ in _DBS:
+        return _DBS[root_]
+    import sqlite3
+    try:
+        cache = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(root_))),
+                             "cache", f"answers-{os.path.basename(root_)}.sqlite")
+        os.makedirs(os.path.dirname(cache), exist_ok=True)
+        con = sqlite3.connect(cache, timeout=60, check_same_thread=False)
+        con.execute("PRAGMA journal_mode=WAL")
+        con.execute("CREATE TABLE IF NOT EXISTS a (sha TEXT PRIMARY KEY, body TEXT NOT NULL)")
+    except Exception:                                  # noqa: BLE001 - a cache, never needed
+        con = None
+    _DBS[root_] = con
+    return con
+
+
+def read_many(root_, shas, bodies=True):
+    """{sha: entry (or True without bodies)} of the stored answers among
+    shas: from the cache, then the files for what it lacks (put in the cache
+    as they are read)."""
+    shas = list(dict.fromkeys(shas))
+    out, con = {}, _db(root_)
+    if con is not None:
+        col = "sha, body" if bodies else "sha"
+        for i in range(0, len(shas), 900):
+            part = shas[i:i + 900]
+            q = f"SELECT {col} FROM a WHERE sha IN ({','.join('?' * len(part))})"
+            for row in con.execute(q, part):
+                out[row[0]] = json.loads(row[1]) if bodies else True
+    fresh = []
+    for sha in shas:
+        if sha in out:
+            continue
+        path = _path(root_, sha)
+        try:
+            with open(path, encoding="utf-8") as fh:
+                text = fh.read()
+            entry = json.loads(text)
+        except (OSError, ValueError):
+            continue
+        out[sha] = entry if bodies else True
+        fresh.append((sha, text))
+    if con is not None and fresh:
+        try:
+            with con:
+                con.executemany("INSERT OR IGNORE INTO a (sha, body) VALUES (?, ?)", fresh)
+        except Exception:                              # noqa: BLE001 - a cache, never needed
+            pass
+    return out
+
+
 def root(data, model):
     return where(data, "classify", "answers", _slug(model))
 
@@ -46,6 +108,28 @@ def root(data, model):
 def key(model, state, question):
     return hashlib.sha256(json.dumps({"model": model, "state": state, "question": question},
                                      sort_keys=True, ensure_ascii=False).encode("utf-8")).hexdigest()
+
+
+_PREFIX = {}
+
+
+def keys_of(model, state, qs):
+    """{qid: key(model, state, q)} for one state, byte for byte, serialising
+    the state once and each question once per process (keys over the asset
+    map serialised 443,740 questions of about a kilobyte each)."""
+    tail = (json.dumps(state, sort_keys=True, ensure_ascii=False) + "}").encode("utf-8")
+    out = {}
+    for qid, q in qs.items():
+        hit = _PREFIX.get((model, id(q)))
+        if hit is None or hit[0] is not q:
+            pre = ('{"model": ' + json.dumps(model, ensure_ascii=False) + ', "question": '
+                   + json.dumps(q, sort_keys=True, ensure_ascii=False) + ', "state": ')
+            hit = (q, hashlib.sha256(pre.encode("utf-8")))
+            _PREFIX[(model, id(q))] = hit
+        h = hit[1].copy()
+        h.update(tail)
+        out[qid] = h.hexdigest()
+    return out
 
 
 def _path(root_, sha):
@@ -298,19 +382,15 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     answers is [None] * len(requests)."""
     import classify
     root_ = root(data, model)
-    keys = [{qid: key(model, state, q) for qid, q in qs.items()} for state, qs in requests]
+    keys = [keys_of(model, state, qs) for state, qs in requests]
     todo = {}
-    # each stored answer is opened once per call: the alias check, the
-    # missing check and the answers returned all read through this
-    memo = {}
+    # every stored answer is looked up once per call, all together (the
+    # cache, then the files): the alias check, the missing check and the
+    # answers returned all read through this
+    memo = read_many(root_, [s for ks in keys for s in ks.values()], bodies=read_answers)
 
     def stored(sha):
-        if sha not in memo:
-            if read_answers:
-                memo[sha] = read(root_, sha)
-            else:
-                memo[sha] = True if os.path.exists(_path(root_, sha)) else None
-        return memo[sha]
+        return memo.get(sha)
     # Answers asked under an alias of the model (the moving name the asset
     # map once used) count when the snapshot that served them is this model:
     # they are copied under this model's key, never asked again.
@@ -322,7 +402,7 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                     old = read(aroot, key(alias, state, q))
                     if old and old.get("model") == model:
                         write(root_, ks[qid], dict(old, migrated_from=alias))
-                        memo.pop(ks[qid], None)
+                        memo.update(read_many(root_, [ks[qid]], bodies=read_answers))
     batch = BATCH if batch is None else batch
     # what each body answers: [(state, qid, the body's own qid)]
     plan = {}
@@ -404,10 +484,11 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
         stats["seconds"] = time.time() - t0
     if not read_answers:
         return [None] * len(keys), stats
+    # what was missing may have been asked since: read those again
+    memo.update(read_many(root_, [s for ks in keys for s in ks.values() if s not in memo]))
     answers = []
     for ks in keys:
-        # what was missing may have been asked since: read those again
-        got = {qid: (memo.get(sha) or read(root_, sha)) for qid, sha in ks.items()}
+        got = {qid: memo.get(sha) for qid, sha in ks.items()}
         answers.append(got if all(got.values()) else None)
     return answers, stats
 

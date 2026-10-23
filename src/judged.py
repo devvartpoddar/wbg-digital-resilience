@@ -545,7 +545,12 @@ def evaluate(data, seed, answered=None):
         except SystemExit as exc:
             lines.append(f"- {kind}: {exc}")
             continue
-        got, oof = fit_kind(data, kind, blocks)
+        if panel.get("posterior.on", True):
+            got, oof = fit_kind(data, kind, blocks)
+        else:
+            # the layer is off: nothing is fitted; the floors read the score
+            got = [f"## {kind}", "", "- posterior.on is false: no layer fitted", ""]
+            oof = {lab: dict(b[1]) for lab, b in blocks.items()}
         lines += got
         oofs[kind] = (blocks, oof)
         if blocks:

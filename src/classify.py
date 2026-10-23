@@ -254,6 +254,33 @@ def request_sha(body):
                           .encode("utf-8")).hexdigest()
 
 
+_PREFIX = {}
+
+
+def _questions_prefix(model, qs):
+    """The hash of a request's bytes up to its state, for these questions:
+    the same for every sentence asked them, so it is made once. Kept with
+    the question objects, so an id is never reused for others."""
+    items = sorted(qs.items())
+    k = (model, tuple((i, id(q)) for i, q in items))
+    hit = _PREFIX.get(k)
+    if hit is None or any(a is not b for a, (_, b) in zip(hit[0], items)):
+        pre = ('{"model": ' + json.dumps(model, ensure_ascii=False) + ', "questions": '
+               + json.dumps(qs, sort_keys=True, ensure_ascii=False) + ', "state": ')
+        hit = ([q for _, q in items], hashlib.sha256(pre.encode("utf-8")), len(pre))
+        _PREFIX[k] = hit
+    return hit
+
+
+def request_sha_of(state, qs, model):
+    """request_sha(request_body(state, qs, model)), byte for byte, without
+    serialising the questions again for every sentence (a key over 155,000
+    sentences serialised about 2 GB of question text)."""
+    h = _questions_prefix(model, qs)[1].copy()
+    h.update((json.dumps(state, sort_keys=True, ensure_ascii=False) + "}").encode("utf-8"))
+    return h.hexdigest()
+
+
 # ------------------------------------------------------------------- the store
 
 def decide(body, *, api_key, endpoint=ENDPOINT, timeout=60, tries=5):
@@ -421,12 +448,17 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     # A sentence whose questions do not fit one request is asked in several
     # (answers.bodies_for); only a sentence too long for a single question
     # is refused, never truncated.
+    shas = []
     for p, body in bodies:
-        one = request_body(p["state"], dict(list(body["questions"].items())[:1]), model)
-        if len(json.dumps(one, ensure_ascii=False)) > MAX_REQUEST_CHARS:
+        # the longest a request with one question gets: the state's length
+        # plus the fixed part for that question (lengths do not depend on
+        # the order of keys), so no request is serialised for the check
+        first = dict(list(body["questions"].items())[:1])
+        state_len = len(json.dumps(p["state"], ensure_ascii=False))
+        if first and state_len + _questions_prefix(model, first)[2] + 1 > MAX_REQUEST_CHARS:
             raise SystemExit(f"classify: {p['row']['unit_id']} makes a request over "
                              f"{MAX_REQUEST_CHARS:,} characters with one question; not truncated")
-    shas = [request_sha(b) for _, b in bodies]
+        shas.append(request_sha_of(body["state"], body["questions"], model))
     prefix = "smoke_" if limit else ""
     fb = feedback.settings(feedback.ASSET) if rounds_apply(min_cosine, limit) else {}
     h = hashlib.sha256(f"min_cosine={min_cosine}\nunit=sentence\nprior={prior.VERSION}\n"
