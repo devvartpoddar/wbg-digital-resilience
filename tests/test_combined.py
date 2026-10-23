@@ -88,7 +88,8 @@ def _frames():
                        "ids": ["fiber", "satellite", "data_hosting"],
                        "names": {"fiber": "Fiber", "satellite": "Satellite",
                                  "data_hosting": "Data hosting"},
-                       "floor": 0.3, "qsha": "q-assets"},
+                       "floor": 0.3, "qsha": "q-assets",
+                       "qshas": {"fiber": "qa-f", "satellite": "qa-s", "data_hosting": "qa-d"}},
             "pairs": [{"unit_id": u, "set_a": "backup_power", "set_b": "cra", "p_keep_a": "0.6",
                        "p_keep_b": "0.6"} for u in uids[20:25]],
             "pairs_run": "checks-run",
@@ -152,14 +153,19 @@ def test_both_sheets_are_drawn_once_and_read_back_into_every_decisions_labels(tm
     g = combined.Graded(data, 3)
     cra = g.measure_grades("cra")
     lines = [v for rid, v in cra.items() if not rid.endswith(".o")]
-    # fiber where the sentence was asked about it, none where no asset was listed
-    assert lines and all(v[0] == 3 and v[1] in ("fiber", "none") for v in lines)
-    assert any(v[1] == "fiber" for v in lines)
+    # the assets are lines of their own now, not part of the measure's row
+    assert lines and all(v[0] == 3 and v[1] == "" for v in lines)
     typed = [v for v in lines if v[2]]
     assert typed and all(v[2] == "T1" for v in typed)
     # a sentence cra never read is an 'outside' row: 0, as nobody named cra on it
     assert all(v[0] == 0 for rid, v in cra.items() if rid.endswith(".o"))
-    assert {v[1] for v in g.asset_grades().values()} <= {"fiber", "none"}
+    assets = g.asset_grades()
+    assert assets and {v[1] for v in assets.values()} <= {"fiber", "none"}
+    assert any(v == (2, "fiber", "", "") for v in assets.values())
+    # each line is drawn with its own chance, never more than its sentence's
+    for b in blocks:
+        for ln in b["lines"]:
+            assert float(ln["weight"]) >= b["weight"] - 1e-9
     pairs = g.pair_answers()
     assert pairs and set(pairs.values()) == {"only B"}       # backup_power 0, cra 3
     assert set(g.package_answers("package_asset").values()) == {"yes"}
@@ -174,6 +180,12 @@ def test_both_sheets_are_drawn_once_and_read_back_into_every_decisions_labels(tm
     assert len(stored) == len(graded)
     weights = {r["text_sha256"]: float(r["weight"]) for r in stored}
     assert all(w >= 1.0 for w in weights.values())          # one over a chance
+    # a sentence cra read whose cra line was not drawn has no row in cra's key
+    drawn_cra = {r["unit_id"] for r in keyrows if r["frame"] == "pool"}
+    for b in blocks:
+        if b["unit_id"] in frames["measures"]["cra"]["units"]:
+            has = any(ln["kind"] == "measure" and ln["label_set"] == "cra" for ln in b["lines"])
+            assert has == (b["unit_id"] in drawn_cra)
     # the pair checks and the package lines go to the checks' own label files
     import judged
     assert judged.evaluate_tab(data, 3, "pairs", pairs) == len(pairs)
@@ -183,14 +195,19 @@ def test_both_sheets_are_drawn_once_and_read_back_into_every_decisions_labels(tm
     links = list(csv.DictReader(open(os.path.join(data, "labels", "package_links.csv"),
                                      encoding="utf-8")))
     assert n_links == 1 and links[0]["applies"] == "no" and float(links[0]["weight"]) >= 1.0
-    # the sentence's assets as labels of the set 'assets'
-    assert combined.store_assets(data, 3, g) == len(blocks)
+    # each asset line as a label of its asset
+    assert combined.store_assets(data, 3, g) == len(assets)
+    stored = list(csv.DictReader(open(os.path.join(data, "labels", "assets_units.csv"),
+                                      encoding="utf-8")))
+    assert {r["label_id"] for r in stored} <= {"fiber", "satellite", "data_hosting"}
 
 
 def test_the_headline_scores_measure_and_asset_together():
-    blocks = [{"block": "S1", "unit_id": "u1", "weight": 2.0, "lines": []},
-              {"block": "S2", "unit_id": "u2", "weight": 1.0, "lines": []},
-              {"block": "S3", "unit_id": "u3", "weight": 1.0, "lines": []}]
+    lines = lambda w: [{"kind": "measure", "label_set": "cra", "weight": str(w)},
+                       {"kind": "asset", "asset_id": "fiber", "weight": str(w)}]
+    blocks = [{"block": "S1", "unit_id": "u1", "weight": 1.0, "lines": lines(2)},
+              {"block": "S2", "unit_id": "u2", "weight": 1.0, "lines": lines(1)},
+              {"block": "S3", "unit_id": "u3", "weight": 1.0, "lines": lines(1)}]
 
     class G:
         sblocks = blocks
@@ -266,3 +283,21 @@ def test_a_seed_with_any_key_of_its_own_is_refused(tmp_path, monkeypatch):
     open(os.path.join(data, "review", "check_units_cra_s4.key.csv"), "w").close()
     with pytest.raises(SystemExit, match="seed 4 is taken"):
         combined.build(data, 4, "train")
+
+
+def test_a_sentence_shows_each_line_with_exactly_its_own_chance():
+    lines = {f"u{i}": {("measure", "a"): 0.5, ("measure", "b"): 0.1, ("block",): 0.02}
+             for i in range(4000)}
+    drawn = combined.draw_lines(lines, 9)
+    assert abs(len(drawn) - 2000) < 150       # drawn at its largest line chance
+    shown_b = sum(1 for _, _, shown in drawn if ("measure", "b") in shown)
+    assert abs(shown_b - 400) < 70            # line b at its own 0.1, not the sentence's 0.5
+    # one uniform a sentence: every sentence showing b also shows a
+    assert all(("measure", "a") in shown for _, _, shown in drawn if ("measure", "b") in shown)
+
+
+def test_a_commitments_asset_lines_come_with_its_measure_line():
+    frames = _frames()
+    chance = {("u000", (("measure", "cra"),)): 0.6, ("u000", (("asset", "fiber"),)): 0.1}
+    got = combined.line_chances(chance, frames)
+    assert got["u000"][("asset", "fiber")] == 0.6   # cra links u000 to fiber

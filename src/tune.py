@@ -182,6 +182,8 @@ def asset_grid(data):
     by_text = {check_units.text_key(t): u for u, t in measure.unit_texts(data, index).items()}
     named = {}
     for name in labels.label_sets():
+        if name == measure.ASSET_SET:
+            continue                 # the combined sheets' asset lines: asset_line_grid
         for u, (_, asset, w) in check_units.graded_labels(name, data, fitting=True,
                                                          units_by_text=by_text).items():
             given = set(asset.split("|")) - {"", "other"}
@@ -190,7 +192,8 @@ def asset_grid(data):
     real = {u: (a - {"none"}, w) for u, (a, w) in named.items() if a - {"none"}}
     none = {u: v for u, v in named.items() if v[0] == {"none"}}
     if not real:
-        return lines + ["- no graded sentence names an asset yet", ""]
+        return lines + ["- no measure sheet's sentence names an asset", ""] + \
+            asset_line_grid(data, amap, before, by_text)
     lines += [f"On {len(real)} graded sentences a person gave an asset and {len(none)} where "
               "they said none, weighted, at the panel's asset.multiple. Agree = the person's "
               "assets are among the pipeline's (any one of them); other assets given = assets the "
@@ -228,7 +231,62 @@ def asset_grid(data):
         if k <= 20 or mark:
             lines.append(f"| {k}{mark} | {fl} | {pf} | {d} | {ag:.2f} | {ex:.2f} | {on:.2f} |")
     return lines + ["", "Read it: the highest agree with a low 'on none'; decay 0 is the "
-                    "sentence alone.", ""]
+                    "sentence alone.", ""] + asset_line_grid(data, amap, before, by_text)
+
+
+def asset_line_grid(data, amap, before, by_text):
+    """asset.floor x paragraph floor x decay against the combined sheets'
+    asset lines, each a sentence and an asset a person graded (reading the
+    passage): the weighted precision and recall of the pipeline giving that
+    asset, ranked by the floors' rule (the most recall whose precision
+    reaches floor.target_precision). Returns report lines."""
+    import json
+    import check_units
+    import classify
+    import measure
+    folder = classify.last_run("assets", data)
+    if not folder:
+        return []
+    with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
+        qshas = json.load(fh).get("question_sha256", {})
+    graded = {k: v for k, v in check_units.asset_line_grades(data, by_text, qshas).items()
+              if k[0] in before}
+    if not graded:
+        return []
+    target = float(panel.get("floor.target_precision", 0.8))
+    now = (float(panel.get("asset.floor", 0.3)),
+           float(panel.get("asset.paragraph_floor", panel.get("asset.floor", 0.3))),
+           float(panel.get("asset.decay", 0.4)))
+    results = []
+    for fl in FLOORS:
+        for pf in FLOORS:
+            for d in DECAYS:
+                if d == 0 and pf != fl:
+                    continue
+                tp = fp = pos = 0.0
+                for (u, a), (y, w) in graded.items():
+                    win = {x for x, _ in measure.sentence_assets(
+                        amap.get(u, {}), [amap.get(x, {}) for x in before[u]], d, fl, pf)[0]}
+                    tp += w if y and a in win else 0.0
+                    fp += w if not y and a in win else 0.0
+                    pos += w if y else 0.0
+                prec = tp / (tp + fp) if tp + fp else 0.0
+                rec = tp / pos if pos else 0.0
+                results.append((prec >= target, rec if prec >= target else prec, (fl, pf, d),
+                                prec, rec))
+    results.sort(key=lambda r: (not r[0], -r[1], r[2]))
+    lines = [f"### On the combined sheets' asset lines ({len(graded)} sentence and asset pairs "
+             f"graded, {sum(1 for y, _ in graded.values() if y)} yes)", "",
+             f"Weighted by each line's design weight; ranked by the floors' rule: the most "
+             f"recall whose precision reaches {target}. In sample: the asset layers were "
+             f"fitted on the same grades.", "",
+             "| rank | floor | paragraph floor | decay | precision | recall |",
+             "|---|---|---|---|---|---|"]
+    for k, (_, _, (fl, pf, d), prec, rec) in enumerate(results, 1):
+        mark = " (panel)" if (fl, pf, d) == now else ""
+        if k <= 20 or mark:
+            lines.append(f"| {k}{mark} | {fl} | {pf} | {d} | {prec:.2f} | {rec:.2f} |")
+    return lines + [""]
 
 
 NOT_YET = [

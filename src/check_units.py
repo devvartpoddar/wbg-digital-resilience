@@ -867,27 +867,40 @@ def fit_asset_layers(data):
     with open(where(data, "embeddings", "sentence_index.csv"), newline="", encoding="utf-8") as fh:
         texts = measure.unit_texts(data, list(_csv.DictReader(fh)))
     by_text = {text_key(t): u for u, t in texts.items()}
+    # The assets a person gave a sentence on a measure's own sheet: every
+    # asset asked of that sentence is graded by it, given or not ...
     named, weight = {}, {}
     for name in labels.label_sets():
+        if name == measure.ASSET_SET:
+            continue
         for u, (_, asset, w) in graded_labels(name, data, fitting=True,
                                               units_by_text=by_text).items():
             if asset:
                 named[u] = set(asset.split("|")) - {""}   # the assets a person gave it
                 weight[u] = w
     unsure = unsure_assets(data, by_text)
-    scores = {}
+    # ... and the combined sheets' asset lines, each graded on its own (a
+    # line not drawn is no grade, never a no)
+    own = asset_line_grades(data, by_text, man["question_sha256"])
+    graded, scores = {}, {}
     with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            if r.get("asked") == "true" and r.get("unit_id") in named \
-                    and r["label_id"] not in unsure.get(r["unit_id"], ()):
-                scores.setdefault(r["label_id"], {})[r["unit_id"]] = \
-                    sum(float(r.get(f"p{g}") or 0) for g in panel.grades())
+            u, a = r.get("unit_id"), r["label_id"]
+            if r.get("asked") != "true":
+                continue
+            if (u, a) in own:
+                graded[(u, a)] = own[(u, a)]
+            elif u in named and a not in unsure.get(u, ()):
+                graded[(u, a)] = (int(a in named[u]), weight[u])
+            else:
+                continue
+            scores.setdefault(a, {})[u] = sum(float(r.get(f"p{g}") or 0) for g in panel.grades())
     vector_of, projects_of = posterior.lookups(data)
-    vecs = {u: vector_of(u) for u in named}
+    vecs = {u: vector_of(u) for u, _ in graded}
     vecs = {u: v for u, v in vecs.items() if v is not None}
     out, lines = {}, ["## Asset probability layers", ""]
-    blocks = {asset: ([(u, 1 if asset in named[u] else 0, weight[u], projects_of(u)) for u in sc],
-                      sc, vecs, man["question_sha256"].get(asset, ""))
+    blocks = {asset: ([(u, graded[(u, asset)][0], graded[(u, asset)][1], projects_of(u))
+                       for u in sc], sc, vecs, man["question_sha256"].get(asset, ""))
               for asset, sc in sorted(scores.items())}
     # pooled across assets when posterior.pool is on, as the measures are
     pooled = posterior.fit_pooled(blocks) if posterior.settings()["pool"] else None
@@ -915,8 +928,9 @@ def fit_asset_layers(data):
     gates = {}
     for asset in sorted(scores):
         mine = [p["regex"] for p in pats if p["label_id"] == asset]
-        pos = [(cos[(asset, u)], any(rx.search(texts.get(u, "")) for rx in mine), weight[u])
-               for u in named if asset in named[u] and (asset, u) in cos]
+        pos = [(cos[(asset, u)], any(rx.search(texts.get(u, "")) for rx in mine), w)
+               for (u, a), (y, w) in sorted(graded.items())
+               if a == asset and y and (asset, u) in cos]
         got = skip.fit(pos)
         if got:
             bound = skip.loss_bound(got[1], [p[2] for p in pos])
@@ -944,6 +958,26 @@ def with_sheet(rows):
     for r in rows:
         r["sheet"] = "evaluation" if is_eval(r) else "training"
     return rows
+
+
+def asset_line_grades(data, by_text, qshas, fitting=True):
+    """{(unit_id, asset): (1 if graded 2 or more else 0, weight)} of the
+    combined sheets' asset lines (data/labels/assets_units.csv, label_id
+    the asset) under each asset's current question; with fitting, an
+    evaluation sheet's are left out."""
+    import panel
+    lo = min(panel.grades())
+    path = where(data, "labels", f"{measure.ASSET_SET}_units.csv")
+    out = {}
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in sorted(csv.DictReader(fh), key=lambda r: r.get("graded_on", "")):
+                a, u = r.get("label_id", ""), by_text.get(r.get("text_sha256", ""))
+                if u is None or a not in qshas or r.get("question_sha256") != qshas[a] \
+                        or r.get("grade", "") == "" or (fitting and is_eval(r)):
+                    continue
+                out[(u, a)] = (int(int(r["grade"]) >= lo), float(r.get("weight") or 1.0))
+    return out
 
 
 def unsure_assets(data, by_text):
