@@ -83,52 +83,15 @@ SHEET_COLS = [("row_id", 8), ("measure", 20), ("measure means", 40), ("project",
 LABEL_COLS = ["label_set", "label_id", "unit_id", "text_sha256", "question_sha256", "grade",
               "asset", "type", "source", "graded_on", "stratum", "weight", "unsure", "sheet"]
 THRESHOLDS = [0.15, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
-# The band design (--design bands): drawn by the posterior, densest where a
-# cut-off would be chosen, so the floor can be read off the graded sheet. Each band is (stratum, low, high, rows).
-BANDS = [("p<0.15", 0.0, 0.15, 5), ("p0.15-0.4", 0.15, 0.4, 8), ("p0.4-0.6", 0.4, 0.6, 12),
-         ("p0.6-0.8", 0.6, 0.8, 10), ("p0.8+", 0.8, 1.01, 5)]
-# The floor design (--design floor): about 20 units a measure in bands around
-# its floor (control panel floor.<set>), to check a chosen floor; a measure
-# without one is drawn in BANDS at about half the rows.
-FLOOR_STEPS = [(-1.0, -0.2, 2), (-0.2, -0.1, 3), (-0.1, 0.0, 5), (0.0, 0.1, 5), (0.1, 0.25, 3),
-               (0.25, 1.0, 2)]
-
-
-def floor_bands(floor, scale=1.0):
-    """[(stratum, low, high, rows)] around a floor, or BANDS halved;
-    `scale` multiplies every band's rows (the tuning draw: 1.4, about 28)."""
-    rows = lambda n: int(n * scale + 0.5)
-    if floor is None:
-        return [(s, lo, hi, rows((n + 1) // 2)) for s, lo, hi, n in BANDS]
-    out = []
-    for a, b, n in FLOOR_STEPS:
-        lo, hi = max(0.0, floor + a), min(1.01, floor + b)
-        if hi > lo:
-            out.append((f"p{lo:.2f}-{min(hi, 1.0):.2f}", lo, hi, rows(n)))
-    return out
-
-
-TUNE_SCALE = 1.4   # the tuning draw: the floor bands at 1.4 times (about 28), links over the whole range
-
-
-LINK_FLOOR_BANDS = [("p0.5-0.6", 0.5, 0.6, 8), ("p0.6-0.7", 0.6, 0.7, 8), ("p0.7-0.8", 0.7, 0.8, 8),
-                    ("p0.8+", 0.8, 1.01, 6)]
 LINK_BANDS = [("p<0.3", 0.0, 0.3, 10), ("p0.3-0.5", 0.3, 0.5, 15), ("p0.5-0.7", 0.5, 0.7, 15),
               ("p0.7-0.9", 0.7, 0.9, 15), ("p0.9+", 0.9, 1.01, 15)]
 HOW_TO = [
-    "Each measure tab: read the sentence (with its paragraph, section and component) and enter a "
-    "grade on the measure's scale (tab 'grades'). Asset and type are optional (tab 'types' "
-    "defines the types). Asset: 'other' when the commitment is about something that is not a "
-    "digital asset, 'none' when the sentence names no asset; for several, type them joined by "
-    "| (fiber|data_hosting). Type: the same, | for several. Leave a row blank to skip it.",
-    "Rows were drawn by the model's probability that the sentence is a commitment, more of them "
-    "near where a cut-off would fall; the model's answer is not shown.",
-    "Tab 'package links': does carrying out the package deliver or apply the commitment? "
-    "Enter yes, no or unsure.",
-    "Tab 'pair checks': two measures both count the sentence; which does it commit the project "
-    "to? only A, only B, both, neither, or unsure.",
-    "Tab 'package assets': does the package buy, build, install, connect, operate or design "
-    "the asset named? yes, no or unsure.",
+    "Read the sentence (with its paragraph, section and component) and enter a grade on the "
+    "measure's scale (tab 'grades'). Asset and type are optional (tab 'types' defines the "
+    "types). Asset: 'other' when the commitment is about something that is not a digital "
+    "asset, 'none' when the sentence names no asset; for several, type them joined by | "
+    "(fiber|data_hosting). Type: the same, | for several. Leave a row blank to skip it.",
+    "The model's answer is not shown.",
     "Do not reorder, insert or delete rows or columns: row_id joins each row to its key file.",
 ]
 ALL = "all"              # ./wbg check all: every measure, one workbook, plus the package links
@@ -190,29 +153,6 @@ def draw(units, floor, seed, design="train"):
     return picked
 
 
-def draw_bands(units, top, seed, bands=BANDS):
-    """The units the model read, by band of the probability the floor reads
-    (the probability layer's, else the model's score for the grades the
-    control panel counts): (unit, stratum, stratum size, rows drawn)."""
-    rng = random.Random(seed)
-    strata = {}
-    for u in units:
-        if u["sent"] != "true" or u.get(f"p{top}", "") == "":
-            continue
-        p = float(u["p_committed_calibrated"]) if u.get("p_committed_calibrated") \
-            else measure.score_of(u)
-        s = next((b[0] for b in bands if b[1] <= p < b[2]), None)
-        if s is not None:
-            strata.setdefault(s, []).append(u)
-    picked = []
-    for s, _, _, per in bands:
-        pool = sorted(strata.get(s, []), key=lambda u: u["unit_id"])
-        n = min(per, len(pool))
-        for u in rng.sample(pool, n):
-            picked.append((u, s, len(pool), n))
-    return picked
-
-
 def draw_elusion(run, units, per, seed):
     """Units the funnel never read, by stratum of their best cosine over the
     measure's phrases: near (within ELUSION_BAND below the pool threshold)
@@ -259,13 +199,6 @@ def sheet_rows(name, data, seed=1, elusion=False, design="train", **kw):
     units = measure.read_units(folder, data)
     if elusion:
         picked = draw_elusion(run, units, ELUSION_PER, seed)
-    elif design == "bands":
-        picked = draw_bands(units, len(run.scale) - 1, seed)
-    elif design in ("floor", "tune"):
-        import labels
-        picked = draw_bands(units, len(run.scale) - 1, seed,
-                            floor_bands(panel.floor(name),
-                                        TUNE_SCALE if design == "tune" else 1.0))
     elif design in ("train", "eval"):
         picked = draw(units, run.floor, seed, design)
     else:
@@ -323,127 +256,20 @@ def all_path(data, seed):
 
 
 def build_all(data, seed, design="train", near_gate=False, **kw):
-    """One workbook for a person to grade: a tab per measure (drawn by
-    `design`), and a tab of package links. Each tab has its own key file,
-    check_units_<set>_s<seed>.key.csv and check_links_s<seed>.key.csv, so
-    `--evaluate` reads each measure as it reads a sheet of its own. The
-    training and evaluation designs draw the combined sheets instead (a tab
-    of sentences and one of packages, every decision read off each item
-    once; src/combined.py), into the same key files."""
-    import labels
-    if design in ("train", "eval"):
-        import combined
-        xlsx, n, k = combined.build(data, seed, design, near_gate, kw.get("projects"),
-                                    kw.get("dry_run", False))
-        return xlsx, n + k
-    xlsx = all_path(data, seed)
-    if os.path.exists(xlsx):
-        raise SystemExit(f"check: {xlsx} exists and may hold grades; use another --seed")
-    tabs, keys = [], []
-    for name in labels.label_sets():
-        if name == measure.ASSET_SET:
-            continue
-        if not measure.current_run(name, data, **kw):
-            print(f"check: {name}: no current measure run; left out")
-            continue
-        key, sheet, scale, assets = sheet_rows(name, data, seed, design=design, **kw)
-        base = where(data, "review", f"check_units_{name}_s{seed}")
-        if os.path.exists(base + ".xlsx") or os.path.exists(base + ".key.csv"):
-            raise SystemExit(f"check: {base} exists; use another --seed")
-        tabs.append({"tab": name[:31], "rows": sheet, "scale": scale, "assets": assets,
-                     "types": set_types(name, data), "measure": name})
-        keys.append((base + ".key.csv", KEY_COLS, key))
-    lkey, lsheet = link_rows(data, seed, kw.get("projects"),
-                             LINK_FLOOR_BANDS if design == "floor" else LINK_BANDS)
-    if lsheet:
-        tabs.append({"tab": "package links", "rows": lsheet})
-        keys.append((where(data, "review", f"check_links_s{seed}.key.csv"), LINK_KEY_COLS, lkey))
-    # The decisions after the measures, each with its own tab (src/judged.py).
-    import judged
-    for tab, fname, rows_of, kcols, cols, answers in (
-            ("pair checks", "check_pairs", judged.pair_rows, judged.PAIR_KEY_COLS,
-             judged.PAIR_SHEET, judged.PAIR_ANSWERS),
-            ("package assets", "check_package_assets", judged.package_asset_rows,
-             judged.ASSET_KEY_COLS, judged.ASSET_SHEET, ["yes", "no", "unsure"])):
-        k, sheet = rows_of(data, seed, kw.get("projects"))
-        if sheet:
-            tabs.append({"tab": tab, "rows": sheet, "cols": cols, "drops": [("answer", answers)]})
-            keys.append((where(data, "review", f"{fname}_s{seed}.key.csv"), kcols, k))
-    os.makedirs(os.path.dirname(xlsx), exist_ok=True)
-    for path, cols, rows in keys:
-        _write_key(path, cols, rows)
-    _write_xlsx(xlsx, tabs)
-    return xlsx, sum(len(t["rows"]) for t in tabs)
+    """One workbook for a person to grade, the combined sheets: a tab of
+    sentences and one of packages, every decision read off each item once
+    (src/combined.py), with a key file per measure and per decision so
+    `--evaluate` reads each as it reads a sheet of its own."""
+    import combined
+    xlsx, n, k = combined.build(data, seed, design, near_gate, kw.get("projects"),
+                                kw.get("dry_run", False))
+    return xlsx, n + k
 
 
 def link_question_sha():
     import link_packages
     return hashlib.sha256(json.dumps(link_packages.PAIR_QUESTION, sort_keys=True)
                           .encode("utf-8")).hexdigest()
-
-
-def link_rows(data, seed, projects=None, bands=LINK_BANDS):
-    """(key rows, sheet rows) of the package links drawn by band of the
-    link's probability, from the current link run; ([], []) without one."""
-    import link_packages
-    folder = link_packages.current_run(data, projects=projects)
-    if not folder:
-        print("check: no current link run; the package links tab is left out")
-        return [], []
-    with open(os.path.join(folder, "commitment_packages.csv"), newline="", encoding="utf-8") as fh:
-        pairs = list(csv.DictReader(fh))
-    units = {(name, u["unit_id"]): u
-             for name, (_, us) in link_packages.committed_units(data, projects).items() for u in us}
-    packages = {p["package_id"]: p for p in link_packages.load_packages(data, projects)}
-    names = {}
-    import labels
-    for name in {p["label_set"] for p in pairs}:
-        try:
-            names[name] = labels.load_set(name)[0]["name"]
-        except (SystemExit, IndexError):
-            names[name] = name
-    pairs = [p for p in pairs if (p["label_set"], p["unit_id"]) in units
-             and p["package_id"] in packages and p.get("probability", "") != ""]
-    for p in pairs:                  # the decision reads the posterior (src/judged.py)
-        p["probability"] = p.get("p_calibrated") or p["probability"]
-    picked = draw_links(pairs, seed, bands)
-    random.Random(seed).shuffle(picked)
-    qsha = link_question_sha()
-    key, sheet = [], []
-    for i, (p, stratum, size, drawn) in enumerate(picked, 1):
-        u, pk = units[(p["label_set"], p["unit_id"])], packages[p["package_id"]]
-        state = link_packages.pair_state(u, pk)
-        key.append({"row_id": i, "label_set": p["label_set"], "unit_id": p["unit_id"],
-                    "package_id": p["package_id"],
-                    "text_sha256": text_key(u["text"]),
-                    "package_sha256": pk["sha"], "question_sha256": qsha,
-                    "probability": p["probability"], "stratum": stratum, "stratum_size": size,
-                    "stratum_drawn": drawn, "link_run": os.path.basename(folder)})
-        sheet.append({"row_id": i, "project": p["project_id"],
-                      "measure": names.get(p["label_set"], p["label_set"]),
-                      "commitment": u["text"],
-                      "commitment component": state.get("commitment_component", ""),
-                      "package": pk["text"], "package component": pk["component"]})
-    return key, sheet
-
-
-def draw_links(pairs, seed, bands=LINK_BANDS):
-    """Commitment and package pairs by band of the link probability:
-    (pair, stratum, stratum size, rows drawn)."""
-    rng = random.Random(seed)
-    strata = {}
-    for p in pairs:
-        x = float(p["probability"])
-        s = next((b[0] for b in bands if b[1] <= x < b[2]), None)
-        if s is not None:
-            strata.setdefault(s, []).append(p)
-    picked = []
-    for s, _, _, per in bands:
-        pool = sorted(strata.get(s, []), key=lambda p: (p["label_set"], p["unit_id"], p["package_id"]))
-        n = min(per, len(pool))
-        for p in rng.sample(pool, n):
-            picked.append((p, s, len(pool), n))
-    return picked
 
 
 def _write_xlsx(path, tabs):
@@ -1336,12 +1162,10 @@ def main():
                     help="units the funnel never read, from just below and far below the pool")
     ap.add_argument("--seed", type=int, default=1)
     ap.add_argument("--design", default="train",
-                    choices=("train", "eval", "bands", "floor", "tune"),
+                    choices=("train", "eval"),
                     help="train (the default): 30 near the floor, 10 far from it; eval: a "
                          "random draw by the decision (60 committed, 30 not), kept out of "
-                         "every fit; bands: by band of the posterior (5/8/12/10/5); floor or "
-                         "tune: around each measure's floor (about 20 or 28; links around "
-                         "0.7 or over the whole range)")
+                         "every fit")
     ap.add_argument("--near-gate", action="store_true",
                     help="check all, train or eval: also draw sentences just below each "
                          "measure's gate (the last training round)")

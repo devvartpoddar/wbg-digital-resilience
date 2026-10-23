@@ -222,7 +222,7 @@ def test_a_check_sheet_is_drawn_from_a_run_with_the_sentence_and_its_paragraph(s
     data, _ = store
     measure.measure("cra", data, **RUN)
     kw = {k: v for k, v in RUN.items() if k in ("top", "max_rounds")}
-    key, sheet, scale, assets = check_units.sheet_rows("cra", data, design="bands", **kw)
+    key, sheet, scale, assets = check_units.sheet_rows("cra", data, **kw)
     assert len(key) == len(sheet) == 1
     row = sheet[0]
     assert row["sentence"].startswith("A site-specific hazard assessment")

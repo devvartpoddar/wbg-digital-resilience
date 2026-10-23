@@ -156,103 +156,20 @@ def fitting_rows(data, kind):
     return [r for r in read_labels(data, kind) if not (r.get("stratum") or "").startswith("eval:")]
 
 
-def draw(rows, score, seed, bands=BANDS):
-    """[(row, stratum, stratum size, drawn)] by band of score(row)."""
-    rng = random.Random(seed)
-    strata = {}
-    for r in rows:
-        x = score(r)
-        s = next((b[0] for b in bands if b[1] <= x < b[2]), None)
-        if s is not None:
-            strata.setdefault(s, []).append(r)
-    out = []
-    for s, _, _, per in bands:
-        pool = strata.get(s, [])
-        n = min(per, len(pool))
-        for r in rng.sample(pool, n):
-            out.append((r, s, len(pool), n))
-    rng.shuffle(out)
-    return out
-
-
 # ------------------------------------------------------------ the pair checks tab
 
 PAIR_KEY_COLS = ["row_id", "unit_id", "set_a", "set_b", "text_sha256", "question_sha256",
                  "p_keep_a", "p_keep_b", "stratum", "stratum_size", "stratum_drawn", "run"]
-PAIR_SHEET = [("row_id", 8), ("project", 12), ("measure A", 30), ("measure B", 30),
-              ("sentence", 90), ("answer", 12), ("note", 24)]
 PAIR_LABEL_COLS = ["unit_id", "set_a", "set_b", "text_sha256", "question_sha256", "answer",
                    "weight", "source", "graded_on", "stratum"]
-
-
-def pair_rows(data, seed, projects=None):
-    """(key rows, sheet rows) of the 'pair checks' tab, drawn from the
-    current pair-check run by band of the larger drop probability."""
-    import check_units
-    import commit_checks
-    folder = commit_checks.current_run(data, projects)
-    if not folder:
-        return [], []
-    with open(os.path.join(folder, "pairs.csv"), newline="", encoding="utf-8") as fh:
-        pairs = list(csv.DictReader(fh))
-    _, _, known = commit_checks.plan(data, projects)
-    texts = {uid: u["text"] for (_, uid), u in known.items()}
-    proj = {uid: u.get("project_ids", "") for (_, uid), u in known.items()}
-    names = {}
-    for p in pairs:
-        for s in (p["set_a"], p["set_b"]):
-            names.setdefault(s, commit_checks.boundary_of(s)[0])
-    keep = lambda p: min(float(p.get("p_keep_a") or 0), float(p.get("p_keep_b") or 0))
-    key, sheet = [], []
-    for i, (p, st, size, n) in enumerate(draw(pairs, keep, seed), 1):
-        q = commit_checks.pair_question(p["set_a"], p["set_b"])
-        key.append({"row_id": i, "unit_id": p["unit_id"], "set_a": p["set_a"],
-                    "set_b": p["set_b"], "text_sha256": check_units.text_key(texts[p["unit_id"]]),
-                    "question_sha256": sha(q), "p_keep_a": p.get("p_keep_a", ""),
-                    "p_keep_b": p.get("p_keep_b", ""), "stratum": st, "stratum_size": size,
-                    "stratum_drawn": n, "run": os.path.basename(folder)})
-        sheet.append({"row_id": i, "project": proj.get(p["unit_id"], ""),
-                      "measure A": names[p["set_a"]], "measure B": names[p["set_b"]],
-                      "sentence": texts[p["unit_id"]]})
-    return key, sheet
 
 
 # ------------------------------------------------------------ the package assets tab
 
 ASSET_KEY_COLS = ["row_id", "package_id", "asset_id", "package_sha256", "question_sha256",
                   "probability", "stratum", "stratum_size", "stratum_drawn", "run"]
-ASSET_SHEET = [("row_id", 8), ("project", 12), ("package", 70), ("package component", 30),
-               ("asset", 30), ("answer", 12), ("note", 24)]
 ASSET_LABEL_COLS = ["package_id", "asset_id", "package_sha256", "question_sha256", "answer",
                     "weight", "source", "graded_on", "stratum"]
-
-
-def package_asset_rows(data, seed, projects=None):
-    """(key rows, sheet rows) of the 'package assets' tab: packages and the
-    assets they were asked about, by band of the posterior."""
-    import labels
-    import link_packages
-    folder = link_packages.current_run(data, projects=projects)
-    if not folder:
-        return [], []
-    with open(os.path.join(folder, "package_assets.csv"), newline="", encoding="utf-8") as fh:
-        rows = list(csv.DictReader(fh))
-    packages = {p["package_id"]: p for p in link_packages.load_packages(data, projects)}
-    assets = {a["id"]: a for a in labels.load_set("assets") if a["active"] == "true"}
-    qs = link_packages.asset_questions(list(assets.values()))
-    rows = [r for r in rows if r["package_id"] in packages and r["label_id"] in qs]
-    score = lambda r: float(r.get("p_calibrated") or r["probability"])
-    key, sheet = [], []
-    for i, (r, st, size, n) in enumerate(draw(rows, score, seed), 1):
-        p = packages[r["package_id"]]
-        key.append({"row_id": i, "package_id": r["package_id"], "asset_id": r["label_id"],
-                    "package_sha256": p["sha"], "question_sha256": sha(qs[r["label_id"]]),
-                    "probability": f"{score(r):.3f}", "stratum": st, "stratum_size": size,
-                    "stratum_drawn": n, "run": os.path.basename(folder)})
-        sheet.append({"row_id": i, "project": p["project_id"], "package": p["text"],
-                      "package component": p.get("component", ""),
-                      "asset": assets[r["label_id"]]["name"]})
-    return key, sheet
 
 
 def read_answers(xlsx, tab):

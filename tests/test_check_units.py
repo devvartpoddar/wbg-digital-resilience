@@ -1,6 +1,6 @@
-"""The grading sheets (src/check_units.py): the band draw, the combined
-workbook with a tab per measure and the package links, and reading the
-person's answers back, on invented rows."""
+"""The grading sheets (src/check_units.py): the workbook, and reading the
+person's answers back (including a tab of a workbook written before the
+combined sheets), on invented rows."""
 import csv
 import os
 import sys
@@ -12,25 +12,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 import check_units  # noqa: E402
 
 openpyxl = pytest.importorskip("openpyxl")
-
-
-def _units(n=200):
-    return [{"unit_id": f"u{i:03d}", "sent": "true", "route": "", "grade": "0",
-             "p3": f"{i / n:.3f}"} for i in range(n)]
-
-
-def test_the_band_draw_takes_each_bands_quota_and_is_repeatable():
-    units = _units() + [{"unit_id": "x", "sent": "false", "route": "", "grade": "", "p3": ""}]
-    picked = check_units.draw_bands(units, 3, seed=2)
-    got = {}
-    for u, s, size, drawn in picked:
-        got[s] = (size, drawn)
-        lo, hi = next((b[1], b[2]) for b in check_units.BANDS if b[0] == s)
-        assert lo <= float(u["p3"]) < hi
-    assert got == {"p<0.15": (30, 5), "p0.15-0.4": (50, 8), "p0.4-0.6": (40, 12),
-                   "p0.6-0.8": (40, 10), "p0.8+": (40, 5)}
-    assert [u["unit_id"] for u, *_ in picked] == \
-        [u["unit_id"] for u, *_ in check_units.draw_bands(units, 3, seed=2)]
 
 
 def _tabs():
@@ -102,23 +83,6 @@ def test_link_answers_are_stored_by_text_and_scored_by_threshold(tmp_path, monke
     assert [(r["text_sha256"], r["applies"]) for r in stored] == [("t1", "yes"), ("t2", "no")]
     report = open(out).read()
     assert "| 0.3 | 0.50" in report and "| 0.9 | 1.00" in report
-
-
-def test_the_floor_draw_sits_around_the_measures_commit_floor():
-    bands = check_units.floor_bands(0.3)
-    assert [b[0] for b in bands] == ["p0.00-0.10", "p0.10-0.20", "p0.20-0.30", "p0.30-0.40",
-                                     "p0.40-0.55", "p0.55-1.00"]
-    assert sum(b[3] for b in bands) == 20
-    assert any(lo <= 0.3 < hi for _, lo, hi, _ in bands)
-    assert sum(b[3] for b in check_units.floor_bands(None)) == 21
-
-
-def test_the_tuning_draw_is_the_floor_draw_at_about_28_rows():
-    for floor in (0.3, 0.5, 0.6):
-        bands = check_units.floor_bands(floor, check_units.TUNE_SCALE)
-        assert [b[0] for b in bands] == [b[0] for b in check_units.floor_bands(floor)]
-        assert sum(b[3] for b in bands) == 28
-    assert sum(b[3] for b in check_units.floor_bands(None, check_units.TUNE_SCALE)) == 29
 
 
 def test_only_grades_given_under_the_current_question_are_read(tmp_path):

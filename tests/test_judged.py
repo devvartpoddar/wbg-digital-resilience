@@ -27,16 +27,6 @@ def _block(seed, n=30):
     return rows, score, vecs
 
 
-def test_draw_takes_each_band_and_records_its_weight():
-    rows = [{"p": x / 100} for x in range(100)]
-    got = judged.draw(rows, lambda r: r["p"], seed=1)
-    by = {}
-    for r, st, size, n in got:
-        by[st] = (size, n)
-    assert by["p<0.3"] == (30, 10) and by["p0.9+"] == (10, 10)
-    assert judged.draw(rows, lambda r: r["p"], seed=1) == got        # same seed, same draw
-
-
 def test_a_kind_is_fitted_pooled_and_read_back_by_its_question(tmp_path, monkeypatch):
     monkeypatch.setattr(judged.posterior, "settings", lambda: dict(S))
     data = str(tmp_path)
