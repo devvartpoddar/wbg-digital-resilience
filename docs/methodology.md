@@ -39,6 +39,7 @@ Any model that meets all three may be used, including an external one. For an ex
 | The dashboards' views, all reading one decision (5f) | Built; Metabase cards that read dropped or renamed columns need an edit after the next load (runbook) |
 | One decision system for assets and measures alike: the control panel, the gate with word patterns and feedback rounds below it, the skip rule, the probability layer (weighted, out of sample, every graded sentence but itself votes, current-question grades only, optionally pooled), the floor, and the tuning report that compares every dial on the grades (5g) | Built 2026-10-22; no layer or fitted gate exists yet, because no sheet has been graded under the current questions |
 | Training and evaluation sheets (`./wbg check --design train`, `--design eval`), elusion sheets | Built; the next sheets to grade |
+| Release v1.0 (provisional, 2026-10-23): the raw score, the layer off, floors read off the seed-7 grades (5g) | Settings merged; figures are upper estimates until an evaluation sheet is graded |
 | The record of judgement in Postgres: grades, draws, layers, gates, runs, spend, answers (4) | Built 2026-10-22, not yet loaded |
 
 **Next on the box: a clean run from scratch** (`docs/runbook-box.md`, "Clean run from scratch"). The box's checkout is at #56; #57, #58 and the changes of 2026-10-22 have not run there.
