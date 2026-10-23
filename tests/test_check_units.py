@@ -183,3 +183,27 @@ def test_a_grade_follows_its_sentence_when_a_re_parse_moves_the_ids(tmp_path):
                         text_sha256="gone", question_sha256="q", grade="0"))
     got = check_units.graded_labels("cra", str(tmp_path), "q", units_by_text={key: "D:p00009:s002"})
     assert got == {"D:p00009:s002": (3, "", 1.0)}                # moved; the vanished one dropped
+
+
+def test_a_character_excel_refuses_never_reaches_the_workbook(tmp_path):
+    """One U+FFFF inside a Chad PAD paragraph killed a whole `./wbg check all`
+    draw at write time - "All strings must be XML compatible" - because
+    openpyxl's own ILLEGAL_CHARACTERS_RE covers the C0 controls but not the
+    noncharacters U+FFFE and U+FFFF. cell_text is the display boundary and
+    strips XML 1.0's whole disallowed set, so the sheet opens and can be
+    graded."""
+    assert check_units.cell_text("before\uffffafter") == "beforeafter"
+    assert check_units.cell_text("a\ufffeb\x00c\x0bd\ud800e") == "abcde"
+    assert check_units.cell_text("a\fb") == "a\n[page break]\nb"   # the marker survives
+    assert check_units.cell_text("a\tb\nc\rd") == "a\tb\nc\rd"     # tab, newline, CR survive
+    assert check_units.cell_text("Résumé 数字") == "Résumé 数字"    # ordinary text is untouched
+    tabs = _tabs()
+    tabs[0]["rows"][0]["sentence"] = "before\uffffafter"
+    tabs[0]["assets"] = ["fib\x00er"]
+    path = str(tmp_path / "refused.xlsx")
+    check_units._write_xlsx(path, tabs)                            # raised before the fix
+    wb = openpyxl.load_workbook(path)
+    seen = [c.value for row in wb["backup_power"].iter_rows()
+            for c in row if isinstance(c.value, str)]
+    assert "beforeafter" in seen
+    assert not any("\uffff" in v or "\x00" in v for v in seen)
