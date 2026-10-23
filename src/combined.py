@@ -8,19 +8,22 @@ and what it does not (evaluation), an asset the same over its own
 posterior, the paragraph rule the sentences whose asset comes from the
 paragraph, the pair checks a band of their keep probability, and the
 package assets and links bands of theirs; a few random sentences check
-what no gate let in. A decision's chance of taking an item is its
-stratum's target over the stratum's size; the item's chance is the
-largest over every decision it is in, and the item is drawn once
-(Poisson sampling, a hash of the seed and the item standing for the
-uniform). Every decision then weights every item it sees by one over that
-chance, so each decision's figures stay unbiased however many others
-read the same item, and a sentence wanted by three decisions is read
-once.
+what no gate let in. A decision's chance of taking a line (one question
+on one sentence: a measure, an asset, or the sentence read whole) is its
+stratum's target over the stratum's size, and a line's chance is the
+largest any decision gives it. One uniform a sentence, from a hash of the
+seed and the sentence, decides all its lines (Poisson sampling with
+permanent random numbers): a line is shown when the uniform falls below
+its chance, so it is shown with exactly that chance, and lines share a
+passage as often as their chances allow. Every decision weights each line
+by one over its chance. A sentence a decision does not want is not asked
+about it, however many other questions it is in: on 2026-10-23 drawing
+whole sentences gave 22 lines a sentence, four times the rows wanted.
 
 A sentence's block shows its passage once, with the sentence marked, and
-under it one line per question: each measure the sentence was asked
-about (0-3), each type of a measure that committed it (yes, no, unsure),
-each asset it was asked about or given (0-3), and a last line naming
+under it its drawn lines: measures (0-3), with the types of a measure
+that committed it (yes, no, unsure), assets (0-3; the assets a
+commitment links to come with its measure line), and a last line naming
 anything else that applies, which closes the block. In a closed block a
 blank line is 0 or no; a block not closed is not read. A package's block
 does the same for the assets it was asked about and the commitments it
@@ -98,46 +101,46 @@ def eval_targets(n_measures):
     return per, EVAL["not_committed"]
 
 
-def sentence_members(frames, design, near_gate=False):
-    """({unit_id: [stratum]}, {stratum: target}): every decision's stratum
-    for every sentence it reads."""
-    members, targets = {}, {}
-    add = lambda u, s: members.setdefault(u, []).append(s)
+def sentence_items(frames, design, near_gate=False):
+    """({item: [stratum]}, {stratum: target}) for the sentences. An item is
+    (unit_id, lines): the lines a stratum wants answered together. A line
+    is ("measure", set), ("asset", asset) or ("block",), the sentence read
+    whole (its last line, which the random and near-gate draws want); a
+    pair check wants both its measure lines."""
+    items, targets = {}, {}
+    add = lambda u, lines, s: items.setdefault((u, lines), []).append(s)
     ev = design == "eval"
     per_yes, per_no = eval_targets(len(frames["measures"]))
     for name, m in frames["measures"].items():
         for uid, u in m["units"].items():
-            p = m["posterior"](u)
-            if ev:
-                s = "eval:committed" if p >= m["floor"] else "eval:not_committed"
-            else:
-                s = "train:near" if abs(p - m["floor"]) <= NEAR else "train:far"
-            add(uid, f"measure:{name}:{s}")
+            add(uid, (("measure", name),), f"measure:{name}:{measure_stratum(m, u, design)}")
         if ev:
             targets[f"measure:{name}:eval:committed"] = per_yes
             targets[f"measure:{name}:eval:not_committed"] = per_no
         else:
             for s, n in TRAIN["measure"].items():
                 targets[f"measure:{name}:{s}"] = n
-        for uid in m.get("near_gate", ()) if near_gate else ():
-            add(uid, f"near_gate:{name}")
+        if near_gate:
+            for uid in m.get("near_gate", ()):
+                add(uid, (("block",),), f"near_gate:{name}")
             targets[f"near_gate:{name}"] = (EVAL if ev else TRAIN)["near_gate"]
     a = frames["assets"]
     for uid, own in a["amap"].items():
-        win = {x for x, _ in a["winners"].get(uid, ([], ""))[0]}
-        unit = a["winners"].get(uid, ([], ""))[1] == "unit"
+        win, level = a["winners"].get(uid, ([], ""))
+        win = {x for x, _ in win}
         for asset, p in own.items():
             if ev:
-                s = "eval:asset_yes" if unit and asset in win else "eval:asset_no"
+                s = "eval:asset_yes" if level == "unit" and asset in win else "eval:asset_no"
             else:
                 s = "train:near" if abs(p - a["floor"]) <= NEAR else "train:far"
-            add(uid, f"asset:{asset}:{s}")
+            add(uid, (("asset", asset),), f"asset:{asset}:{s}")
     for asset in a["ids"]:
         for s, n in (EVAL if ev else TRAIN)["asset"].items():
             targets[f"asset:{asset}:{s}"] = n
-    for uid, (_, level) in a["winners"].items():
+    for uid, (win, level) in a["winners"].items():
         if level == "paragraph":
-            add(uid, "asset_paragraph")
+            for asset, _ in win:
+                add(uid, (("asset", asset),), "asset_paragraph")
     targets["asset_paragraph"] = (EVAL if ev else TRAIN)["asset_paragraph"]
     if not ev:
         import judged
@@ -145,35 +148,82 @@ def sentence_members(frames, design, near_gate=False):
             s = band(min(float(r.get("p_keep_a") or 0), float(r.get("p_keep_b") or 0)),
                      judged.BANDS)
             if s:
-                add(r["unit_id"], f"pairs:{s}")
+                add(r["unit_id"], (("measure", r["set_a"]), ("measure", r["set_b"])), f"pairs:{s}")
         for s, _, _, n in judged.BANDS:
             targets[f"pairs:{s}"] = n
     for uid in frames["corpus_units"]:
-        add(uid, "random")
+        add(uid, (("block",),), "random")
     targets["random"] = (EVAL if ev else TRAIN)["random"]
-    return members, targets
+    return items, targets
 
 
-def package_members(frames, design):
-    """({package_id: [stratum]}, {stratum: target}) for the packages."""
+def package_items(frames, design):
+    """({item: [stratum]}, {stratum: target}) for the packages: an item is
+    (package_id, (line,)), its line ("package_asset", asset) or
+    ("package_link", set, unit_id)."""
     import check_units
     import judged
     pre = "eval:" if design == "eval" else ""
-    members, targets = {}, {}
+    items, targets = {}, {}
     p = frames["packages"]
     for r in p["assets"]:
         s = band(r["p"], judged.BANDS)
         if s:
-            members.setdefault(r["package_id"], []).append(f"package_assets:{pre}{s}")
+            items.setdefault((r["package_id"], (("package_asset", r["label_id"]),)), []) \
+                .append(f"package_assets:{pre}{s}")
     for s, _, _, n in judged.BANDS:
         targets[f"package_assets:{pre}{s}"] = n
     for r in p["links"]:
         s = band(r["p"], check_units.LINK_BANDS)
         if s:
-            members.setdefault(r["package_id"], []).append(f"package_links:{pre}{s}")
+            items.setdefault((r["package_id"], (("package_link", r["label_set"], r["unit_id"]),)),
+                             []).append(f"package_links:{pre}{s}")
     for s, _, _, n in check_units.LINK_BANDS:
         targets[f"package_links:{pre}{s}"] = n
-    return members, targets
+    return items, targets
+
+
+def line_chances(chance, frames=None):
+    """{item id: {line: chance}} from the items' chances: a line's chance is
+    the largest of the items it is in. With frames (the sentences), the
+    asset lines a commitment (a sentence the measure commits) links to take
+    at least that measure line's chance, so measure and asset are judged
+    together whenever the measure is."""
+    out = {}
+    for (key, lines), p in chance.items():
+        d = out.setdefault(key, {})
+        for ln in lines:
+            d[ln] = max(d.get(ln, 0.0), p)
+    if frames:
+        ids = set(frames["assets"]["ids"])
+        for name, m in frames["measures"].items():
+            for uid, d in out.items():
+                p, u = d.get(("measure", name)), m["units"].get(uid)
+                if p and u and m["posterior"](u) >= m["floor"]:     # a commitment shown
+                    for asset in links_of(u) & ids:
+                        d[("asset", asset)] = max(d.get(("asset", asset), 0.0), p)
+    return out
+
+
+def links_of(u):
+    """The assets a measure's unit row links its commitment to."""
+    return set((u.get("asset_links") or u.get("asset_link") or "").split("|")) - {""}
+
+
+def draw_lines(lines, seed):
+    """[(item id, chance, {line: chance} shown)] in sheet order. One uniform
+    a sentence (or package) stands for all its lines (permanent random
+    numbers): it is drawn when the uniform falls below its largest line
+    chance, and shows each line whose chance the uniform is below, so lines
+    share a passage as often as their chances allow and each line is shown
+    with exactly its own chance."""
+    got = []
+    for key, d in lines.items():
+        x = uniform(seed, key)
+        shown = {ln: p for ln, p in d.items() if x < p}
+        if shown:
+            got.append((x, key, max(d.values()), shown))
+    return [(key, c, shown) for _, key, c, shown in sorted(got)]
 
 
 # ------------------------------------------------------------ what the runs say
@@ -241,6 +291,7 @@ def load_frames(data, design, near_gate=False, projects=None):
         with open(os.path.join(afolder, "manifest.json"), encoding="utf-8") as fh:
             qshas = json.load(fh).get("question_sha256", {})
     frames["assets"] = {"amap": amap, "winners": winners, "ids": [a["id"] for a in assets],
+                        "qshas": qshas,
                         "names": {a["id"]: a["name"] for a in assets},
                         "floor": float(panel.get("asset.floor", 0.3)),
                         "qsha": hashlib.sha256(json.dumps(qshas, sort_keys=True)
@@ -302,27 +353,29 @@ def package_frames(data, projects=None):
 
 # ------------------------------------------------------------ blocks and lines
 
-def sentence_blocks(frames, drawn, chance, design, prior=None):
-    """[block] for the drawn sentences: {block, unit_id, weight, lines:
-    [{kind, label_set, label_id, type_id, asset_id, label, text, answer}]}.
+def sentence_blocks(frames, drawn, design, prior=None):
+    """[block] for the drawn sentences (draw_lines): {block, unit_id, weight,
+    chance, lines: [{kind, label_set, label_id, type_id, asset_id, label,
+    text, answer, weight}]}. A measure line shows its measure's types when
+    the measure committed the sentence; each line's weight is one over its
+    own chance, the block's (the last line's) one over the sentence's.
     prior (prior_grades) fills in what a sheet of the same kind already
-    graded on the sentence under the same questions: the measure's grade
-    and its types, and the sentence's assets, so keeping them loses
-    nothing."""
+    graded on the sentence under the same questions."""
     prior = prior or {"measures": {}, "assets": {}}
     a = frames["assets"]
     texts = frames["corpus"].texts
     out = []
-    for i, uid in enumerate(drawn, 1):
-        b = {"block": f"S{i:04d}", "unit_id": uid, "weight": 1.0 / chance[uid],
-             "chance": chance[uid], "lines": []}
+    for i, (uid, chance, shown) in enumerate(drawn, 1):
+        b = {"block": f"S{i:04d}", "unit_id": uid, "weight": 1.0 / chance,
+             "chance": chance, "lines": []}
         for name, m in frames["measures"].items():
+            p = shown.get(("measure", name))
             u = m["units"].get(uid)
-            if not u:
+            if not p or not u:
                 continue
             before = prior["measures"].get((name, text_sha(u["text"]), m["qsha"]))
             b["lines"].append({"kind": "measure", "label_set": name, "label_id": m["label_id"],
-                               "label": m["name"], "text": "",
+                               "label": m["name"], "text": "", "weight": 1.0 / p, "chance": p,
                                "answer": before["grade"] if before else ""})
             row = m["assigned"].get(uid)
             if row:
@@ -332,18 +385,20 @@ def sentence_blocks(frames, drawn, chance, design, prior=None):
                     if f"p_{t}" in row:
                         b["lines"].append({"kind": "type", "label_set": name, "type_id": t,
                                            "label": f"{m['name']}: {tname}", "text": tdef or "",
+                                           "weight": 1.0 / p, "chance": p,
                                            "answer": "yes" if t in said else
                                            "unsure" if t in unsure else ""})
-        win = {x for x, _ in a["winners"].get(uid, ([], ""))[0]}
-        gave = prior["assets"].get(text_sha(texts.get(uid, "")))
+        tsha = text_sha(texts.get(uid, ""))
         for asset in a["ids"]:
-            if asset in a["amap"].get(uid, {}) or asset in win:
+            p = shown.get(("asset", asset))
+            if p:
+                before = prior["assets"].get((tsha, asset))
                 b["lines"].append({"kind": "asset", "asset_id": asset,
                                    "label": a["names"][asset], "text": "",
-                                   "answer": "" if gave is None else
-                                   "2" if asset in gave[0] else
-                                   "unsure" if asset in gave[1] else ""})
+                                   "weight": 1.0 / p, "chance": p,
+                                   "answer": before or ""})
         b["lines"].append({"kind": "other", "label": "anything else that applies",
+                           "weight": b["weight"], "chance": chance,
                            "text": "Required, closes the block: none, or the ids of the "
                                    "measures and assets that apply and are not listed, joined "
                                    "by | (tab 'lists')."})
@@ -352,28 +407,31 @@ def sentence_blocks(frames, drawn, chance, design, prior=None):
     return out
 
 
-def package_blocks(frames, drawn, chance):
+def package_blocks(frames, drawn):
     p = frames["packages"]
     names = frames["assets"]["names"]
     mnames = {n: m["name"] for n, m in frames["measures"].items()}
-    by_pkg_a, by_pkg_l = {}, {}
-    for r in p["assets"]:
-        by_pkg_a.setdefault(r["package_id"], []).append(r)
-    for r in p["links"]:
-        by_pkg_l.setdefault(r["package_id"], []).append(r)
+    rows_a = {(r["package_id"], r["label_id"]): r for r in p["assets"]}
+    rows_l = {(r["package_id"], r["label_set"], r["unit_id"]): r for r in p["links"]}
     out = []
-    for i, pid in enumerate(drawn, 1):
-        b = {"block": f"K{i:04d}", "package_id": pid, "weight": 1.0 / chance[pid],
-             "chance": chance[pid], "lines": []}
-        for r in sorted(by_pkg_a.get(pid, []), key=lambda r: r["label_id"]):
-            b["lines"].append({"kind": "package_asset", "asset_id": r["label_id"], "row": r,
-                               "label": names.get(r["label_id"], r["label_id"]), "text": ""})
-        for r in sorted(by_pkg_l.get(pid, []), key=lambda r: (r["label_set"], r["unit_id"])):
-            u = p["units"][(r["label_set"], r["unit_id"])]
-            b["lines"].append({"kind": "package_link", "label_set": r["label_set"], "row": r,
-                               "label": mnames.get(r["label_set"], r["label_set"]),
-                               "text": u["text"]})
+    for i, (pid, chance, shown) in enumerate(drawn, 1):
+        b = {"block": f"K{i:04d}", "package_id": pid, "weight": 1.0 / chance,
+             "chance": chance, "lines": []}
+        for ln, c in sorted(shown.items()):
+            if ln[0] == "package_asset":
+                r = rows_a[(pid, ln[1])]
+                b["lines"].append({"kind": "package_asset", "asset_id": ln[1], "row": r,
+                                   "label": names.get(ln[1], ln[1]), "text": "",
+                                   "weight": 1.0 / c, "chance": c})
+        for ln, c in sorted(shown.items()):
+            if ln[0] == "package_link":
+                r = rows_l[(pid, ln[1], ln[2])]
+                u = p["units"][(ln[1], ln[2])]
+                b["lines"].append({"kind": "package_link", "label_set": ln[1], "row": r,
+                                   "label": mnames.get(ln[1], ln[1]), "text": u["text"],
+                                   "weight": 1.0 / c, "chance": c})
         b["lines"].append({"kind": "other", "label": "anything else that applies",
+                           "weight": b["weight"], "chance": chance,
                            "text": "Required, closes the block: none, or the ids of assets "
                                    "the package buys or builds that are not listed, joined by |."})
         out.append(b)
@@ -636,8 +694,8 @@ def same_kind(r, design):
 
 def prior_grades(data, frames, design):
     """{"measures": {(set, text SHA-256, question SHA-256): label row},
-    "assets": {text SHA-256: (assets given, assets unsure)}} of what sheets
-    of the same kind already graded under the current questions."""
+    "assets": {(text SHA-256, asset): grade}} of what sheets of the same
+    kind already graded under the current questions."""
     out = {"measures": {}, "assets": {}}
     for name, m in frames["measures"].items():
         path = where(data, "labels", f"{name}_units.csv")
@@ -652,13 +710,14 @@ def prior_grades(data, frames, design):
                         and not (r.get("stratum") or "").endswith(":outside"):
                     out["measures"][(name, r["text_sha256"], m["qsha"])] = r
     path = where(data, "labels", "assets_units.csv")
+    qshas = frames["assets"]["qshas"]
     if os.path.exists(path):
         with open(path, newline="", encoding="utf-8") as fh:
             for r in sorted(csv.DictReader(fh), key=lambda r: r.get("graded_on", "")):
-                if r.get("question_sha256") == frames["assets"]["qsha"] and same_kind(r, design):
-                    out["assets"][r["text_sha256"]] = (
-                        set(r.get("asset", "").split("|")) - {"", "none"},
-                        set(r.get("unsure", "").split("|")) - {""})
+                a = r.get("label_id", "")
+                if a in qshas and r.get("question_sha256") == qshas[a] and same_kind(r, design) \
+                        and r.get("grade", "") != "":
+                    out["assets"][(r["text_sha256"], a)] = r["grade"]
     return out
 
 
@@ -711,21 +770,20 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
     if taken and not dry_run:
         raise SystemExit(f"check: seed {seed} is taken ({os.path.basename(taken[0])} exists "
                          f"and may hold grades); use another --seed")
-    members, targets = sentence_members(frames, design, near_gate)
-    chance = inclusion(members, targets)
-    drawn = poisson(chance, seed)
+    items, targets = sentence_items(frames, design, near_gate)
+    lines = line_chances(inclusion(items, targets), frames)
+    drawn = draw_lines(lines, seed)
+    pitems, ptargets = package_items(frames, design)
+    plines = line_chances(inclusion(pitems, ptargets))
+    pdrawn = draw_lines(plines, seed)
     if dry_run:
-        pm, pt = package_members(frames, design)
-        pchance = inclusion(pm, pt)
-        for line in size_lines(members, targets, chance, drawn, pchance, seed):
+        for line in size_lines(targets, lines, drawn, ptargets, plines, pdrawn, seed):
             print(line)
-        return xlsx, len(drawn), len(poisson(pchance, seed))
-    sblocks = sentence_blocks(frames, drawn, chance, design, prior_grades(data, frames, design))
+        return xlsx, len(drawn), len(pdrawn)
+    sblocks = sentence_blocks(frames, drawn, design, prior_grades(data, frames, design))
     number_lines(sblocks)
     context(frames, data, sblocks)
-    pm, pt = package_members(frames, design)
-    pchance = inclusion(pm, pt)
-    pblocks = package_blocks(frames, poisson(pchance, seed), pchance)
+    pblocks = package_blocks(frames, pdrawn)
     number_lines(pblocks)
     pk = frames["packages"]
     for b in pblocks:
@@ -740,18 +798,20 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
               "label_set": ln.get("label_set", ""), "label_id": ln.get("label_id", ""),
               "type_id": ln.get("type_id", ""), "asset_id": ln.get("asset_id", ""),
               "unit_id": b["unit_id"], "text_sha256": text_sha(b["text"]),
-              "weight": fmt(b["weight"]), "chance": fmt(b["chance"])}
+              "weight": fmt(ln["weight"]), "chance": fmt(ln["chance"])}
              for b in sblocks for ln in b["lines"]]
     check_units._write_key(key_path(data, "sentences", seed), SENTENCE_KEY, srows)
     prows = [{"row_id": ln["line"], "block": b["block"], "kind": ln["kind"],
               "label_set": ln.get("label_set", ""), "asset_id": ln.get("asset_id", ""),
               "unit_id": ln.get("row", {}).get("unit_id", ""), "package_id": b["package_id"],
-              "weight": fmt(b["weight"]), "chance": fmt(b["chance"])}
+              "weight": fmt(ln["weight"]), "chance": fmt(ln["chance"])}
              for b in pblocks for ln in b["lines"]]
     check_units._write_key(key_path(data, "packages", seed), PACKAGE_KEY, prows)
-    # each measure's key, as a sheet of its own would have it: its lines, and
-    # one 'outside' row a block the measure never read (named on the last
-    # line or not), which is what the pool missed
+    # each measure's key, as a sheet of its own would have it: its lines,
+    # each at its own weight, and one 'outside' row a block of a sentence
+    # the measure never read (named on the last line or not), at the
+    # block's weight, which is what the pool missed. A sentence the measure
+    # read whose line was not drawn has no row: it was not sampled for it.
     cols = check_units.KEY_COLS + ["weight", "frame"]
     for name, m in frames["measures"].items():
         rows = []
@@ -761,22 +821,27 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
             u = m["units"].get(b["unit_id"])
             common = {"label_id": m["label_id"], "unit_id": b["unit_id"],
                       "paragraph_id": b["paragraph_id"], "question_sha256": m["qsha"],
-                      "measure_dir": m["dir"], "weight": fmt(b["weight"])}
+                      "measure_dir": m["dir"]}
             if line:
                 rows.append({**common, "row_id": line["line"], "text_sha256": text_sha(u["text"]),
-                             "stratum": measure_stratum(m, u, design), "frame": "pool"})
-            else:
+                             "stratum": measure_stratum(m, u, design), "frame": "pool",
+                             "weight": fmt(line["weight"])})
+            elif u is None:
                 rows.append({**common, "row_id": f"{b['block']}.o", "frame": "outside",
-                             "text_sha256": text_sha(b["text"]), "stratum": pre + "outside"})
+                             "text_sha256": text_sha(b["text"]), "stratum": pre + "outside",
+                             "weight": fmt(b["weight"])})
         check_units._write_key(where(data, "review", f"check_units_{name}_s{seed}.key.csv"),
                                cols, rows)
+    # each asset line, as a label of its asset (data/labels/assets_units.csv)
     a = frames["assets"]
     check_units._write_key(key_path(data, "assets", seed), cols, [
-        {"row_id": b["block"], "label_id": "assets", "unit_id": b["unit_id"],
+        {"row_id": ln["line"], "label_id": ln["asset_id"], "unit_id": b["unit_id"],
          "paragraph_id": b["paragraph_id"], "text_sha256": text_sha(b["text"]),
-         "question_sha256": a["qsha"], "stratum": pre + "assets", "measure_dir": "",
-         "weight": fmt(b["weight"]), "frame": "pool"} for b in sblocks])
-    # the pair checks the sentences answer
+         "question_sha256": a["qshas"].get(ln["asset_id"], ""), "stratum": pre + "asset",
+         "measure_dir": "", "weight": fmt(ln["weight"]), "frame": "pool"}
+        for b in sblocks for ln in b["lines"] if ln["kind"] == "asset"])
+    # the pair checks the sentences answer: those whose two measure lines
+    # were both drawn, at the smaller line's chance (one uniform for both)
     block_of = {b["unit_id"]: b for b in sblocks}
     texts = {(n, uid): u["text"] for n, m in frames["measures"].items() for uid, u in m["units"].items()}
     prs = []
@@ -784,13 +849,17 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
         b = block_of.get(r["unit_id"])
         if not b:
             continue
+        got = {ln["label_set"]: ln["chance"] for ln in b["lines"] if ln["kind"] == "measure"}
+        if r["set_a"] not in got or r["set_b"] not in got:
+            continue
         prs.append({"row_id": f"P{len(prs) + 1:04d}", "unit_id": r["unit_id"], "set_a": r["set_a"],
                     "set_b": r["set_b"],
                     "text_sha256": text_sha(texts.get((r["set_a"], r["unit_id"]), b["text"])),
                     "question_sha256": judged.sha(commit_checks.pair_question(r["set_a"], r["set_b"])),
                     "p_keep_a": r.get("p_keep_a", ""), "p_keep_b": r.get("p_keep_b", ""),
                     "stratum": pre + "pairs", "stratum_size": "", "stratum_drawn": "",
-                    "run": frames["pairs_run"], "weight": fmt(b["weight"]), "block": b["block"]})
+                    "run": frames["pairs_run"], "block": b["block"],
+                    "weight": fmt(1.0 / min(got[r["set_a"]], got[r["set_b"]]))})
     check_units._write_key(key_path(data, "pairs", seed),
                            judged.PAIR_KEY_COLS + ["weight", "block"], prs)
     # the packages' lines, in the shapes of the package-asset and link keys
@@ -809,7 +878,7 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
                            "stratum": (pre if design == "eval" else "") +
                            (band(r["p"], judged.BANDS) or ""),
                            "stratum_size": "", "stratum_drawn": "", "run": pk["run"],
-                           "weight": fmt(b["weight"])})
+                           "weight": fmt(ln["weight"])})
             elif ln["kind"] == "package_link":
                 u = pk["units"][(r["label_set"], r["unit_id"])]
                 pl.append({"row_id": ln["line"], "label_set": r["label_set"],
@@ -820,7 +889,7 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
                            "stratum": (pre if design == "eval" else "") +
                            (band(r["p"], check_units.LINK_BANDS) or ""),
                            "stratum_size": "", "stratum_drawn": "", "link_run": pk["run"],
-                           "weight": fmt(b["weight"])})
+                           "weight": fmt(ln["weight"])})
     check_units._write_key(key_path(data, "package_assets", seed),
                            judged.ASSET_KEY_COLS + ["weight"], pa)
     check_units._write_key(key_path(data, "links", seed),
@@ -833,35 +902,38 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
     adefs = [(x["id"], x["name"], x.get("definition", "")) for x in assets]
     write_workbook(xlsx + ".part.xlsx", sblocks, pblocks, scale, measures, adefs)
     os.replace(xlsx + ".part.xlsx", xlsx)
-    expected = sum(chance.values())
-    print(f"check: {len(sblocks)} sentences drawn (expected {expected:.0f}), "
-          f"{sum(len(b['lines']) for b in sblocks)} lines; {len(pblocks)} packages "
-          f"(expected {sum(pchance.values()):.0f}); "
+    print(f"check: {len(sblocks)} sentences drawn, "
+          f"{sum(len(b['lines']) for b in sblocks)} lines; {len(pblocks)} packages, "
+          f"{sum(len(b['lines']) for b in pblocks)} lines; "
           f"{sum(1 for b in sblocks for ln in b['lines'] if ln.get('answer'))} lines filled "
           f"from earlier grades")
     return xlsx, len(sblocks), len(pblocks)
 
 
-def size_lines(members, targets, chance, drawn, pchance, seed):
-    """What a draw would bring: per decision, the rows it wants and the
-    sentences it would see; then the sentences and packages in all."""
-    sees = {}
-    picked = set(drawn)
-    for uid, strata in members.items():
-        for s in set(strata):
-            d = s.rsplit(":", 2)[0] if s.startswith(("measure:", "asset:")) else s.split(":")[0]
-            if uid in picked:
-                sees[d] = sees.get(d, 0) + 1
+def size_lines(targets, lines, drawn, ptargets, plines, pdrawn, seed):
+    """What a draw would bring: per decision, the rows it wants; per kind
+    of line, how many the sheet would show (and the expected number); then
+    the sentences and packages in all."""
     want = {}
-    for s, n in targets.items():
-        d = s.rsplit(":", 2)[0] if s.startswith(("measure:", "asset:")) else s.split(":")[0]
-        want[d] = want.get(d, 0) + n
-    out = ["| decision | rows wanted | sentences drawn that it reads |", "|---|---|---|"]
-    for d in sorted(want):
-        out.append(f"| {d} | {want[d]} | {sees.get(d, 0)} |")
-    out += ["", f"sentences: {len(drawn)} drawn at seed {seed} (expected {sum(chance.values()):.0f}, "
-            f"against {sum(want.values())} rows wanted: the rest is overlap); packages: "
-            f"{len(poisson(pchance, seed))} (expected {sum(pchance.values()):.0f})"]
+    for t in (targets, ptargets):
+        for s, n in t.items():
+            d = s.rsplit(":", 2)[0] if s.startswith(("measure:", "asset:")) else s.split(":")[0]
+            want[d] = want.get(d, 0) + n
+    out = ["| decision | rows wanted |", "|---|---|"]
+    out += [f"| {d} | {want[d]} |" for d in sorted(want)]
+    kinds, expect = {}, {}
+    for got, every in ((drawn, lines), (pdrawn, plines)):
+        for _, _, shown in got:
+            for ln in shown:
+                kinds[ln[0]] = kinds.get(ln[0], 0) + 1
+        for d in every.values():
+            for ln, p in d.items():
+                expect[ln[0]] = expect.get(ln[0], 0.0) + p
+    out += ["", "| line | shown | expected |", "|---|---|---|"]
+    out += [f"| {k} | {kinds.get(k, 0)} | {expect[k]:.0f} |" for k in sorted(expect)]
+    out += ["", f"sentences: {len(drawn)} at seed {seed}; packages: {len(pdrawn)}. A measure "
+            f"line also brings its measure's types when the measure committed the sentence; "
+            f"every block ends with one 'anything else' line."]
     return out
 
 
@@ -888,6 +960,8 @@ def blocks_from_key(rows):
                                   "package_id": r.get("package_id", ""),
                                   "weight": float(r["weight"]), "lines": []}
             out.append(b)
+        if r["kind"] == "other":        # the block's own weight: the last line's
+            b["weight"] = float(r["weight"])
         b["lines"].append(dict(r, line=r["row_id"]))
     return out
 
@@ -918,18 +992,21 @@ class Graded:
                      for b in self.sblocks}
 
     def measure_grades(self, name):
-        """{row_id: (grade, assets, types, unsure types)} of a measure's key:
-        its lines in closed blocks (unsure left out), and its 'outside' row
-        in every closed block that does not ask it (2 if the person named
-        the measure on the last line, else 0)."""
+        """{row_id: (grade, '', types, unsure types)} of a measure's key: its
+        lines in closed blocks (unsure left out), and its 'outside' row for
+        each closed block of a sentence the measure never read (2 if the
+        person named the measure on the last line, else 0)."""
         out = {}
+        outside = {r["row_id"] for r in _read_key(where(
+            self.data, "review", f"check_units_{name}_s{self.seed}.key.csv"))
+            if r.get("frame") == "outside"}
         for b in self.sblocks:
             measures, assets, _, types, others = self.said[b["block"]]
-            a = "|".join(sorted(assets)) or "none"
             line = next((ln for ln in b["lines"] if ln["kind"] == "measure"
                          and ln["label_set"] == name), None)
             if line is None:
-                out[f"{b['block']}.o"] = (2 if name in others else 0, a, "", "")
+                if f"{b['block']}.o" in outside:     # a sentence the measure never read
+                    out[f"{b['block']}.o"] = (2 if name in others else 0, "", "", "")
                 continue
             g = measures[name]
             if g is None:
@@ -937,19 +1014,21 @@ class Graded:
             yes, uns = types.get(name, (set(), set()))
             has_types = any(ln["kind"] == "type" and ln["label_set"] == name for ln in b["lines"])
             t = ("|".join(sorted(yes)) or "none") if has_types and g >= self.lo else ""
-            out[line["line"]] = (g, a, t, "|".join(sorted(uns)) if t else "")
+            # the assets are each their own line and label (assets_units.csv)
+            out[line["line"]] = (g, "", t, "|".join(sorted(uns)) if t else "")
         return out
 
     def asset_grades(self):
-        """{block: (grade, assets, '', unsure assets)} for assets_units.csv:
-        the assets the person gave the sentence ('none' for none)."""
+        """{line: (grade, asset, '', '')} of the asset lines in closed
+        blocks, as labels of each asset (assets_units.csv); unsure and
+        unreadable lines are left out."""
         out = {}
         for b in self.sblocks:
-            _, assets, unsure, _, _ = self.said[b["block"]]
-            grades = [grade_of(self.answers.get(ln["line"], "")) for ln in b["lines"]
-                      if ln["kind"] == "asset"]
-            g = max([x for x in grades if x is not None] + [self.lo if assets else 0])
-            out[b["block"]] = (g, "|".join(sorted(assets)) or "none", "", "|".join(sorted(unsure)))
+            for ln in b["lines"]:
+                if ln["kind"] == "asset":
+                    g = grade_of(self.answers.get(ln["line"], ""))
+                    if g is not None:
+                        out[ln["line"]] = (g, ln["asset_id"] if g >= self.lo else "none", "", "")
         return out
 
     def pair_answers(self):
@@ -971,9 +1050,9 @@ class Graded:
 
 
 def store_assets(data, seed, graded=None):
-    """The assets the person gave each sentence, as labels of the set
-    'assets' (data/labels/assets_units.csv), which the asset layers, the
-    asset gates and the tuning report read."""
+    """Each asset line's grade, as a label of its asset in the set 'assets'
+    (data/labels/assets_units.csv, label_id the asset), which the asset
+    layers, the asset gates and the tuning report read."""
     import check_units
     graded = graded or Graded(data, seed)
     key = _read_key(key_path(data, "assets", seed))
@@ -1012,14 +1091,17 @@ def headline_items(graded, units_of, levels, lo=2):
     out = {"measure": [], "joint": [], "recall": [], "by_measure": {}}
     for b in graded.sblocks:
         measures, assets, unsure, _, _ = graded.said[b["block"]]
-        w = b["weight"]
+        weight = {ln["label_set"]: float(ln["weight"]) for ln in b["lines"]
+                  if ln["kind"] == "measure"}
+        asked = {ln["asset_id"] for ln in b["lines"] if ln["kind"] == "asset"}
         for name, g in measures.items():
             u = units_of.get(name, {}).get(b["unit_id"])
             if u is None or g is None:
                 continue
+            w = weight[name]
             mine = out["by_measure"].setdefault(name, ([], []))
             shown = measure.is_committed(u, panel.floor(name))
-            links = set((u.get("asset_links") or u.get("asset_link") or "").split("|")) - {""}
+            links = links_of(u) & asked      # drawn with the measure line (line_chances)
             if u.get("asset_link_level", "unit") not in levels:
                 links = set()
             if shown:
