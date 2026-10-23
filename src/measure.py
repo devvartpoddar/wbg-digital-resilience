@@ -353,12 +353,37 @@ def sentence_asset(own, earlier, decay=None, floor=None, paragraph_floor=None, m
     return "", (max(total.values()) if total else 0.0), "none"
 
 
+def _stamp(*paths):
+    return tuple((os.path.getmtime(p), os.path.getsize(p)) if os.path.exists(p) else None
+                 for p in paths)
+
+
+_MEMO = {}
+
+
+def _memo(name, data, paths, make):
+    """make() once per process while the files it reads are unchanged: the
+    evaluation and the stages read the same corpus tables many times."""
+    key = (name, os.path.abspath(str(data)))
+    stamp = _stamp(*paths)
+    if _MEMO.get(key, (None,))[0] != stamp:
+        _MEMO[key] = (stamp, make())
+    return _MEMO[key][1]
+
+
 def unit_texts(data, index):
     """{unit_id: text as embedded} (a list item with its lead-in)."""
     import units
-    every = {u["unit_id"]: u for u in units.search_units(data)}
+    every = _memo("search_units", data, [where(data, "appraisal", f) for f in
+                                         ("paragraphs.csv", "sentences.csv")],
+                  lambda: {u["unit_id"]: u for u in units.search_units(data)})
+    texts = _memo("unit_texts", data, [where(data, "appraisal", f) for f in
+                                       ("paragraphs.csv", "sentences.csv")], dict)
     cache, out = {}, {}
     for r in index:
+        if r["unit_id"] in texts:
+            out[r["unit_id"]] = texts[r["unit_id"]]
+            continue
         u = every[r["unit_id"]]
         d = u["doc_id"]
         if d not in cache:
@@ -367,13 +392,17 @@ def unit_texts(data, index):
         body = cache[d][int(u["char_start"]):int(u["char_end"])]
         if u.get("lead_in_start"):
             body = cache[d][int(u["lead_in_start"]):int(u["lead_in_end"])] + "\n" + body
-        out[r["unit_id"]] = body
+        out[r["unit_id"]] = texts[r["unit_id"]] = body
     return out
 
 
 def paragraph_rows(data):
-    with open(where(data, "appraisal", "paragraphs.csv"), newline="", encoding="utf-8") as fh:
-        return {r["paragraph_id"]: r for r in csv.DictReader(fh)}
+    path = where(data, "appraisal", "paragraphs.csv")
+
+    def make():
+        with open(path, newline="", encoding="utf-8") as fh:
+            return {r["paragraph_id"]: r for r in csv.DictReader(fh)}
+    return _memo("paragraphs", data, [path], make)
 
 
 def _text(cache, data, doc_id):
@@ -601,21 +630,20 @@ class Run:
             row["_state"] = self.state_of(row)
             sent.append(row)
         requests_ = [(r["_state"], self.qs) for r in sent]
-        got, st = answers.ask(model, requests_, self.data,
-                              api_key=api_key, log=self.log, workers=workers, dry_run=True)
+        got, st = answers.ask(model, requests_, self.data, api_key=api_key, log=self.log,
+                              workers=workers, dry_run=True, read_answers=False)
         self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} asked; measure "
                  f"question: {st['to_ask']:,} to ask (about US${st['estimate_usd']:.3f})")
         if dry_run:
             return 0, 0.0, []
-        calls, cost = 0, 0.0
-        if st["to_ask"]:
-            if not api_key:
-                raise SystemExit("measure: no credential: set $WBG_OPENROUTER_KEY")
-            got, st = answers.ask(model, requests_, self.data,
-                                  api_key=api_key, log=self.log, workers=workers)
-            calls, cost = st["calls"], st["cost_usd"]
-            if st["failures"] or not all(got):
-                return calls, cost, st["failures"] or [("", "an answer is missing")]
+        if st["to_ask"] and not api_key:
+            raise SystemExit("measure: no credential: set $WBG_OPENROUTER_KEY")
+        # asks only what is missing (none, often) and reads the answers
+        got, st = answers.ask(model, requests_, self.data,
+                              api_key=api_key, log=self.log, workers=workers)
+        calls, cost = st["calls"], st["cost_usd"]
+        if st["failures"] or not all(got):
+            return calls, cost, st["failures"] or [("", "an answer is missing")]
         for row, g in zip(sent, got):
             self.grade_into(row, g)
         return calls, cost, []
@@ -713,13 +741,16 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
             publish=False, **kw):
     """One measure through the funnel; with publish=True its rows go to
     Postgres as the last step (src/store.py)."""
-    run = Run(name, data, log=log, **kw)
+    # the run folder is known from the inputs' names: a run already written
+    # is found before the corpus (the matrix, 155,000 texts) is read
+    run = Run(name, data, log=log, build=False, **kw)
     if os.path.exists(os.path.join(run.out, "manifest.json")):
         log(f"{name}: already written: {run.out}")
         if publish:
             import store
             store.try_publish(data, sets=[name], projects=run.projects, log=log)
-        return run.out
+        return None if dry_run else run.out
+    run.load_corpus()
     log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades -> {run.out}")
     t0 = time.time()
     rows = run.candidate_rows()

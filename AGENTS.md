@@ -15,7 +15,7 @@ Reading and model calls are what a task costs. So:
 - Every threshold is one line of `inputs/config/control_panel.csv` (read by `src/panel.py`); never put a number a person tunes back into code.
 - A measure is files, not code: adding or revising one needs no reading of `src/` (`docs/runbook-box.md`, "Adding a measure from the board").
 - Why a run is new, what costs money and why `./wbg status` says "stale" or "would be new": `docs/runbook-box.md`, "How runs and caches are keyed". Read it; do not re-derive keys from `src/`.
-- Before any stage that calls a model, run it with `--dry-run` and read the estimate; report it with the spend afterwards. Stop and ask if the stage would re-ask what is already stored (a whole measure or the whole asset map). Never run the whole cohort to check a change: use `--project <id>`.
+- Run any stage that calls a model with `--max-spend <US$>`, set to what you expect it to cost (a run rebuilt from stored answers: a few cents). Each step prints its estimate and stops before any request that would pass the cap, so no separate `--dry-run` is needed first; use `--dry-run` only to see estimates without running. Report the spend afterwards. If the cap stops a run, report what it would ask; stop and ask if it would re-ask what is already stored (a whole measure or the whole asset map). Never run the whole cohort to check a change: use `--project <id>`.
 - Report in a few lines: what changed, what was run, the spend from `data/reports/spend.csv`.
 
 ## Where it runs
@@ -46,7 +46,7 @@ Plain language; expand every abbreviation on first use. No claim beyond the data
 
 ## Done means
 
-- On the box there is no pytest: check a change with `python -m py_compile` on the files touched and a `--dry-run` of the stage, then a real run on one project. `python -m pytest` passes where pytest is installed (a laptop, a cloud session); it is not run on the box.
+- On the box there is no pytest: check a change with `python -m py_compile` on the files touched, then a real run on one project with `--max-spend`. `python -m pytest` passes where pytest is installed (a laptop, a cloud session); it is not run on the box.
 - The change was run on real data (at least one project) and the output looked at.
 - A re-run on unchanged input gives identical output; an interrupted run restarts without redoing finished work.
 - Nothing under `data/` is staged.

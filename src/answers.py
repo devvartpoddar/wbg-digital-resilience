@@ -287,12 +287,15 @@ class CapReached(SystemExit):
 
 
 def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False,
-        aliases=(), batch=None):
+        aliases=(), batch=None, read_answers=True):
     """Answers for every request, asking only what is not stored.
     Returns (answers, stats): answers = [{qid: entry}] per request (None for
     a request with a missing answer when nothing could be asked), stats =
     {"to_ask": calls planned, "chars": request characters, "calls", "cost_usd",
-    "failures": [(call sha, error)], "seconds"}."""
+    "failures": [(call sha, error)], "seconds", "stored_items": requests with
+    every answer stored}. With read_answers False (an estimate) nothing stored
+    is opened: whether an answer is stored is a stat of its file, and
+    answers is [None] * len(requests)."""
     import classify
     root_ = root(data, model)
     keys = [{qid: key(model, state, q) for qid, q in qs.items()} for state, qs in requests]
@@ -303,7 +306,10 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
 
     def stored(sha):
         if sha not in memo:
-            memo[sha] = read(root_, sha)
+            if read_answers:
+                memo[sha] = read(root_, sha)
+            else:
+                memo[sha] = True if os.path.exists(_path(root_, sha)) else None
         return memo[sha]
     # Answers asked under an alias of the model (the moving name the asset
     # map once used) count when the snapshot that served them is this model:
@@ -321,9 +327,11 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     # what each body answers: [(state, qid, the body's own qid)]
     plan = {}
     groups, seen = {}, set()
+    complete_ = 0
     for (state, qs), ks in zip(requests, keys):
         missing = {qid: q for qid, q in qs.items() if stored(ks[qid]) is None}
         if not missing:
+            complete_ += 1
             continue
         if batch > 1:
             k = json.dumps([state, missing], sort_keys=True, ensure_ascii=False)
@@ -346,7 +354,7 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
             plan.setdefault(sha, [(it[0], it[1][qid], bq) for it, qid, bq in members])
     chars = sum(len(json.dumps(b, ensure_ascii=False)) for b in todo.values())
     stats = {"to_ask": len(todo), "chars": chars, "calls": 0, "cost_usd": 0.0, "failures": [],
-             "seconds": 0.0,
+             "seconds": 0.0, "stored_items": complete_,
              "estimate_usd": chars / 4 / 1e6 * classify.PRICE_PER_MTOK}
     cap = spend_cap(data)
     if todo and not dry_run and cap is not None and \
@@ -394,6 +402,8 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                     log(f"  {n:,}/{len(todo):,} asked, {stats['calls']:,} stored, "
                         f"{len(stats['failures'])} failed, US${stats['cost_usd']:.3f}")
         stats["seconds"] = time.time() - t0
+    if not read_answers:
+        return [None] * len(keys), stats
     answers = []
     for ks in keys:
         # what was missing may have been asked since: read those again

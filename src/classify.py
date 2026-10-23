@@ -513,7 +513,7 @@ def feedback_rounds(name, data, qs, bodies, merged, asked, routes, round_of, *, 
         order_ = sorted(new, key=lambda u: item_of[u]["i"])
         requests_ = [(item_of[u]["state"], new[u]) for u in order_]
         _, pre = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                             dry_run=True, aliases=ALIASES)
+                             dry_run=True, aliases=ALIASES, read_answers=False)
         if pre["to_ask"] and not api_key:
             raise SystemExit(f"classify: no credential for the feedback round: set "
                              f"${embed.KEY_VAR} or put the key in {embed.KEY_FILE}")
@@ -644,9 +644,10 @@ def remember_plan(data, key, out):
 
 
 def planned_run(name, data, *, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, projects=None,
-                model=MODEL):
+                model=MODEL, plan_if_unknown=True):
     """The run folder plan() would name, from the fingerprint cache when it
-    has seen these inputs before, else by planning (and remembering)."""
+    has seen these inputs before, else by planning (and remembering), or
+    None with plan_if_unknown False."""
     try:
         key = _plan_key(name, data, taxonomy, min_cosine, projects, model)
     except (OSError, SystemExit):
@@ -657,6 +658,8 @@ def planned_run(name, data, *, taxonomy=TAXONOMY, min_cosine=MIN_COSINE, project
                 return where(data, "classify", json.load(fh)["run"])
         except (OSError, ValueError, KeyError):
             pass
+    if not plan_if_unknown:
+        return None
     out = plan(name, data, model=model, taxonomy=taxonomy, min_cosine=min_cosine,
                projects=projects)[5]
     if key:
@@ -709,6 +712,19 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
              dry_run=False, log=print, workers=WORKERS, min_cosine=MIN_COSINE, projects=None):
     """Classify the label set; returns the run folder (None on a dry run or
     when requests failed - run again to resume)."""
+    if not limit:
+        # a run already written is found from the fingerprint cache, without
+        # building every sentence's request (minutes on the box)
+        try:
+            done = planned_run(name, data, taxonomy=taxonomy, min_cosine=min_cosine,
+                               projects=projects, model=model, plan_if_unknown=False)
+        except SystemExit:
+            done = None
+        if done and os.path.exists(os.path.join(done, "manifest.json")):
+            log(f"{name}: already written: {done}")
+            if not dry_run:
+                write_marker(data, name, projects, done, min_cosine)   # a run made before markers
+            return None if dry_run else done
     try:
         labels, scale, qs, bodies, shas, out, cosines, routes = plan(
             name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine,
@@ -741,8 +757,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     import answers
     requests_ = [(p["state"], b["questions"]) for p, b in bodies if b["questions"]]
     got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                          dry_run=True, aliases=ALIASES)
-    log(f"  answers stored already for {sum(1 for g in got if g):,} sentences; calls to make: "
+                          dry_run=True, aliases=ALIASES, read_answers=False)
+    log(f"  answers stored already for {st['stored_items']:,} sentences; calls to make: "
         f"{st['to_ask']:,} (about {st['chars'] / 4 / 1e6:.1f}M tokens, US${st['estimate_usd']:.2f})")
     rounds = rounds_apply(min_cosine, limit)
     if rounds:
@@ -753,15 +769,15 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
     if dry_run:
         log("  --dry-run: first pass only; no request made, nothing written")
         return None
-    calls, cost, secs = 0, 0.0, 0.0
     if st["to_ask"]:
         if not api_key:
             raise SystemExit(f"classify: no credential: set ${embed.KEY_VAR} or put the "
                              f"key in {embed.KEY_FILE} in the main checkout")
         log(f"  spent today before this run: US${spend_today(data)[1]:.2f}")
-        got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
-                              aliases=ALIASES)
-        calls, cost, secs = st["calls"], st["cost_usd"], st["seconds"]
+    # asks only what is missing and reads the answers (the estimate opened none)
+    got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                          aliases=ALIASES)
+    calls, cost, secs = st["calls"], st["cost_usd"], st["seconds"]
     if st["failures"] or not all(got):
         if calls:
             record_spend(data, "classify", name, model, calls, cost, secs, "failed")

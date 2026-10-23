@@ -222,8 +222,9 @@ current questions:
 1. `./wbg run --to search` (fetch, prepare, embed, search): the parser and the
    sentence splitter changed, so every PDF is read again (hours) and the sentence
    index is new; embeddings come from the cache where the text is unchanged.
-2. `./wbg run --from classify --dry-run`, read the estimates, then without
-   `--dry-run`. The first run has **no probability layer and no fitted gate**: the
+2. `./wbg run --from classify --max-spend <US$>`: each step prints its
+   estimate and stops before a request that would pass the cap (`--dry-run`
+   only prints the estimates). The first run has **no probability layer and no fitted gate**: the
    floors read the model's score and the pools use the panel's starting gates
    (`measure.gate_cosine` and `asset.gate_cosine`, both 0.3: one to four in ten
    sentences are asked about each measure; measures and assets alike then get
