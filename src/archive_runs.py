@@ -54,9 +54,12 @@ KEEP_ENTRIES = {("classify", "answers"), ("classify", "current"), ("types", "cac
 
 
 def current_names(data, scopes):
-    """{stage: {folder name}} of the run folders the stages would name now,
-    over every scope in scopes (None is the whole cohort)."""
+    """({stage: {folder name}}, [errors]) of the run folders the stages would
+    name now, over every scope in scopes (None is the whole cohort). A
+    lookup that fails is an error, never an empty answer: its current
+    folder would otherwise look superseded and be moved."""
     keep = {s: set() for s in STAGES}
+    errors = []
 
     def add(stage, folder):
         if folder:
@@ -67,7 +70,7 @@ def current_names(data, scopes):
             try:
                 add("search", search.run_folder(name, data)[0])
             except Exception as exc:                   # noqa: BLE001
-                print(f"  search {name}: {exc}")
+                errors.append(f"search {name}: {exc}")
             for fn, stage in ((lambda: classify.current_run(name, data, projects=projects),
                                "classify"),
                               (lambda: measure.current_run(name, data, projects=projects),
@@ -77,16 +80,16 @@ def current_names(data, scopes):
                 try:
                     add(stage, fn())
                 except Exception as exc:               # noqa: BLE001
-                    print(f"  {stage} {name} scope={projects}: {exc}")
+                    errors.append(f"{stage} {name} scope={projects}: {exc}")
         try:
             add("checks", commit_checks.current_run(data, projects=projects))
         except Exception as exc:                       # noqa: BLE001
-            print(f"  checks scope={projects}: {exc}")
+            errors.append(f"checks scope={projects}: {exc}")
         try:
             add("links", link_packages.current_run(data, projects=projects))
         except Exception as exc:                       # noqa: BLE001
-            print(f"  links scope={projects}: {exc}")
-    return keep
+            errors.append(f"links scope={projects}: {exc}")
+    return keep, errors
 
 
 def main():
@@ -103,7 +106,13 @@ def main():
     args = ap.parse_args()
     data = args.data
     scopes = [None] + [sorted(classify.scope(p) or []) for p in args.project]
-    keep = current_names(data, scopes)
+    keep, errors = current_names(data, scopes)
+    if errors:
+        print("A stage's current run could not be found, so nothing is moved "
+              "(its folder would look superseded):")
+        print("\n".join(f"  {e}" for e in errors))
+        if not args.dry_run:
+            return 1
     dest = os.path.join(data, "archive", f"runs-{args.date}")
     log, moved = [], []
     for stage in STAGES + EXTRA:

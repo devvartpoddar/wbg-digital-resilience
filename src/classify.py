@@ -697,8 +697,8 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
             name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine,
             projects=projects)
     except SystemExit as exc:
-        if not dry_run:
-            raise
+        if not dry_run or "search run" not in str(exc):
+            raise           # only a search run not scored yet has no estimate
         # The gate reads the search run, and a dry run writes nothing, so a
         # dry run that starts before the search stage has scored the new index
         # cannot plan (./wbg run --dry-run --from embed, 2026-10-22: the run

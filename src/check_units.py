@@ -537,8 +537,7 @@ def graded_sheet(name, data, seed, elusion=False):
     raise SystemExit(f"check: no sheet for {name} at seed {seed} ({base}.xlsx or {xlsx})")
 
 
-QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "sheet", "graded_units",
-                "precision", "recall", "evaluated_at", "report_path"]
+from schema import QUALITY_COLS  # noqa: E402  (one list, loaded in this shape)
 
 
 def write_quality(data, name, key, rows, floor):

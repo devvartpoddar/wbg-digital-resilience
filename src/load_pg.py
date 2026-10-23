@@ -128,8 +128,7 @@ TABLES = [
 # ./wbg check --evaluate, and a file written before the kind-of-sheet column
 # existed (2026-10-22) has no header for it while the views read it
 # (sql/views/17_measure_pages.sql). A column the file lacks loads as NULL.
-QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "sheet", "graded_units",
-                "precision", "recall", "evaluated_at", "report_path"]
+QUALITY_COLS = S.QUALITY_COLS
 # Names earlier layouts used in wbg, and tables no longer loaded; dropped
 # once so nothing stale lingers. The earlier wbg_internal schema is folded
 # into wbg by prepare().
@@ -658,11 +657,18 @@ def judgement_tables(data):
     mans = [p for st in stages for p in glob.glob(os.path.join(data, st, "*", "manifest.json"))]
     mans += [p for st in stages
              for p in glob.glob(os.path.join(data, "archive", "runs-*", st, "*", "manifest.json"))]
-    rows = []
-    for p in sorted(mans):
+    # One row per run id (the folder's name, the table's key): a folder
+    # written again after its old copy was archived (the same inputs come
+    # back) is read from where it lives now, never twice.
+    live = {os.path.basename(os.path.dirname(p)) for p in mans if "/archive/" not in p}
+    seen, rows = set(), []
+    for p in sorted(mans, key=lambda p: ("/archive/" in p, p)):
+        run = os.path.basename(os.path.dirname(p))
+        if run in seen or ("/archive/" in p and run in live):
+            continue
+        seen.add(run)
         with open(p, encoding="utf-8") as fh:
             m = json.load(fh)
-        run = os.path.basename(os.path.dirname(p))
         rows.append({"run_id": run, "stage": os.path.basename(os.path.dirname(os.path.dirname(p))),
                      "label_set": m.get("label_set") or (run.rsplit("-", 1)[0] if "-" in run else ""),
                      "created_at": m.get("created_at", ""),
