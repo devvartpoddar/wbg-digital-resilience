@@ -45,7 +45,7 @@ Release v1.0 (2026-10-23) decides on the decision model's raw score: `posterior.
 | Package to asset | `link.asset_yes` 0.67 | 85% | 73% | 65 package lines |
 | Commitment to package | `dashboard.package_link_min_probability` 0.7, unchanged | never reaches 85% (AUC 0.66) | | 60 links, 13 yes |
 
-Read the commitment-to-package links as low confidence: they are the weakest step. A commitment counts without an asset; when one is given it is the sentence's best asset at 0.8 or more, read from the sentence alone (the paragraph rule is off). Tried and not taken into v1.0, all on seed 7: a second ask of the same question for scores 0.3 to 0.9 (AUC 0.914 to 0.934, but no measurable change in recall at 85 per cent precision); phrase cosine and word patterns as layer inputs (no gain); the commitment asset question as a fallback (asset found on 49 against 43 per cent of true commitments, but a wrong asset on 5 to 7 per cent).
+Read the commitment-to-package links as low confidence: they are the weakest step. A commitment counts without an asset; when one is given it is the sentence's best asset at 0.8 or more, read from the sentence alone (the paragraph rule is off). The dashboards count it too (`dashboard.commitment_link_levels` unit|none), its asset shown as (no asset). Tried and not taken into v1.0, all on seed 7: a second ask of the same question for scores 0.3 to 0.9 (AUC 0.914 to 0.934, but no measurable change in recall at 85 per cent precision); phrase cosine and word patterns as layer inputs (no gain); the commitment asset question as a fallback (asset found on 49 against 43 per cent of true commitments, but a wrong asset on 5 to 7 per cent).
 
 ## The probability layer
 
