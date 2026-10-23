@@ -124,6 +124,12 @@ TABLES = [
     ("awards", "procurement/awards.csv"),
     ("measure_quality", "labels/measure_quality.csv"),
 ]
+# measure_quality's shape is the schema's, not the file's: it is written by
+# ./wbg check --evaluate, and a file written before the kind-of-sheet column
+# existed (2026-10-22) has no header for it while the views read it
+# (sql/views/17_measure_pages.sql). A column the file lacks loads as NULL.
+QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "sheet", "graded_units",
+                "precision", "recall", "evaluated_at", "report_path"]
 # Names earlier layouts used in wbg, and tables no longer loaded; dropped
 # once so nothing stale lingers. The earlier wbg_internal schema is folded
 # into wbg by prepare().
@@ -220,6 +226,9 @@ def load_table(conn, data, table, rel, release_id=""):
         elif table == "components":
             rows = component_rows(path)
             cols = ["component_id"] + cols
+        elif table == "measure_quality":
+            cols = list(QUALITY_COLS)      # the schema's shape, not the file's
+            rows = reader
         else:
             rows = reader
         return load_rows(conn, table, cols, rows, sha256_file(path), release_id)
@@ -641,8 +650,14 @@ def judgement_tables(data):
                              "question_sha256": g.get("question_sha256", ""),
                              "search_run": g.get("search_run", "")})
     out.append(("skip_gates", GATE_COLS, _files_key(gates), rows, {}))
-    mans = [p for st in ("classify", "measures", "links", "types", "checks")
-            for p in glob.glob(os.path.join(data, st, "*", "manifest.json"))]
+    # Every run manifest ever written, the archived ones included: `runs` is
+    # the record of what was run, and src/archive_runs.py takes a superseded
+    # run folder — its manifest with it — to data/archive/runs-<date>/<stage>/,
+    # where this still reads it (2026-10-22: archiving used to drop its row).
+    stages = ("classify", "measures", "links", "types", "checks")
+    mans = [p for st in stages for p in glob.glob(os.path.join(data, st, "*", "manifest.json"))]
+    mans += [p for st in stages
+             for p in glob.glob(os.path.join(data, "archive", "runs-*", st, "*", "manifest.json"))]
     rows = []
     for p in sorted(mans):
         with open(p, encoding="utf-8") as fh:

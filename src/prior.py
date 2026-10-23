@@ -79,9 +79,19 @@ def word_df(data):
             df[w] += 1
     out = {"units": len(index), "df": dict(sorted(df.items()))}
     os.makedirs(os.path.dirname(cache), exist_ok=True)
-    with open(cache + ".part", "w", encoding="utf-8") as fh:
+    # The temporary file carries the process id. The parallel stages all find
+    # this cache missing at once on the first run after the index changed
+    # (./wbg run --jobs 3 runs three measure sets side by side, each in its
+    # own process), and with one shared "<cache>.part" the writer that lost
+    # the race renamed a file another had already moved:
+    # FileNotFoundError on data/prior/word_df-<key>.json.part, which stopped
+    # the measure stage and the run with it (2026-10-22, the first cohort
+    # pass after the splitter changed the index). Every writer's file holds
+    # the same content, so the last one to finish wins.
+    part = f"{cache}.part-{os.getpid()}"
+    with open(part, "w", encoding="utf-8") as fh:
         json.dump(out, fh, sort_keys=True)
-    os.replace(cache + ".part", cache)
+    os.replace(part, cache)
     return out["units"], out["df"]
 
 

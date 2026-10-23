@@ -692,9 +692,20 @@ def classify(name, data, *, model=MODEL, api_key="", taxonomy=TAXONOMY, limit=0,
              dry_run=False, log=print, workers=WORKERS, min_cosine=MIN_COSINE, projects=None):
     """Classify the label set; returns the run folder (None on a dry run or
     when requests failed - run again to resume)."""
-    labels, scale, qs, bodies, shas, out, cosines, routes = plan(
-        name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine,
-        projects=projects)
+    try:
+        labels, scale, qs, bodies, shas, out, cosines, routes = plan(
+            name, data, model=model, taxonomy=taxonomy, limit=limit, min_cosine=min_cosine,
+            projects=projects)
+    except SystemExit as exc:
+        if not dry_run:
+            raise
+        # The gate reads the search run, and a dry run writes nothing, so a
+        # dry run that starts before the search stage has scored the new index
+        # cannot plan (./wbg run --dry-run --from embed, 2026-10-22: the run
+        # died here and the stages after this one got no estimate). Say so and
+        # carry on; a real run keeps the error.
+        log(f"{name}: no estimate - {exc}")
+        return None
     if not limit:
         try:
             remember_plan(data, _plan_key(name, data, taxonomy, min_cosine, projects, model), out)
