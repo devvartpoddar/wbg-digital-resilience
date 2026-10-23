@@ -239,6 +239,14 @@ current questions:
    that do not), graded and evaluated the same way. Its weighted precision and recall
    are the dashboards' figures; its rows never fit anything. Add elusion sheets
    (`./wbg check <set> --elusion`) for recall outside the pool.
+6. Move the runs nothing reads any more out of view:
+   `python3 src/archive_runs.py --dry-run` then without it (add `--project <id>`
+   to keep a smoke run's own folders). Every superseded run folder under
+   `data/<stage>/` goes to `data/archive/runs-<date>/` with a `WHAT-IS-HERE.md`
+   naming them; the answer store, the vector cache, the PDFs and text,
+   `data/labels/` and the current folders stay where they are, and nothing is
+   deleted (AGENTS.md rule 1). The next `./wbg status` then says a release
+   would be new, because a release records which run folders are present.
 
 ## After the first load
 

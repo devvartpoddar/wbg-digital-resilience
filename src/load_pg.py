@@ -124,6 +124,11 @@ TABLES = [
     ("awards", "procurement/awards.csv"),
     ("measure_quality", "labels/measure_quality.csv"),
 ]
+# measure_quality's shape is the schema's, not the file's: it is written by
+# ./wbg check --evaluate, and a file written before the kind-of-sheet column
+# existed (2026-10-22) has no header for it while the views read it
+# (sql/views/17_measure_pages.sql). A column the file lacks loads as NULL.
+QUALITY_COLS = S.QUALITY_COLS
 # Names earlier layouts used in wbg, and tables no longer loaded; dropped
 # once so nothing stale lingers. The earlier wbg_internal schema is folded
 # into wbg by prepare().
@@ -220,6 +225,9 @@ def load_table(conn, data, table, rel, release_id=""):
         elif table == "components":
             rows = component_rows(path)
             cols = ["component_id"] + cols
+        elif table == "measure_quality":
+            cols = list(QUALITY_COLS)      # the schema's shape, not the file's
+            rows = reader
         else:
             rows = reader
         return load_rows(conn, table, cols, rows, sha256_file(path), release_id)
@@ -641,13 +649,26 @@ def judgement_tables(data):
                              "question_sha256": g.get("question_sha256", ""),
                              "search_run": g.get("search_run", "")})
     out.append(("skip_gates", GATE_COLS, _files_key(gates), rows, {}))
-    mans = [p for st in ("classify", "measures", "links", "types", "checks")
-            for p in glob.glob(os.path.join(data, st, "*", "manifest.json"))]
-    rows = []
-    for p in sorted(mans):
+    # Every run manifest ever written, the archived ones included: `runs` is
+    # the record of what was run, and src/archive_runs.py takes a superseded
+    # run folder — its manifest with it — to data/archive/runs-<date>/<stage>/,
+    # where this still reads it (2026-10-22: archiving used to drop its row).
+    stages = ("classify", "measures", "links", "types", "checks")
+    mans = [p for st in stages for p in glob.glob(os.path.join(data, st, "*", "manifest.json"))]
+    mans += [p for st in stages
+             for p in glob.glob(os.path.join(data, "archive", "runs-*", st, "*", "manifest.json"))]
+    # One row per run id (the folder's name, the table's key): a folder
+    # written again after its old copy was archived (the same inputs come
+    # back) is read from where it lives now, never twice.
+    live = {os.path.basename(os.path.dirname(p)) for p in mans if "/archive/" not in p}
+    seen, rows = set(), []
+    for p in sorted(mans, key=lambda p: ("/archive/" in p, p)):
+        run = os.path.basename(os.path.dirname(p))
+        if run in seen or ("/archive/" in p and run in live):
+            continue
+        seen.add(run)
         with open(p, encoding="utf-8") as fh:
             m = json.load(fh)
-        run = os.path.basename(os.path.dirname(p))
         rows.append({"run_id": run, "stage": os.path.basename(os.path.dirname(os.path.dirname(p))),
                      "label_set": m.get("label_set") or (run.rsplit("-", 1)[0] if "-" in run else ""),
                      "created_at": m.get("created_at", ""),

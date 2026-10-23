@@ -115,6 +115,11 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
            "was_sent_to_model", "was_asked", "is_committed"}
+# measure_quality's columns: written by ./wbg check --evaluate
+# (src/check_units.py) and loaded in this shape whatever the file's header
+# (src/load_pg.py), so the two cannot drift apart.
+QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "sheet", "graded_units",
+                "precision", "recall", "evaluated_at", "report_path"]
 # Pipe-joined lists in the CSV become arrays, which Metabase renders and
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
