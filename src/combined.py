@@ -509,6 +509,7 @@ def write_workbook(path, sblocks, pblocks, scale, measures, assets):
     from openpyxl.styles import Alignment, Font, PatternFill
     from openpyxl.worksheet.datavalidation import DataValidation
     import check_units
+    cx = check_units.cell_text     # every string, so no character Excel refuses gets in
     wb = Workbook()
     wb.active.title = "how to"
     for line in HOW_TO:
@@ -528,14 +529,14 @@ def write_workbook(path, sblocks, pblocks, scale, measures, assets):
         for k, b in enumerate(blocks):
             fill = shade if k % 2 else None
             head = ws.max_row + 1
-            ws.append([b["block"], b["what"], b["where"], check_units.cell_text(b["passage"]),
+            ws.append([b["block"], b["what"], cx(b["where"]), cx(b["passage"]),
                        "", ""])
             ws.row_dimensions[head].height = min(400, 15 * (len(b["passage"]) // 95 + 1))
             if b.get("sentence"):
-                ws.append(["", "sentence", "", check_units.cell_text(b["sentence"]), "", ""])
+                ws.append(["", "sentence", "", cx(b["sentence"]), "", ""])
                 ws.cell(ws.max_row, 4).font = Font(bold=True)
             for line in b["lines"]:
-                ws.append([line["line"], line["kind"].replace("package_", ""), line["label"],
+                ws.append([line["line"], line["kind"].replace("package_", ""), cx(line["label"]),
                            check_units.cell_text(line.get("text", "")), line.get("answer", ""),
                            ""])
                 if line["kind"] in ("measure", "asset"):
@@ -557,21 +558,21 @@ def write_workbook(path, sblocks, pblocks, scale, measures, assets):
     s = wb.create_sheet("scale")
     s.append(["grade", "meaning"])
     for i, line in enumerate(scale):
-        s.append([i, line])
+        s.append([i, cx(line)])
     s.column_dimensions["B"].width = 120
     t = wb.create_sheet("types")
     t.append(["measure", "type", "name", "definition"])
     for mid, mname, _, ts in measures:
         for tid, tname, tdef in ts:
-            t.append([mname, tid, tname, check_units.cell_text(tdef)])
+            t.append([cx(mname), cx(tid), cx(tname), cx(tdef)])
     for c, w in zip("ABCD", (26, 30, 30, 100)):
         t.column_dimensions[c].width = w
     lists = wb.create_sheet("lists")
     lists.append(["id", "kind", "name", "definition"])
     for mid, mname, mdef, _ in measures:
-        lists.append([mid, "measure", mname, check_units.cell_text(mdef)])
+        lists.append([cx(mid), "measure", cx(mname), cx(mdef)])
     for aid, aname, adef in assets:
-        lists.append([aid, "asset", aname, check_units.cell_text(adef)])
+        lists.append([cx(aid), "asset", cx(aname), cx(adef)])
     for c, w in zip("ABCD", (28, 10, 30, 100)):
         lists.column_dimensions[c].width = w
     wb.save(path)
