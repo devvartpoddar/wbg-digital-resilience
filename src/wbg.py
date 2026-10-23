@@ -329,7 +329,9 @@ def run(args, data):
             # measures commit. Asked once the sets are in; a dry run's estimate reads the runs as they stand.
             if not failed:
                 _run("commit_checks.py", *dry, *scope, data=data)
-            if done and not args.dry_run:
+            # one publish a run: the publish stage writes every table that
+            # moved; only a run that stops here publishes here
+            if done and not args.dry_run and "publish" not in stages:
                 _run("store.py", *done, *scope, data=data)
         elif stage == "link":
             _run("link_packages.py", *dry, *scope, data=data)
@@ -1049,7 +1051,7 @@ def main(argv=None):
              *(["--elusion"] if args.elusion else []), "--seed", str(args.seed),
              *(["--design", args.design] if args.design else []),
              *(["--near-gate"] if args.near_gate else []),
-             *(["--dry-run"] if args.dry_run else []), data=data)
+             *(["--dry-run"] if args.dry_run else []), *_scope(args), data=data)
         return 0
     if args.cmd == "evaluate":
         _run("evaluate_activities.py", args.label_set, "--column", args.column,

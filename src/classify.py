@@ -19,7 +19,7 @@ rule's fitted gate, src/skip.py, else the control panel's asset.gate_cosine;
 0 asks every label of every sentence) or that a word pattern of the label
 matches (<set>_patterns.csv, optional); then feedback rounds (src/feedback.py)
 look below the gate, asking the sentences nearest those whose posterior
-reaches asset.floor, until a round yields too few (asset_feedback.* on the
+reaches asset.ask_floor, until a round yields too few (asset_feedback.* on the
 control panel, apart from the measures' feedback.*).
 
 Reads  data/appraisal/{paragraphs,components}.csv, data/appraisal/text/
@@ -386,7 +386,8 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
     the measures' rule); a sentence with no question is not sent. routes =
     {(unit_id, label_id): embedding | pattern | both}. The feedback rounds
     (classify) follow from the stored answers, so the folder is keyed on what
-    they read too: asset_feedback.*, asset.floor and the asset layers.
+    they read too: asset_feedback.*, asset.ask_floor and the asset layers (asset.floor,
+    which decides a sentence's asset, is applied on reading: measure.read_units).
     `projects` limits the run to the sentences of those projects (a cohort
     set, say); the run is keyed on the sentences it covers, so a scope is its
     own run and a wider one later reads the store."""
@@ -434,7 +435,7 @@ def plan(name, data, *, model=MODEL, taxonomy=TAXONOMY, limit=0, min_cosine=MIN_
         h.update(json.dumps({"patterns": {l: [[x["pattern_id"], x["pattern"]] for x in v]
                                           for l, v in sorted(pats.items())},
                              "feedback": fb,
-                             "floor": float(panel.get("asset.floor", 0.3)) if fb else None,
+                             "floor": ask_floor() if fb else None,
                              "grades": list(panel.grades()) if fb else None,
                              "layers_on": bool(panel.get("posterior.on", True)) if fb else None,
                              "layers": layers_digest_for(data, question_shas(qs)) if fb else ""},
@@ -468,7 +469,7 @@ def feedback_rounds(name, data, qs, bodies, merged, asked, routes, round_of, *, 
     import numpy
     import posterior
     fb = feedback.settings(feedback.ASSET)
-    floor = float(panel.get("asset.floor", 0.3))
+    floor = ask_floor()
     vector_of, projects_of = posterior.lookups(data)
     layers = layers_for(data, question_shas(qs), vector_of, projects_of)
     matrix = numpy.load(where(data, "embeddings", "sentence_emb.npy"), mmap_mode="r")
@@ -561,6 +562,20 @@ def write_marker(data, name, projects, out, min_cosine):
     os.replace(marker + ".part", marker)
 
 
+# The modules plan() reads requests through (its key hashes their code).
+PLAN_CODE = ("classify.py", "embed.py", "feedback.py", "labels.py", "panel.py", "prior.py", "search.py",
+             "skip.py", "units.py", "paths.py", "common.py")
+
+
+def ask_floor():
+    """What the asset map's feedback rounds count as a sentence having an
+    asset (control panel asset.ask_floor): it decides which sentences the next
+    round asks, so it is in the run key. asset.floor, which decides a
+    sentence's asset, is read when the map is read (measure.read_units) and is
+    in no key."""
+    return float(panel.get("asset.ask_floor", 0.3))
+
+
 def _plan_key(name, data, taxonomy, min_cosine, projects, model):
     """A cheap fingerprint of everything plan() reads: the corpus tables (by
     their remembered checksums), the label set's files, the pipeline's code,
@@ -582,15 +597,17 @@ def _plan_key(name, data, taxonomy, min_cosine, projects, model):
         h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
     # what the feedback rounds read (plan() keys the folder on them too)
     h.update(json.dumps([panel.items("feedback."), panel.items("asset_feedback."),
-                         panel.get("asset.floor"),
+                         ask_floor(),
                          panel.get("posterior.on", True), panel.get("read.grades")],
                         sort_keys=True, default=str).encode())
     p = layers_path(data)
-    h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
+    if panel.get("posterior.on", True):         # a layer file is read only when layers are on
+        h.update((file_sha256(p, remember=False) if os.path.exists(p) else "-").encode())
+    # the code plan() runs, not every module: an edit elsewhere (the tuning
+    # report, a docstring in wbg.py) names the same run
     src = os.path.dirname(os.path.abspath(__file__))
-    for f in sorted(os.listdir(src)):
-        if f.endswith(".py"):
-            h.update(file_sha256(os.path.join(src, f), remember=False).encode())
+    for f in PLAN_CODE:
+        h.update(file_sha256(os.path.join(src, f), remember=False).encode())
     if min_cosine:
         import search
         h.update(os.path.basename(search.run_folder(name, data, taxonomy=taxonomy)[0]).encode())

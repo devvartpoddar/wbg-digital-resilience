@@ -501,24 +501,50 @@ def classify_rows(data, projects=None, min_cosine=None, sets=None):
     import classify
     import measure
     import posterior
-    sha, rows = _run_rows(data, lambda n, d: classify.current_run(
-        n, d, projects=projects, min_cosine=min_cosine), "scores.csv", sets)
-    if sha is None:
-        return sha, rows
-    vector_of, projects_of = posterior.lookups(data)
-    layers, digests = {}, []
-    for run in sorted({r["run"] for r in rows}):
-        folder = where(data, "classify", run)
-        layers[run] = classify.asset_layers(data, folder, vector_of, projects_of)
-        digests.append(classify.asset_layers_digest(data, folder))
-    for r in rows:
-        if r.get("asked") != "true":
-            r["p_committed_calibrated"] = ""
+    folders = []
+    for name in labels.label_sets():
+        if sets and name not in sets:
             continue
-        p = measure.score_of(r)
-        lay = layers.get(r["run"], {}).get(r["label_id"])
-        r["p_committed_calibrated"] = f"{lay.probability(r['unit_id'], p) if lay else p:.4f}"
-    return sha + "|" + "|".join(digests), rows
+        try:
+            folder = classify.current_run(name, data, projects=projects, min_cosine=min_cosine)
+        except SystemExit:
+            continue
+        if folder:
+            folders.append((name, folder))
+    if not folders:
+        return None, []
+    digests = [classify.asset_layers_digest(data, f) for _, f in folders]
+    sha = ("|".join(os.path.basename(f) for _, f in folders) + "|" + "|".join(digests)
+           + f"|{'|'.join(map(str, panel_grades()))}")
+
+    def rows():
+        # a generator: about two million rows, read only when the key says
+        # the table is to be written
+        vector_of = projects_of = None
+        for name, folder in folders:
+            run = os.path.basename(folder)
+            lay = {}
+            if classify.asset_layers_digest(data, folder):
+                if vector_of is None:
+                    vector_of, projects_of = posterior.lookups(data)
+                lay = classify.asset_layers(data, folder, vector_of, projects_of)
+            with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
+                for r in csv.DictReader(fh):
+                    r = dict(r, label_set=name, run=run)
+                    if r.get("asked") != "true":
+                        r["p_committed_calibrated"] = ""
+                    else:
+                        p = measure.score_of(r)
+                        layer = lay.get(r["label_id"])
+                        r["p_committed_calibrated"] = (
+                            f"{layer.probability(r['unit_id'], p) if layer else p:.4f}")
+                    yield r
+    return sha, rows()
+
+
+def panel_grades():
+    import panel
+    return panel.grades()
 
 
 UNIT_ASSET_COLS = ["unit_id", "asset_rank", "paragraph_id", "project_ids", "asset_id",
@@ -722,37 +748,69 @@ def sync_answers(conn, data, release_id=""):
     return len(new)
 
 
+def reading_key(data=None, projects=None):
+    """The control-panel settings the readings of a run apply (the floors,
+    the asset rule, the types rule, what a score is, whether layers are on),
+    and the asset map they read the assets from: part of a table's source
+    key, so a moved setting reloads the table and nothing upstream."""
+    import classify
+    import panel
+    folder = classify.current_run("assets", data, projects=projects) if data else None
+    settings = {k: v for p in ("floor.", "asset.", "types.", "read.")
+                for k, v in panel.items(p).items()}
+    settings["posterior.on"] = panel.get("posterior.on", True)
+    return hashlib.sha256(json.dumps([settings, os.path.basename(folder or "")],
+                                     sort_keys=True, default=str).encode()).hexdigest()[:16]
+
+
 def measure_rows(data, projects=None, sets=None):
-    """The current measure run per set (or the sets named), with the
-    current type assignments (src/kinds.py) joined on as types_yes,
-    best_type and best_p where a set has an approved list and an
-    assignment run; blank otherwise."""
+    """(key, rows) of the current measure run per set (or the sets named),
+    read as every reader reads them (measure.read_units: the measure's floor
+    and the assets as the panel reads them now), with the current type
+    assignments (kinds.read_assignments) joined on as types_yes, best_type
+    and best_p where a set has an approved list and an assignment run; blank
+    otherwise. The key is made before any row is read, and the rows are a
+    generator, so an unchanged table costs no read."""
     import kinds
     import measure
-    sha, rows = _run_rows(data, lambda n, d: measure.current_run(n, d, projects=projects),
-                          "units.csv", sets)
-    if sha is None:
-        return sha, rows
-    assigned, runs = {}, []
+    mruns, aruns = [], []
     for name in labels.label_sets():
         if sets and name not in sets:
             continue
-        folder = kinds.current_assign(name, data, projects=projects)
+        try:
+            folder = measure.current_run(name, data, projects=projects)
+        except SystemExit:
+            continue
         if not folder:
             continue
-        runs.append(os.path.basename(folder))
-        with open(os.path.join(folder, "assignments.csv"), newline="", encoding="utf-8") as fh:
-            for a in csv.DictReader(fh):
-                assigned[(name, a["label_id"], a["unit_id"])] = a
-    for r in rows:
-        a = assigned.get((r["label_set"], r["label_id"], r["unit_id"]), {})
-        r.update({"types_yes": a.get("types_yes", ""), "best_type": a.get("best_type", ""),
-                  "best_p": a.get("best_p", "")})
+        mruns.append((name, folder))
+        af = kinds.current_assign(name, data, projects=projects)
+        if af:
+            aruns.append((name, af))
+    if not mruns:
+        return None, []
     mapping = {name: labels.type_resolution(name)[0] for name in labels.label_sets()}
-    apply_type_resolution(rows, mapping)
     merges = hashlib.sha256(repr(sorted((n, sorted(m.items())) for n, m in mapping.items()))
                             .encode()).hexdigest()[:12]
-    return sha + "|" + "|".join(runs) + "|" + merges, rows
+    sha = ("|".join(os.path.basename(f) for _, f in mruns) + "|" + reading_key(data, projects)
+           + "|" + "|".join(os.path.basename(f) for _, f in aruns) + "|" + merges)
+
+    def rows():
+        assigned = {}
+        for name, af in aruns:
+            for a in kinds.read_assignments(af, name, data):
+                assigned[(name, a["label_id"], a["unit_id"])] = a
+        for name, folder in mruns:
+            run = os.path.basename(folder)
+            batch = []
+            for u in measure.read_units(folder, data):
+                a = assigned.get((name, u["label_id"], u["unit_id"]), {})
+                batch.append(dict(u, label_set=name, run=run,
+                                  types_yes=a.get("types_yes", ""),
+                                  best_type=a.get("best_type", ""), best_p=a.get("best_p", "")))
+            apply_type_resolution(batch, mapping)
+            yield from batch
+    return sha, rows()
 
 
 ASSET_LINK_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
@@ -786,7 +844,12 @@ def check_rows(data, projects=None):
     if not folder:
         return None, []
     with open(os.path.join(folder, "pairs.csv"), newline="", encoding="utf-8") as fh:
-        return os.path.basename(folder), list(csv.DictReader(fh))
+        rows = list(csv.DictReader(fh))
+    # the decision read at the panel's floor.pair_check now, as the views do
+    for r in rows:
+        if r.get("p_keep_a") not in ("", None) and r.get("p_keep_b") not in ("", None):
+            r["decision"] = commit_checks.decision(float(r["p_keep_a"]), float(r["p_keep_b"]))
+    return f"{os.path.basename(folder)}|{commit_checks.floor()}", rows
 
 
 def link_rows(data, projects=None):
@@ -966,6 +1029,28 @@ def _last_sha(conn, table):
     last = conn.execute(f"SELECT source_sha256 FROM {LOADS} WHERE table_name = %s "
                         "ORDER BY loaded_at DESC LIMIT 1", (table,)).fetchone()
     return last[0] if last and _exists(conn, table) else None
+
+
+def last_key(conn, name):
+    """The last source key recorded under name, whether or not a table of
+    that name exists (the views' key, say)."""
+    last = conn.execute(f"SELECT source_sha256 FROM {LOADS} WHERE table_name = %s "
+                        "ORDER BY loaded_at DESC LIMIT 1", (name,)).fetchone()
+    return last[0] if last else None
+
+
+def views_key():
+    """A hash of what finish() builds the views from: every sql/views file
+    and the control-panel values they read."""
+    import panel
+    h = hashlib.sha256()
+    folder = os.path.join(ROOT, "sql", "views")
+    for f in sorted(os.listdir(folder)):
+        if f.endswith(".sql"):
+            with open(os.path.join(folder, f), "rb") as fh:
+                h.update(f.encode() + b"\0" + fh.read())
+    h.update(json.dumps(panel.settings(), sort_keys=True, default=str).encode())
+    return h.hexdigest()[:24]
 
 
 def _function_exists(conn, name):

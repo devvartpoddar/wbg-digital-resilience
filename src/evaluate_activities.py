@@ -101,9 +101,8 @@ def evaluate(name, data, column, text_regex=None, log=print, **kw):
     rx = re.compile(text_regex, re.I) if text_regex else None
     matched = match_paragraphs(activities, data)
     units = defaultdict(list)
-    with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
-        for u in csv.DictReader(fh):
-            units[u["paragraph_id"]].append(u)
+    for u in measure.read_units(folder, data):
+        units[u["paragraph_id"]].append(u)
     rows = []
     for a in activities:
         flag = a["flags"].get(column, "")

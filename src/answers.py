@@ -297,6 +297,14 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     root_ = root(data, model)
     keys = [{qid: key(model, state, q) for qid, q in qs.items()} for state, qs in requests]
     todo = {}
+    # each stored answer is opened once per call: the alias check, the
+    # missing check and the answers returned all read through this
+    memo = {}
+
+    def stored(sha):
+        if sha not in memo:
+            memo[sha] = read(root_, sha)
+        return memo[sha]
     # Answers asked under an alias of the model (the moving name the asset
     # map once used) count when the snapshot that served them is this model:
     # they are copied under this model's key, never asked again.
@@ -304,16 +312,17 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
         aroot = root(data, alias)
         for (state, qs), ks in zip(requests, keys):
             for qid, q in qs.items():
-                if read(root_, ks[qid]) is None:
+                if stored(ks[qid]) is None:
                     old = read(aroot, key(alias, state, q))
                     if old and old.get("model") == model:
                         write(root_, ks[qid], dict(old, migrated_from=alias))
+                        memo.pop(ks[qid], None)
     batch = BATCH if batch is None else batch
     # what each body answers: [(state, qid, the body's own qid)]
     plan = {}
     groups, seen = {}, set()
     for (state, qs), ks in zip(requests, keys):
-        missing = {qid: q for qid, q in qs.items() if read(root_, ks[qid]) is None}
+        missing = {qid: q for qid, q in qs.items() if stored(ks[qid]) is None}
         if not missing:
             continue
         if batch > 1:
@@ -387,7 +396,8 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
         stats["seconds"] = time.time() - t0
     answers = []
     for ks in keys:
-        got = {qid: read(root_, sha) for qid, sha in ks.items()}
+        # what was missing may have been asked since: read those again
+        got = {qid: (memo.get(sha) or read(root_, sha)) for qid, sha in ks.items()}
         answers.append(got if all(got.values()) else None)
     return answers, stats
 

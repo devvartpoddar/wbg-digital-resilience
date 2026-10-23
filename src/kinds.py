@@ -27,15 +27,23 @@ Two steps, each repeatable and stored:
             types a sentence at 0.5 and 1.3 at 0.7 (2026-10-22; the
             commitment scale had given 6.1).
 
-  gaps      The units no type reaches (at least types.gap_min_units of them)
+  gaps      Only with types.gaps on (off by default: the OTH types already
+            proposed, data/types/<set>_oth_types.csv, are kept as they are).
+            The units no type reaches (at least types.gap_min_units of them)
             go to the generative model with the existing types, which proposes
             only new kinds the list does not cover (not by asset, by scope or
             by another measure, and within the measure's definition). Each is
-            named with the prefix "OTH." and assigned straight away by their own
+            named with the prefix "OTH." and asked of every unit by their own
             fit questions: nothing waits on an
             approval, and a person promotes an OTH type by writing it into
             the list. The OTH types are written to data/types/<set>_oth_types.csv
-            and loaded with the approved ones.
+            (by a run over the whole cohort only) and loaded with the approved
+            ones.
+
+Units are asked at floor.ask (measure.ASK_FLOOR); which types count
+(floor.types, types.multiple: the approved types, else the OTH ones) is
+decided when the assignments are read (read_assignments), so a moved floor
+asks nothing and needs no new run.
 
 Reads  data/measures/<set>-<version>/units.csv
        analysis/labels/<set>.csv, <set>_types.csv (assign)
@@ -82,6 +90,10 @@ OTH_MIN = int(panel.get("types.gap_min_units", 5))
 # has none.
 TYPE_FLOOR = float(panel.get("floor.types", 0.5))
 TYPE_MULTIPLE = bool(panel.get("types.multiple", True))
+# Re-propose OTH types from the units no type reaches (on), or keep the ones
+# already proposed (off, the default): a proposal is a generative call and
+# new wording, so it is made when a person asks for it, not on every run.
+TYPE_GAPS = str(panel.get("types.gaps", "off")).strip().lower() in ("on", "true", "always")
 
 
 def type_winners(probs, floor=None, multiple=None):
@@ -189,17 +201,17 @@ def parse_types(response, allow_empty=False):
 # ------------------------------------------------------------------ propose
 
 def committed_units(name, data, **kw):
-    """The current measure run's committed units (measure.is_committed: the
-    posterior at the measure's floor), per label."""
+    """The current measure run's units at floor.ask (measure.ASK_FLOOR), per
+    label: the units types are asked about. The measure's own floor, at or
+    above it, picks which of them count when they are read, so moving it
+    asks nothing."""
     folder = measure.current_run(name, data, **kw)
     if not folder:
         raise SystemExit(f"types: no measure run for {name}; run ./wbg measure {name} first")
-    floor = panel.floor(name)
     out = defaultdict(list)
-    with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
-        for u in csv.DictReader(fh):
-            if measure.is_committed(u, floor):
-                out[u["label_id"]].append(u)
+    for u in measure.read_units(folder, data, links=False):
+        if measure.is_committed({**u, "committed": ""}, measure.ASK_FLOOR):
+            out[u["label_id"]].append(u)
     return folder, dict(out)
 
 
@@ -406,15 +418,56 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
             shas.append(classify.request_sha(body))
             rows.append((lid, u, qs))
     h = hashlib.sha256()
-    h.update(f"{os.path.basename(run_folder)}\t{model}\n".encode())
+    h.update(f"{model}\n".encode())
     import judged
-    h.update(f"prior={prior.VERSION}\nfloor={TYPE_FLOOR}\nmultiple={TYPE_MULTIPLE}\n"
-             f"gap_min={OTH_MIN}\n"
+    # keyed on what is asked: the units and their questions (below), the OTH
+    # types (frozen, or proposed: then the floor that finds the units no
+    # type reaches counts), the layers; no decision floor and no run name
+    gaps = (f"on:{OTH_MIN}:{TYPE_FLOOR}:{TYPE_MULTIPLE}" if TYPE_GAPS else
+            "off:" + json.dumps(frozen_oth(name, data), sort_keys=True))
+    h.update(f"prior={prior.VERSION}\ngaps={gaps}\n"
              f"layers={judged.digest(data, 'types', judged.type_question_shas(name, data))}\n"
              .encode())
     for (lid, u, _), sha in zip(rows, shas):
         h.update(f"{u['unit_id']}:{sha}\n".encode())
     return run_folder, approved, rows, where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
+
+
+def frozen_oth(name, data):
+    """{label_id: [OTH type]} as last proposed for the cohort
+    (data/types/<set>_oth_types.csv), or {}."""
+    path = where(data, "types", f"{name}_oth_types.csv")
+    out = defaultdict(list)
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                if r.get("active", "true") == "true":
+                    out[r["label_id"]].append({"type_id": r["type_id"], "type_name": r["type_name"],
+                                               "definition": r["definition"]})
+    return dict(out)
+
+
+def read_assignments(folder, name, data=None):
+    """An assignment run's rows as the control panel reads them now: types_yes,
+    best_type and best_p from the stored scores at floor.types (types.multiple),
+    the approved types first and the OTH types where none of those counts,
+    through the types' layers when fitted. Every reader reads them here."""
+    import judged
+    lays = judged.layers(data, "types", judged.type_question_shas(name, data)) if data else {}
+    with open(os.path.join(folder, "assignments.csv"), newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    for r in rows:
+        raw = {k[2:]: float(v) for k, v in r.items() if k.startswith("p_") and v not in ("", None)}
+        probs = calibrate(lays, name, r["unit_id"],
+                          {t: q for t, q in raw.items() if not t.startswith(OTH_PREFIX)})
+        yes = type_winners(probs)
+        if not yes:
+            oth = {t: q for t, q in raw.items() if t.startswith(OTH_PREFIX)}
+            probs = {**probs, **oth}
+            yes = type_winners(oth)
+        r.update({"types_yes": "|".join(yes), "best_type": yes[0] if yes else "",
+                  "best_p": f"{probs[yes[0]]:.3f}" if yes else ""})
+    return rows
 
 
 def current_assign(name, data, **kw):
@@ -492,6 +545,9 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
     if dry_run:
         if not st["to_ask"]:
             _gap_pass(name, approved, rows, got, data, api_key, True, log, model, workers)
+        else:
+            log("  OTH types: asked of every unit once the first answers are in "
+                f"({'re-proposed' if TYPE_GAPS else 'kept as proposed'})")
         log("  --dry-run: nothing asked, nothing written")
         return None
     if st["to_ask"]:
@@ -523,13 +579,15 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
         probs = calibrate(lays, name, u["unit_id"], raw)
         yes = type_winners(probs)
         entries = list(g.values())
-        if not yes and i in oth_got:
-            # no approved type counts: the gap types' questions (no layer yet)
+        if i in oth_got:
+            # every unit's OTH answers are kept; they count where no
+            # approved type does (no layer yet)
             second = type_scores(oth_got[i], oth_got[i])
             entries += list(oth_got[i].values())
             raw = {**raw, **second}
-            probs = {**probs, **second}
-            yes = type_winners(second)
+            if not yes:
+                probs = {**probs, **second}
+                yes = type_winners(second)
         best = yes[0] if yes else (max(probs, key=probs.get) if probs else "")
         counts[lid][best if yes else "other"] += 1
         model_served = "|".join(sorted({e["model"] for e in entries}))
@@ -558,7 +616,12 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
                  "type_name": t["type_name"], "definition": t["definition"], "active": "true",
                  "source": "gap"} for lid, ts in sorted(oth.items()) for t in ts]
     oth_cols = ["measure_id", "label_id", "type_id", "type_name", "definition", "active", "source"]
-    for path in (os.path.join(part, "oth_types.csv"), where(data, "types", f"{name}_oth_types.csv")):
+    # the cohort's current OTH list is written only by a proposal over the
+    # whole cohort: a scoped run never replaces it
+    paths = [os.path.join(part, "oth_types.csv")]
+    if TYPE_GAPS and not kw.get("projects"):
+        paths.append(where(data, "types", f"{name}_oth_types.csv"))
+    for path in paths:
         with open(path + ".tmp", "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=oth_cols, lineterminator="\n")
             w.writeheader()
@@ -610,32 +673,37 @@ def calibrate(lays, name, unit_id, probs):
 
 def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, workers,
               lays=None):
-    """({label: OTH types}, {row index: second choice entries}) for the units
-    no approved type counts for (type_winners on the calibrated answer);
-    (None, None) when a request failed."""
+    """({label: OTH types}, {row index: OTH answers}): the OTH types (kept as
+    proposed, or with types.gaps re-proposed from the units no approved type
+    counts for), asked of every unit of their label, so which type counts is
+    a reading (read_assignments); (None, None) when a request failed."""
     import answers
-    labs = {lab["id"]: lab for lab in labels.load_set(name)}
-    none_by = defaultdict(list)
-    for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
-        if g:
-            if not type_winners(calibrate(lays, name, u["unit_id"], type_scores(g, qs))):
-                none_by[lid].append((i, u))
-    oth, spent = {}, 0.0
-    for lid, items in sorted(none_by.items()):
-        ts, c = gaps(name, lid, labs[lid], approved[lid], [u for _, u in items], data,
-                     api_key=api_key, dry_run=dry_run, log=log)
-        spent += c
-        if ts:
-            oth[lid] = ts
-    if spent:
-        classify.record_spend(data, "types-gaps", name, GEN_MODEL, len(oth), spent, 0.0, "")
+    if TYPE_GAPS:
+        labs = {lab["id"]: lab for lab in labels.load_set(name)}
+        none_by = defaultdict(list)
+        for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
+            if g:
+                if not type_winners(calibrate(lays, name, u["unit_id"], type_scores(g, qs))):
+                    none_by[lid].append((i, u))
+        oth, spent = {}, 0.0
+        for lid, items in sorted(none_by.items()):
+            ts, c = gaps(name, lid, labs[lid], approved[lid], [u for _, u in items], data,
+                         api_key=api_key, dry_run=dry_run, log=log)
+            spent += c
+            if ts:
+                oth[lid] = ts
+        if spent:
+            classify.record_spend(data, "types-gaps", name, GEN_MODEL, len(oth), spent, 0.0, "")
+    else:
+        oth = {lid: ts for lid, ts in frozen_oth(name, data).items() if lid in approved}
     reqs, idx = [], []
     mname = measure_name(name)
     for lid, ts in oth.items():
         qs = assign_questions(ts, mname)
-        for i, u in none_by[lid]:
-            reqs.append(({"sentence": u["text"]}, qs))
-            idx.append(i)
+        for i, (rl, u, _) in enumerate(rows):
+            if rl == lid:
+                reqs.append(({"sentence": u["text"]}, qs))
+                idx.append(i)
     if not reqs:
         return oth, {}
     got2, st = answers.ask(model, reqs, data, api_key=api_key, log=log, workers=workers,

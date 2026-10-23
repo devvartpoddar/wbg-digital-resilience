@@ -130,8 +130,8 @@ def store(tmp_path, monkeypatch):
 
 
 def _rows(out):
-    with open(os.path.join(out, "units.csv"), newline="") as fh:
-        return list(csv.DictReader(fh))
+    """The run's rows as every reader reads them (measure.read_units)."""
+    return measure.read_units(out, os.path.dirname(os.path.dirname(out)))
 
 
 RUN = dict(api_key="k", log=lambda *_: None, workers=1, top=1, max_rounds=0)
@@ -333,6 +333,45 @@ def test_a_run_publishes_its_findings_assets_and_record_to_postgres(store, monke
         assert conn.execute("SELECT count(*) FROM wbg.answers").fetchone()[0] == len(got)
         stages = {r[0] for r in conn.execute("SELECT stage FROM wbg.runs")}
         assert {"measures", "classify"} <= stages
+
+
+def test_a_moved_floor_is_a_publish_not_a_run(store, monkeypatch, tmp_path):
+    """With a scratch database (WBG_PG_TEST): publishing again with nothing
+    moved writes no run table and builds no view; moving the measure's floor
+    names the same measure run and rewrites measure_findings alone."""
+    dsn = os.environ.get("WBG_PG_TEST")
+    if not dsn:
+        pytest.skip("set WBG_PG_TEST to a scratch database")
+    import psycopg
+    import load_pg
+    import store as st
+    data, _ = store
+    first = measure.measure("cra", data, api_key="k", log=lambda *_: None, workers=1)
+    monkeypatch.setattr(load_pg, "found_sets", lambda sha: ["cra", "assets"])
+    amap = os.path.join(data, "classify", "assets-abc")
+    monkeypatch.setattr(classify, "current_run",
+                        lambda name, d, **kw: amap if name == "assets" else None)
+    built = []
+    real_finish = load_pg.finish
+    monkeypatch.setattr(load_pg, "finish", lambda conn, log=print: built.append(1) or
+                        real_finish(conn, log=log))
+    with psycopg.connect(dsn, autocommit=True) as conn:
+        conn.execute("DROP SCHEMA IF EXISTS wbg CASCADE")
+        st.publish(data, sets=["cra", "assets"], log=lambda *_: None, conn=conn)
+        assert built == [1]
+        again = st.publish(data, sets=["cra", "assets"], log=lambda *_: None, conn=conn)
+        assert "measure_findings" not in again and "paragraph_grades" not in again
+        assert built == [1]                                # nothing moved: no view built
+        panel_file = tmp_path / "panel.csv"
+        with open(os.environ["WBG_PANEL"], encoding="utf-8") as fh:
+            panel_file.write_text(fh.read().replace("floor.default,0.5,", "floor.default,0.95,"))
+        monkeypatch.setenv("WBG_PANEL", str(panel_file))
+        assert measure.current_run("cra", data) == first   # the same run: nothing asked
+        moved = st.publish(data, sets=["cra", "assets"], log=lambda *_: None, conn=conn)
+        assert "measure_findings" in moved and "paragraph_grades" not in moved
+        assert built == [1, 1]
+        assert not any(r[0] for r in conn.execute(
+            "SELECT is_committed FROM wbg.measure_findings").fetchall())    # 0.9 < 0.95
 
 
 def test_a_sentence_takes_every_asset_at_the_floor_best_first():

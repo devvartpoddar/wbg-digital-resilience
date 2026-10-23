@@ -256,8 +256,7 @@ def sheet_rows(name, data, seed=1, elusion=False, design="train", **kw):
     run = measure.Run(name, data, build=False, log=lambda *_: None, **kw)
     run.load_corpus()
     qsha = classify.question_shas(run.qs)
-    with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
-        units = list(csv.DictReader(fh))
+    units = measure.read_units(folder, data)
     if elusion:
         picked = draw_elusion(run, units, ELUSION_PER, seed)
     elif design == "bands":
@@ -659,10 +658,12 @@ def latest_run(name, data):
     for m in sorted(glob.glob(where(data, "measures", f"{glob.escape(name)}-*", "manifest.json")),
                     key=os.path.getmtime, reverse=True):
         with open(m, encoding="utf-8") as fh:
-            if json.load(fh).get("question_sha256", {}).get(lid) != sha:
-                continue
-        with open(os.path.join(os.path.dirname(m), "units.csv"), newline="", encoding="utf-8") as fh:
-            return {u["unit_id"]: u for u in csv.DictReader(fh)}, sha
+            man = json.load(fh)
+        # a run over named projects (a smoke run) is never what a layer or a
+        # gate is fitted on: only a run over the whole cohort
+        if man.get("question_sha256", {}).get(lid) != sha or man.get("projects"):
+            continue
+        return {u["unit_id"]: u for u in measure.read_units(os.path.dirname(m), data)}, sha
     return None, sha
 
 
@@ -1035,9 +1036,8 @@ def assigned_types(name, data):
     folder = kinds.current_assign(name, data)
     if not folder:
         return {}
-    with open(os.path.join(folder, "assignments.csv"), newline="", encoding="utf-8") as fh:
-        return {r["unit_id"]: set((r.get("types_yes") or "").split("|")) - {""} or {"none"}
-                for r in csv.DictReader(fh)}
+    return {r["unit_id"]: set((r.get("types_yes") or "").split("|")) - {""} or {"none"}
+            for r in kinds.read_assignments(folder, name, data)}
 
 
 def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
@@ -1053,8 +1053,7 @@ def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
     store_labels(name, data, key, graded, source)
     # measure the run the sheet was drawn from
     mdir = where(data, "measures", key[0]["measure_dir"])
-    with open(os.path.join(mdir, "units.csv"), newline="", encoding="utf-8") as fh:
-        units = {u["unit_id"]: u for u in csv.DictReader(fh)}
+    units = {u["unit_id"]: u for u in measure.read_units(mdir, data)}
     import panel, posterior
     lo = min(panel.grades())
     floor = panel.floor(name)
@@ -1287,9 +1286,8 @@ def evaluate_elusion(name, data, seed=1, **kw):
         man = json.load(fh)
     import panel
     yes_from = min(panel.grades())
-    with open(os.path.join(mdir, "units.csv"), newline="", encoding="utf-8") as fh:
-        in_pool = sum(1 for u in csv.DictReader(fh) if u["sent"] == "true"
-                      and u.get("committed") == "true")
+    in_pool = sum(1 for u in measure.read_units(mdir, data, links=False)
+                  if u["sent"] == "true" and u.get("committed") == "true")
     lines = [f"# {name}: what the pool missed, from {len(graded)} graded units it never read", "",
              f"Drawn from the units outside {key[0]['measure_dir']} (pool: cosine >= "
              f"{man['min_cosine']}), in two strata: near (within {ELUSION_BAND} below the "

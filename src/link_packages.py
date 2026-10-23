@@ -166,12 +166,9 @@ def committed_units(data, projects=None, sets=None):
             continue
         if not folder:
             continue
-        floor = panel.floor(name)
-        rows = []
-        with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
-            for u in csv.DictReader(fh):
-                if measure.is_committed(u, floor):
-                    rows.append(u)
+        # asked at floor.ask; the measure's floor picks what counts on reading
+        rows = [u for u in measure.read_units(folder, data)
+                if measure.is_committed({**u, "committed": ""}, measure.ASK_FLOOR)]
         out[name] = (os.path.basename(folder), rows)
     return out
 
@@ -225,8 +222,13 @@ class Plan:
             h.update(f"{q['query_id']}\t{q['text']}\n".encode())
         h.update(json.dumps(self.asset_qs, sort_keys=True).encode())
         h.update(json.dumps(PAIR_QUESTION, sort_keys=True).encode())
-        for name, (run, _) in sorted(self.runs.items()):
-            h.update(f"{name}\t{run}\n".encode())
+        # keyed on the committed units themselves (their text and the assets
+        # that pair them), not the measure runs' names: a new measure run
+        # with the same units is the same link run
+        for name, (_, units) in sorted(self.runs.items()):
+            for u in sorted(units, key=lambda x: x["unit_id"]):
+                h.update(f"{name}\t{u['unit_id']}\t{hashlib.sha256(u['text'].encode()).hexdigest()}"
+                         f"\t{sorted(unit_assets(u))}\n".encode())
         # the layers the decisions read (src/judged.py)
         import judged
         self.asset_shas = {a: judged.sha(q) for a, q in self.asset_qs.items()}

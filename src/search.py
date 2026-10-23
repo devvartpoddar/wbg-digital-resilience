@@ -164,16 +164,26 @@ def coverage_lines(name, queries=None, folder=TAXONOMY):
             f"{name}_queries.csv): " + ", ".join(f"{t} ({n})" for _, t, n in gaps)]
 
 
+_VERSIONS = {}
+
+
 def run_version(queries, model, dim, index_path):
-    """A SHA-256 over everything a run's scores depend on."""
-    h = hashlib.sha256()
-    for q in queries:
-        h.update(f"{q['query_id']}\t{q['text']}\n".encode())
-    h.update(f"{model}:{dim}\n".encode())
-    with open(index_path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()[:12]
+    """A SHA-256 over everything a run's scores depend on. The index's
+    bytes are hashed once per process for an unchanged file (every stage
+    looks a search run up, once per set and reader)."""
+    st = os.stat(index_path)
+    memo = (tuple((q["query_id"], q["text"]) for q in queries), model, dim, index_path,
+            st.st_size, st.st_mtime_ns)
+    if memo not in _VERSIONS:
+        h = hashlib.sha256()
+        for q in queries:
+            h.update(f"{q['query_id']}\t{q['text']}\n".encode())
+        h.update(f"{model}:{dim}\n".encode())
+        with open(index_path, "rb") as fh:
+            for block in iter(lambda: fh.read(1 << 20), b""):
+                h.update(block)
+        _VERSIONS[memo] = h.hexdigest()[:12]
+    return _VERSIONS[memo]
 
 
 # ----------------------------------------------------------------- the scoring

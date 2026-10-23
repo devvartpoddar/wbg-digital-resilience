@@ -257,13 +257,11 @@ def load_frames(data, design, near_gate=False, projects=None):
         if corpus is None:
             run.load_corpus()
             corpus = run
-        with open(os.path.join(folder, "units.csv"), newline="", encoding="utf-8") as fh:
-            units = {u["unit_id"]: u for u in csv.DictReader(fh) if u["sent"] == "true"}
+        units = {u["unit_id"]: u for u in measure.read_units(folder, data) if u["sent"] == "true"}
         assigned = {}
         af = kinds.current_assign(name, data, **kw)
         if af:
-            with open(os.path.join(af, "assignments.csv"), newline="", encoding="utf-8") as fh:
-                assigned = {r["unit_id"]: r for r in csv.DictReader(fh)}
+            assigned = {r["unit_id"]: r for r in kinds.read_assignments(af, name, data)}
         lab = run.labels[0]
         m = {"units": units, "label_id": lab["id"], "name": lab["name"],
              "qsha": classify.question_shas(run.qs)[lab["id"]], "floor": run.floor,
@@ -1121,6 +1119,7 @@ def report(data, seed, graded=None):
     """data/reports/evaluate_combined.md: the precision of what the
     dashboards show, measure and asset together, with its interval; the
     measure alone; and by measure. Returns its path."""
+    import measure
     import panel
     graded = graded or Graded(data, seed)
     keys = {}
@@ -1136,8 +1135,8 @@ def report(data, seed, graded=None):
         keys[name] = rows
         want = {r["unit_id"] for r in rows if r.get("frame") != "outside"}
         mdir = where(data, "measures", rows[0]["measure_dir"])
-        with open(os.path.join(mdir, "units.csv"), newline="", encoding="utf-8") as fh:
-            units_of[name] = {u["unit_id"]: u for u in csv.DictReader(fh) if u["unit_id"] in want}
+        units_of[name] = {u["unit_id"]: u for u in measure.read_units(mdir, data)
+                          if u["unit_id"] in want}
     lv = panel.get("dashboard.commitment_link_levels", "unit|paragraph")
     levels = set(lv if isinstance(lv, list) else str(lv).split("|"))
     got = headline_items(graded, units_of, levels, graded.lo)

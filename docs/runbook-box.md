@@ -96,11 +96,17 @@ now.
 |---|---|---|
 | embed | one vector per text: `cache/<model>.<dim>/<sha of text>.f32`; `sentence_index.csv` is rebuilt every run | the text, model or dim changes |
 | search | query ids and texts (definitions and phrases), model:dim, and the **bytes of `sentence_index.csv`** | never (query vectors are cached) |
-| classify (asset map) | the starting gate, the fitted gates that apply (`data/labels/assets_gate.json`), the prior-input version (`prior.VERSION`), and every sentence's request (model, section, sentence, component, questions) | a sentence's text or a question changes, or a gate lets new sentences in |
-| measure | the search and asset-map run names, the asset layers that apply, the settings (model, gate (fitted or starting), top, feedback, floor, projects, the prior-input version, the `read.`, `asset.` and `posterior.` panel settings), the patterns, the question (scale, definitions), the measure's probability layer | a question or state changes, or new units enter |
-| types | the measure run name, model, the prior-input version, and every committed unit's request | a type list changes or new units are committed |
-| checks | the measure run names, model, the prior-input version, and every pair request | new committed pairs |
-| links | `LINK_VERSION`, model, `link.asset_top`, `link.measure_top`, `link.asset_yes`, measure query texts, the bytes of `packages.csv`, the asset and pair questions, the measure run names, projects | new pairs or packages |
+| classify (asset map) | the starting gate, the fitted gates that apply, the prior-input version, every sentence's request, and for the feedback rounds `asset_feedback.*`, **`asset.ask_floor`** and the layers (only while `posterior.on`) | a sentence's text or a question changes, or a gate lets new sentences in |
+| measure | the search run name, the gate, top, `feedback.*`, **`floor.ask`**, `read.grades`, the prior-input version, projects, the patterns, the question, the measure's probability layer | a question or state changes, or new units enter |
+| types | model, the prior-input version, `types.gaps` (and the OTH types kept), the layers, and every unit's request (units at `floor.ask`) | a type list changes or new units reach `floor.ask` |
+| checks | model, the prior-input version, the layers, and every pair request (units at `floor.ask`) | new pairs |
+| links | `LINK_VERSION`, model, `link.asset_top`, `link.measure_top`, `link.asset_yes`, `dashboard.commitment_link_levels`, the query texts, `packages.csv`, the questions, the layers, projects, and **each committed unit's text and assets** (not the measure run names) | new pairs or packages |
+
+**Decisions are read, not stored (2026-10-23).** No decision floor is in any run key: `floor.default`, `floor.<set>`, `asset.floor`, `asset.decay`, `asset.paragraph_floor`, `asset.multiple`, `floor.types`, `types.multiple` and `floor.pair_check` are applied when a run is read (`measure.read_units`, `kinds.read_assignments`, `load_pg.check_rows`, the views). The stages ask at `floor.ask` (measures, and the units types, checks and links ask about) and `asset.ask_floor` (the asset map's rounds). So moving a decision floor is `./wbg publish`: it rewrites `measure_findings` (and `unit_assets` or `unit_pair_checks` when their settings moved) and rebuilds the views, in a minute or two, with nothing asked. Keep every decision floor at or above its ask floor: below it, only what was asked at the ask floor shows. Moving an ask floor is a run (it changes what is asked).
+
+**What a publish writes.** Each table is skipped when its source key (in `wbg.loads`) is unchanged; its rows are read only when it is written. The views are rebuilt only when a table was written, a view file changed or a control-panel value moved. `./wbg run` publishes once, at its publish stage.
+
+**What is cached.** The asset map is parsed once per run into `data/cache/asset_map-*.pickle`; the sentence index once per process; each stored answer is opened once per `answers.ask`.
 
 The prior inputs (section 5g, `src/prior.py`) are stored with every stage's
 answers; their version is in each stage's key (`prior.VERSION`, and
@@ -112,15 +118,16 @@ The paragraph counts (`wbg.unit_paragraph_context`) are made at every
 publish from the finished classification; they are in no run key.
 
 Code is in no run folder's name: changing `src/` alone does not make a model
-run new (it does count in the prepare stages' fingerprints, below).
+run new (it does count in the prepare stages' fingerprints, below; the asset
+map's lookup cache hashes only the modules its plan reads, `classify.PLAN_CODE`).
 
 **Why a run is "new" with nothing re-asked.** The names chain: anything
 that changes `sentence_index.csv` (re-embedding, re-cleaning, a component or
 copy change in the unit metadata) gives a new search version, so new measure
 folders, so new types, checks and links folders, all rebuilt from stored
-answers. A changed floor, any measure setting, a pattern, a refitted
+answers. A changed ask floor, a measure's question or pattern, a refitted
 probability layer or gate, or the project scope does the same from the
-measure stage down.
+measure stage down. A changed decision floor does not (above).
 
 **What `./wbg status` prints.**
 
