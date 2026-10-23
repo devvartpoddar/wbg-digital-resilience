@@ -292,15 +292,29 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
 
 
 
+_INDEX = {}
+
+
+def _index(idx):
+    """(rows, sha256) of the sentence index, read once per process while the
+    file is unchanged: every set's run reads the same index (the measure
+    stage runs every set in one process). The rows are shared: read them,
+    never change them."""
+    st = os.stat(idx)
+    stamp = (os.path.abspath(idx), st.st_mtime, st.st_size)
+    if _INDEX.get("stamp") != stamp:
+        _INDEX.update(stamp=stamp, rows=_rows(idx), sha=_sha_file(idx))
+    return _INDEX["rows"], _INDEX["sha"]
+
+
 def load_run(folder, data):
     """(queries, scores, index) of a scored run, refusing one scored against
     another sentence index: its rows would be read against the wrong units."""
     with open(os.path.join(folder, "manifest.json"), encoding="utf-8") as fh:
         manifest = json.load(fh)
     idx = _paths(data)[1]
-    index = _rows(idx)
+    index, idx_sha = _index(idx)
     scores = numpy.load(os.path.join(folder, "scores.npy"), mmap_mode="r")
-    idx_sha = _sha_file(idx)
     if scores.shape[0] != len(index) or manifest.get("index_sha256", idx_sha) != idx_sha:
         raise SystemExit(f"search: {os.path.basename(folder)} was scored against another "
                          f"sentence index; run ./wbg search again")

@@ -371,7 +371,7 @@ class CapReached(SystemExit):
 
 
 def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=False,
-        aliases=(), batch=None, read_answers=True):
+        aliases=(), batch=None, read_answers=True, tags=None):
     """Answers for every request, asking only what is not stored.
     Returns (answers, stats): answers = [{qid: entry}] per request (None for
     a request with a missing answer when nothing could be asked), stats =
@@ -379,7 +379,10 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     "failures": [(call sha, error)], "seconds", "stored_items": requests with
     every answer stored}. With read_answers False (an estimate) nothing stored
     is opened: whether an answer is stored is a stat of its file, and
-    answers is [None] * len(requests)."""
+    answers is [None] * len(requests). tags (one per request) split the
+    calls, cost and failures by tag in stats["by_tag"]: several label sets
+    asked in one call (src/measure.py, measure_many) keep their own ledger.
+    A request asked for several tags counts under the first."""
     import classify
     root_ = root(data, model)
     keys = [keys_of(model, state, qs) for state, qs in requests]
@@ -408,7 +411,9 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
     plan = {}
     groups, seen = {}, set()
     complete_ = 0
-    for (state, qs), ks in zip(requests, keys):
+    tag_of, item_tag = {}, {}
+    tags = list(tags) if tags is not None else [None] * len(requests)
+    for (state, qs), ks, tag in zip(requests, keys, tags):
         missing = {qid: q for qid, q in qs.items() if stored(ks[qid]) is None}
         if not missing:
             complete_ += 1
@@ -417,11 +422,13 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
             k = json.dumps([state, missing], sort_keys=True, ensure_ascii=False)
             if k not in seen:                                  # the same item asks once
                 seen.add(k)
+                item_tag[k] = tag
                 groups.setdefault(json.dumps(missing, sort_keys=True), []).append((state, missing))
             continue
         for body in bodies_for(state, missing, model):
             sha = classify.request_sha(body)
             todo.setdefault(sha, body)                         # the same request asks once
+            tag_of.setdefault(sha, tag)
             plan.setdefault(sha, [(state, body["questions"][q], q) for q in body["questions"]])
     # Items sharing a question set go together, ordered by their state (a
     # sentence's section, component and text), so a batch holds neighbours
@@ -431,11 +438,23 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
         for body, members in batches_for(items, model, batch):
             sha = classify.request_sha(body)
             todo.setdefault(sha, body)
+            first = members[0][0]
+            tag_of.setdefault(sha, item_tag.get(json.dumps(list(first), sort_keys=True,
+                                                           ensure_ascii=False)))
             plan.setdefault(sha, [(it[0], it[1][qid], bq) for it, qid, bq in members])
     chars = sum(len(json.dumps(b, ensure_ascii=False)) for b in todo.values())
     stats = {"to_ask": len(todo), "chars": chars, "calls": 0, "cost_usd": 0.0, "failures": [],
              "seconds": 0.0, "stored_items": complete_,
-             "estimate_usd": chars / 4 / 1e6 * classify.PRICE_PER_MTOK}
+             "estimate_usd": chars / 4 / 1e6 * classify.PRICE_PER_MTOK, "by_tag": {}}
+    for t in dict.fromkeys(tags):
+        stats["by_tag"][t] = {"to_ask": 0, "chars": 0, "calls": 0, "cost_usd": 0.0,
+                              "failures": []}
+    for sha, body in todo.items():
+        b = stats["by_tag"][tag_of.get(sha)]
+        b["to_ask"] += 1
+        b["chars"] += len(json.dumps(body, ensure_ascii=False))
+    for b in stats["by_tag"].values():
+        b["estimate_usd"] = b["chars"] / 4 / 1e6 * classify.PRICE_PER_MTOK
     cap = spend_cap(data)
     if todo and not dry_run and cap is not None and \
             _spent_here[0] + stats["estimate_usd"] > cap:
@@ -466,6 +485,9 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                     paid = f.result()
                     stats["cost_usd"] += paid
                     stats["calls"] += 1
+                    b = stats["by_tag"][tag_of.get(futures[f])]
+                    b["cost_usd"] += paid
+                    b["calls"] += 1
                     _spent_here[0] += paid
                     if cap is not None and _spent_here[0] > cap:
                         pool.shutdown(wait=True, cancel_futures=True)
@@ -474,6 +496,8 @@ def ask(model, requests, data, *, api_key="", log=print, workers=None, dry_run=F
                                          f"stored")
                 except classify.TransportError as exc:
                     stats["failures"].append((futures[f], str(exc)[:200]))
+                    stats["by_tag"][tag_of.get(futures[f])]["failures"].append(
+                        (futures[f], str(exc)[:200]))
                 except classify.Refused as exc:
                     pool.shutdown(wait=True, cancel_futures=True)
                     raise SystemExit(f"answers: refused, stopping ({stats['calls']:,} stored so "

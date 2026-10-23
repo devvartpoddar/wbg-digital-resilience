@@ -650,56 +650,91 @@ class Run:
     def grade(self, rows, rnd, api_key, dry_run, workers):
         """The measure's question, through the answer store, for the rows
         in the pool. Returns (calls, cost, failures)."""
-        import answers
-        model = self.settings["model"]
-        sent = []
-        for row in rows:
-            row["sent"] = "true"
-            row["_state"] = self.state_of(row)
-            sent.append(row)
-        requests_ = [(r["_state"], self.qs) for r in sent]
-        got, st = answers.ask(model, requests_, self.data, api_key=api_key, log=self.log,
-                              workers=workers, dry_run=True, read_answers=False)
-        self.log(f"  round {rnd}: {len(rows):,} units, {len(sent):,} asked; measure "
-                 f"question: {st['to_ask']:,} to ask (about US${st['estimate_usd']:.3f})")
-        if dry_run:
-            return 0, 0.0, []
-        if st["to_ask"] and not api_key:
-            raise SystemExit("measure: no credential: set $WBG_OPENROUTER_KEY")
-        # asks only what is missing (none, often) and reads the answers
-        got, st = answers.ask(model, requests_, self.data,
-                              api_key=api_key, log=self.log, workers=workers)
-        calls, cost = st["calls"], st["cost_usd"]
-        if st["failures"] or not all(got):
-            return calls, cost, st["failures"] or [("", "an answer is missing")]
-        for row, g in zip(sent, got):
-            self.grade_into(row, g)
-        return calls, cost, []
+        return grade_many([(self, rows, rnd)], api_key, dry_run, workers, self.log)[self.name]
 
     # ---- relevance feedback
 
-    def feedback_rows(self, graded, rnd):
-        """The next batch: the unseen units nearest the Rocchio query, in
-        index order on ties. The query is the centroid of the committed
-        units' vectors minus NEGATIVE_WEIGHT times the centroid of the units
-        asked and not committed: the first run showed the raw centroid pulls in the
-        measure's neighbourhood ("resilient infrastructure" in general), and
-        the rejected units are exactly what that neighbourhood looks like."""
+    def feedback_query(self, graded):
+        """The Rocchio query of the units graded so far, or None: the
+        centroid of the committed units' vectors minus NEGATIVE_WEIGHT times
+        the centroid of the units asked and not committed. The first run
+        showed the raw centroid pulls in the measure's neighbourhood
+        ("resilient infrastructure" in general), and the rejected units are
+        exactly what that neighbourhood looks like."""
         import feedback
         pos = [self.row_of[r["unit_id"]] for r in graded
                if r["sent"] == "true" and r["committed"] == "true"]
         neg = [self.row_of[r["unit_id"]] for r in graded
                if r["sent"] == "true" and r["committed"] != "true"]
-        q = feedback.query(self.matrix, pos, neg, NEGATIVE_WEIGHT)
-        if q is None:
-            return []
-        (order, sims), = feedback.ranked(self.matrix, [q])
+        return feedback.query(self.matrix, pos, neg, NEGATIVE_WEIGHT)
+
+    def feedback_pick(self, graded, rnd, order, sims):
+        """The next batch: the unseen units first in `order` (the corpus
+        ranked by the query, index order on ties)."""
+        import feedback
         seen = {r["unit_id"] for r in graded}
         pick = feedback.next_rows(
             order, lambda i: self.index[i]["unit_id"] not in seen and
             classify.in_scope(self.index[i], self.projects), self.settings["batch"])
         return [self.base_row(self.index[i], "feedback", rnd, k + 1, f"{float(sims[i]):.6f}")
                 for k, i in enumerate(pick)]
+
+    def feedback_rows(self, graded, rnd):
+        """The next batch of one measure on its own (measure_many ranks every
+        measure's query in one pass)."""
+        import feedback
+        q = self.feedback_query(graded)
+        if q is None:
+            return []
+        (order, sims), = feedback.ranked(self.matrix, [q])
+        return self.feedback_pick(graded, rnd, order, sims)
+
+
+def grade_many(batches, api_key, dry_run, workers, log=print):
+    """Every measure's batch [(run, rows, round)] through the answer store
+    in one ask, so the requests of all the measures share the workers.
+    Each measure's requests are the ones it would make alone (a batch holds
+    one question set), so the answers are the same. Returns {name: (calls,
+    cost, failures)}."""
+    import answers
+    if not batches:
+        return {}
+    model = batches[0][0].settings["model"]
+    data = batches[0][0].data
+    requests_, tags, sent = [], [], []
+    for run, rows, _ in batches:
+        assert run.settings["model"] == model
+        for row in rows:
+            row["sent"] = "true"
+            row["_state"] = run.state_of(row)
+            requests_.append((row["_state"], run.qs))
+            tags.append(run.name)
+            sent.append((run, row))
+    _, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                        dry_run=True, read_answers=False, tags=tags)
+    for run, rows, rnd in batches:
+        b = st["by_tag"].get(run.name) or {"to_ask": 0, "estimate_usd": 0.0}
+        run.log(f"  {run.name} round {rnd}: {len(rows):,} units, {len(rows):,} asked; measure "
+                f"question: {b['to_ask']:,} to ask (about US${b['estimate_usd']:.3f})")
+    if dry_run:
+        return {run.name: (0, 0.0, []) for run, _, _ in batches}
+    if st["to_ask"] and not api_key:
+        raise SystemExit("measure: no credential: set $WBG_OPENROUTER_KEY")
+    # asks only what is missing (none, often) and reads the answers
+    got, st = answers.ask(model, requests_, data, api_key=api_key, log=log, workers=workers,
+                          tags=tags)
+    out = {}
+    for run, _, _ in batches:
+        b = st["by_tag"].get(run.name) or {"calls": 0, "cost_usd": 0.0, "failures": []}
+        out[run.name] = (b["calls"], b["cost_usd"], list(b["failures"]))
+    for (run, row), g in zip(sent, got):
+        if g is None:
+            if not out[run.name][2]:
+                out[run.name][2].append(("", "an answer is missing"))
+            continue
+        if not out[run.name][2]:
+            run.grade_into(row, g)
+    return out
 
 
 def report_lines(run, rows, rounds, calls, cost, seconds, served):
@@ -769,54 +804,95 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
             publish=False, **kw):
     """One measure through the funnel; with publish=True its rows go to
     Postgres as the last step (src/store.py)."""
-    # the run folder is known from the inputs' names: a run already written
-    # is found before the corpus (the matrix, 155,000 texts) is read
-    run = Run(name, data, log=log, build=False, **kw)
-    if os.path.exists(os.path.join(run.out, "manifest.json")):
-        log(f"{name}: already written: {run.out}")
-        if publish:
-            import store
-            store.try_publish(data, sets=[name], projects=run.projects, log=log)
-        return None if dry_run else run.out
-    run.load_corpus()
-    log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades -> {run.out}")
-    t0 = time.time()
-    rows = run.candidate_rows()
-    rounds, calls, cost = {}, 0, 0.0
-    top = len(run.scale) - 1
-    rnd = 0
-    while True:
-        c, k, failures = run.grade(rows if rnd == 0 else batch, rnd, api_key, dry_run, workers)
-        calls += c
-        cost += k
-        if failures:
-            # Paid calls are paid whether or not the run completes: the
-            # ledger must match the provider's bill.
-            classify.record_spend(data, "measure", name, run.settings["model"], calls,
-                                  cost, time.time() - t0, "failed")
-            log(f"  {len(failures)} request(s) failed; nothing written. Run again to resume.")
-            for sha, err in failures[:5]:
-                log(f"    {sha[:12]}: {err}")
-            return None
-        if dry_run:
-            log("  --dry-run: round 0 only; no request made, nothing written")
-            return None
-        this = rows if rnd == 0 else batch
-        got = sum(1 for r in this if r["sent"] == "true" and r["committed"] == "true")
-        rounds[str(rnd)] = {"graded": sum(1 for r in this if r["sent"] == "true"),
-                            "committed": got}
-        log(f"    committed this round: {got}")
-        if rnd > 0 and got < run.settings["min_yield"]:
-            break
-        if rnd >= run.settings["max_rounds"]:
-            break
-        rnd += 1
-        batch = run.feedback_rows(rows, rnd)
-        if not batch:
-            break
-        rows.extend(batch)
-    seconds = time.time() - t0
-    classify.record_spend(data, "measure", name, run.settings["model"], calls, cost, seconds,
+    return measure_many([name], data, api_key=api_key, dry_run=dry_run, log=log,
+                        workers=workers, publish=publish, **kw).get(name)
+
+
+def measure_many(names, data, *, api_key="", dry_run=False, log=print,
+                 workers=classify.WORKERS, publish=False, **kw):
+    """Several measures through the funnel in one process: the corpus (the
+    paragraphs, the sentence index, the texts) is read once, every measure's
+    round is one ask (grade_many) and every measure's feedback query is
+    ranked in one pass over the matrix (feedback.ranked). Each measure's
+    rows, rounds and answers are what it would get alone. Returns {name:
+    run folder, or None where it failed or was a dry run}."""
+    import feedback
+    out, live = {}, []
+    for name in names:
+        # the run folder is known from the inputs' names: a run already
+        # written is found before the corpus (the matrix, 155,000 texts) is read
+        run = Run(name, data, log=log, build=False, **kw)
+        if os.path.exists(os.path.join(run.out, "manifest.json")):
+            log(f"{name}: already written: {run.out}")
+            if publish:
+                import store
+                store.try_publish(data, sets=[name], projects=run.projects, log=log)
+            out[name] = None if dry_run else run.out
+            continue
+        run.load_corpus()
+        log(f"{name}: {len(run.labels)} label(s) x {len(run.scale)} grades -> {run.out}")
+        rows = run.candidate_rows()
+        live.append({"run": run, "rows": rows, "batch": rows, "rnd": 0, "rounds": {},
+                     "calls": 0, "cost": 0.0, "t0": time.time()})
+    while live:
+        res = grade_many([(m["run"], m["batch"], m["rnd"]) for m in live], api_key, dry_run,
+                         workers, log)
+        going = []
+        for m in live:
+            run = m["run"]
+            c, k, failures = res[run.name]
+            m["calls"] += c
+            m["cost"] += k
+            if failures:
+                # Paid calls are paid whether or not the run completes: the
+                # ledger must match the provider's bill.
+                classify.record_spend(data, "measure", run.name, run.settings["model"],
+                                      m["calls"], m["cost"], time.time() - m["t0"], "failed")
+                log(f"  {run.name}: {len(failures)} request(s) failed; nothing written. "
+                    f"Run again to resume.")
+                for sha, err in failures[:5]:
+                    log(f"    {sha[:12]}: {err}")
+                out[run.name] = None
+                continue
+            if dry_run:
+                log(f"  {run.name} --dry-run: round 0 only; no request made, nothing written")
+                out[run.name] = None
+                continue
+            this = m["batch"]
+            got = sum(1 for r in this if r["sent"] == "true" and r["committed"] == "true")
+            m["rounds"][str(m["rnd"])] = {"graded": sum(1 for r in this if r["sent"] == "true"),
+                                          "committed": got}
+            log(f"    {run.name} committed this round: {got}")
+            if (m["rnd"] > 0 and got < run.settings["min_yield"]) or \
+                    m["rnd"] >= run.settings["max_rounds"]:
+                out[run.name] = _write(run, m, publish)
+                continue
+            m["q"] = run.feedback_query(m["rows"])
+            if m["q"] is None:
+                out[run.name] = _write(run, m, publish)
+                continue
+            going.append(m)
+        # every measure's next batch from one pass over the matrix
+        if going:
+            ranked = feedback.ranked(going[0]["run"].matrix, [m["q"] for m in going])
+        live = []
+        for m, (order, sims) in zip(going, ranked if going else []):
+            m["rnd"] += 1
+            m["batch"] = m["run"].feedback_pick(m["rows"], m["rnd"], order, sims)
+            if not m["batch"]:
+                out[m["run"].name] = _write(m["run"], m, publish)
+                continue
+            m["rows"].extend(m["batch"])
+            live.append(m)
+    return out
+
+
+def _write(run, m, publish):
+    """Write a finished measure's run folder, its report and its spend."""
+    data, log, rows = run.data, run.log, m["rows"]
+    rounds, calls, cost = m["rounds"], m["calls"], m["cost"]
+    seconds = time.time() - m["t0"]
+    classify.record_spend(data, "measure", run.name, run.settings["model"], calls, cost, seconds,
                           os.path.basename(run.out))
     served = defaultdict(int)
     for r in rows:
@@ -831,7 +907,7 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
         w = csv.DictWriter(fh, fieldnames=UNIT_COLS, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
         w.writerows(rows)
-    manifest = dict(run.settings, label_set=name, search_run=os.path.basename(run.search_run),
+    manifest = dict(run.settings, label_set=run.name, search_run=os.path.basename(run.search_run),
                     patterns=len(run.patterns), calibration=run.calibration, version=os.path.basename(run.out).rsplit("-", 1)[1],
                     units_seen=len(rows), graded=sum(1 for r in rows if r["sent"] == "true"),
                     rounds=rounds, questions=run.qs, question_sha256=classify.question_shas(run.qs),
@@ -846,18 +922,18 @@ def measure(name, data, *, api_key="", dry_run=False, log=print, workers=classif
     # the assets as the panel reads them now
     lines = report_lines(run, read_units(run.out, data), rounds, calls, cost, seconds,
                          dict(served))
-    report = where(data, "reports", f"measure_{name}.txt")
+    report = where(data, "reports", f"measure_{run.name}.txt")
     os.makedirs(os.path.dirname(report), exist_ok=True)
     with open(report, "w", encoding="utf-8") as fh:
         fh.write("\n".join(lines) + f"\n  -> {run.out}\n")
     for line in lines:
         log(line)
-    if any(m != run.settings["model"] for m in served):
+    if any(x != run.settings["model"] for x in served):
         log(f"  warning: a snapshot other than the one requested served some units: {dict(served)}")
     log(f"  wrote {run.out}")
     if publish:
         import store
-        store.try_publish(data, sets=[name], projects=run.projects, log=log)
+        store.try_publish(data, sets=[run.name], projects=run.projects, log=log)
     return run.out
 
 
