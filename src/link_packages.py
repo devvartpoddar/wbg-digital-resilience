@@ -238,7 +238,26 @@ class Plan:
         if projects:
             h.update(("\n".join(sorted(projects))).encode())
         self.version = h.hexdigest()[:12]
-        self.out = where(data, "links", f"packages-{self.version}")
+        self.out = self._adopt(where(data, "links", f"packages-{self.version}"), projects)
+
+    def _adopt(self, out, projects):
+        """out, or a written link run over the whole cohort that read the same
+        measure runs with the same settings, packages and questions
+        (src/adopt.py): its pairs follow from those, so it is reused."""
+        import adopt
+        got = adopt.resolve(self.data, "links", out)
+        if got != out or os.path.exists(os.path.join(out, "manifest.json")) or projects:
+            return got
+        runs = {n: r for n, (r, _) in self.runs.items()}
+        for folder, m in adopt.manifests(self.data, "links", "packages-"):
+            if (any(m.get(k) != v for k, v in self.settings.items())
+                    or m.get("packages") != len(self.packages)
+                    or m.get("measure_runs") != runs or m.get("asset_questions") != self.asset_qs
+                    or m.get("pair_question") != PAIR_QUESTION):
+                continue
+            return adopt.record(self.data, "links", out, folder,
+                                "same measure runs, settings, packages and questions")
+        return out
 
     # ---- step 1: the assets each package is asked about
 

@@ -514,8 +514,9 @@ def classify_rows(data, projects=None, min_cosine=None, sets=None):
     if not folders:
         return None, []
     digests = [classify.asset_layers_digest(data, f) for _, f in folders]
-    sha = ("|".join(os.path.basename(f) for _, f in folders) + "|" + "|".join(digests)
-           + f"|{'|'.join(map(str, panel_grades()))}")
+    # the same form as before 2026-10-23, so an unchanged asset map is not
+    # reloaded (its two million rows) for a new key format
+    sha = "|".join(os.path.basename(f) for _, f in folders) + "|" + "|".join(digests)
 
     def rows():
         # a generator: about two million rows, read only when the key says

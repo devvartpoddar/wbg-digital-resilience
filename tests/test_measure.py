@@ -374,6 +374,29 @@ def test_a_moved_floor_is_a_publish_not_a_run(store, monkeypatch, tmp_path):
             "SELECT is_committed FROM wbg.measure_findings").fetchall())    # 0.9 < 0.95
 
 
+def test_a_run_written_under_an_older_key_is_reused_not_rebuilt(store):
+    """A run whose folder name an older key made, holding the same work, is
+    adopted for the new name: the same folder, nothing asked or written."""
+    import json
+    data, _ = store
+    first = measure.measure("cra", data, **RUN)
+    old = os.path.join(os.path.dirname(first), "cra-0ldf0rmat000")
+    os.rename(first, old)
+    m = json.load(open(os.path.join(old, "manifest.json")))
+    m["floor"] = m.pop("ask_floor")                       # the older manifest's field
+    json.dump(m, open(os.path.join(old, "manifest.json"), "w"))
+    assert measure.measure("cra", data, **RUN) == old     # adopted: no new run
+    assert not os.path.exists(first)
+    got = json.load(open(os.path.join(data, "measures", "adopted.json")))
+    assert got[os.path.basename(first)]["folder"] == "cra-0ldf0rmat000"
+    # a run that asked differently is never adopted
+    m["max_rounds"] = 99
+    json.dump(m, open(os.path.join(old, "manifest.json"), "w"))
+    os.remove(os.path.join(data, "measures", "adopted.json"))
+    assert measure.Run("cra", data, build=False, log=lambda *_: None,
+                       **{k: v for k, v in RUN.items() if k in ("top", "max_rounds")}).out == first
+
+
 def test_a_sentence_takes_every_asset_at_the_floor_best_first():
     own = {"fiber": 0.8, "data_hosting": 0.4, "geospatial": 0.1}
     assert measure.sentence_assets(own, [], floor=0.3, multiple=True) == (

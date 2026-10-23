@@ -33,7 +33,8 @@ Two steps, each repeatable and stored:
             go to the generative model with the existing types, which proposes
             only new kinds the list does not cover (not by asset, by scope or
             by another measure, and within the measure's definition). Each is
-            named with the prefix "OTH." and asked of every unit by their own
+            named with the prefix "OTH." and asked of the units no approved type
+            reaches, by their own
             fit questions: nothing waits on an
             approval, and a person promotes an OTH type by writing it into
             the list. The OTH types are written to data/types/<set>_oth_types.csv
@@ -42,8 +43,11 @@ Two steps, each repeatable and stored:
 
 Units are asked at floor.ask (measure.ASK_FLOOR); which types count
 (floor.types, types.multiple: the approved types, else the OTH ones) is
-decided when the assignments are read (read_assignments), so a moved floor
-asks nothing and needs no new run.
+decided when the assignments are read (read_assignments). floor.types and
+floor.types also picks which units are asked the OTH types (those no
+approved type reaches), so it is in this stage's key: moving it is a short
+types run, asking only the units it newly leaves without a type (a run
+already holding those answers is reused).
 
 Reads  data/measures/<set>-<version>/units.csv
        analysis/labels/<set>.csv, <set>_types.csv (assign)
@@ -421,16 +425,59 @@ def assign_plan(name, data, model=measure.MODEL, log=lambda *_: None, **kw):
     h.update(f"{model}\n".encode())
     import judged
     # keyed on what is asked: the units and their questions (below), the OTH
-    # types (frozen, or proposed: then the floor that finds the units no
-    # type reaches counts), the layers; no decision floor and no run name
-    gaps = (f"on:{OTH_MIN}:{TYPE_FLOOR}:{TYPE_MULTIPLE}" if TYPE_GAPS else
-            "off:" + json.dumps(frozen_oth(name, data), sort_keys=True))
-    h.update(f"prior={prior.VERSION}\ngaps={gaps}\n"
+    # types (kept, or proposed) and floor.types, which picks the units the
+    # OTH types are asked of (those no approved type reaches), the layers;
+    # no run name, and not types.multiple (it changes no unit's questions)
+    oth = frozen_oth(name, data)
+    gaps = (f"on:{OTH_MIN}" if TYPE_GAPS else "off:" + json.dumps(oth, sort_keys=True))
+    h.update(f"prior={prior.VERSION}\ngaps={gaps}\nfloor={TYPE_FLOOR}\n"
              f"layers={judged.digest(data, 'types', judged.type_question_shas(name, data))}\n"
              .encode())
     for (lid, u, _), sha in zip(rows, shas):
         h.update(f"{u['unit_id']}:{sha}\n".encode())
-    return run_folder, approved, rows, where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
+    out = where(data, "types", f"{name}-assign-{h.hexdigest()[:12]}")
+    if not TYPE_GAPS:
+        out = _adopt(name, data, out, model, run_folder, approved, oth, rows)
+    return run_folder, approved, rows, out
+
+
+def _adopt(name, data, out, model, run_folder, approved, oth, rows):
+    """out, or a written assignment run that asked exactly what this one
+    would (src/adopt.py): the same measure run, model, types and OTH types,
+    and the same units."""
+    import adopt
+    got = adopt.resolve(data, "types", out)
+    if got != out or os.path.exists(os.path.join(out, "manifest.json")):
+        return got
+    types = {lid: [t["type_id"] for t in ts] + [t["type_id"] for t in oth.get(lid, [])]
+             for lid, ts in approved.items()}
+    units = {(lid, u["unit_id"]) for lid, u, _ in rows}
+    for folder, m in adopt.manifests(data, "types", f"{name}-assign-"):
+        if (m.get("model") != model or m.get("measure_run") != os.path.basename(run_folder)
+                or m.get("types") != types or m.get("units") != len(units)):
+            continue
+        listed = defaultdict(list)
+        for t in m.get("oth_types") or []:
+            listed[t["label_id"]].append({k: t[k] for k in ("type_id", "type_name", "definition")})
+        if dict(listed) != {lid: ts for lid, ts in oth.items() if lid in approved and ts}:
+            continue
+        with open(os.path.join(folder, "assignments.csv"), newline="", encoding="utf-8") as fh:
+            got = list(csv.DictReader(fh))
+        if {(r["label_id"], r["unit_id"]) for r in got} != units:
+            continue
+        # every unit no approved type reaches at floor.types now must hold
+        # its OTH answers: the folder asked what this run would ask
+        def none_now(r):
+            appr = {t: float(r[f"p_{t}"]) for t in types[r["label_id"]]
+                    if not t.startswith(OTH_PREFIX) and r.get(f"p_{t}") not in ("", None)}
+            return not type_winners(appr)
+        if any(none_now(r) and any(r.get(f"p_{t['type_id']}") in ("", None)
+                                   for t in oth.get(r["label_id"], []))
+               for r in got):
+            continue
+        return adopt.record(data, "types", out, folder,
+                            "same measure run, model, types, OTH types and units")
+    return out
 
 
 def frozen_oth(name, data):
@@ -546,7 +593,8 @@ def assign(name, data, *, api_key="", model=measure.MODEL, dry_run=False, log=pr
         if not st["to_ask"]:
             _gap_pass(name, approved, rows, got, data, api_key, True, log, model, workers)
         else:
-            log("  OTH types: asked of every unit once the first answers are in "
+            log("  OTH types: asked of the units no approved type reaches, once the "
+                "first answers are in "
                 f"({'re-proposed' if TYPE_GAPS else 'kept as proposed'})")
         log("  --dry-run: nothing asked, nothing written")
         return None
@@ -675,16 +723,17 @@ def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, wor
               lays=None):
     """({label: OTH types}, {row index: OTH answers}): the OTH types (kept as
     proposed, or with types.gaps re-proposed from the units no approved type
-    counts for), asked of every unit of their label, so which type counts is
-    a reading (read_assignments); (None, None) when a request failed."""
+    counts for), asked of the units no approved type reaches, so which type
+    counts is read from the stored scores (read_assignments); (None, None)
+    when a request failed."""
     import answers
+    none_by = defaultdict(list)
+    for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
+        if g:
+            if not type_winners(calibrate(lays, name, u["unit_id"], type_scores(g, qs))):
+                none_by[lid].append((i, u))
     if TYPE_GAPS:
         labs = {lab["id"]: lab for lab in labels.load_set(name)}
-        none_by = defaultdict(list)
-        for i, ((lid, u, qs), g) in enumerate(zip(rows, got)):
-            if g:
-                if not type_winners(calibrate(lays, name, u["unit_id"], type_scores(g, qs))):
-                    none_by[lid].append((i, u))
         oth, spent = {}, 0.0
         for lid, items in sorted(none_by.items()):
             ts, c = gaps(name, lid, labs[lid], approved[lid], [u for _, u in items], data,
@@ -700,10 +749,9 @@ def _gap_pass(name, approved, rows, got, data, api_key, dry_run, log, model, wor
     mname = measure_name(name)
     for lid, ts in oth.items():
         qs = assign_questions(ts, mname)
-        for i, (rl, u, _) in enumerate(rows):
-            if rl == lid:
-                reqs.append(({"sentence": u["text"]}, qs))
-                idx.append(i)
+        for i, u in none_by[lid]:
+            reqs.append(({"sentence": u["text"]}, qs))
+            idx.append(i)
     if not reqs:
         return oth, {}
     got2, st = answers.ask(model, reqs, data, api_key=api_key, log=log, workers=workers,

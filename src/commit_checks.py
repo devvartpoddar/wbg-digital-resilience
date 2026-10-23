@@ -116,7 +116,38 @@ def plan(data, projects=None, model=classify.MODEL):
     for _, _, _, (state, qs) in pairs:
         h.update(classify.request_sha(classify.request_body(state, qs, model)).encode())
     known = {(name, uid): u for name, us in sets.items() for uid, u in us.items()}
-    return pairs, where(data, "checks", f"checks-{h.hexdigest()[:12]}"), known
+    out = _adopt(data, where(data, "checks", f"checks-{h.hexdigest()[:12]}"), pairs, model)
+    return pairs, out, known
+
+
+def _adopt(data, out, pairs, model):
+    """out, or a written checks run that holds exactly these pairs, each
+    with the scores the stored answers to today's questions give
+    (src/adopt.py): the same work, so it is reused, not rebuilt."""
+    import adopt
+    got = adopt.resolve(data, "checks", out)
+    if got != out or os.path.exists(os.path.join(out, "manifest.json")):
+        return got
+    want = {(uid, a, b): req for uid, a, b, req in pairs}
+    for folder, m in adopt.manifests(data, "checks", "checks-"):
+        if m.get("model") != model or m.get("pairs") != len(want):
+            continue
+        with open(os.path.join(folder, "pairs.csv"), newline="", encoding="utf-8") as fh:
+            rows = {(r["unit_id"], r["set_a"], r["set_b"]): r for r in csv.DictReader(fh)}
+        if set(rows) != set(want):
+            continue
+        import answers
+        keys = list(want)
+        got_, st = answers.ask(model, [want[k] for k in keys], data, dry_run=True)
+        if st["to_ask"] or not all(got_):
+            continue
+        same = all(abs(classify.fit_score(g["keep_a"]) - float(rows[k]["score_a"])) < 5e-4 and
+                   abs(classify.fit_score(g["keep_b"]) - float(rows[k]["score_b"])) < 5e-4
+                   for k, g in zip(keys, got_))
+        if same:
+            return adopt.record(data, "checks", out, folder,
+                                "same pairs, each score the stored answer to today's question")
+    return out
 
 
 def keep_shas(sets):

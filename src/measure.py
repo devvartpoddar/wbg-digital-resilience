@@ -494,13 +494,41 @@ class Run:
             h.update(f"p\t{pt['label_id']}\t{pt['pattern_id']}\t{pt['pattern']}\n".encode())
         h.update(json.dumps(self.qs, sort_keys=True).encode())
         h.update(json.dumps(self.calibration, sort_keys=True).encode())
-        self.out = where(data, "measures", f"{name}-{h.hexdigest()[:12]}")
+        self.out = self._adopt(where(data, "measures", f"{name}-{h.hexdigest()[:12]}"))
         # The run folder is known from the inputs' names alone. A reader
         # (the load, the types stage, the evaluation) stops here; what
         # follows reads the corpus and is only for a run or a check sheet.
         self._loaded = False
         if build:
             self.load_corpus()
+
+    def _adopt(self, out):
+        """out, or a written run of this measure that asked exactly what
+        this run would (src/adopt.py): the same search run, questions,
+        patterns, layer and settings, its feedback rounds counted at
+        floor.ask. Its units and answers are then what this run would
+        write, so it is reused, not rebuilt."""
+        import adopt
+        got = adopt.resolve(self.data, "measures", out)
+        if got != out or os.path.exists(os.path.join(out, "manifest.json")):
+            return got
+        same = ("model", "top", "min_cosine", "batch", "min_yield", "max_rounds",
+                "negative_weight", "prior", "projects")
+        for folder, m in adopt.manifests(self.data, "measures", f"{self.name}-"):
+            if os.path.basename(folder).rsplit("-", 1)[0] != self.name:
+                continue
+            ask = m.get("ask_floor", m.get("floor"))
+            read = {k: v for k, v in (m.get("panel") or {}).items() if k.startswith("read.")}
+            if (any(m.get(k) != self.settings[k] for k in same) or ask is None
+                    or float(ask) != ASK_FLOOR or read != self.settings["panel"]
+                    or m.get("search_run") != os.path.basename(self.search_run)
+                    or m.get("questions") != self.qs or m.get("calibration") != self.calibration
+                    or m.get("patterns") != len(self.patterns)):
+                continue
+            return adopt.record(self.data, "measures", out, folder,
+                                "same search run, questions, patterns, layer and settings; "
+                                "rounds counted at floor.ask")
+        return out
 
     def load_corpus(self):
         """The paragraphs, the index, the matrix, the texts, the commitment

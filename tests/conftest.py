@@ -14,7 +14,8 @@ import tempfile
 
 STARTING = {"posterior.on": "true", "floor.default": "0.5", "floor.types": "0.5",
             "floor.pair_check": "0.5", "asset.floor": "0.3", "asset.decay": "0.4",
-            "asset.multiple": "true", "link.asset_yes": "0.5"}
+            "asset.multiple": "true", "link.asset_yes": "0.5", "floor.ask": "0.5",
+            "asset.ask_floor": "0.3"}
 
 
 def _test_panel():
