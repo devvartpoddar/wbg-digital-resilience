@@ -13,9 +13,12 @@ The four decisions after them go through the same loop:
 Each kind's labels are pooled into one fit when posterior.pool is on (as
 for measures and assets: posterior.fit_pooled, one intercept per label, the
 weights shared), since a type, a pair side or an asset has few graded rows
-of its own. Grades come from the combined
-workbook (./wbg check all): the type column of each measure tab, and the
-tabs 'pair checks', 'package assets' and 'package links'; ./wbg check all
+of its own. Grades come from the workbook of ./wbg check all: on the
+combined sheets (the training and evaluation designs, src/combined.py) the
+type lines of each sentence, the pair checks read off its two measure
+grades, and the package lines; on the older designs the type column of each
+measure tab and the tabs 'pair checks', 'package assets' and 'package
+links'. An evaluation sheet's answers (stratum eval:*) never fit. ./wbg check all
 --evaluate stores them in data/labels/ and fits the layers into
 data/labels/<kind>_posterior.json, keyed on the exact question each label
 asks; the stage reads them (its posterior column) and its floor reads the
@@ -118,18 +121,24 @@ def store(data, kind, cols, rows, keys):
     """Merge rows into data/labels/<kind>.csv, the latest grade of each key
     winning."""
     path = label_path(data, kind)
+    # a training and an evaluation answer to the same question are kept apart
+    key = lambda r: tuple(r.get(k, "") for k in keys) + \
+        ((r.get("stratum") or "").startswith("eval:"),)
     current = {}
     if os.path.exists(path):
         with open(path, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
-                current[tuple(r.get(k, "") for k in keys)] = r
+                current[key(r)] = r
     for r in rows:
-        current[tuple(r.get(k, "") for k in keys)] = r
+        current[key(r)] = r
+    import check_units
+    check_units.with_sheet(list(current.values()))
+    cols = cols if "sheet" in cols else cols + ["sheet"]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
-        w.writerows(sorted(current.values(), key=lambda r: tuple(r.get(k, "") for k in keys)))
+        w.writerows(sorted(current.values(), key=lambda r: tuple(str(x) for x in key(r))))
     os.replace(path + ".part", path)
 
 
@@ -139,6 +148,12 @@ def read_labels(data, kind):
         return []
     with open(path, newline="", encoding="utf-8") as fh:
         return list(csv.DictReader(fh))
+
+
+def fitting_rows(data, kind):
+    """A kind's stored answers that may fit a layer: an evaluation sheet's
+    (stratum eval:*) never do."""
+    return [r for r in read_labels(data, kind) if not (r.get("stratum") or "").startswith("eval:")]
 
 
 def draw(rows, score, seed, bands=BANDS):
@@ -167,7 +182,7 @@ PAIR_KEY_COLS = ["row_id", "unit_id", "set_a", "set_b", "text_sha256", "question
 PAIR_SHEET = [("row_id", 8), ("project", 12), ("measure A", 30), ("measure B", 30),
               ("sentence", 90), ("answer", 12), ("note", 24)]
 PAIR_LABEL_COLS = ["unit_id", "set_a", "set_b", "text_sha256", "question_sha256", "answer",
-                   "weight", "source", "graded_on"]
+                   "weight", "source", "graded_on", "stratum"]
 
 
 def pair_rows(data, seed, projects=None):
@@ -209,7 +224,7 @@ ASSET_KEY_COLS = ["row_id", "package_id", "asset_id", "package_sha256", "questio
 ASSET_SHEET = [("row_id", 8), ("project", 12), ("package", 70), ("package component", 30),
                ("asset", 30), ("answer", 12), ("note", 24)]
 ASSET_LABEL_COLS = ["package_id", "asset_id", "package_sha256", "question_sha256", "answer",
-                    "weight", "source", "graded_on"]
+                    "weight", "source", "graded_on", "stratum"]
 
 
 def package_asset_rows(data, seed, projects=None):
@@ -248,8 +263,10 @@ def read_answers(xlsx, tab):
     return {str(r[ri]): check_units._clean(r[ai]) for r in rows if check_units._clean(r[ai])}
 
 
-def evaluate_tab(data, seed, kind):
-    """Store a tab's answers in data/labels/<kind>.csv. Returns rows stored."""
+def evaluate_tab(data, seed, kind, answered=None):
+    """Store a tab's answers in data/labels/<kind>.csv (answered: {row_id:
+    answer} from the combined sheets, else read off the tab). Returns rows
+    stored."""
     import check_units
     tab, kcols, lcols, keys, fname = {
         "pairs": ("pair checks", PAIR_KEY_COLS, PAIR_LABEL_COLS,
@@ -262,10 +279,11 @@ def evaluate_tab(data, seed, kind):
         return 0
     with open(kpath, newline="", encoding="utf-8") as fh:
         key = list(csv.DictReader(fh))
-    try:
-        answered = read_answers(check_units.all_path(data, seed), tab)
-    except KeyError:
-        return 0
+    if answered is None:
+        try:
+            answered = read_answers(check_units.all_path(data, seed), tab)
+        except KeyError:
+            return 0
     today = datetime.date.today().isoformat()
     rows = []
     for k in key:
@@ -273,7 +291,7 @@ def evaluate_tab(data, seed, kind):
         if not a or a.lower() == "unsure":
             continue
         rows.append({**{c: k.get(c, "") for c in lcols}, "answer": a,
-                     "weight": f"{int(k['stratum_size']) / int(k['stratum_drawn']):.6g}",
+                     "weight": f"{check_units.key_weight(k):.6g}",
                      "source": os.path.basename(kpath)[:-8], "graded_on": today})
     if rows:
         store(data, kind, lcols, rows, keys)
@@ -334,11 +352,12 @@ def type_blocks(data):
             if uid in assigned and int(r["grade"]) >= lo:
                 ts = set(r["type"].split("|")) - {"", "other"}
                 if ts:
-                    given[uid] = (ts, float(r.get("weight") or 1.0))
+                    given[uid] = (ts, float(r.get("weight") or 1.0),
+                                  set((r.get("unsure") or "").split("|")) - {""})
         for label, qsha in shas.items():
             t = label.split(":", 1)[1]
             rows = [(u, int(t in given[u][0]), given[u][1], projects_of(u)) for u in given
-                    if f"p_{t}" in assigned[u]]
+                    if f"p_{t}" in assigned[u] and t not in given[u][2]]
             score = {u: float(assigned[u][f"p_{t}"] or 0) for u, *_ in rows}
             vecs = {u: vector_of(u) for u in score}
             vecs = {u: v for u, v in vecs.items() if v is not None}
@@ -388,7 +407,7 @@ def pair_blocks(data):
     vector_of, projects_of = posterior.lookups(data)
     qsha = pair_question_shas(data)
     blocks = {}
-    for r in read_labels(data, "pairs"):
+    for r in fitting_rows(data, "pairs"):
         uid = by_text.get(r["text_sha256"])
         p = pairs.get((uid, r["set_a"], r["set_b"]))
         if not p or r["question_sha256"] != qsha.get((r["set_a"], r["set_b"])):
@@ -447,7 +466,7 @@ def package_asset_blocks(data):
     assets = [a for a in labels.load_set("assets") if a["active"] == "true"]
     qsha = {a: sha(q) for a, q in link_packages.asset_questions(assets).items()}
     blocks = {}
-    for r in read_labels(data, "package_assets"):
+    for r in fitting_rows(data, "package_assets"):
         p = by_sha.get(r["package_sha256"])
         a = r["asset_id"]
         if not p or r["question_sha256"] != qsha.get(a) or (p["package_id"], a) not in asked:
@@ -484,7 +503,7 @@ def package_link_blocks(data):
             units[check_units.text_key(u["text"])] = u["unit_id"]
     qsha = check_units.link_question_sha()
     rows, score, vecs = [], {}, {}
-    for r in read_labels(data, "package_links"):
+    for r in fitting_rows(data, "package_links"):
         uid, p = units.get(r["text_sha256"]), by_sha.get(r["package_sha256"])
         if not uid or not p or r["question_sha256"] != qsha or r["applies"] not in ("yes", "no"):
             continue
@@ -506,12 +525,14 @@ FLOOR = {"types": "floor.types", "pairs": "floor.pair_check", "package_assets": 
          "package_links": "dashboard.package_link_min_probability"}
 
 
-def evaluate(data, seed):
-    """Store the 'pair checks' and 'package assets' answers, fit every kind's
-    layer, and write data/reports/evaluate_after_measures.md with each
-    kind's precision and recall at its floor, out of sample. Returns the
-    report path."""
-    stored = {k: evaluate_tab(data, seed, k) for k in ("pairs", "package_assets")}
+def evaluate(data, seed, answered=None):
+    """Store the 'pair checks' and 'package assets' answers (answered: {kind:
+    {row_id: answer}} from the combined sheets, else read off the tabs), fit
+    every kind's layer, and write data/reports/evaluate_after_measures.md
+    with each kind's precision and recall at its floor, out of sample.
+    Returns the report path."""
+    answered = answered or {}
+    stored = {k: evaluate_tab(data, seed, k, answered.get(k)) for k in ("pairs", "package_assets")}
     lines = ["# The decisions after the measures: types, pair checks, package links", "",
              f"Answers stored this time: pair checks {stored['pairs']}, package assets "
              f"{stored['package_assets']} (package links and types are stored with their "

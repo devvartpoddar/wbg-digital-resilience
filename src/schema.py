@@ -588,7 +588,7 @@ TABLES = {
                  "own_best_asset_id": "The sentence's own best asset, whatever its probability.",
                  "own_best_probability": "Its posterior probability."}),
     "graded_labels": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "text_sha256", "question_sha256"),
+        schema=PUBLIC, key=("label_set", "label_id", "text_sha256", "question_sha256", "sheet"),
         foreign=[],
         comment="Every grade a person gave a sentence (data/labels/<set>_units.csv, written "
                 "by ./wbg check <set> --evaluate): keyed by the text's SHA-256 and the exact "
@@ -600,19 +600,32 @@ TABLES = {
                  "type": "The type the person gave, if any.",
                  "source": "The sheet the grade came from.",
                  "stratum": "The draw's stratum; eval:* rows are an evaluation sheet's.",
-                 "weight": "The design weight: the stratum's size over the rows drawn from it."}),
+                 "weight": "The design weight: the stratum's size over the rows drawn from it, "
+                           "or one over the sentence's chance of being drawn (combined sheets).",
+                 "unsure": "Types (or, for the set assets, assets) the person left unsure: "
+                           "those questions are left out.",
+                 "sheet": "training or evaluation: a sentence may have one grade of each, "
+                          "kept apart so neither fits or measures the other."}),
     "graded_package_links": dict(
-        schema=PUBLIC, key=("label_set", "unit_id", "package_id", "question_sha256"),
+        schema=PUBLIC, key=("label_set", "unit_id", "package_id", "question_sha256", "sheet"),
         foreign=[],
         comment="Every answer a person gave on a package-link sheet (data/labels/"
                 "package_links.csv): does carrying out the package deliver the commitment.",
-        columns={"applies": "yes, no or unsure."}),
+        columns={"applies": "yes, no or unsure.",
+                 "stratum": "The draw's stratum; eval:* rows are an evaluation sheet's.",
+                 "weight": "The design weight (as in graded_labels).",
+                 "sheet": "training or evaluation (as in graded_labels)."}),
     "check_draws": dict(
         schema=PUBLIC, key=("sheet", "row_id"), foreign=[],
         comment="Every row ever drawn for a person to grade (data/review/*.key.csv), with its "
                 "stratum and the stratum's size: what makes a sheet's figures weightable.",
         columns={"sheet": "The key file's name (the sheet and seed).",
-                 "measure_dir": "The measure run the row was drawn from."}),
+                 "measure_dir": "The measure run the row was drawn from.",
+                 "weight": "One over the row's chance of being drawn (combined sheets); "
+                           "empty where the stratum's size and rows drawn give it.",
+                 "block": "Combined sheets: the sentence's or package's block the line is in.",
+                 "kind": "Combined sheets: what the line asks (measure, type, asset, "
+                         "package_asset, package_link, other)."}),
     "posterior_layers": dict(
         schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
         comment="The probability layer fitted for each label (data/labels/<set>_posterior.json, "

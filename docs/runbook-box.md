@@ -224,21 +224,27 @@ current questions:
    settings: `feedback.*` and `asset_feedback.*`; `asset_feedback.max_rounds` 0
    is the comparison without them). Stored answers are reused wherever
    the exact question and state were asked before.
-3. Grade a training sheet: `./wbg check all --design train --seed <n>`
-   (about 40 rows a measure, near each floor), then `./wbg check all --seed <n>
-   --evaluate`. That stores the grades, fits each measure's layer and gate (and the
-   assets', from the assets given on the sheet), and reports each measure out of
-   sample with a suggested floor. It ends with `data/reports/tune.md`: every
-   layer setting, the asset floor and decay compared on the grades; set the panel
-   from it.
+3. Grade a training sheet: `./wbg check all --design train --seed <n> --dry-run`
+   (how many sentences and packages, per decision; nothing written), then without
+   `--dry-run`: `data/review/check_units_all_s<n>.xlsx`, a tab of sentences (each
+   with its passage and a line per measure, type and asset it bears on) and a tab
+   of packages; about 40 rows a measure near each floor, 20 an asset, the pair
+   checks, the paragraph rule and 50 random sentences, drawn once for all
+   (docs/method/checks-and-postgres.md, "The combined sheets"). Then `./wbg check
+   all --seed <n> --evaluate`. That stores the grades, fits each measure's layer and
+   gate, the assets', the types', the pair checks' and the packages', and reports
+   each out of sample with a suggested floor. It ends with `data/reports/tune.md`
+   and `data/reports/evaluate_combined.md`: set the panel from them.
 4. `./wbg run --from classify` again: the runs are new (their keys hold the layers
    and gates); answers come from the store, and only sentences a gate newly lets in
    are asked. Repeat 3 and 4 while definitions are being tuned.
 5. When definitions are settled: an evaluation sheet, drawn fresh,
-   `./wbg check all --design eval --seed <m>` (90 rows a measure: 60 that count, 30
-   that do not), graded and evaluated the same way. Its weighted precision and recall
-   are the dashboards' figures; its rows never fit anything. Add elusion sheets
-   (`./wbg check <set> --elusion`) for recall outside the pool.
+   `./wbg check all --design eval --seed <m>` (900 committed sentences over the
+   measures and 30 not committed a measure, the assets alike), graded and evaluated
+   the same way. `data/reports/evaluate_combined.md` gives the figure to quote: the
+   precision of measure and asset together, about plus or minus 4 points; its rows
+   never fit anything. Give the last training round `--near-gate` for the sentences
+   just below each gate.
 6. Move the runs nothing reads any more out of view:
    `python3 src/archive_runs.py --dry-run` then without it (add `--project <id>`
    to keep a smoke run's own folders). Every superseded run folder under
@@ -325,10 +331,11 @@ US$0.02), after which the measure appears in every dashboard filter.
 
 ## After the run
 
-- Grade a training sheet per measure (`./wbg check <set>`, then
-  `--evaluate`): it refits the probability layer and the gate. Only an
-  evaluation sheet (`--design eval`) gives the precision and recall to quote.
-- The elusion sheet (`./wbg check <set> --elusion`) when there is time.
+- Grade the combined training sheet (`./wbg check all`, then `--evaluate`):
+  it refits every layer and gate. Only an evaluation sheet (`--design eval`)
+  gives the precision to quote (`data/reports/evaluate_combined.md`).
+- A measure's own sheet and elusion sheet (`./wbg check <set>`, `--elusion`)
+  still work for one measure.
 - Copy the run note to the vault (AGENTS.md rule 8).
 
 ## New measures from the dashboard

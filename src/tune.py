@@ -197,7 +197,7 @@ def asset_grid(data):
               "pipeline gives a sentence that the person did not, per sentence; "
               "on 'none' = the pipeline gives an asset at the "
               "sentence's own level where the person said the sentence names none (an asset "
-              "from the paragraph is not counted against it: the sheet asks about the sentence). "
+              "from the paragraph is not counted against it). "
               "In sample: the asset layers were fitted on the same grades.", "",
               "| rank | floor | paragraph floor | decay | agree | other assets given | on 'none' |",
               "|---|---|---|---|---|---|---|"]

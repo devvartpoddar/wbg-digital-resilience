@@ -81,7 +81,7 @@ SHEET_COLS = [("row_id", 8), ("measure", 20), ("measure means", 40), ("project",
               ("section", 20), ("component", 18), ("sentence", 70), ("paragraph", 70),
               ("grade", 8), ("asset", 14), ("type", 18), ("note", 24)]
 LABEL_COLS = ["label_set", "label_id", "unit_id", "text_sha256", "question_sha256", "grade",
-              "asset", "type", "source", "graded_on", "stratum", "weight"]
+              "asset", "type", "source", "graded_on", "stratum", "weight", "unsure", "sheet"]
 THRESHOLDS = [0.15, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 # The band design (--design bands): drawn by the posterior, densest where a
 # cut-off would be chosen, so the floor can be read off the graded sheet. Each band is (stratum, low, high, rows).
@@ -139,7 +139,16 @@ LINK_SHEET_COLS = [("row_id", 8), ("project", 10), ("measure", 20), ("commitment
                    ("commitment component", 14), ("package", 60), ("package component", 18),
                    ("applies", 10), ("note", 24)]
 LINK_LABEL_COLS = ["label_set", "unit_id", "package_id", "text_sha256", "package_sha256",
-                   "question_sha256", "applies", "weight", "source", "graded_on"]
+                   "question_sha256", "applies", "weight", "source", "graded_on", "stratum",
+                   "sheet"]
+
+
+def key_weight(k):
+    """A key row's design weight: its own (one over its chance in a combined
+    draw, src/combined.py), else its stratum's size over the rows drawn."""
+    if k.get("weight"):
+        return float(k["weight"])
+    return int(k["stratum_size"]) / int(k["stratum_drawn"])
 
 
 def wilson(k, n, z=1.96):
@@ -293,8 +302,11 @@ def _write_key(path, cols, rows):
 
 
 def build(name, data, seed=1, elusion=False, design="train", **kw):
+    near_gate = kw.pop("near_gate", False)
+    if kw.get("dry_run") and not (name == ALL and design in ("train", "eval")):
+        raise SystemExit("check: --dry-run is for ./wbg check all with --design train or eval")
     if name == ALL:
-        return build_all(data, seed, design=design, **kw)
+        return build_all(data, seed, design=design, near_gate=near_gate, **kw)
     key, sheet, scale, assets = sheet_rows(name, data, seed, elusion, design, **kw)
     base = where(data, "review", f"check_units_{name}{'_elusion' if elusion else ''}_s{seed}")
     if os.path.exists(base + ".xlsx"):
@@ -311,12 +323,20 @@ def all_path(data, seed):
     return where(data, "review", f"check_units_{ALL}_s{seed}.xlsx")
 
 
-def build_all(data, seed, design="train", **kw):
+def build_all(data, seed, design="train", near_gate=False, **kw):
     """One workbook for a person to grade: a tab per measure (drawn by
     `design`), and a tab of package links. Each tab has its own key file,
     check_units_<set>_s<seed>.key.csv and check_links_s<seed>.key.csv, so
-    `--evaluate` reads each measure as it reads a sheet of its own."""
+    `--evaluate` reads each measure as it reads a sheet of its own. The
+    training and evaluation designs draw the combined sheets instead (a tab
+    of sentences and one of packages, every decision read off each item
+    once; src/combined.py), into the same key files."""
     import labels
+    if design in ("train", "eval"):
+        import combined
+        xlsx, n, k = combined.build(data, seed, design, near_gate, kw.get("projects"),
+                                    kw.get("dry_run", False))
+        return xlsx, n + k
     xlsx = all_path(data, seed)
     if os.path.exists(xlsx):
         raise SystemExit(f"check: {xlsx} exists and may hold grades; use another --seed")
@@ -541,6 +561,10 @@ def graded_sheet(name, data, seed, elusion=False):
     base = where(data, "review", f"check_units_{name}{'_elusion' if elusion else ''}_s{seed}")
     if os.path.exists(base + ".xlsx"):
         return base + ".key.csv", read_sheet(base + ".xlsx"), os.path.basename(base)
+    import combined
+    if not elusion and combined.is_combined(data, seed) and os.path.exists(base + ".key.csv"):
+        return (base + ".key.csv", combined.Graded(data, seed).measure_grades(name),
+                os.path.basename(base))
     xlsx = all_path(data, seed)
     if not elusion and os.path.exists(xlsx) and os.path.exists(base + ".key.csv"):
         return base + ".key.csv", read_sheet(xlsx, name[:31]), os.path.basename(base)
@@ -850,10 +874,12 @@ def fit_asset_layers(data):
             if asset:
                 named[u] = set(asset.split("|")) - {""}   # the assets a person gave it
                 weight[u] = w
+    unsure = unsure_assets(data, by_text)
     scores = {}
     with open(os.path.join(folder, "scores.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            if r.get("asked") == "true" and r.get("unit_id") in named:
+            if r.get("asked") == "true" and r.get("unit_id") in named \
+                    and r["label_id"] not in unsure.get(r["unit_id"], ()):
                 scores.setdefault(r["label_id"], {})[r["unit_id"]] = \
                     sum(float(r.get(f"p{g}") or 0) for g in panel.grades())
     vector_of, projects_of = posterior.lookups(data)
@@ -908,32 +934,63 @@ def fit_asset_layers(data):
     return lines + [""]
 
 
+def is_eval(r):
+    """Whether a key or label row is an evaluation sheet's."""
+    return (r.get("stratum") or "").startswith(EVAL)
+
+
+def with_sheet(rows):
+    """Each label row with its kind of sheet (part of its key in Postgres)."""
+    for r in rows:
+        r["sheet"] = "evaluation" if is_eval(r) else "training"
+    return rows
+
+
+def unsure_assets(data, by_text):
+    """{unit_id: assets a person left unsure} (data/labels/assets_units.csv):
+    those questions are left out, not read as no."""
+    path = where(data, "labels", f"{measure.ASSET_SET}_units.csv")
+    out = {}
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in csv.DictReader(fh):
+                u = by_text.get(r.get("text_sha256", ""))
+                if u and r.get("unsure") and not is_eval(r):
+                    out[u] = set(r["unsure"].split("|")) - {""}
+    return out
+
+
 def store_labels(name, data, key, graded, source):
     """The person's grades as labels in data/labels/<set>_units.csv, keyed by
-    text and question, never by position; a later grade of the same text
-    under the same question replaces an earlier one."""
+    text, question and kind of sheet, never by position; a later grade of the
+    same text under the same question on the same kind of sheet replaces an
+    earlier one. A training and an evaluation grade of one sentence are kept
+    apart, so neither changes what the other measures or fits."""
     lpath = where(data, "labels", f"{name}_units.csv")
     current = {}
     if os.path.exists(lpath):
         with open(lpath, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
-                current[(r["label_id"], r["text_sha256"], r["question_sha256"])] = r
+                current[(r["label_id"], r["text_sha256"], r["question_sha256"],
+                         is_eval(r))] = r
     today = datetime.date.today().isoformat()
     for k in key:
         if k["row_id"] in graded:
-            g, a, t = graded[k["row_id"]]
-            current[(k["label_id"], k["text_sha256"], k["question_sha256"])] = {
+            g, a, t, *rest = graded[k["row_id"]]
+            current[(k["label_id"], k["text_sha256"], k["question_sha256"], is_eval(k))] = {
                 "label_set": name, "label_id": k["label_id"], "unit_id": k["unit_id"],
                 "text_sha256": k["text_sha256"], "question_sha256": k["question_sha256"],
                 "grade": g, "asset": a, "type": t, "source": source, "graded_on": today,
                 "stratum": k.get("stratum", ""),
-                "weight": f"{int(k['stratum_size']) / int(k['stratum_drawn']):.6g}"
-                if k.get("stratum_size") and k.get("stratum_drawn") else ""}
+                "weight": f"{key_weight(k):.6g}"
+                if k.get("weight") or (k.get("stratum_size") and k.get("stratum_drawn")) else "",
+                "unsure": rest[0] if rest else ""}
     os.makedirs(os.path.dirname(lpath), exist_ok=True)
     with open(lpath + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=LABEL_COLS, lineterminator="\n", restval="")
         w.writeheader()
-        w.writerows(sorted(current.values(), key=lambda r: (r["label_id"], r["text_sha256"])))
+        w.writerows(sorted(with_sheet(list(current.values())),
+                           key=lambda r: (r["label_id"], r["text_sha256"], r["sheet"])))
     os.replace(lpath + ".part", lpath)
 
 
@@ -969,23 +1026,28 @@ def evaluate(name, data, seed=1, elusion=False, layer=True, **kw):
     floor = panel.floor(name)
     rows = []
     for k in key:
-        if k["row_id"] not in graded:
+        # a combined sheet's 'outside' rows are stored (the skip rule reads
+        # them) but are no decision of this run's
+        if k["row_id"] not in graded or k.get("frame") == "outside":
             continue
         u = units[k["unit_id"]]
-        g, a, t = graded[k["row_id"]]
+        g, a, t, *_ = graded[k["row_id"]]
         rows.append({"grade": g, "yes": g >= lo, "asset": a, "type": t, "unit_id": k["unit_id"],
-                     "w": int(k["stratum_size"]) / int(k["stratum_drawn"]),
+                     "w": key_weight(k),
                      "p": _posterior(u), "model": measure.score_of(u),
                      "committed": u.get("committed") == "true",
                      "link": u.get("asset_link", ""),
                      "links": set((u.get("asset_links") or u.get("asset_link") or "").split("|")) - {""},
                      "stratum": k["stratum"]})
+    if not rows:
+        raise SystemExit(f"check: no graded row of {source} is a sentence {name} read")
     is_eval = all(r["stratum"].startswith(EVAL) for r in rows)
     lines = [f"# {name}: the pipeline's decision against {len(rows)} graded units", "",
              f"Drawn from {key[0]['measure_dir']} by stratum "
-             f"({', '.join(sorted({k['stratum'] for k in key}))}). Yes = the person graded "
+             f"({', '.join(sorted({k['stratum'] for k in key if k.get('frame') != 'outside'}))})"
+             f". Yes = the person graded "
              f"{lo} or more; the pipeline says yes when the posterior reaches the floor "
-             f"({floor}). Weighted estimates use each stratum's size over rows drawn; "
+             f"({floor}). Weighted estimates use each row's design weight; "
              f"intervals are 95 per cent Wilson on the effective sample size. Recall is "
              f"within the graded pool (candidates and feedback units), not the corpus.",
              "", ("An evaluation sheet: a random draw by the decision, never used to fit; "
@@ -1052,9 +1114,13 @@ def evaluate_all(data, seed, **kw):
     xlsx = all_path(data, seed)
     if not os.path.exists(xlsx):
         raise SystemExit(f"check: {xlsx} not found; draw it with ./wbg check all --seed {seed}")
+    import combined
     import posterior, tune
     pool = posterior.settings()["pool"]
     outs, n, report = [], 0, {}
+    both = combined.Graded(data, seed) if combined.is_combined(data, seed) else None
+    if both:
+        print(f"  assets: {combined.store_assets(data, seed, both)} sentences stored")
     for name in labels.label_sets():
         if not os.path.exists(where(data, "review", f"check_units_{name}_s{seed}.key.csv")):
             continue
@@ -1080,7 +1146,8 @@ def evaluate_all(data, seed, **kw):
         print(f"  asset layers: {exc}")
     if os.path.exists(where(data, "review", f"check_links_s{seed}.key.csv")):
         try:
-            out, k = evaluate_links(data, seed)
+            out, k = evaluate_links(data, seed,
+                                    both.package_answers("package_link") if both else None)
             outs.append(out)
             n += k
         except SystemExit as exc:
@@ -1089,15 +1156,19 @@ def evaluate_all(data, seed, **kw):
     # floors (src/judged.py).
     import judged
     try:
-        outs.append(judged.evaluate(data, seed))
+        outs.append(judged.evaluate(data, seed, {
+            "pairs": both.pair_answers(),
+            "package_assets": both.package_answers("package_asset")} if both else None))
     except SystemExit as exc:
         print(f"  after the measures: {exc}")
+    if both:
+        outs.append(combined.report(data, seed, both))
     # What the grades say every tunable setting should be (src/tune.py).
     outs.append(tune.report(data))
     return ", ".join(outs) or "nothing", n
 
 
-def evaluate_links(data, seed):
+def evaluate_links(data, seed, answered=None):
     """The person's answers on the package links tab: stored as labels in
     data/labels/package_links.csv (keyed by both texts and the question), and
     the precision of the link at each probability threshold, weighted back
@@ -1105,7 +1176,8 @@ def evaluate_links(data, seed):
     kpath = where(data, "review", f"check_links_s{seed}.key.csv")
     with open(kpath, newline="", encoding="utf-8") as fh:
         key = list(csv.DictReader(fh))
-    answered = read_links(all_path(data, seed))
+    if answered is None:
+        answered = read_links(all_path(data, seed))
     if not answered:
         raise SystemExit("no link answered")
     lpath = where(data, "labels", "package_links.csv")
@@ -1113,24 +1185,27 @@ def evaluate_links(data, seed):
     if os.path.exists(lpath):
         with open(lpath, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
-                current[(r["text_sha256"], r["package_sha256"], r["question_sha256"])] = r
+                current[(r["text_sha256"], r["package_sha256"], r["question_sha256"],
+                         is_eval(r))] = r
     today = datetime.date.today().isoformat()
     for k in key:
         if k["row_id"] in answered:
-            current[(k["text_sha256"], k["package_sha256"], k["question_sha256"])] = {
+            current[(k["text_sha256"], k["package_sha256"], k["question_sha256"],
+                     is_eval(k))] = {
                 **{c: k[c] for c in ("label_set", "unit_id", "package_id", "text_sha256",
                                       "package_sha256", "question_sha256")},
                 "applies": answered[k["row_id"]],
-                "weight": f"{int(k['stratum_size']) / int(k['stratum_drawn']):.6g}",
+                "weight": f"{key_weight(k):.6g}", "stratum": k.get("stratum", ""),
                 "source": os.path.basename(kpath)[:-8], "graded_on": today}
     os.makedirs(os.path.dirname(lpath), exist_ok=True)
     with open(lpath + ".part", "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=LINK_LABEL_COLS, lineterminator="\n")
+        w = csv.DictWriter(fh, fieldnames=LINK_LABEL_COLS, lineterminator="\n", restval="")
         w.writeheader()
-        w.writerows(sorted(current.values(), key=lambda r: (r["text_sha256"], r["package_sha256"])))
+        w.writerows(sorted(with_sheet(list(current.values())),
+                           key=lambda r: (r["text_sha256"], r["package_sha256"], r["sheet"])))
     os.replace(lpath + ".part", lpath)
     rows = [{"p": float(k["probability"]), "yes": answered[k["row_id"]] == "yes",
-             "w": int(k["stratum_size"]) / int(k["stratum_drawn"]), "stratum": k["stratum"]}
+             "w": key_weight(k), "stratum": k["stratum"]}
             for k in key if answered.get(k["row_id"]) in ("yes", "no")]
     unsure = sum(1 for v in answered.values() if v not in ("yes", "no"))
     f = lambda x: "-" if x is None else f"{x:.2f}"
@@ -1227,6 +1302,12 @@ def main():
                          "every fit; bands: by band of the posterior (5/8/12/10/5); floor or "
                          "tune: around each measure's floor (about 20 or 28; links around "
                          "0.7 or over the whole range)")
+    ap.add_argument("--near-gate", action="store_true",
+                    help="check all, train or eval: also draw sentences just below each "
+                         "measure's gate (the last training round)")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="check all, train or eval: how many sentences and packages the draw "
+                         "would bring, per decision; nothing is written")
     ap.add_argument("--projects", default="", help="comma-separated project ids: the run's scope")
     ap.add_argument("--data", default=data_root())
     args = ap.parse_args()
@@ -1235,9 +1316,13 @@ def main():
         out, n = evaluate(args.label_set, args.data, args.seed, elusion=args.elusion, **kw)
         print(f"{n} graded rows; wrote {out}")
     else:
+        if args.near_gate:
+            kw["near_gate"] = True
+        if args.dry_run:
+            kw["dry_run"] = True
         path, n = build(args.label_set, args.data, args.seed, elusion=args.elusion,
                         design=args.design, **kw)
-        print(f"wrote {path}: {n} rows to grade")
+        print(f"{'would write' if args.dry_run else 'wrote'} {path}: {n} rows to grade")
     return 0
 
 
