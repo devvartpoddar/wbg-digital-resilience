@@ -146,7 +146,7 @@ def test_both_sheets_are_drawn_once_and_read_back_into_every_decisions_labels(tm
         answers[b["lines"][-1]["line"]] = "none"
     pkey = list(csv.DictReader(open(combined.key_path(data, "packages", 3), encoding="utf-8")))
     for r in pkey:
-        answers[r["line"]] = {"package_asset": "yes", "package_link": "no",
+        answers[r["row_id"]] = {"package_asset": "yes", "package_link": "no",
                               "other": "none"}[r["kind"]]
     _fill(xlsx, answers)
     g = combined.Graded(data, 3)
@@ -227,3 +227,42 @@ def test_a_dry_run_says_the_size_and_writes_nothing(tmp_path, monkeypatch, capsy
     _, n, k = combined.build(data, 3, "eval", dry_run=True)
     assert n > 0 and "rows wanted" in capsys.readouterr().out
     assert not os.path.exists(os.path.join(data, "review"))
+
+
+def test_a_training_sheet_never_shows_an_evaluations_grades_and_both_are_kept(tmp_path):
+    data = str(tmp_path)
+    frames = _frames()
+    u = frames["measures"]["cra"]["units"]["u000"]
+    key = lambda stratum: [{"row_id": "1", "label_id": "cra", "unit_id": "u000",
+                            "text_sha256": combined.text_sha(u["text"]),
+                            "question_sha256": "q-cra", "stratum": stratum, "weight": "2"}]
+    check_units.store_labels("cra", data, key("eval:committed"), {"1": (3, "fiber", "")}, "e")
+    check_units.store_labels("cra", data, key("train:near"), {"1": (1, "none", "")}, "t")
+    rows = list(csv.DictReader(open(os.path.join(data, "labels", "cra_units.csv"),
+                                    encoding="utf-8")))
+    assert sorted((r["sheet"], r["grade"]) for r in rows) == [("evaluation", "3"),
+                                                             ("training", "1")]
+    train = combined.prior_grades(data, frames, "train")["measures"]
+    ev = combined.prior_grades(data, frames, "eval")["measures"]
+    assert [r["grade"] for r in train.values()] == ["1"]
+    assert [r["grade"] for r in ev.values()] == ["3"]
+
+
+def test_an_answer_off_the_list_is_left_out_and_named():
+    blocks = [{"block": "S1", "lines": [{"line": "S1.01", "kind": "measure"},
+                                        {"line": "S1.02", "kind": "type"},
+                                        {"line": "S1.03", "kind": "asset"},
+                                        {"line": "S1.04", "kind": "other"}]}]
+    answers = {"S1.01": "2?", "S1.02": "y", "S1.03": "3", "S1.04": "none"}
+    assert combined.unreadable(blocks, answers) == ["S1.01", "S1.02"]
+
+
+def test_a_seed_with_any_key_of_its_own_is_refused(tmp_path, monkeypatch):
+    data = str(tmp_path)
+    frames = _frames()
+    monkeypatch.setattr(combined, "load_frames", lambda *a, **k: frames)
+    monkeypatch.setattr(combined, "context", _context)
+    os.makedirs(os.path.join(data, "review"))
+    open(os.path.join(data, "review", "check_units_cra_s4.key.csv"), "w").close()
+    with pytest.raises(SystemExit, match="seed 4 is taken"):
+        combined.build(data, 4, "train")

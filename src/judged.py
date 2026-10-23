@@ -121,18 +121,24 @@ def store(data, kind, cols, rows, keys):
     """Merge rows into data/labels/<kind>.csv, the latest grade of each key
     winning."""
     path = label_path(data, kind)
+    # a training and an evaluation answer to the same question are kept apart
+    key = lambda r: tuple(r.get(k, "") for k in keys) + \
+        ((r.get("stratum") or "").startswith("eval:"),)
     current = {}
     if os.path.exists(path):
         with open(path, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
-                current[tuple(r.get(k, "") for k in keys)] = r
+                current[key(r)] = r
     for r in rows:
-        current[tuple(r.get(k, "") for k in keys)] = r
+        current[key(r)] = r
+    import check_units
+    check_units.with_sheet(list(current.values()))
+    cols = cols if "sheet" in cols else cols + ["sheet"]
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n", extrasaction="ignore")
         w.writeheader()
-        w.writerows(sorted(current.values(), key=lambda r: tuple(r.get(k, "") for k in keys)))
+        w.writerows(sorted(current.values(), key=lambda r: tuple(str(x) for x in key(r))))
     os.replace(path + ".part", path)
 
 

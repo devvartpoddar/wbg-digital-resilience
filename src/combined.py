@@ -263,7 +263,9 @@ def near_gate_units(run, units, data):
     import check_units
     import search
     folder, _ = search.run_folder(run.name, data)
-    gate = run.settings["min_cosine"] or 1.0
+    gate = run.settings["min_cosine"]
+    if not gate:
+        return []                    # no gate: every sentence is read, none is below it
     return sorted(h["unit_id"] for h in search.hits(folder, data, labels=[run.labels[0]["id"]])
                   if h["unit_id"] not in units
                   and gate - check_units.ELUSION_BAND <= float(h["score"]) < gate)
@@ -282,9 +284,13 @@ def package_frames(data, projects=None):
     out["packages"] = {p["package_id"]: p for p in link_packages.load_packages(data, projects)}
     out["units"] = {(n, u["unit_id"]): u for n, (_, us) in
                     link_packages.committed_units(data, projects).items() for u in us}
+    import labels
+    asked = link_packages.asset_questions([a for a in labels.load_set("assets")
+                                           if a["active"] == "true"])
     with open(os.path.join(folder, "package_assets.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            if r["package_id"] in out["packages"] and r.get("probability", "") != "":
+            if r["package_id"] in out["packages"] and r.get("probability", "") != "" \
+                    and r["label_id"] in asked:
                 out["assets"].append({**r, "p": float(r.get("p_calibrated") or r["probability"])})
     with open(os.path.join(folder, "commitment_packages.csv"), newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
@@ -299,9 +305,11 @@ def package_frames(data, projects=None):
 def sentence_blocks(frames, drawn, chance, design, prior=None):
     """[block] for the drawn sentences: {block, unit_id, weight, lines:
     [{kind, label_set, label_id, type_id, asset_id, label, text, answer}]}.
-    prior ({(label_set, text SHA-256, question SHA-256): grade}) fills the
-    grade of a measure line already graded under the same question."""
-    prior = prior or {}
+    prior (prior_grades) fills in what a sheet of the same kind already
+    graded on the sentence under the same questions: the measure's grade
+    and its types, and the sentence's assets, so keeping them loses
+    nothing."""
+    prior = prior or {"measures": {}, "assets": {}}
     a = frames["assets"]
     texts = frames["corpus"].texts
     out = []
@@ -312,21 +320,29 @@ def sentence_blocks(frames, drawn, chance, design, prior=None):
             u = m["units"].get(uid)
             if not u:
                 continue
-            tsha = text_sha(u["text"])
+            before = prior["measures"].get((name, text_sha(u["text"]), m["qsha"]))
             b["lines"].append({"kind": "measure", "label_set": name, "label_id": m["label_id"],
                                "label": m["name"], "text": "",
-                               "answer": prior.get((name, tsha, m["qsha"]), "")})
+                               "answer": before["grade"] if before else ""})
             row = m["assigned"].get(uid)
             if row:
+                said = set((before or {}).get("type", "").split("|"))
+                unsure = set((before or {}).get("unsure", "").split("|"))
                 for t, (tname, tdef) in m["types"].items():
                     if f"p_{t}" in row:
                         b["lines"].append({"kind": "type", "label_set": name, "type_id": t,
-                                           "label": f"{m['name']}: {tname}", "text": tdef or ""})
+                                           "label": f"{m['name']}: {tname}", "text": tdef or "",
+                                           "answer": "yes" if t in said else
+                                           "unsure" if t in unsure else ""})
         win = {x for x, _ in a["winners"].get(uid, ([], ""))[0]}
+        gave = prior["assets"].get(text_sha(texts.get(uid, "")))
         for asset in a["ids"]:
             if asset in a["amap"].get(uid, {}) or asset in win:
                 b["lines"].append({"kind": "asset", "asset_id": asset,
-                                   "label": a["names"][asset], "text": ""})
+                                   "label": a["names"][asset], "text": "",
+                                   "answer": "" if gave is None else
+                                   "2" if asset in gave[0] else
+                                   "unsure" if asset in gave[1] else ""})
         b["lines"].append({"kind": "other", "label": "anything else that applies",
                            "text": "Required, closes the block: none, or the ids of the "
                                    "measures and assets that apply and are not listed, joined "
@@ -428,6 +444,21 @@ def block_answers(block, answers, asset_ids, lo=2):
                 uns.add(line["type_id"])
     asset_ids = set(asset_ids)
     return measures, assets | (other & asset_ids), unsure, types, other - asset_ids
+
+
+def unreadable(blocks, answers):
+    """The lines whose answer is not on their list (a pasted or typed value
+    the dropdown would refuse), in sheet order."""
+    ok = {"measure": GRADES, "asset": GRADES}
+    out = []
+    for b in blocks:
+        for ln in b["lines"]:
+            v = (answers.get(ln["line"]) or "").strip().lower()
+            if not v or ln["kind"] == "other":
+                continue
+            if v not in ok.get(ln["kind"], YES_NO):
+                out.append(ln["line"])
+    return out
 
 
 def pair_answer(ga, gb, lo=2):
@@ -577,9 +608,9 @@ def read_workbook(path):
 
 # ------------------------------------------------------------ drawing the sheets
 
-SENTENCE_KEY = ["line", "block", "kind", "label_set", "label_id", "type_id", "asset_id",
+SENTENCE_KEY = ["row_id", "block", "kind", "label_set", "label_id", "type_id", "asset_id",
                 "unit_id", "text_sha256", "weight", "chance"]
-PACKAGE_KEY = ["line", "block", "kind", "label_set", "asset_id", "unit_id", "package_id",
+PACKAGE_KEY = ["row_id", "block", "kind", "label_set", "asset_id", "unit_id", "package_id",
                "weight", "chance"]
 
 
@@ -594,10 +625,19 @@ def measure_stratum(m, u, design):
     return "train:near" if abs(p - m["floor"]) <= NEAR else "train:far"
 
 
-def prior_grades(data, frames):
-    """{(set, text SHA-256, question SHA-256): grade} of every grade already
-    given under a measure's current question."""
-    out = {}
+def same_kind(r, design):
+    """Whether a stored label comes from a sheet of the design's kind: a
+    training sheet never shows an evaluation's grades (they would then be
+    stored as training rows and fit), nor an evaluation sheet a training's
+    (it is graded afresh, so its figures are out of sample)."""
+    return (r.get("stratum") or "").startswith("eval:") == (design == "eval")
+
+
+def prior_grades(data, frames, design):
+    """{"measures": {(set, text SHA-256, question SHA-256): label row},
+    "assets": {text SHA-256: (assets given, assets unsure)}} of what sheets
+    of the same kind already graded under the current questions."""
+    out = {"measures": {}, "assets": {}}
     for name, m in frames["measures"].items():
         path = where(data, "labels", f"{name}_units.csv")
         if not os.path.exists(path):
@@ -607,8 +647,17 @@ def prior_grades(data, frames):
                 # an 'outside' row is a measure nobody looked at on that
                 # sentence, not a grade to show again
                 if r.get("grade", "") != "" and r.get("question_sha256") == m["qsha"] \
+                        and same_kind(r, design) \
                         and not (r.get("stratum") or "").endswith(":outside"):
-                    out[(name, r["text_sha256"], m["qsha"])] = r["grade"]
+                    out["measures"][(name, r["text_sha256"], m["qsha"])] = r
+    path = where(data, "labels", "assets_units.csv")
+    if os.path.exists(path):
+        with open(path, newline="", encoding="utf-8") as fh:
+            for r in sorted(csv.DictReader(fh), key=lambda r: r.get("graded_on", "")):
+                if r.get("question_sha256") == frames["assets"]["qsha"] and same_kind(r, design):
+                    out["assets"][r["text_sha256"]] = (
+                        set(r.get("asset", "").split("|")) - {"", "none"},
+                        set(r.get("unsure", "").split("|")) - {""})
     return out
 
 
@@ -652,6 +701,15 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
     if not dry_run and (os.path.exists(xlsx) or os.path.exists(key_path(data, "sentences", seed))):
         raise SystemExit(f"check: {xlsx} or its keys exist and may hold grades; use another --seed")
     frames = load_frames(data, design, near_gate, projects)
+    writes = [key_path(data, w, seed) for w in ("sentences", "packages", "assets", "pairs",
+                                                 "package_assets", "links")]
+    for name in frames["measures"]:
+        base = where(data, "review", f"check_units_{name}_s{seed}")
+        writes += [base + ".key.csv", base + ".xlsx"]
+    taken = [p for p in writes if os.path.exists(p)]
+    if taken and not dry_run:
+        raise SystemExit(f"check: seed {seed} is taken ({os.path.basename(taken[0])} exists "
+                         f"and may hold grades); use another --seed")
     members, targets = sentence_members(frames, design, near_gate)
     chance = inclusion(members, targets)
     drawn = poisson(chance, seed)
@@ -661,7 +719,7 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
         for line in size_lines(members, targets, chance, drawn, pchance, seed):
             print(line)
         return xlsx, len(drawn), len(poisson(pchance, seed))
-    sblocks = sentence_blocks(frames, drawn, chance, design, prior_grades(data, frames))
+    sblocks = sentence_blocks(frames, drawn, chance, design, prior_grades(data, frames, design))
     number_lines(sblocks)
     context(frames, data, sblocks)
     pm, pt = package_members(frames, design)
@@ -677,14 +735,14 @@ def build(data, seed, design="train", near_gate=False, projects=None, dry_run=Fa
     fmt = lambda x: f"{x:.6g}"
     os.makedirs(where(data, "review"), exist_ok=True)
     # the sentences and packages as drawn: what a closed block is read against
-    srows = [{"line": ln["line"], "block": b["block"], "kind": ln["kind"],
+    srows = [{"row_id": ln["line"], "block": b["block"], "kind": ln["kind"],
               "label_set": ln.get("label_set", ""), "label_id": ln.get("label_id", ""),
               "type_id": ln.get("type_id", ""), "asset_id": ln.get("asset_id", ""),
               "unit_id": b["unit_id"], "text_sha256": text_sha(b["text"]),
               "weight": fmt(b["weight"]), "chance": fmt(b["chance"])}
              for b in sblocks for ln in b["lines"]]
     check_units._write_key(key_path(data, "sentences", seed), SENTENCE_KEY, srows)
-    prows = [{"line": ln["line"], "block": b["block"], "kind": ln["kind"],
+    prows = [{"row_id": ln["line"], "block": b["block"], "kind": ln["kind"],
               "label_set": ln.get("label_set", ""), "asset_id": ln.get("asset_id", ""),
               "unit_id": ln.get("row", {}).get("unit_id", ""), "package_id": b["package_id"],
               "weight": fmt(b["weight"]), "chance": fmt(b["chance"])}
@@ -829,7 +887,7 @@ def blocks_from_key(rows):
                                   "package_id": r.get("package_id", ""),
                                   "weight": float(r["weight"]), "lines": []}
             out.append(b)
-        b["lines"].append(dict(r))
+        b["lines"].append(dict(r, line=r["row_id"]))
     return out
 
 
@@ -844,10 +902,16 @@ class Graded:
         self.data, self.seed = data, seed
         self.lo = min(panel.grades())
         self.answers = read_workbook(check_units.all_path(data, seed))
-        self.sblocks = closed(blocks_from_key(_read_key(key_path(data, "sentences", seed))),
-                              self.answers)
-        self.pblocks = closed(blocks_from_key(_read_key(key_path(data, "packages", seed))),
-                              self.answers)
+        sblocks = blocks_from_key(_read_key(key_path(data, "sentences", seed)))
+        pblocks = blocks_from_key(_read_key(key_path(data, "packages", seed)))
+        self.bad = unreadable(sblocks + pblocks, self.answers)
+        for line in self.bad:
+            self.answers[line] = "unsure"    # left out, and said so
+        if self.bad:
+            print(f"check: {len(self.bad)} answers are not on their line's list and are left "
+                  f"out: {', '.join(self.bad[:20])}{' ...' if len(self.bad) > 20 else ''}")
+        self.sblocks = closed(sblocks, self.answers)
+        self.pblocks = closed(pblocks, self.answers)
         self.asset_ids = [a["id"] for a in labels.load_set(measure.ASSET_SET)]
         self.said = {b["block"]: block_answers(b, self.answers, self.asset_ids, self.lo)
                      for b in self.sblocks}
@@ -981,7 +1045,7 @@ def report(data, seed, graded=None):
     import glob
     for path in glob.glob(where(data, "review", f"check_units_*_s{seed}.key.csv")):
         name = os.path.basename(path)[len("check_units_"):-len(f"_s{seed}.key.csv")]
-        if name == "all":
+        if name == "all" or name.endswith("_elusion"):
             continue
         rows = _read_key(path)
         if not rows:
@@ -1014,8 +1078,8 @@ def report(data, seed, graded=None):
              f"({'|'.join(sorted(levels))}); it is right when the person graded the measure "
              f"{graded.lo} or more and gave the sentence that asset. Weights are one over each "
              f"sentence's chance of being drawn; the interval is Wilson on the effective sample.",
-             "- Sentences graded before under the same question keep that grade (it was filled "
-             "in on the sheet); on an evaluation sheet their decisions are in sample.", "",
+             "- What a sheet of the same kind graded before was filled in; an evaluation sheet "
+             "is graded afresh, never from a training sheet's grades.", "",
              "| measure | precision, measure | sentences | precision, measure and asset | "
              "commitments |", "|---|---|---|---|---|"]
     for name, (mi, ji) in sorted(got["by_measure"].items()):

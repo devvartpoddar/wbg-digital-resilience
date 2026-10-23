@@ -71,7 +71,7 @@ SHEET_COLS = [("row_id", 8), ("measure", 20), ("measure means", 40), ("project",
               ("section", 20), ("component", 18), ("sentence", 70), ("paragraph", 70),
               ("grade", 8), ("asset", 14), ("type", 18), ("note", 24)]
 LABEL_COLS = ["label_set", "label_id", "unit_id", "text_sha256", "question_sha256", "grade",
-              "asset", "type", "source", "graded_on", "stratum", "weight", "unsure"]
+              "asset", "type", "source", "graded_on", "stratum", "weight", "unsure", "sheet"]
 THRESHOLDS = [0.15, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]
 # The band design (--design bands): drawn by the posterior, densest where a
 # cut-off would be chosen, so the floor can be read off the graded sheet. Each band is (stratum, low, high, rows).
@@ -129,7 +129,8 @@ LINK_SHEET_COLS = [("row_id", 8), ("project", 10), ("measure", 20), ("commitment
                    ("commitment component", 14), ("package", 60), ("package component", 18),
                    ("applies", 10), ("note", 24)]
 LINK_LABEL_COLS = ["label_set", "unit_id", "package_id", "text_sha256", "package_sha256",
-                   "question_sha256", "applies", "weight", "source", "graded_on", "stratum"]
+                   "question_sha256", "applies", "weight", "source", "graded_on", "stratum",
+                   "sheet"]
 
 
 def key_weight(k):
@@ -923,6 +924,18 @@ def fit_asset_layers(data):
     return lines + [""]
 
 
+def is_eval(r):
+    """Whether a key or label row is an evaluation sheet's."""
+    return (r.get("stratum") or "").startswith(EVAL)
+
+
+def with_sheet(rows):
+    """Each label row with its kind of sheet (part of its key in Postgres)."""
+    for r in rows:
+        r["sheet"] = "evaluation" if is_eval(r) else "training"
+    return rows
+
+
 def unsure_assets(data, by_text):
     """{unit_id: assets a person left unsure} (data/labels/assets_units.csv):
     those questions are left out, not read as no."""
@@ -932,26 +945,29 @@ def unsure_assets(data, by_text):
         with open(path, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
                 u = by_text.get(r.get("text_sha256", ""))
-                if u and r.get("unsure"):
+                if u and r.get("unsure") and not is_eval(r):
                     out[u] = set(r["unsure"].split("|")) - {""}
     return out
 
 
 def store_labels(name, data, key, graded, source):
     """The person's grades as labels in data/labels/<set>_units.csv, keyed by
-    text and question, never by position; a later grade of the same text
-    under the same question replaces an earlier one."""
+    text, question and kind of sheet, never by position; a later grade of the
+    same text under the same question on the same kind of sheet replaces an
+    earlier one. A training and an evaluation grade of one sentence are kept
+    apart, so neither changes what the other measures or fits."""
     lpath = where(data, "labels", f"{name}_units.csv")
     current = {}
     if os.path.exists(lpath):
         with open(lpath, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
-                current[(r["label_id"], r["text_sha256"], r["question_sha256"])] = r
+                current[(r["label_id"], r["text_sha256"], r["question_sha256"],
+                         is_eval(r))] = r
     today = datetime.date.today().isoformat()
     for k in key:
         if k["row_id"] in graded:
             g, a, t, *rest = graded[k["row_id"]]
-            current[(k["label_id"], k["text_sha256"], k["question_sha256"])] = {
+            current[(k["label_id"], k["text_sha256"], k["question_sha256"], is_eval(k))] = {
                 "label_set": name, "label_id": k["label_id"], "unit_id": k["unit_id"],
                 "text_sha256": k["text_sha256"], "question_sha256": k["question_sha256"],
                 "grade": g, "asset": a, "type": t, "source": source, "graded_on": today,
@@ -963,7 +979,8 @@ def store_labels(name, data, key, graded, source):
     with open(lpath + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=LABEL_COLS, lineterminator="\n", restval="")
         w.writeheader()
-        w.writerows(sorted(current.values(), key=lambda r: (r["label_id"], r["text_sha256"])))
+        w.writerows(sorted(with_sheet(list(current.values())),
+                           key=lambda r: (r["label_id"], r["text_sha256"], r["sheet"])))
     os.replace(lpath + ".part", lpath)
 
 
@@ -1158,11 +1175,13 @@ def evaluate_links(data, seed, answered=None):
     if os.path.exists(lpath):
         with open(lpath, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
-                current[(r["text_sha256"], r["package_sha256"], r["question_sha256"])] = r
+                current[(r["text_sha256"], r["package_sha256"], r["question_sha256"],
+                         is_eval(r))] = r
     today = datetime.date.today().isoformat()
     for k in key:
         if k["row_id"] in answered:
-            current[(k["text_sha256"], k["package_sha256"], k["question_sha256"])] = {
+            current[(k["text_sha256"], k["package_sha256"], k["question_sha256"],
+                     is_eval(k))] = {
                 **{c: k[c] for c in ("label_set", "unit_id", "package_id", "text_sha256",
                                       "package_sha256", "question_sha256")},
                 "applies": answered[k["row_id"]],
@@ -1172,7 +1191,8 @@ def evaluate_links(data, seed, answered=None):
     with open(lpath + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.DictWriter(fh, fieldnames=LINK_LABEL_COLS, lineterminator="\n", restval="")
         w.writeheader()
-        w.writerows(sorted(current.values(), key=lambda r: (r["text_sha256"], r["package_sha256"])))
+        w.writerows(sorted(with_sheet(list(current.values())),
+                           key=lambda r: (r["text_sha256"], r["package_sha256"], r["sheet"])))
     os.replace(lpath + ".part", lpath)
     rows = [{"p": float(k["probability"]), "yes": answered[k["row_id"]] == "yes",
              "w": key_weight(k), "stratum": k["stratum"]}
