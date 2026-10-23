@@ -35,7 +35,7 @@ in two strata (near: within ELUSION_BAND below the pool threshold; far: the
 rest), weighted back to their strata, which is how a technology-assisted
 review is signed off.
 """
-import argparse, csv, datetime, hashlib, json, math, os, random, sys
+import argparse, csv, datetime, hashlib, json, math, os, random, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
@@ -45,13 +45,23 @@ import panel  # noqa: E402
 
 CELL_MAX = 32_000   # Excel's limit on a cell's characters
 
+# What a string may keep to be written into the workbook: XML 1.0's Char
+# production, because openpyxl writes through lxml and lxml refuses anything
+# outside it. openpyxl's own ILLEGAL_CHARACTERS_RE is NOT enough - it covers
+# the C0 controls but not the noncharacters U+FFFE and U+FFFF, and one U+FFFF
+# inside a Chad PAD paragraph killed a whole `./wbg check all` draw at write
+# time with "All strings must be XML compatible". Nothing is stripped at parse
+# time: a paragraph is kept as the document says it. This is the display
+# boundary, so the loss is here, and the tab has to open for a person to grade
+# it at all.
+XML_TEXT_RE = re.compile("[^\t\n\r\x20-\ud7ff\ue000-\ufffd\U00010000-\U0010ffff]")
+
 
 def cell_text(value):
     """Excel refuses control characters. A form feed is a page break in the
     raw file, which the reader wants to see, so it gets a visible marker."""
-    from openpyxl.cell.cell import ILLEGAL_CHARACTERS_RE
     text = str(value if value is not None else "").replace("\f", "\n[page break]\n")
-    return ILLEGAL_CHARACTERS_RE.sub("", text)[:CELL_MAX]
+    return XML_TEXT_RE.sub("", text)[:CELL_MAX]
 
 # The two sheets the method grades on (docs/method/measures.md, "Training and
 # evaluation sheets"). A training sheet (--design train) is drawn where a
@@ -438,7 +448,7 @@ def _write_xlsx(path, tabs):
         ncol[0] += 1
         c = lists.cell(1, ncol[0]).column_letter
         for i, v in enumerate(values, 1):
-            lists.cell(i, ncol[0], v)
+            lists.cell(i, ncol[0], cell_text(v))
         return f"lists!${c}$1:${c}${len(values)}"
 
     wrap = Alignment(wrap_text=True, vertical="top")
@@ -478,7 +488,7 @@ def _write_xlsx(path, tabs):
     s.append(["measure", "grade", "meaning ({name} is the measure)"])
     for t in measures:
         for i, line in enumerate(t["scale"]):
-            s.append([t["measure"], i, line])
+            s.append([t["measure"], i, cell_text(line)])
     s.column_dimensions["A"].width = 26
     s.column_dimensions["C"].width = 120
     if any(t["types"] for t in measures):
@@ -486,7 +496,7 @@ def _write_xlsx(path, tabs):
         s.append(["measure", "type", "name", "definition"])
         for t in measures:
             for tid, nm, d in t["types"]:
-                s.append([t["measure"], tid, nm, cell_text(d)])
+                s.append([t["measure"], cell_text(tid), cell_text(nm), cell_text(d)])
         for c, w in zip("ABCD", (26, 30, 30, 100)):
             s.column_dimensions[c].width = w
     wb.save(path)
