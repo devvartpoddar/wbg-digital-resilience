@@ -600,7 +600,10 @@ TABLES = {
                  "type": "The type the person gave, if any.",
                  "source": "The sheet the grade came from.",
                  "stratum": "The draw's stratum; eval:* rows are an evaluation sheet's.",
-                 "weight": "The design weight: the stratum's size over the rows drawn from it."}),
+                 "weight": "The design weight: the stratum's size over the rows drawn from it, "
+                           "or one over the sentence's chance of being drawn (combined sheets).",
+                 "unsure": "Types (or, for the set assets, assets) the person left unsure: "
+                           "those questions are left out."}),
     "graded_package_links": dict(
         schema=PUBLIC, key=("label_set", "unit_id", "package_id", "question_sha256"),
         foreign=[],
@@ -612,7 +615,9 @@ TABLES = {
         comment="Every row ever drawn for a person to grade (data/review/*.key.csv), with its "
                 "stratum and the stratum's size: what makes a sheet's figures weightable.",
         columns={"sheet": "The key file's name (the sheet and seed).",
-                 "measure_dir": "The measure run the row was drawn from."}),
+                 "measure_dir": "The measure run the row was drawn from.",
+                 "weight": "One over the row's chance of being drawn (combined sheets); "
+                           "empty where the stratum's size and rows drawn give it."}),
     "posterior_layers": dict(
         schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
         comment="The probability layer fitted for each label (data/labels/<set>_posterior.json, "

@@ -574,12 +574,12 @@ def unit_asset_rows(data, projects=None):
 # replaced whole when its sources change.
 
 GRADED_COLS = ["label_set", "label_id", "unit_id", "text_sha256", "question_sha256", "grade",
-               "asset", "type", "source", "graded_on", "stratum", "weight"]
+               "asset", "type", "source", "graded_on", "stratum", "weight", "unsure"]
 GRADED_LINK_COLS = ["label_set", "unit_id", "package_id", "text_sha256", "package_sha256",
                     "question_sha256", "applies", "source", "graded_on"]
 DRAW_COLS = ["sheet", "row_id", "label_id", "label_set", "unit_id", "package_id", "paragraph_id",
              "text_sha256", "question_sha256", "stratum", "stratum_size", "stratum_drawn",
-             "measure_dir"]
+             "measure_dir", "weight"]
 LAYER_COLS = ["label_set", "label_id", "question_sha256", "graded_yes", "graded_no",
               "coefficients", "settings", "file_sha256"]
 GATE_COLS = ["label_set", "label_id", "gate", "share_lost", "positives", "question_sha256",

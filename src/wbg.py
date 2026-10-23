@@ -964,7 +964,12 @@ def main(argv=None):
     p.add_argument("--design", choices=("train", "eval", "bands", "floor", "tune"),
                    help="train (the default): near each floor; eval: a random draw by the "
                         "decision, kept out of every fit; bands, floor, tune: by band of the "
-                        "posterior or around the floor")
+                        "posterior or around the floor. With 'all', train and eval draw the "
+                        "combined sheets (one of sentences, one of packages)")
+    p.add_argument("--near-gate", action="store_true",
+                   help="with 'all': also draw sentences just below each measure's gate")
+    p.add_argument("--dry-run", action="store_true",
+                   help="with 'all': how many sentences and packages the draw would bring")
     p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
                                         "hand-labelled activities workbook")
     p.add_argument("label_set")
@@ -1042,7 +1047,9 @@ def main(argv=None):
     if args.cmd == "check":
         _run("check_units.py", args.label_set, *(["--evaluate"] if args.evaluate else []),
              *(["--elusion"] if args.elusion else []), "--seed", str(args.seed),
-             *(["--design", args.design] if args.design else []), data=data)
+             *(["--design", args.design] if args.design else []),
+             *(["--near-gate"] if args.near_gate else []),
+             *(["--dry-run"] if args.dry_run else []), data=data)
         return 0
     if args.cmd == "evaluate":
         _run("evaluate_activities.py", args.label_set, "--column", args.column,
