@@ -496,3 +496,30 @@ def test_figures_one_space_apart_are_both_read():
     row = F._plan_row(rec, "GOODS", True, meta, 1)
     assert row["estimated_amount"] == "100000.00" and row["actual_amount"] == "0.00"
     assert row["status_raw"] == "Signed"
+
+
+def test_an_html_page_or_empty_body_is_never_stored_as_a_plan(tmp_path, monkeypatch):
+    import fetch_procurement as F
+
+    class R:
+        def __init__(self, content):
+            self.content = content
+    path = str(tmp_path / "1.txt")
+    for body in (b"", b"  \n", b"<!DOCTYPE html><html>busy</html>", b"\n<html><body>"):
+        monkeypatch.setattr(F, "get", lambda url, timeout, body=body: R(body))
+        with pytest.raises(RuntimeError):
+            F._fetch_plan_file(path, "https://a.example/1.txt", False, 0)
+        assert not os.path.exists(path)
+    monkeypatch.setattr(F, "get", lambda url, timeout: R(b"Project information\n"))
+    blob, stamp = F._fetch_plan_file(path, "https://a.example/1.txt", False, 0)
+    assert blob == b"Project information\n" and stamp
+    assert F._fetch_plan_file(path, "https://a.example/1.txt", False, 0) == (blob, "")
+
+
+def test_a_renamed_response_key_stops_the_run():
+    import fetch_procurement as F
+    F.check_keys([], F.NOTICE_KEYS, "notices")                     # an empty page says nothing
+    F.check_keys([{"id": 1, "notice_type": "x", "noticedate": "d"}, {"id": 2}],
+                 F.NOTICE_KEYS, "notices")                         # present somewhere: fine
+    with pytest.raises(SystemExit, match="noticedate"):
+        F.check_keys([{"id": 1, "notice_type": "x", "notice_date": "d"}], F.NOTICE_KEYS, "notices")

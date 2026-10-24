@@ -84,3 +84,61 @@ def test_the_v3_record_is_preferred_and_fills_what_v2_lacks():
     assert row["project_name"] == "X" and row["approval_fy"] == "2027"
     assert row["in_projects_interface"] == "true" and row["record_source"] == "v3"
     assert F.merge({}, {}) == {}
+
+
+class _Resp:
+    def __init__(self, status, content=b"", headers=None):
+        self.status_code, self.content, self.headers = status, content, headers or {}
+        self.text = content.decode("latin-1")
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def _serve(monkeypatch, answers):
+    import api
+    seen = []
+
+    def fake(method, url, **kw):
+        seen.append(url)
+        return answers.pop(0)
+    monkeypatch.setattr(api.requests, "request", fake)
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    return seen
+
+
+def test_a_redirect_to_http_is_upgraded_and_throttling_is_asked_again(monkeypatch):
+    import fetch
+    seen = _serve(monkeypatch, [_Resp(302, headers={"location": "http://d.example/x.pdf"}),
+                                _Resp(403), _Resp(200, b"%PDF-1.7 ... %%EOF\n")])
+    assert fetch.get("https://a.example/x").status_code == 200
+    assert seen == ["https://a.example/x", "https://d.example/x.pdf", "https://d.example/x.pdf"]
+
+
+def test_a_missing_document_is_not_asked_again(monkeypatch):
+    import api
+    import fetch
+    seen = _serve(monkeypatch, [_Resp(404), _Resp(200)])
+    with pytest.raises(api.Refused):
+        fetch.get("https://a.example/gone")
+    assert len(seen) == 1
+
+
+def test_only_a_whole_pdf_counts_as_fetched(tmp_path, monkeypatch):
+    import fetch
+    assert fetch.complete_pdf(b"%PDF-1.4\n" + b"x" * 5000 + b"\n%%EOF\n")
+    assert not fetch.complete_pdf(b"%PDF-1.4\n" + b"x" * 5000)          # cut short
+    assert not fetch.complete_pdf(b"<html>%%EOF</html>")
+    monkeypatch.setattr(fetch, "get", lambda url, timeout: _Resp(200, b"%PDF-1.4 truncated"))
+    counts, notes = {"pdf_missing": 0, "pdf_cached": 0, "pdf_fetched": 0}, []
+    doc = {"doc_id": "D1", "pdfurl": "https://a.example/D1.pdf"}
+    assert fetch.fetch_pdf(doc, str(tmp_path), counts, notes, "P1", 0) == (None, "")
+    assert counts["pdf_missing"] == 1 and "FAILED" in notes[0]
+    assert os.listdir(tmp_path) == []
+    whole = b"%PDF-1.4\nbody\n%%EOF\n"
+    monkeypatch.setattr(fetch, "get", lambda url, timeout: _Resp(200, whole))
+    blob, stamp = fetch.fetch_pdf(doc, str(tmp_path), counts, notes, "P1", 0)
+    assert blob == whole and stamp.endswith("Z")
+    assert os.listdir(tmp_path) == ["D1.pdf"]
+    assert fetch.fetch_pdf(doc, str(tmp_path), counts, notes, "P1", 0) == (whole, "")

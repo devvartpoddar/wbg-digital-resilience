@@ -9,12 +9,12 @@ Writes data/raw/pdf/{doc_id}.pdf   the PDF, which src/pdf_layout.py reads
 Resumable: a document whose PDF already exists is not re-fetched.
 Run again after an interruption and it picks up where it stopped.
 """
-import argparse, csv, hashlib, json, os, re, sys, time
+import argparse, csv, hashlib, json, os, re, sys, tempfile, time
 import urllib.parse
-import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import api  # noqa: E402
 from paths import data_root, where, write_fetch_status  # noqa: E402
 WDS = "https://search.worldbank.org/api/v3/wds"
 
@@ -51,37 +51,54 @@ def classify(doc_type, title):
     return "project_paper_other"
 
 
-def get(url, *, timeout=60, tries=6):
-    """GET, following redirects manually so an http:// Location can be upgraded.
+# Status codes asked again (with connection errors). A 403 from the content
+# delivery network is throttling: the same URL succeeds moments later. A 404,
+# or any other 4xx, is final (api.Refused).
+RETRY = frozenset({403, 408, 429} | set(range(500, 600)))
+REDIRECTS = (301, 302, 303, 307, 308)
+MAX_REDIRECTS = 5
+# A PDF is whole when it opens with %PDF and its %%EOF marker sits in this many
+# final bytes (an incremental update or trailing newline can follow it).
+PDF_TAIL = 2048
 
-    About a quarter of document URLs 302 to documents1.worldbank.org over plain
-    http. Left alone the proxy refuses it and the body stored is a 118-byte 403
-    page that parses fine and contains nothing. Upgrading the scheme recovers
-    the document intact.
-    """
-    for attempt in range(tries):
-        try:
-            seen = url
-            for _ in range(5):
-                r = requests.get(seen, timeout=timeout, allow_redirects=False,
-                                 headers=HEADERS)
-                if r.status_code in (301, 302, 303, 307, 308):
-                    loc = r.headers.get("location", "")
-                    seen = urllib.parse.urljoin(seen, loc)
-                    if seen.startswith("http://"):
-                        seen = "https://" + seen[len("http://"):]
-                    continue
-                r.raise_for_status()
-                return r
-            raise RuntimeError("too many redirects")
-        except Exception as exc:
-            # A 403 here is the content delivery network throttling, not a
-            # permission problem: the same URL succeeds moments later. Back off
-            # further for those rather than giving up on a real document.
-            if attempt == tries - 1:
-                raise
-            transient = "403" in str(exc) or "429" in str(exc)
-            time.sleep((3 if transient else 1) * (2 ** attempt))
+
+def get(url, *, timeout=60, tries=6):
+    """GET through api.request, following redirects here so an http://
+    Location is upgraded to https: the proxy refuses plain http and answers
+    with a 403 page that would be stored as the document."""
+    for _ in range(MAX_REDIRECTS):
+        r = api.request("GET", url, timeout=timeout, tries=tries, retry=RETRY,
+                        headers=HEADERS, allow_redirects=False)
+        if r.status_code not in REDIRECTS:
+            return r
+        url = urllib.parse.urljoin(url, r.headers.get("location", ""))
+        if url.startswith("http://"):
+            url = "https://" + url[len("http://"):]
+    raise api.Transport(f"too many redirects from {url}")
+
+
+def now_stamp():
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+
+
+def complete_pdf(blob):
+    """Whether a body is a whole PDF: the %PDF header and %%EOF near the end."""
+    return blob.startswith(b"%PDF") and b"%%EOF" in blob[-PDF_TAIL:]
+
+
+def write_atomic(dest, blob):
+    """Write aside under a name unique to this call, then rename into place,
+    so two threads fetching one file never share a temporary file."""
+    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dest),
+                               prefix=os.path.basename(dest) + ".", suffix=".part")
+    try:
+        with os.fdopen(fd, "wb") as fh:
+            fh.write(blob)
+        os.replace(tmp, dest)
+    except BaseException:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+        raise
 
 
 def list_docs(project_id, doc_type):
@@ -108,39 +125,37 @@ def list_docs(project_id, doc_type):
 
 
 def fetch_pdf(doc, pdf_dir, counts, notes, pid, delay):
-    """The PDF behind a document, cached on disk. Returns its bytes, or None.
-
-    A document whose PDF cannot be had is noted and left out: clean.py reads
-    the PDF only."""
+    """(bytes, fetched_at) of the PDF behind a document, cached on disk;
+    fetched_at is the time of this download, blank for a cached file.
+    (None, "") when it cannot be had: clean.py reads the PDF only."""
     dest = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
     if os.path.exists(dest):
         counts["pdf_cached"] += 1
         with open(dest, "rb") as fh:
-            return fh.read()
+            return fh.read(), ""
     if not doc.get("pdfurl"):
         counts["pdf_missing"] += 1
         notes.append(f"{pid}\t{doc['doc_id']}\tno pdfurl published")
-        return None
+        return None, ""
     try:
+        stamp = now_stamp()
         blob = get(doc["pdfurl"], timeout=120).content
     except Exception as exc:
         counts["pdf_missing"] += 1
         notes.append(f"{pid}\t{doc['doc_id']}\tPDF FETCH FAILED\t{exc}")
-        return None
-    if not blob.startswith(b"%PDF"):
-        # A throttled interface answers with an HTML page and status 200.
-        # That is a failed download, tried again on the next run, not a fact
-        # about the document.
+        return None, ""
+    if not complete_pdf(blob):
+        # A throttled interface answers with an HTML page and status 200, and a
+        # cut connection leaves a truncated file: a failed download, tried again
+        # on the next run, not a fact about the document.
         counts["pdf_missing"] += 1
-        notes.append(f"{pid}\t{doc['doc_id']}\tPDF FETCH FAILED\tpdfurl did not return a PDF")
-        return None
-    tmp = dest + ".part"
-    with open(tmp, "wb") as fh:
-        fh.write(blob)
-    os.replace(tmp, dest)
+        notes.append(f"{pid}\t{doc['doc_id']}\tPDF FETCH FAILED\t"
+                     f"pdfurl did not return a whole PDF ({len(blob)} bytes)")
+        return None, ""
+    write_atomic(dest, blob)
     counts["pdf_fetched"] += 1
     time.sleep(delay)
-    return blob
+    return blob, stamp
 
 
 def read_cohort(path):
@@ -194,8 +209,14 @@ def main():
             c["no_docs"] += 1
             nts.append(f"{pid}\tno appraisal documents returned")
         for doc in docs:
-            got.append((doc, fetch_pdf(doc, pdf_dir, c, nts, pid, args.delay)))
+            got.append((doc, *fetch_pdf(doc, pdf_dir, c, nts, pid, args.delay)))
         return pid, True, got, c, nts
+
+    docs_csv = where(args.out, "documents")
+    previous = {}
+    if os.path.exists(docs_csv):
+        with open(docs_csv, newline="", encoding="utf-8") as fh:
+            previous = {r["doc_id"]: r for r in csv.DictReader(fh)}
 
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
@@ -208,56 +229,55 @@ def main():
                 print(f"[{n}/{len(projects)}] {pid} listing failed", flush=True)
                 continue
             listed.add(pid)
-            for doc, pdf_blob in got:
+            for doc, pdf_blob, stamp in got:
                 if doc["doc_id"] in by_doc:
                     by_doc[doc["doc_id"]]["_projects"].add(pid)
                     continue
                 if not pdf_blob:
                     continue
-                pdf_path = os.path.join(pdf_dir, f"{doc['doc_id']}.pdf")
-                # The file's own time, on this run and every later one, so a
-                # re-listing of an unchanged document leaves documents.csv as it was.
-                when = os.path.getmtime(pdf_path)
+                sha = hashlib.sha256(pdf_blob).hexdigest()
+                # An unchanged PDF keeps the time it was first fetched, so a
+                # re-listing leaves documents.csv as it was.
+                old = previous.get(doc["doc_id"], {})
+                if old.get("pdf_sha256") == sha and old.get("fetched_at"):
+                    stamp = old["fetched_at"]
                 by_doc[doc["doc_id"]] = {
                     "_projects": {pid},
                     "doc_id": doc["doc_id"], "doc_type": doc["doc_type"],
                     "doc_kind": classify(doc["doc_type"], doc["title"]),
                     "title": doc["title"], "disclosure_date": doc["disclosure_date"],
                     "lang": doc["lang"],
-                    "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(when)),
+                    "fetched_at": stamp or now_stamp(),
                     # The interface gives some addresses as http; the same
                     # address serves https, which a browser will open.
                     "pdf_url": re.sub(r"^http://", "https://", doc["pdfurl"]),
                     "pdf_bytes": len(pdf_blob),
-                    "pdf_sha256": hashlib.sha256(pdf_blob).hexdigest(),
+                    "pdf_sha256": sha,
                     "owner_unit": doc["owner_unit"],
                 }
             if n % 10 == 0:
                 print(f"  ...{n}/{len(projects)} projects, {len(by_doc)} documents", flush=True)
 
-    docs_csv = where(args.out, "documents")
     # A project this run did not list - outside a --limit smoke run, or its
     # listing failed - keeps the documents an earlier run recorded for it, so a
     # partial run never shrinks the corpus.
-    if os.path.exists(docs_csv):
-        with open(docs_csv, newline="", encoding="utf-8") as fh:
-            for old in csv.DictReader(fh):
-                kept = {p for p in old["project_ids"].split("|") if p and p not in listed}
-                if not kept and old["doc_id"] not in by_doc and \
-                        os.path.exists(os.path.join(pdf_dir, f"{old['doc_id']}.pdf")):
-                    # Listed this run, but the listing no longer names a
-                    # document whose PDF is on disk: a shorter listing (a
-                    # paged or throttled answer) must not shrink the corpus.
-                    kept = {p for p in old["project_ids"].split("|") if p}
-                    counts["kept_not_relisted"] = counts.get("kept_not_relisted", 0) + 1
-                if not kept:
-                    continue
-                if old["doc_id"] in by_doc:
-                    by_doc[old["doc_id"]]["_projects"] |= kept
-                else:
-                    row = {c: old.get(c, "") for c in DOC_COLS if c != "project_ids"}
-                    by_doc[old["doc_id"]] = dict(row, _projects=kept)
-                    counts["kept_from_earlier_run"] = counts.get("kept_from_earlier_run", 0) + 1
+    for old in previous.values():
+        kept = {p for p in old["project_ids"].split("|") if p and p not in listed}
+        if not kept and old["doc_id"] not in by_doc and \
+                os.path.exists(os.path.join(pdf_dir, f"{old['doc_id']}.pdf")):
+            # Listed this run, but the listing no longer names a document whose
+            # PDF is on disk: a shorter listing (a paged or throttled answer)
+            # must not shrink the corpus.
+            kept = {p for p in old["project_ids"].split("|") if p}
+            counts["kept_not_relisted"] = counts.get("kept_not_relisted", 0) + 1
+        if not kept:
+            continue
+        if old["doc_id"] in by_doc:
+            by_doc[old["doc_id"]]["_projects"] |= kept
+        else:
+            row = {c: old.get(c, "") for c in DOC_COLS if c != "project_ids"}
+            by_doc[old["doc_id"]] = dict(row, _projects=kept)
+            counts["kept_from_earlier_run"] = counts.get("kept_from_earlier_run", 0) + 1
     rows = []
     for did in sorted(by_doc):
         row = dict(by_doc[did])

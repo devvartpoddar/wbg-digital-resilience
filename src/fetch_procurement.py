@@ -175,7 +175,9 @@ def list_plans(project_id, log, delay):
         "fl": "id,docty,display_title,disclosure_date,txturl,pdfurl,lang,projectid"})
     url = f"{WDS}?{q}"
     r = get(url, timeout=60)
-    data = r.json()
+    data = json_body(r, f"plan listing {project_id}")
+    check_keys([v for k, v in (data.get("documents") or {}).items() if k != "facets"],
+               PLAN_LIST_KEYS, f"plan listing {project_id}")
     docs = []
     for key, val in (data.get("documents") or {}).items():
         if key == "facets":
@@ -787,7 +789,7 @@ def _first_token(text, tokens):
 
 # ---------------------------------------------------------------- main stages
 
-def collect_plans(projects, data, log, refresh, delay, workers=6):
+def collect_plans(projects, data, log, refresh, delay, workers=6, previous=None):
     """List every project's plans, download the renditions, then parse them.
 
     Listing is serial because it is one request per project and the interface is
@@ -798,8 +800,11 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
     the constraint here is the far side's latency, not ours.
 
     Parsing stays serial and in a deterministic order, so a re-run produces the
-    same rows whatever order the downloads completed in.
+    same rows whatever order the downloads completed in. `previous` maps a plan
+    document to the (content_sha256, fetched_at) an earlier run recorded: an
+    unchanged rendition keeps that time.
     """
+    previous = previous or {}
     raw_dir = where(data, "plans")
     os.makedirs(raw_dir, exist_ok=True)
     listing_failures, no_plan, tasks = [], [], []
@@ -823,7 +828,7 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
 
     rows, fetch_failures, free_text_chars, bundle_docs = [], [], [], []
     empty_docs = []
-    blobs = {}
+    blobs, stamps = {}, {}
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {
             pool.submit(_fetch_plan_file, os.path.join(raw_dir, f"{d['doc_id']}.txt"),
@@ -835,8 +840,9 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
             pid, d = futures[fut]
             done += 1
             try:
-                blob, _fetched = fut.result()
+                blob, stamp = fut.result()
                 blobs[(pid, d["doc_id"])] = blob
+                stamps[d["doc_id"]] = stamp
             except Exception as exc:                   # noqa: BLE001
                 fetch_failures.append((pid, d["doc_id"], str(exc)))
             if done % 200 == 0:
@@ -846,7 +852,6 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
         blob = blobs.get((pid, d["doc_id"]))
         if blob is None:
             continue
-        path = os.path.join(raw_dir, f"{d['doc_id']}.txt")
         text = blob.decode("utf-8", errors="replace")
         text, kind = segment_for_project(text, pid)
         if kind != "single":
@@ -855,12 +860,14 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
             # A bundle that does not name this project: kept on disk, counted,
             # and not parsed, so no other operation's packages land here.
             continue
+        sha = sha256_bytes(blob)
+        old_sha, old_at = previous.get(d["doc_id"], ("", ""))
         meta = {
             "project_id": pid, "doc_id": d["doc_id"],
             "disclosure_date": d["disclosure_date"],
-            "content_sha256": sha256_bytes(blob),
-            "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
-                                        time.gmtime(os.path.getmtime(path))),
+            "content_sha256": sha,
+            "fetched_at": (old_at if old_sha == sha and old_at else
+                           stamps.get(d["doc_id"]) or now_stamp()),
         }
         parsed, free = parse_plan_text(text, meta)
         free_text_chars.append(sum(len(x) for x in free))
@@ -903,14 +910,48 @@ def store_keeping_old(path, blob):
     os.replace(tmp, path)
 
 
+def refuse_page(blob, what):
+    """Raise when a body is empty or an HTML page: a throttled or failing
+    interface answers 200 with one, and it must not be stored as data."""
+    head = blob[:512].lstrip().lower()
+    if not head:
+        raise RuntimeError(f"{what}: empty body, not stored")
+    if head.startswith((b"<!doctype html", b"<html")) or b"<html" in head:
+        raise RuntimeError(f"{what}: an HTML page, not stored")
+
+
+def json_body(r, what):
+    """The parsed JSON of a response, refusing an empty body or HTML page."""
+    refuse_page(r.content, what)
+    try:
+        return r.json()
+    except ValueError:
+        raise RuntimeError(f"{what}: response is not JSON") from None
+
+
+def check_keys(records, expected, what):
+    """Stop the run when the interface renamed a field: an expected key absent
+    from every record of a non-empty page would otherwise be read as blank."""
+    if not records:
+        return
+    for k in expected:
+        if not any(isinstance(r, dict) and k in r for r in records):
+            raise SystemExit(f"{what}: no record carries '{k}'; the interface's "
+                             f"response changed, update the reader")
+
+
 def _fetch_plan_file(path, url, refresh, delay):
+    """(bytes, fetched_at) of a plan rendition; fetched_at is blank when the
+    file was already on disk."""
     if os.path.exists(path) and not refresh:
-        return open(path, "rb").read(), False
-    r = get(url, timeout=120)
-    blob = r.content
+        with open(path, "rb") as fh:
+            return fh.read(), ""
+    stamp = now_stamp()
+    blob = get(url, timeout=120).content
+    refuse_page(blob, f"plan rendition {os.path.basename(path)}")
     store_keeping_old(path, blob)
     time.sleep(delay)
-    return blob, True
+    return blob, stamp
 
 
 # Fields naming or reaching a person: the procurement contact on a notice and
@@ -918,6 +959,13 @@ def _fetch_plan_file(path, url, refresh, delay):
 # kept: a response is stored without them.
 PERSONAL = {"contact_name", "contact_email", "contact_phone_no", "contact_address",
             "teammemfullname"}
+
+
+# Keys every page of the interface's records carries; absent from a whole page,
+# the interface changed (check_keys).
+NOTICE_KEYS = ("id", "notice_type", "noticedate")
+AWARD_KEYS = ("contr_id", "contr_desc", "contr_sgn_date")
+PLAN_LIST_KEYS = ("id", "display_title")
 
 
 def _without_personal(record):
@@ -934,7 +982,8 @@ def collect_notices(projects, data, log, refresh, delay):
         records = None
         try:
             if os.path.exists(path) and not refresh:
-                records = json.load(open(path, encoding="utf-8"))
+                with open(path, encoding="utf-8") as fh:
+                    records = json.load(fh)
             else:
                 records, pages = [], []
                 offset = 0
@@ -942,8 +991,9 @@ def collect_notices(projects, data, log, refresh, delay):
                     q = urllib.parse.urlencode({"format": "json", "rows": str(PAGE),
                                                 "os": str(offset), "project_id": pid})
                     r = get(f"{NOTICES}?{q}", timeout=90)
-                    j = r.json()
+                    j = json_body(r, f"notices {pid}")
                     batch = j.get("procnotices") or []
+                    check_keys(batch, NOTICE_KEYS, f"notices {pid}")
                     log.record("notices", NOTICES, q, len(batch), sha256_bytes(r.content))
                     records.extend(batch)
                     pages.append(len(batch))
@@ -990,7 +1040,8 @@ def collect_awards(projects, data, log, refresh, delay):
         records = None
         try:
             if os.path.exists(path) and not refresh:
-                records = json.load(open(path, encoding="utf-8"))
+                with open(path, encoding="utf-8") as fh:
+                    records = json.load(fh)
             else:
                 records = []
                 offset = 0
@@ -998,8 +1049,9 @@ def collect_awards(projects, data, log, refresh, delay):
                     q = urllib.parse.urlencode({"format": "json", "rows": str(PAGE),
                                                 "os": str(offset), "projectid": pid})
                     r = get(f"{AWARDS}?{q}", timeout=90)
-                    j = r.json()
+                    j = json_body(r, f"awards {pid}")
                     batch = j.get("contract") or []
+                    check_keys(batch, AWARD_KEYS, f"awards {pid}")
                     log.record("awards", AWARDS, q, len(batch), sha256_bytes(r.content))
                     records.extend(batch)
                     offset += PAGE
@@ -1111,9 +1163,15 @@ def main():
     plan_rows, listing_fail, no_plan, plan_fail, free_chars = [], [], [], [], []
     bundle_docs, empty_docs = [], []
     if not args.skip_plans:
+        previous = {}
+        packages_csv = os.path.join(proc_dir, "packages_raw.csv")
+        if os.path.exists(packages_csv):
+            with open(packages_csv, newline="", encoding="utf-8") as fh:
+                for r in csv.DictReader(fh):
+                    previous.setdefault(r["plan_doc_id"], (r["content_sha256"], r["fetched_at"]))
         (plan_rows, listing_fail, no_plan, plan_fail, free_chars, bundle_docs,
          empty_docs) = collect_plans(projects, args.data, log, args.refresh,
-                                     args.delay, workers=args.workers)
+                                     args.delay, workers=args.workers, previous=previous)
 
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
