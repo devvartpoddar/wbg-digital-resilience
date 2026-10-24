@@ -5,7 +5,9 @@ A label set is two or three CSV files, kept by people and only read here:
   <set>.csv           one row per label: <x>_id, <x>_name, definition, active
                       (and any other columns: version, seed_ids, note)
   <set>_queries.csv   search phrases per label: <x>_id, query_id, query, active
-  <set>_scale.csv     the grades the classifier asks for: grade, description
+  scale.csv           the grade scale every set shares (grade, description, with
+                      {name} standing for the label); a <set>_scale.csv beside a
+                      set overrides it
   <set>_patterns.csv  word patterns per label (optional): <x>_id, pattern_id,
                       pattern, active. A regular expression, matched without
                       regard to case; write whole words with \b
@@ -70,7 +72,7 @@ def _dirs(dirs):
 
 def _is_set(path):
     name = os.path.basename(path)[:-4]
-    return not name.endswith(_SUFFIXES)
+    return name != "scale" and not name.endswith(_SUFFIXES)
 
 
 def label_sets(dirs=None, include_inactive=False):

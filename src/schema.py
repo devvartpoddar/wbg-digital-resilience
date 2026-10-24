@@ -488,7 +488,7 @@ TABLES = {
                  "file_sha256": "SHA-256 of the file the row was copied from."}),
     "label_scale": dict(
         schema=PUBLIC, key=("label_set", "label_id", "grade"), foreign=[],
-        comment="A copy of each set's grade scale (<set>_scale.csv, kept by a person), one row "
+        comment="A copy of the grade scale each set uses (analysis/labels/scale.csv, kept by a person), one row "
                 "per label and grade with the label's name filled in: the grades the decision "
                 "model chooses among.",
         columns={"grade": "The grade, 0 the lowest.",
