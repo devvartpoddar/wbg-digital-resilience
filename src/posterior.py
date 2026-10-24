@@ -1,50 +1,11 @@
-"""The probability layer after every graded model question.
-
-The decision model gives each sentence a score for a label: its probability
-of the grades the control panel counts (read.grades, 2 and 3). This layer
-turns that score into the probability that a person would grade the sentence
-so: a logistic regression stacked on the score and on how similar the
-sentence is, by its embedding, to the sentences a person graded for the same
-label. Stacking, not strict Bayes: the score and the similarities read the
-same sentence, so they are not independent, and a fitted weight on each
-absorbs what they share (docs/method/decisions.md).
-
-Two similarity numbers, both from the graded sentences of the label:
-
-  vote      a weighted vote of the graded sentences, each weighted by its
-            design weight times exp(sharpness x (similarity - 1)): the
-            closest count most.
-  centroid  similarity to the (weighted) average graded yes minus
-            similarity to the average graded no.
-
-A graded sentence never votes for itself: its features leave its own
-grade out, as an ungraded sentence's never include one, so the weights
-learned are the weights used. Every other graded sentence votes, of the same
-project or a near-copy alike: appraisal documents reuse wording, and a
-sentence whose graded near-copy says yes usually is yes. posterior.near_copy
-can leave near-copies out too (off by default; the tuning report,
-src/tune.py, compares). Leakage between projects is the out-of-fold check's
-job (folds by whole project), not the vote's.
-
-With posterior.pool (on) the labels of one decision share the weights on
-the score and the similarities, each label keeping its own intercept (its
-base rate) and its own graded sentences: a measure has 40 or so graded
-rows, a type or an asset fewer, few for four weights of its own. The same
-setting governs every decision: measures, assets, and the four after them
-(src/judged.py).
-
-The grades come from sheets drawn by band, not at random, so each graded
-sentence carries its design weight (the stratum's size over the rows drawn
-from it) into the fit, the vote and every precision and recall reported.
-The fit is checked out of sample: folds by project (no project in two
-folds), each fold scored by a layer fitted on the others; the floor the
-evaluation suggests is read off those out-of-fold probabilities.
-
-The fit is made by the evaluation (src/check_units.py --evaluate, the only
-reader of grades, AGENTS.md rule 9), on the grades given under the exact
-question now asked, and written to a file of identifiers, numbers and
-weights keyed on that question; a run reads the file. With no file, another
-question, or too few graded sentences, the probability is the model's score.
+"""The probability layer: a logistic regression stacked on the model's score
+and on the sentence's similarity to the sentences a person graded for the
+same label (a sharpness-weighted vote, and the distance between the graded
+yes and no centroids). A graded sentence never votes for itself. Labels of
+one decision kind are pooled (posterior.pool): one intercept each, shared
+slopes. Checked out of fold by project; fits weight each row by its design
+weight to posterior.fit_weight_power, reports by the full weight.
+Fitted by src/grading.py, read through src/fits.py (docs/method/decisions.md).
 """
 import hashlib, json, math, zlib
 

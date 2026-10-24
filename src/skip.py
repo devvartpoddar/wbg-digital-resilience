@@ -1,24 +1,8 @@
-"""The skip rule: what is not asked (docs/method/decisions.md).
-
-One rule for every graded question: skip as much as possible while losing at
-most skip.max_loss (1 per cent) of the sentences a person graded yes under
-the question now asked, each counted at its design weight. A question is
-skipped for a sentence whose best cosine to the label's phrases is below the
-gate and which no word pattern of the label matches (patterns are always
-asked), so the gate is the highest cosine that leaves at most that share of
-the graded yes below it.
-
-The gate is fitted by the evaluation (src/check_units.py, the only reader of
-grades) and written to data/labels/<set>_gate.json, one entry per label,
-keyed on the exact question and the search run whose cosines it read. A
-stage reads the entry that matches both; with none (no grades yet under the
-current question, too few yes, or new phrases) the control panel's starting
-gate applies (measure.gate_cosine, asset.gate_cosine).
-
-The graded yes come from sentences some earlier gate, pattern, feedback round
-or elusion draw put before a person, so a gate can rise above where no yes
-has been seen; the elusion draw (./wbg check <set> --elusion) is what looks
-below it.
+"""The skip rule (docs/method/decisions.md): a label's gate is the highest
+cosine that leaves at most skip.max_loss of the graded yes below it (a yes a
+word pattern matches is always asked). Fitted by src/grading.py from
+skip.min_positives graded yes or more, stored through src/fits.py; until
+then the panel's starting gate applies.
 """
 import math
 

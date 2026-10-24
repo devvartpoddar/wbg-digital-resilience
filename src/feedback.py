@@ -1,17 +1,9 @@
-"""Relevance feedback: the second look below the gate, the same for a
-measure and for an asset (docs/method/decisions.md).
-
-The method is the same for both; the numbers are not shared: measures
-read feedback.*, the asset map asset_feedback.* (asset_feedback.max_rounds
-0 turns the asset map's rounds off). After a pass of answers, the sentences that count (a measure's committed
-sentences; an asset's sentences whose own posterior reaches asset.floor) are
-averaged into a centroid, minus feedback.negative_weight times the centroid
-of the sentences asked that do not count (Rocchio, with no query term); the
-corpus is ranked by cosine to it, and the next feedback.batch sentences not
-yet asked are asked. A label stops when a round yields fewer than
-feedback.min_yield sentences that count, or after feedback.max_rounds
-rounds. A yield rule for how deep to read, not a recall guarantee: the
-elusion sheet looks at what it leaves.
+"""Relevance feedback below the gate, the same for an asset and a measure
+(docs/method/decisions.md): the sentences that count at the ask floor,
+minus feedback.negative_weight times those asked that do not (Rocchio),
+rank the corpus; the next feedback.batch unasked sentences are asked, until
+a round yields fewer than feedback.min_yield or feedback.max_rounds is
+reached. A yield rule for depth, not a recall guarantee.
 """
 import numpy
 
@@ -21,9 +13,8 @@ BLOCK = 20_000
 
 
 def settings(prefix="feedback."):
-    """The round settings: feedback.* for the measures, asset_feedback.* for
-    the asset map. Each has its own lines on the control panel, so the two
-    are tuned apart; a line the panel lacks falls back to the measures'."""
+    """feedback.* for the measures; asset_feedback.<k> overrides a line for
+    the asset map where the panel writes one."""
     def get(k, default):
         v = panel.get(prefix + k)
         return panel.get("feedback." + k, default) if v is None else v

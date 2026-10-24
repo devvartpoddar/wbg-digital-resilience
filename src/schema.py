@@ -13,18 +13,15 @@ rules, from the person who runs Metabase:
   - a PRIMARY KEY on every table and a FOREIGN KEY on every join column
     (declared NOT VALID: an orphan row is reported by the audits, not fatal);
   - COMMENT ON every table and every column a reader could misread;
-  - everything lives in one schema, wbg, so a question joins without a
-    schema prefix; the three bookkeeping tables (loads, data_release and
-    paragraph_projects) say so in their comment and can be hidden in
-    Metabase's table settings. Tables nothing in sql/views/ or analysis/sql/
-    reads are not loaded at all: the CSV under data/ stays the record.
+  - everything a dashboard reads lives in one schema, wbg; the record
+    (answers, grades, fits, spend) lives in wbg_store (src/db.py) and is
+    never dropped. loads, data_release and paragraph_projects are
+    bookkeeping and can be hidden in Metabase's table settings.
 
-Every table is recreated on each load, so nothing here survives unless the
-loader applies it.
+Every wbg table is recreated on load or publish, so nothing here survives
+unless the loader applies it.
 """
 
-PUBLIC = "wbg"
-INTERNAL = PUBLIC   # one schema; the name stays for the loader's bookkeeping tables
 
 # Column renames applied to every table (csv name -> column name).
 RENAME = {
@@ -93,8 +90,7 @@ INTEGER = {"ordinal", "asset_rank", "text_start_offset", "text_end_offset", "pdf
            "units_hit_count", "most_likely_grade", "feedback_round",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
            "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
-           "graded_yes", "graded_no", "positives", "calls", "units_seen", "units_graded",
-           "prior_para_assets", "prior_para_measures"}
+           "graded_yes", "graded_no", "positives", "calls", "units_seen", "units_graded"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "commitment_v2_usd_millions", "commitment_v3_usd_millions",
@@ -109,17 +105,10 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "unit_best_asset_probability", "linked_asset_probability",
            "template_wording_share",
            "cosine", "probability", "p_only_a", "p_only_b", "p_both", "p_neither",
-           "p_keep_a", "p_keep_b", "score_a", "score_b",
-           "prior_phrase_cosine", "prior_phrase_match", "prior_probability_a",
-           "prior_probability_b", "prior_phrase_cosine_a", "prior_phrase_cosine_b"}
+           "p_keep_a", "p_keep_b", "score_a", "score_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
            "was_sent_to_model", "was_asked", "is_committed"}
-# measure_quality's columns: written by ./wbg check --evaluate
-# (src/check_units.py) and loaded in this shape whatever the file's header
-# (src/load_pg.py), so the two cannot drift apart.
-QUALITY_COLS = ["label_set", "version", "question_sha256", "run_id", "sheet", "graded_units",
-                "precision", "recall", "evaluated_at", "report_path"]
 # Pipe-joined lists in the CSV become arrays, which Metabase renders and
 # `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
@@ -157,13 +146,6 @@ def rename(table, csv_name):
 # schema, primary key, foreign keys [(column, table, column)], comments.
 # Table names are the ones a person sees; the loader maps its sources to them.
 
-# The prior inputs that need no grading (src/prior.py, docs/method/decisions.md):
-# stored next to the decision model's answers, read by nothing until a graded
-# sheet fits the weights and cut-offs that use them.
-PRIOR_INPUTS = {
-    "prior_phrase_cosine": "Prior input: best embedding cosine to the label's search phrases.",
-    "prior_phrase_match": "Prior input: the best phrase's share of information found in the text, each word weighted by how rare it is in the corpus (0 to 1).",
-}
 PROBABILITY_GRADES = {
     "grade_confidence": "The model's own confidence in its answer.",
     "probability_grade_0": "Probability of grade 0 (the passage is not about the label).",
@@ -172,12 +154,11 @@ PROBABILITY_GRADES = {
     "probability_grade_3": "Probability of grade 3 (financed or committed). The four grade probabilities are the model's raw answer, kept as the record: no decision reads them one by one; the decision reads posterior_probability.",
     "posterior_probability": "The probability every decision reads: the model's probability of grades 2 and 3 through the label's probability layer (src/posterior.py), or that score itself until a sheet graded under the current question has been evaluated. A sentence counts at the label's floor (control panel) or above.",
     "model_served": "The exact decision-model snapshot that answered.",
-    "run_id": "The run folder under data/, a hash of everything the answers depend on.",
 }
 
 TABLES = {
     "projects": dict(
-        schema=PUBLIC, key=("project_id",), foreign=[],
+        key=("project_id",), foreign=[],
         comment="One row per cohort project: the projects interface record plus the managing "
                 "unit read from its most recent appraisal document.",
         columns={
@@ -197,7 +178,7 @@ TABLES = {
             "managing_unit_as_of_date": "That document's disclosure date.",
         }),
     "documents": dict(
-        schema=PUBLIC, key=("document_id",), foreign=[],
+        key=("document_id",), foreign=[],
         comment="One appraisal document (Project Appraisal Document or Project Paper) fetched "
                 "as PDF; project_ids lists every operation the interface files it under.",
         columns={
@@ -212,7 +193,7 @@ TABLES = {
             "fetched_at": "When the PDF was downloaded.",
         }),
     "paragraphs": dict(
-        schema=PUBLIC, key=("paragraph_id",),
+        key=("paragraph_id",),
         foreign=[("document_id", "documents", "document_id")],
         comment="One cleaned unit of a document (a paragraph, heading, table row or footnote) "
                 "with its text and the component heading it sits under.",
@@ -243,7 +224,7 @@ TABLES = {
             "text": "The cleaned text (resolved from the offsets at load time).",
         }),
     "search_units": dict(
-        schema=PUBLIC, key=("unit_id",),
+        key=("unit_id",),
         foreign=[("paragraph_id", "paragraphs", "paragraph_id"),
                  ("document_id", "documents", "document_id")],
         comment="One unit the search embeds and scores: a sentence, a whole footnote or a prose "
@@ -263,7 +244,7 @@ TABLES = {
             "text": "The unit's text, without the lead-in.",
         }),
     "components": dict(
-        schema=PUBLIC, key=("component_id",),
+        key=("component_id",),
         foreign=[("document_id", "documents", "document_id")],
         comment="One component or sub-component as one document states it, with its cost; the "
                 "most recent document's list is the project's current one.",
@@ -281,7 +262,7 @@ TABLES = {
             "page_number": "PDF page the table was read from.",
         }),
     "packages": dict(
-        schema=PUBLIC, key=("package_id",),
+        key=("package_id",),
         foreign=[("project_id", "projects", "project_id"),
                  ("component_document_id", "documents", "document_id")],
         comment="One procurement-plan package, as its newest plan version states it. A planned "
@@ -323,7 +304,7 @@ TABLES = {
             "in_latest_plan": "False when the package is not in the project's most recently disclosed plan: dropped, or the plan was published in parts.",
         }),
     "notices": dict(
-        schema=PUBLIC, key=("notice_id",),
+        key=("notice_id",),
         foreign=[("project_id", "projects", "project_id"),
                  ("package_id", "packages", "package_id")],
         comment="One procurement notice from the notices interface, linked to its plan package "
@@ -337,7 +318,7 @@ TABLES = {
             "method_code": "The interface's method code.",
         }),
     "awards": dict(
-        schema=PUBLIC, key=("award_id",),
+        key=("award_id",),
         foreign=[("project_id", "projects", "project_id"),
                  ("package_id", "packages", "package_id")],
         comment="One signed contract from the contract awards interface, linked to its plan "
@@ -353,14 +334,14 @@ TABLES = {
             "package_link_kind": "How the package was found; see notices.",
         }),
     "paragraph_projects": dict(
-        schema=INTERNAL, key=("paragraph_id", "project_id"),
+        key=("paragraph_id", "project_id"),
         foreign=[("paragraph_id", "paragraphs", "paragraph_id"),
                  ("project_id", "projects", "project_id")],
         comment="Pipeline bookkeeping: one row per paragraph and project, unpacked from "
                 "paragraphs.project_ids so a paragraph joins its project by key.",
         columns={}),
     "labels": dict(
-        schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
+        key=("label_set", "label_id"), foreign=[],
         comment="One label of one label set: the assets (inputs/taxonomy) and each measure "
                 "set (analysis/labels), with its definition.",
         columns={
@@ -372,7 +353,7 @@ TABLES = {
             "folder": "Where the set lives in git.",
         }),
     "search_paragraphs": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "paragraph_id"),
+        key=("label_set", "label_id", "paragraph_id"),
         foreign=[("paragraph_id", "paragraphs", "paragraph_id")],
         comment="One paragraph per label with its best-scoring search unit: where the search "
                 "says the label is talked about. No cut-off is applied.",
@@ -386,7 +367,7 @@ TABLES = {
             "run_id": "The search run the row comes from.",
         }),
     "paragraph_grades": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
+        key=("label_set", "label_id", "unit_id"),
         foreign=[("paragraph_id", "paragraphs", "paragraph_id")],
         comment="The asset map: one row per sentence and asset with the decision model's "
                 "probability of each grade (0 not about it, 1 background, 2 supported, "
@@ -398,10 +379,9 @@ TABLES = {
             "best_cosine": "The sentence's cosine against the asset's phrases.",
             "route": "Why the asset's question was asked: embedding (the cosine reached the gate), pattern (a word pattern of the asset matched), both, or feedback (a relevance-feedback round below the gate); NULL when not asked.",
             "round": "0 for the first pass; 1 and up for the feedback round that asked it.",
-            **PRIOR_INPUTS,
         })),
     "measure_findings": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "unit_id"),
+        key=("label_set", "label_id", "unit_id"),
         foreign=[("unit_id", "search_units", "unit_id"),
                  ("paragraph_id", "paragraphs", "paragraph_id")],
         comment="One unit seen by a measure run: the decision model's answer (the probability "
@@ -434,10 +414,9 @@ TABLES = {
             "template_wording_share": "As in search_units: share of six-word runs shared with two or more other projects.",
             "copy_unit_ids": "Units in other documents that print the same text.",
             "text": "The unit's text with its list lead-in.",
-            **PRIOR_INPUTS,
         })),
     "measure_types": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "type_id"), foreign=[],
+        key=("label_set", "label_id", "type_id"), foreign=[],
         comment="A measure's approved types (its clusters): proposed by a generative model "
                 "from the committed units, approved by a person in analysis/labels/"
                 "<set>_types.csv, assigned by the decision model with one fit question per type, yes, unsure or no (src/kinds.py); a unit has every type whose probability reaches floor.types.",
@@ -447,7 +426,7 @@ TABLES = {
                  "merged_from": "Type ids the file merges into this one (merge_into), "
                                 "pipe-separated; their yes answers count as this type's."}),
     "measure_quality": dict(
-        schema=PUBLIC, key=("label_set", "question_sha256", "sheet"), foreign=[],
+        key=("label_set", "question_sha256", "sheet"), foreign=[],
         comment="How well the pipeline decides a measure, against a sheet a person graded "
                 "(./wbg check <set> --evaluate): one row per measure, exact question wording "
                 "and kind of sheet, the latest evaluation. Precision and recall are of the "
@@ -459,8 +438,7 @@ TABLES = {
                             "sheet was evaluated.",
                  "question_sha256": "SHA-256 of the exact question the sheet was graded "
                                     "under: a revised definition is a new row.",
-                 "run_id": "The measure run the sheet was drawn from.",
-                 "sheet": "evaluation (a random draw by the decision, never used to fit) or "
+                 "sheet": "evaluation (a random draw by the decision, which fits nothing) or "
                           "training (drawn near the floor).",
                  "graded_units": "Rows the person graded.",
                  "precision": "Of the units the pipeline counts, the weighted share the person "
@@ -469,7 +447,7 @@ TABLES = {
                            "pipeline counts (within the graded pool).",
                  "report_path": "The evaluation report under data/reports/."}),
     "label_queries": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "query_id"), foreign=[],
+        key=("label_set", "label_id", "query_id"), foreign=[],
         comment="A copy of each set's search phrases (<set>_queries.csv, kept by a person): "
                 "the sentences the search ranks units against. Inactive rows are kept.",
         columns={"query_id": "The phrase's id.", "query": "The phrase.",
@@ -477,7 +455,7 @@ TABLES = {
                  "version": "The label's version (its set file's version column).",
                  "file_sha256": "SHA-256 of the file the row was copied from."}),
     "label_patterns": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "pattern_id"), foreign=[],
+        key=("label_set", "label_id", "pattern_id"), foreign=[],
         comment="A copy of each set's word patterns (<set>_patterns.csv, kept by a person): "
                 "regular expressions that add units to a measure's pool. Inactive rows are "
                 "kept. label_pattern_hits counts the units each matched in the current run.",
@@ -487,7 +465,7 @@ TABLES = {
                  "version": "The label's version (its set file's version column).",
                  "file_sha256": "SHA-256 of the file the row was copied from."}),
     "label_scale": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "grade"), foreign=[],
+        key=("label_set", "label_id", "grade"), foreign=[],
         comment="A copy of the grade scale each set uses (analysis/labels/scale.csv, kept by a person), one row "
                 "per label and grade with the label's name filled in: the grades the decision "
                 "model chooses among.",
@@ -496,7 +474,7 @@ TABLES = {
                  "version": "The label's version (its set file's version column).",
                  "file_sha256": "SHA-256 of the file the row was copied from."}),
     "package_assets": dict(
-        schema=PUBLIC, key=("package_id", "label_id"),
+        key=("package_id", "label_id"),
         foreign=[("package_id", "packages", "package_id"),
                  ("project_id", "projects", "project_id")],
         comment="Which digital asset a procurement package buys, builds, installs, connects "
@@ -511,22 +489,9 @@ TABLES = {
             "cosine_rank": "The asset's rank among the package's assets by that cosine; 1 is the best.",
             "probability": "The decision model's probability that the package procures this asset.",
             "model_served": "The decision-model snapshot that answered.",
-            "prior_phrase_cosine": "Prior input: the cosine above, under the name every question's prior uses.",
-            "prior_phrase_match": "Prior input: the best asset phrase's share of information found in the package description, words weighted by rarity.",
         }),
-    "unit_paragraph_context": dict(
-        schema=PUBLIC, key=("unit_id",),
-        foreign=[("unit_id", "search_units", "unit_id"),
-                 ("paragraph_id", "paragraphs", "paragraph_id")],
-        comment="Prior inputs made once every stage has run (src/prior.py, "
-                "docs/method/decisions.md): for each sentence, how many other sentences of its "
-                "paragraph the pipeline classified as having an asset and as committed for any "
-                "measure. They move when the classification is tuned. Rebuilt whole at every "
-                "publish; read by nothing until a graded sheet fits the weights that use them.",
-        columns={"prior_para_assets": "Other sentences of the paragraph whose best asset in the asset map reaches the control panel's asset.floor.",
-                 "prior_para_measures": "Other sentences of the paragraph committed for any measure (each measure's floor)."}),
     "unit_pair_checks": dict(
-        schema=PUBLIC, key=("unit_id", "set_a", "set_b"), foreign=[],
+        key=("unit_id", "set_a", "set_b"), foreign=[],
         comment="For a unit two measures both commit: a fit question per side, yes, unsure or "
                 "no, does the measure apply with the other's boundary beside it (src/commit_checks.py). The commitment "
                 "views keep the unit in a measure when its side's posterior reaches "
@@ -543,7 +508,7 @@ TABLES = {
                  "prior_probability_b": "Prior input: the second measure's probability for the unit.",
                  "prior_phrase_cosine_b": "Prior input: the unit's cosine to the second measure's phrases."}),
     "commitment_packages": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "unit_id", "package_id"),
+        key=("label_set", "label_id", "unit_id", "package_id"),
         foreign=[("package_id", "packages", "package_id"),
                  ("unit_id", "search_units", "unit_id"),
                  ("project_id", "projects", "project_id")],
@@ -569,7 +534,7 @@ TABLES = {
             "prior_phrase_match": "Prior input: the share of the package description's information found in the commitment sentence, words weighted by rarity.",
         }),
     "unit_assets": dict(
-        schema=PUBLIC, key=("unit_id", "asset_rank"),
+        key=("unit_id", "asset_rank"),
         foreign=[("unit_id", "search_units", "unit_id"),
                  ("paragraph_id", "paragraphs", "paragraph_id")],
         comment="The assets of every sentence the search reads, one row per asset (asset_rank "
@@ -587,107 +552,18 @@ TABLES = {
                  "asset_level": "unit, paragraph or none.",
                  "own_best_asset_id": "The sentence's own best asset, whatever its probability.",
                  "own_best_probability": "Its posterior probability."}),
-    "graded_labels": dict(
-        schema=PUBLIC, key=("label_set", "label_id", "text_sha256", "question_sha256", "sheet"),
-        foreign=[],
-        comment="Every grade a person gave a sentence (data/labels/<set>_units.csv, written "
-                "by ./wbg check <set> --evaluate): keyed by the text's SHA-256 and the exact "
-                "question, never by position (AGENTS.md rule 9). Only the evaluation reads "
-                "them; the layers and gates fit on the rows of training sheets under the "
-                "current question. No text is stored here: join search_units on unit_id.",
-        columns={"grade": "The person's grade on the measure's scale; 2 or more is yes.",
-                 "asset": "The asset the person gave the sentence, if any.",
-                 "type": "The type the person gave, if any.",
-                 "source": "The sheet the grade came from.",
-                 "stratum": "The draw's stratum; eval:* rows are an evaluation sheet's.",
-                 "weight": "The design weight: the stratum's size over the rows drawn from it, "
-                           "or one over the sentence's chance of being drawn (combined sheets).",
-                 "unsure": "Types (or, for the set assets, assets) the person left unsure: "
-                           "those questions are left out.",
-                 "sheet": "training or evaluation: a sentence may have one grade of each, "
-                          "kept apart so neither fits or measures the other."}),
-    "graded_package_links": dict(
-        schema=PUBLIC, key=("label_set", "unit_id", "package_id", "question_sha256", "sheet"),
-        foreign=[],
-        comment="Every answer a person gave on a package-link sheet (data/labels/"
-                "package_links.csv): does carrying out the package deliver the commitment.",
-        columns={"applies": "yes, no or unsure.",
-                 "stratum": "The draw's stratum; eval:* rows are an evaluation sheet's.",
-                 "weight": "The design weight (as in graded_labels).",
-                 "sheet": "training or evaluation (as in graded_labels)."}),
-    "check_draws": dict(
-        schema=PUBLIC, key=("sheet", "row_id"), foreign=[],
-        comment="Every row ever drawn for a person to grade (data/review/*.key.csv), with its "
-                "stratum and the stratum's size: what makes a sheet's figures weightable.",
-        columns={"sheet": "The key file's name (the sheet and seed).",
-                 "measure_dir": "The measure run the row was drawn from.",
-                 "weight": "One over the row's chance of being drawn (combined sheets); "
-                           "empty where the stratum's size and rows drawn give it.",
-                 "block": "Combined sheets: the sentence's or package's block the line is in.",
-                 "kind": "Combined sheets: what the line asks (measure, type, asset, "
-                         "package_asset, package_link, other)."}),
-    "posterior_layers": dict(
-        schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
-        comment="The probability layer fitted for each label (data/labels/<set>_posterior.json, "
-                "assets_posterior.json): what turns the model's score into posterior_probability.",
-        columns={"question_sha256": "The exact question it was fitted on; it applies to no other.",
-                 "graded_yes": "Graded yes it was fitted on.",
-                 "graded_no": "Graded no.",
-                 "coefficients": "Intercept, then the weights on logit(score), the vote and the "
-                                 "centroid difference, on standardised inputs (JSON).",
-                 "settings": "The control-panel settings it was fitted with (JSON).",
-                 "file_sha256": "SHA-256 of the file."}),
-    "skip_gates": dict(
-        schema=PUBLIC, key=("label_set", "label_id"), foreign=[],
-        comment="The skip rule's gate fitted for each label (data/labels/<set>_gate.json, "
-                "src/skip.py): the highest cosine that loses at most skip.max_loss of the "
-                "graded yes. A label with no row uses the control panel's starting gate.",
-        columns={"gate": "The cosine gate.",
-                 "share_lost": "The weighted share of graded yes below it.",
-                 "positives": "Graded yes it was fitted on.",
-                 "question_sha256": "The question the grades were given under.",
-                 "search_run": "The search run whose cosines it read."}),
-    "runs": dict(
-        schema=PUBLIC, key=("run_id",), foreign=[],
-        comment="Every model run's manifest (data/{classify,measures,links,types,checks}/*/"
-                "manifest.json): what was asked, of which model, at what cost. Unlike the run "
-                "tables, which hold the current run only, this keeps every run written.",
-        columns={"stage": "classify, measures, links, types or checks.",
-                 "label_set": "The set, where the run is for one.",
-                 "created_at": "When the run was written.",
-                 "calls": "Requests made by the run.",
-                 "cost_usd": "What those requests cost, US$.",
-                 "manifest": "The whole manifest (JSON): questions, their SHA-256, settings, "
-                             "models served."}),
-    "spend": dict(
-        schema=PUBLIC, key=None, foreign=[],
-        comment="The spend ledger (data/reports/spend.csv): one row per stage run that asked "
-                "the decision model or another paid model.",
-        columns={"spent_at": "When.", "stage": "Which stage.", "calls": "Requests.",
-                 "cost_usd": "US$.", "run": "The run folder written, or 'failed'."}),
-    "answers": dict(
-        schema=PUBLIC, key=("answer_sha256",), foreign=[],
-        comment="Every stored decision-model answer (data/classify/answers/): the record a "
-                "re-run reads instead of asking again. Keyed by the SHA-256 of the model, "
-                "the state and the question; the state's text is not repeated here.",
-        columns={"model": "The model asked (its pinned snapshot).",
-                 "model_served": "The snapshot that answered.",
-                 "answer": "The answer as returned (JSON): its probabilities.",
-                 "cost_usd": "Its share of the request's cost, US$.",
-                 "asked_at": "When it was asked.",
-                 "call_sha256": "SHA-256 of the whole request it came in."}),
     "sentence_vectors": dict(
-        schema=INTERNAL, key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
+        key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
         comment="Pipeline bookkeeping: one embedding per search unit (3,072 dimensions), used "
                 "by wbg.similar_units() and wbg.search_phrase().",
         columns={}),
     "data_release": dict(
-        schema=INTERNAL, key=("release_id",), foreign=[],
+        key=("release_id",), foreign=[],
         comment="Pipeline bookkeeping: the single release this database holds, and when each "
                 "kind of record was last fetched. wbg.data_as_of shows it.",
         columns={}),
     "loads": dict(
-        schema=INTERNAL, key=None, foreign=[],
+        key=None, foreign=[],
         comment="Pipeline bookkeeping: one row per table load, with the source file's SHA-256 "
                 "(an unchanged source is not reloaded).",
         columns={}),
