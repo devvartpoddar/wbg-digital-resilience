@@ -5,7 +5,7 @@ description below is taken from a World Bank plan. What they reproduce is the SH
 the wrap artefacts the plan rendition produces, the lot/phase/rebid markers, the
 four languages, and the placeholder forms.
 
-The second half imports src/audit_procurement.py and asserts a maximum rate per
+The second half imports src/audit.py and asserts a maximum rate per
 check against the prepared tables, in the shape of tests/test_corpus_quality.py.
 Those tests skip cleanly when data/ is absent, because data/ is gitignored by
 design and a checkout without the corpus must still pass.
@@ -28,7 +28,7 @@ from paths import data_root  # noqa: E402
 DATA = data_root()
 
 import clean_procurement as P  # noqa: E402
-import audit_procurement as AP  # noqa: E402
+import audit as AP  # noqa: E402
 import fetch_procurement as FP  # noqa: E402
 
 
@@ -362,8 +362,8 @@ def test_audit_check_is_within_its_gate(name):
     tables = {t: _load(t) for t in ("packages", "notices", "awards")}
     if not AP.VOCAB:
         AP.load_vocab(DATA)
-    spec = [c for c in AP.CHECKS if c[0] == name]
-    assert spec, f"{name} is not a check in audit_procurement.py"
+    spec = [c for c in AP.CHECKS["procurement"] if c[0] == name]
+    assert spec, f"{name} is not a procurement check in audit.py"
     _n, wanted, _sev, fn = spec[0]
     hits = total = 0
     for t in wanted:
@@ -377,7 +377,7 @@ def test_audit_check_is_within_its_gate(name):
 
 def test_every_check_has_a_gate():
     """A check with no threshold is a check nobody is held to."""
-    missing = [c[0] for c in AP.CHECKS
+    missing = [c[0] for c in AP.CHECKS["procurement"]
                if c[0] not in MAX_RATE and c[2] in ("defect", "source")]
     assert missing == [], f"defect checks without a gate: {missing}"
 
