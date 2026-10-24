@@ -141,7 +141,15 @@ class Table:
                 f"header={len(self.header)} data={len(self.data)}>")
 
 
-def find_tables(lines, max_header=22):
+HEADER_MAX_LINES = 22    # a section's heading band is at most this many lines
+ANCHOR_WITHIN = 3        # the column heading follows a section name within this many lines
+WIDE_HEADER_GAPS = 3     # a heading line with this many column gaps proves the columns survived
+LABEL_MIN_PREFIX = 5     # characters of a column label that locate it in the heading band
+ALIGNED_FLOOR = 0.8      # share of collapsed records carrying a figure for their columns to be trusted
+REF_CHAIN_MAX = 3        # segments of a 'REF / REF / description' chain read as references
+
+
+def find_tables(lines, max_header=HEADER_MAX_LINES):
     """Every STEP table in the rendition, in document order.
 
     A section heading is a line holding nothing but the section's name AND
@@ -159,7 +167,7 @@ def find_tables(lines, max_header=22):
     tables = []
     heads = [i for i, l in enumerate(lines)
              if SECTION_RE.match(l)
-             and any(ANCHOR_RE.search(x) for x in lines[i + 1:i + 4])]
+             and any(ANCHOR_RE.search(x) for x in lines[i + 1:i + 1 + ANCHOR_WITHIN])]
     for n, i in enumerate(heads):
         end = heads[n + 1] if n + 1 < len(heads) else len(lines)
         # The heading band runs to the first data row; everything after it, up
@@ -187,11 +195,11 @@ def is_collapsed(table):
     fit on one line, and a collapsed band has no such line at all, because
     collapsing leaves the headings one per line or separated by single spaces.
     """
-    wide = sum(1 for l in table.header if len(re.findall(r"\S {2,}\S", l)) >= 3)
+    wide = sum(1 for l in table.header if len(re.findall(r"\S {2,}\S", l)) >= WIDE_HEADER_GAPS)
     return wide < 1
 
 
-def _label_positions(header, label, min_prefix=5):
+def _label_positions(header, label, min_prefix=LABEL_MIN_PREFIX):
     """Every x at which `label` might begin in the heading band.
 
     A heading is broken across lines at a point that depends on the column's
@@ -480,7 +488,7 @@ def read_collapsed_table(table, has_estimated=None):
     return rows
 
 
-def collapsed_is_aligned(rows, floor=0.8):
+def collapsed_is_aligned(rows, floor=ALIGNED_FLOOR):
     """Did the rendition keep its rows together, or scatter the columns?
 
     Some collapsed renditions emit each column of a page as its own run, so the
@@ -519,7 +527,7 @@ def split_ref_chain(desc, fallback):
     """
     parts = desc.split(" / ")
     ref, i = fallback, 0
-    while i < len(parts) and i < 3:
+    while i < len(parts) and i < REF_CHAIN_MAX:
         tok = parts[i].strip()
         if not re.fullmatch(r"[A-Z0-9][A-Z0-9\u2013\u2014-]{1,40}", tok):
             break

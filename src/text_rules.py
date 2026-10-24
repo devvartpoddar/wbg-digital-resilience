@@ -12,6 +12,12 @@ ANNEX = re.compile(r"^\s*(ANNEX|Annex|APPENDIX|Appendix)\s+([0-9]{1,2}|[IVX]{1,4
 NUMBERED_PARA = re.compile(r"^\s*(\d{1,3})\.\s+(\S)")
 TOKEN = re.compile(r"[\w'’-]+", re.UNICODE)
 NUMERIC_TOKEN = re.compile(r"^[\d.,%()$-]+$")
+ANNEX_HEADING_MAX_CHARS = 110  # an annex heading line is no longer than this
+TABULAR_MIN_TOKENS = 6         # fewer tokens than this is never judged tabular
+TABULAR_NUMERIC_SHARE = 0.35   # tabular: at least this share of tokens are figures...
+TABULAR_DIGIT_SHARE = 0.20     # ...or at least this share of characters are digits...
+TABULAR_MAX_WORDY = 0.45       # ...and fewer than this share are words of four letters or more
+WORDY_MIN_CHARS = 3            # a token longer than this, not a number, is a word
 
 # Character folds. Deliberately not NFKC: that would turn a comparison operator
 # into two characters and change meaning. The risk-matrix glyphs are left alone
@@ -95,7 +101,7 @@ def annex_match(line):
     if not m:
         return None
     rest = m.group(3).strip()
-    if rest.startswith(")") or len(line.strip()) > 110:
+    if rest.startswith(")") or len(line.strip()) > ANNEX_HEADING_MAX_CHARS:
         return None
     if re.search(r"[.!?]\s+[A-Z]", rest) or rest.endswith("."):
         return None
@@ -116,10 +122,11 @@ def looks_tabular(body):
     so column gutters are not a signal here; tables the reader recognises as
     tables never reach it."""
     toks = TOKEN.findall(body)
-    if len(toks) < 6:
+    if len(toks) < TABULAR_MIN_TOKENS:
         return False
     numeric = sum(1 for t in toks if NUMERIC_TOKEN.match(t) or t.isdigit())
-    wordy = sum(1 for t in toks if len(t) > 3 and not t.isdigit())
+    wordy = sum(1 for t in toks if len(t) > WORDY_MIN_CHARS and not t.isdigit())
     digits = sum(c.isdigit() for c in body)
-    return (numeric / len(toks) >= 0.35 or digits / max(len(body), 1) >= 0.20) and \
-        wordy / len(toks) < 0.45
+    return (numeric / len(toks) >= TABULAR_NUMERIC_SHARE
+            or digits / max(len(body), 1) >= TABULAR_DIGIT_SHARE) and \
+        wordy / len(toks) < TABULAR_MAX_WORDY

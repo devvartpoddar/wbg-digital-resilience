@@ -46,6 +46,16 @@ MIN_SEEN = 3
 # wins only when it is this many times more common than the alternative.
 RATIO = 5
 MIN_HALF = 2
+PROSE_MIN_COUNT = 2     # the prose (or its names) uses a word whole this often to count it
+ACRONYM_MAX_CHARS = 6   # an all-capitals token this short is an acronym, never split
+CAMEL_MIN_HALF = 4      # both halves this long let a known right half vouch for the left
+SPLIT_MIN_PART = 3      # a frequency split leaves at least this many letters each side
+SHORT_HALF_CHARS = 3    # a half this short makes a whole token more likely a foreign word...
+COMMON_SHORT_WORD = 50  # ...unless the prose uses that half at least this often
+FUSED_MIN_PART = 2      # a fused pair is cut with at least this many letters each side
+FUSED_RIGHT_MIN = 4     # a function word on the right of a fused pair is this long
+UNFUSE_MIN_CHARS = 5    # a shorter word is never unfused
+REJOIN_MAX_PARTS = 3    # rejoin glues up to this many neighbouring fragments
 # A two-letter half is only believed when it is a function word: the corpus
 # is full of 'es', 'er', 'us' as fragments of longer words.
 SHORT_WORDS = {"of", "to", "in", "on", "at", "an", "by", "or", "as", "is", "it",
@@ -135,7 +145,7 @@ def _prose_word(word, vocab):
         return w in ("a", "i")
     if len(w) == 2:
         return w in EN_SHORT
-    return prose.get(w, 0) >= 2
+    return prose.get(w, 0) >= PROSE_MIN_COUNT
 
 
 def build_vocab(texts):
@@ -161,11 +171,11 @@ def _best_cut(token, vocab, names=None):
     as 'GovNet', 'MInT' or 'WiFi' that the prose uses whole is a name and is
     left alone; 'DataCenter' is not one the prose uses, so it is split even
     though the plans repeat it often enough to look like a word."""
-    if token.isupper() and len(token) <= 6:
+    if token.isupper() and len(token) <= ACRONYM_MAX_CHARS:
         return None                         # an acronym: UNOPS, NIDC
     boundaries = [m.start() for m in re.finditer(r"(?<=[a-zà-ÿ])(?=[A-ZÀ-Þ])", token)]
     if boundaries:
-        if names is not None and names.get(token.lower(), 0) >= 2:
+        if names is not None and names.get(token.lower(), 0) >= PROSE_MIN_COUNT:
             return None
         if names is None and _known(token, vocab):
             return None
@@ -179,7 +189,8 @@ def _best_cut(token, vocab, names=None):
                 continue
             # 'aConsultancy': the article is the one single letter allowed.
             left_ok = _known(left, vocab) or left.lower() == "a" or \
-                (len(left) >= 4 and len(right) >= 4 and _known(right, vocab))
+                (len(left) >= CAMEL_MIN_HALF and len(right) >= CAMEL_MIN_HALF
+                 and _known(right, vocab))
             if left_ok and (_known(right, vocab) or right.isupper()):
                 return b
     if len(token) < 2 * MIN_HALF:
@@ -191,9 +202,9 @@ def _best_cut(token, vocab, names=None):
         # more common than the glued form - 'informatiquepour'.
         tc = vocab.get(token.lower(), 0)
         best, score = None, 0
-        for i in range(3, len(token) - 1):
+        for i in range(SPLIT_MIN_PART, len(token) - 1):
             left, right = token[:i], token[i:]
-            if len(right) < 3 and right.lower() not in SHORT_WORDS:
+            if len(right) < SPLIT_MIN_PART and right.lower() not in SHORT_WORDS:
                 continue
             if right.lower() in ENDINGS:
                 continue
@@ -218,10 +229,11 @@ def _best_cut(token, vocab, names=None):
         # fewer, is far more likely a foreign word than a glue - 'formatos' is
         # not 'format os', 'contable' not 'con table' - unless the short half
         # is a word English prose uses all the time, as in 'Provisionof'.
-        short = left if len(left) <= 3 else right if len(right) <= 3 else None
+        short = left if len(left) <= SHORT_HALF_CHARS else \
+            right if len(right) <= SHORT_HALF_CHARS else None
         if ok and short and _known(token, vocab):
             prose = getattr(vocab, "prose", None) or {}
-            if prose.get(short.lower(), 0) < 50:
+            if prose.get(short.lower(), 0) < COMMON_SHORT_WORD:
                 continue
         # A token that also occurs whole is split only when both halves are
         # far more common than it: 'designingand' yes, 'scanner' (scan + a
@@ -252,11 +264,11 @@ def _fused_cut(word, vocab):
     w = word.lower()
     wc = vocab.get(w, 0)
     best, score = None, 0
-    for i in range(2, len(w) - 2):
+    for i in range(FUSED_MIN_PART, len(w) - FUSED_MIN_PART):
         left, right = w[:i], w[i:]
         if right in ENDINGS:
             continue
-        if not (left in FUSED_LEFT or (right in FUNCTION_WORDS and len(right) >= 4)):
+        if not (left in FUSED_LEFT or (right in FUNCTION_WORDS and len(right) >= FUSED_RIGHT_MIN)):
             continue
         s = min(vocab.get(left, 0), vocab.get(right, 0))
         if s >= max(RATIO * wc, MIN_SEEN) and s > score:
@@ -276,7 +288,7 @@ def unfuse(text, vocab, prose_vocab=None):
     def fix(m):
         nonlocal n
         tok = m.group(0)
-        if len(tok) < 5 or _prose_word(tok, prose_vocab):
+        if len(tok) < UNFUSE_MIN_CHARS or _prose_word(tok, prose_vocab):
             return tok
         cut = _fused_cut(tok, vocab)
         if cut is None:
@@ -301,7 +313,7 @@ def rejoin(text, vocab):
         # common word wins: 'prior itaires ayant' is 'prioritaires ayant'
         # (54 uses), not 'prioritairesayant' (3).
         candidates = []
-        for k in (3, 2):
+        for k in range(REJOIN_MAX_PARTS, 1, -1):
             if i + k > len(toks):
                 continue
             parts = toks[i:i + k]

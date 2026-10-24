@@ -18,12 +18,19 @@ with raw_start:raw_end.
 
 Only the PDF is read. A document whose PDF is missing, unreadable or a scan
 (no text layer) is not cleaned, and the report lists it.
+
+Each PDF read is cached under the parser version: PARSER, a checksum of the
+constants of pdf_layout.py and text_rules.py, and the pdfplumber and pdfminer
+versions. Changing any of them re-reads every PDF once. The first run after
+the version took this form (it used to hash the two files' bytes) re-reads
+every PDF once.
 """
 import argparse, csv, hashlib, os, re, sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root, where  # noqa: E402
+from paths import data_root, file_sha256, where  # noqa: E402
+from pdf_layout import SECTION_TITLE_MAX_CHARS  # noqa: E402
 from text_rules import TOKEN, ROMAN, annex_match  # noqa: E402
 from keys import project_parts, project_at  # noqa: E402
 
@@ -57,6 +64,11 @@ SENTENCE_BLOCKS = {"narrative", "annex"}
 # say; component names and costs are read from the front matter separately
 # (src/components.py), straight from the PDF.
 MODEL_BLOCKS = {"narrative", "annex", "footnote"}
+# A footnote holding a link and fewer words than this is a bibliography entry.
+CITATION_MAX_WORDS = 15
+# The PDF reader's own version: bump it when pdf_layout.py or text_rules.py
+# change how a PDF is read in a way their constants do not show.
+PARSER = "pdf-layout-2"
 
 
 def citation_only(text, block):
@@ -65,7 +77,7 @@ def citation_only(text, block):
     is kept for reading and left out of what the model is given."""
     if block != "footnote" or "[link]" not in text:
         return False
-    return len(re.findall(r"[^\W\d_]{2,}", text.replace("[link]", ""))) < 15
+    return len(re.findall(r"[^\W\d_]{2,}", text.replace("[link]", ""))) < CITATION_MAX_WORDS
 
 
 def write_if_changed(path, text):
@@ -84,18 +96,45 @@ SENT_COLS = ["sentence_id", "paragraph_id", "doc_id", "ordinal", "char_start",
              "char_end", "n_tokens", "text_sha256"]
 
 
+def _canon(value):
+    """A constant as a stable string: patterns by text and flags, sets sorted."""
+    if isinstance(value, re.Pattern):
+        return f"re({value.pattern!r},{value.flags})"
+    if isinstance(value, (set, frozenset)):
+        return "{" + ",".join(sorted(_canon(v) for v in value)) + "}"
+    if isinstance(value, dict):
+        return "{" + ",".join(f"{_canon(k)}:{_canon(v)}" for k, v in
+                              sorted(value.items(), key=lambda kv: repr(kv[0]))) + "}"
+    if isinstance(value, (list, tuple)):
+        return "[" + ",".join(_canon(v) for v in value) + "]"
+    return repr(value)
+
+
+def heuristics(*modules):
+    """{module.NAME: canonical value} of the upper-case module constants that
+    shape the PDF read."""
+    out = {}
+    for m in modules:
+        for k, v in vars(m).items():
+            if re.fullmatch(r"[A-Z][A-Z0-9_]*", k) and \
+                    isinstance(v, (int, float, str, tuple, list, dict, set, frozenset, re.Pattern)):
+                out[f"{m.__name__}.{k}"] = _canon(v)
+    return out
+
+
 def parser_version():
-    """The PDF reader's identity: pdfplumber's version plus a checksum of the
-    code that shapes its output - pdf_layout.py and the text rules it uses - so
-    any change to those rules invalidates the cache and is recorded on every
-    row, while an edit elsewhere does not cost an hour of re-reading."""
+    """The PDF reader's identity: PARSER, a checksum of the constants of
+    pdf_layout.py and text_rules.py, and the pdfplumber and pdfminer versions.
+    It keys the layout cache and is recorded on every row, so a changed
+    heuristic or library re-reads every PDF once, and an edit elsewhere does not."""
+    import pdfminer
     import pdfplumber
-    here = os.path.dirname(os.path.abspath(__file__))
-    h = hashlib.sha256()
-    for name in ("pdf_layout.py", "text_rules.py"):
-        with open(os.path.join(here, name), "rb") as fh:
-            h.update(fh.read())
-    return f"pdf-layout-{h.hexdigest()[:10]}/pdfplumber-{pdfplumber.__version__}"
+    import pdf_layout
+    import text_rules
+    consts = heuristics(pdf_layout, text_rules)
+    h = hashlib.sha256("\n".join(f"{k}={consts[k]}" for k in sorted(consts)).encode())
+    return (f"{PARSER}-{h.hexdigest()[:10]}/pdfplumber-{pdfplumber.__version__}"
+            f"/pdfminer-{pdfminer.__version__}")
 
 
 def _layout_job(args):
@@ -127,7 +166,7 @@ def layout_cached(data, docs, workers):
         pdf = where(data, "pdf", f"{doc['doc_id']}.pdf")
         if not os.path.exists(pdf):
             continue
-        sha = doc.get("pdf_sha256") or hashlib.sha256(open(pdf, "rb").read()).hexdigest()
+        sha = doc.get("pdf_sha256") or file_sha256(pdf, remember=False)
         cache = where(data, "cache", f"{doc['doc_id']}.layout.json")
         if os.path.exists(cache):
             with open(cache, encoding="utf-8") as fh:
@@ -242,7 +281,7 @@ def main():
             doc_paras.append({
                 "paragraph_id": pid, "doc_id": did,
                 "project_ids": project_at(parts, a), "ordinal": ordinal,
-                "section_path": path, "section_title": title[:120], "block": block,
+                "section_path": path, "section_title": title[:SECTION_TITLE_MAX_CHARS], "block": block,
                 "char_start": a, "char_end": b, "n_tokens": ntok,
                 "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
                 "page_from": p0, "page_to": p1, "parser": version,

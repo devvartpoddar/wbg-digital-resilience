@@ -42,6 +42,28 @@ FOOTNOTE_GAP = 2.0           # footnotes set in the text's own type start after 
 FOOTNOTE_MAX_UNNUMBERED = 8   # a carried footnote with no number of its own runs at most this many lines
 FOOTNOTE_NUMBER = re.compile(r"^\d{1,3}(?!\d)(?![.,]\d)\s*\S")
 HEADER_REPEAT = 0.30          # a line at the same height on this share of pages is furniture
+FURNITURE_MIN_PAGES = 3       # ...and on at least this many pages
+FURNITURE_BAND = 4            # points: line tops are compared in bands this tall
+MARKER_RAISE = 0.1            # a footnote marker's bottom sits this share of the line size above the baseline
+LEVEL_SHEAR = 0.1             # a text matrix with shear terms below this is level text
+STYLE_SHARE = 0.6             # a line is bold (italic) when this share of its characters is
+PAGE_FRAME_SHARE = 0.8        # a "table" covering this share of the page is a frame, not a table
+TABLE_EDGE_SLACK = 1          # points a line's middle may sit outside a table's ruling
+HEADER_SCAN_ROWS = 12         # a table's header row is looked for among its first rows
+SUBHEADER_MAX_CHARS = 3       # a row of cells this short under the header is a sub-header
+CARRIED_HEADER_MAX_LINE = 2   # a table carries the last header when it starts by this line of a page
+TITLE_MAX_WORDS = 30          # a component, figure or table title line has at most this many words
+BODY_SIZE_TOLERANCE = 0.3     # points: a line within this of the body size is body type
+MEASURE_MIN_LINES = 5         # a page's full-line width needs this many body lines
+HEADING_SIZE_STEP = 0.5       # points above the body size that make a line a heading
+HEADING_MAX_WORDS = 14        # a heading line has at most this many words
+HEADING_MAX_MEASURE = 0.8     # ...and is narrower than this share of the page's full line
+CAPTION_RESET_WORDS = 6       # body text longer than this after a title makes it a section heading
+PITCH_MAX_GAP = 3             # gaps beyond this many body sizes are not line pitch
+DEFAULT_PITCH = 1.2           # line pitch, in body sizes, when a document gives none
+ROMAN_HEADING_MAX_CHARS = 90  # a body line opening with a roman numeral is a heading below this length
+ANNEX_HEADING_MAX_CHARS = 110 # an annex heading is shorter than this
+SECTION_TITLE_MAX_CHARS = 120 # a section title is stored cut to this length
 TOC_LINE = re.compile(r"(\.{3,}|\s\.\s\.\s)\s*\d{1,4}\s*$")
 PAGE_NUM = re.compile(r"^\s*(?:Page\s+)?\d{1,4}(?:\s+of\s+\d{1,4})?\s*$", re.I)
 # Page furniture recognisable by its words alone, wherever on the page it sits:
@@ -129,7 +151,7 @@ def _line_text(line, chars, line_size):
         # but lowered, and must survive.
         if (k and baseline is not None and ch["size"] < SUPERSCRIPT_RATIO * line_size
                 and (t.isdigit() or t in ",*")
-                and ch["bottom"] < baseline - 0.1 * line_size):
+                and ch["bottom"] < baseline - MARKER_RAISE * line_size):
             drop.add(k)
     # A list bullet drawn from a symbol font arrives as whatever letter sits at
     # that code point in the font's own table - Wingdings 'y', Courier 'o',
@@ -168,7 +190,7 @@ def _not_rotated(obj):
     if obj.get("object_type") != "char":
         return True
     m = obj.get("matrix") or (1, 0, 0, 1)
-    return abs(m[1]) < 0.1 and abs(m[2]) < 0.1
+    return abs(m[1]) < LEVEL_SHEAR and abs(m[2]) < LEVEL_SHEAR
 
 
 def _on_page(bbox):
@@ -200,9 +222,10 @@ def _page_lines(page):
         if not sizes:
             continue
         size = Counter(sizes).most_common(1)[0][0]
-        bold = sum("Bold" in c["fontname"] or "Black" in c["fontname"] for c in chars) > 0.6 * len(chars)
+        bold = sum("Bold" in c["fontname"] or "Black" in c["fontname"]
+                   for c in chars) > STYLE_SHARE * len(chars)
         italic = sum("Italic" in c["fontname"] or "Oblique" in c["fontname"]
-                     for c in chars) > 0.6 * len(chars)
+                     for c in chars) > STYLE_SHARE * len(chars)
         text = _norm(_line_text(ln, chars, size))
         if text:
             lines.append({"top": ln["top"], "bottom": ln["bottom"], "x0": ln["x0"],
@@ -218,7 +241,7 @@ def _tables(page):
     for tb in page.find_tables():
         x0, top, x1, bottom = tb.bbox
         rows = tb.extract()
-        if (x1 - x0) * (bottom - top) > 0.8 * area:
+        if (x1 - x0) * (bottom - top) > PAGE_FRAME_SHARE * area:
             continue
         if len(rows) < 2 or max(len(r) for r in rows) < 2:
             continue
@@ -279,7 +302,7 @@ def _clean_table(rows, vocab):
         return [j for j, v in enumerate(r) if v and not _is_numeric(v)]
 
     h = None
-    for i, r in enumerate(grid[:12]):
+    for i, r in enumerate(grid[:HEADER_SCAN_ROWS]):
         if len(text_cells(r)) >= 2 and not numeric_cells(r) and \
                 any(numeric_cells(x) for x in grid[i + 1:]):
             h = i
@@ -306,7 +329,7 @@ def _clean_table(rows, vocab):
     body = grid[h + 1:]
 
     def is_subheader(r):
-        return bool(r) and all(len(v) <= 3 for v in r if v) and not text_cells(r) \
+        return bool(r) and all(len(v) <= SUBHEADER_MAX_CHARS for v in r if v) and not text_cells(r) \
             and len([v for v in r if v]) >= 2
 
     if body and is_subheader(body[0]):
@@ -392,7 +415,7 @@ def _in_box(line, box):
     bulleted cell, its first line read as body text and the rest as table."""
     x0, top, x1, bottom = box
     mid = (line["top"] + line["bottom"]) / 2
-    if not top - 1 <= mid <= bottom + 1:
+    if not top - TABLE_EDGE_SLACK <= mid <= bottom + TABLE_EDGE_SLACK:
         return False
     width = max(line["x1"] - line["x0"], 1e-6)
     overlap = min(line["x1"], x1) - max(line["x0"], x0)
@@ -403,9 +426,9 @@ def _furniture(pages):
     """Fingerprints of lines repeating at the same height across the document."""
     seen = Counter()
     for lines in pages:
-        for fp in {(round(l["top"] / 4), C.fingerprint(l["text"])) for l in lines}:
+        for fp in {(round(l["top"] / FURNITURE_BAND), C.fingerprint(l["text"])) for l in lines}:
             seen[fp] += 1
-    need = max(3, int(HEADER_REPEAT * len(pages)))
+    need = max(FURNITURE_MIN_PAGES, int(HEADER_REPEAT * len(pages)))
     return {fp for fp, n in seen.items() if n >= need and fp[1]}
 
 
@@ -591,7 +614,7 @@ def _title_line(text):
     """A component, figure or table title standing as its own line: read as
     a heading, so never the lead-in of a list or an item of one."""
     text = GLYPH_BULLET.sub("", text, count=1).strip()
-    return bool(TITLE_LINE.match(text)) and len(text.split()) <= 30 \
+    return bool(TITLE_LINE.match(text)) and len(text.split()) <= TITLE_MAX_WORDS \
         and not re.search(r"[.;]$", text) and "\n" not in text
 
 
@@ -653,8 +676,8 @@ def extract(pdf, raw_out=None):
     # than portrait ones. A heading is short; a line running the full measure
     # is prose, even when it is set in bold for emphasis.
     def _measure(lines):
-        w = sorted(l["x1"] - l["x0"] for l in lines if abs(l["size"] - body) < 0.3)
-        return w[len(w) // 2] if len(w) >= 5 else None
+        w = sorted(l["x1"] - l["x0"] for l in lines if abs(l["size"] - body) < BODY_SIZE_TOLERANCE)
+        return w[len(w) // 2] if len(w) >= MEASURE_MIN_LINES else None
     page_measure = [_measure(lines) for lines in pages]
     known = sorted(m for m in page_measure if m)
     doc_measure = known[len(known) // 2] if known else 0
@@ -675,7 +698,7 @@ def extract(pdf, raw_out=None):
     for lines in pages:
         keep = []
         for l in lines:
-            if (round(l["top"] / 4), C.fingerprint(l["text"])) in furniture:
+            if (round(l["top"] / FURNITURE_BAND), C.fingerprint(l["text"])) in furniture:
                 stats["furniture_lines"] += 1
                 continue
             if PAGE_NUM.match(l["text"]):
@@ -718,7 +741,7 @@ def extract(pdf, raw_out=None):
                     # header: borrow the last one when the column count agrees
                     # and the table starts the page's content.
                     if header is None and last_header[0] and \
-                            len(last_header[0]) == width and i <= 2:
+                            len(last_header[0]) == width and i <= CARRIED_HEADER_MAX_LINE:
                         header = last_header[0]
                         caption = last_header[1]
                         stats["table_headers_carried"] += 1
@@ -749,14 +772,15 @@ def extract(pdf, raw_out=None):
             if TOC_LINE.search(l["text"]) or _contents_entry(l["text"]):
                 stats["contents_lines"] += 1
                 continue
-            heading = (l["bold"] or l["italic"] or l["size"] > body + 0.5) \
-                and len(l["text"].split()) <= 14 and not re.search(r"[.;,:]$", l["text"]) \
-                and (l["x1"] - l["x0"]) < 0.8 * page_measure[pno - 1]
+            heading = (l["bold"] or l["italic"] or l["size"] > body + HEADING_SIZE_STEP) \
+                and len(l["text"].split()) <= HEADING_MAX_WORDS \
+                and not re.search(r"[.;,:]$", l["text"]) \
+                and (l["x1"] - l["x0"]) < HEADING_MAX_MEASURE * page_measure[pno - 1]
             text = unmark(l["text"])
             if heading or TITLE_LINE.match(text):
                 last_caption[0], last_caption[1] = text, pno
                 last_header[0] = None   # a new title ends the previous table
-            elif len(text.split()) > 6:
+            elif len(text.split()) > CAPTION_RESET_WORDS:
                 # Body prose after a title makes it a section heading, not a
                 # caption: the data sheet after "G. Key Risks" and its text is
                 # not a key-risks table. A short note ("(US$ million)") keeps it.
@@ -764,9 +788,9 @@ def extract(pdf, raw_out=None):
             items.append(("heading" if heading else "body", pno, text, l))
             if i:
                 gap = l["top"] - keep[i - 1]["top"]
-                if 0 < gap < 3 * body:
+                if 0 < gap < PITCH_MAX_GAP * body:
                     pitches.append(round(gap, 1))
-    pitch = statistics.median(pitches) if pitches else 1.2 * body
+    pitch = statistics.median(pitches) if pitches else DEFAULT_PITCH * body
 
     # 2. Group lines into units.
     units = []          # [kind, text, page_from, page_to]
@@ -901,12 +925,12 @@ def extract(pdf, raw_out=None):
         if kind == "heading" or kind == "body":
             m_roman, m_annex = C.ROMAN.match(text), C.annex_match(text)
             m_letter = C.LETTER.match(text)
-            if m_roman and (kind == "heading" or (len(text) < 90 and
+            if m_roman and (kind == "heading" or (len(text) < ROMAN_HEADING_MAX_CHARS and
                                                   m_roman.group(2).isupper())):
                 block = "heading"
                 roman_seen = True
                 sec_path, sec_title = m_roman.group(1), m_roman.group(2).strip(" .:-")
-            elif m_annex and roman_seen and len(text) < 110:
+            elif m_annex and roman_seen and len(text) < ANNEX_HEADING_MAX_CHARS:
                 annex_seen = True
                 sec_path = f"{m_annex.group(1).upper()} {m_annex.group(2)}"
                 sec_title = m_annex.group(3).strip(" .:-")
@@ -926,8 +950,8 @@ def extract(pdf, raw_out=None):
         elif block == "table" and not roman_seen:
             block = "frontmatter"
         clean_parts.append(text + "\n\n")
-        spans.append((cursor, cursor + len(text), sec_path, sec_title[:120], block, p0, p1,
-                      meta))
+        spans.append((cursor, cursor + len(text), sec_path, sec_title[:SECTION_TITLE_MAX_CHARS],
+                      block, p0, p1, meta))
         cursor += len(text) + 2
     stats["units"] = len(spans)
     return "".join(clean_parts), spans, stats

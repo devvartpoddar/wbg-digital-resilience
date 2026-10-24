@@ -95,6 +95,7 @@ NUMBERED = re.compile(r"^(?:\d+(?:\.\d+)*\.?|\(?[ivxlc]+\)|\(?[a-z]\)|[A-Z]\.)\s
 MINOR = {"and", "or", "of", "the", "for", "to", "in", "on", "a", "an", "with", "by", "at", "from"}
 MIN_WORDS = 4           # fewer words than this is a scrap
 TITLE_WORDS = 10        # a title is at most this many words, nearly all capitalised
+TITLE_CAPITALISED = 0.8 # ...this share of its content words capitalised
 UNVERBED_NOTE = 12      # a footnote this short with no verb is a citation or a caption
 CITATION_WORDS = 40     # a citation (a year or a link, and a source) is shorter than this
 
@@ -127,7 +128,7 @@ def left_out(kind, text, has_lead_in):
     content = [w for w in words if w.lower() not in MINOR]
     titled = NUMBERED.match(text.strip()) or not text.strip().endswith((".", ";", ":"))
     if n <= TITLE_WORDS and content and titled and \
-            sum(w[0].isupper() for w in content) >= 0.8 * len(content):
+            sum(w[0].isupper() for w in content) >= TITLE_CAPITALISED * len(content):
         return "fragment"
     return ""
 

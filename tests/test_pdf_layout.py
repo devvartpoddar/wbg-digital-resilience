@@ -323,3 +323,12 @@ def test_footnotes_read_as_body_text_are_one_unit_each():
         "13 Data from the agency, February 2023", "14 A joint study was done.",
         "15 The third note is here.", "The project will finance 14 Towers in 2023 15 Districts."]
     assert got[1][4]["src"] == [10, 90] and got[1][4]["src"] is not got[0][4]["src"]
+
+
+def test_the_parser_version_follows_the_reading_constants(monkeypatch):
+    import clean
+    v = clean.parser_version()
+    assert v == clean.parser_version() and v.startswith(clean.PARSER + "-")
+    assert "/pdfplumber-" in v and "/pdfminer-" in v
+    monkeypatch.setattr(PL, "LINE_GAP", PL.LINE_GAP + 0.01)
+    assert clean.parser_version() != v
