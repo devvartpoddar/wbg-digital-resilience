@@ -12,7 +12,7 @@ are fixed-width text whose cells clip at the column edge; parse_plan_text reads
 the STEP tables in them. Everything derived (codes, labels, language) is computed
 in clean_procurement.
 """
-import argparse, json, os, re, sys, threading, time, unicodedata, urllib.parse
+import argparse, json, os, re, sys, time, unicodedata, urllib.parse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -21,7 +21,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where, write_fetch_status  # noqa: E402
 
 import plan_table                                     # noqa: E402
-from fetch import get, now_stamp, read_cohort  # noqa: E402
+from fetch import get, now_stamp, read_cohort, write_atomic  # noqa: E402
 from common import read_csv, sha_text, write_csv  # noqa: E402
 from dates import iso_date                    # noqa: E402
 from clean_procurement import (                        # noqa: E402
@@ -652,10 +652,7 @@ def store_keeping_old(path, blob):
         keep = f"{stem}.{sha_text(old)[:12]}{ext}.old"
         if not os.path.exists(keep):
             os.replace(path, keep)
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.part"
-    with open(tmp, "wb") as fh:
-        fh.write(blob)
-    os.replace(tmp, path)
+    write_atomic(path, blob)
 
 
 def refuse_page(blob, what):

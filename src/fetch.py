@@ -7,7 +7,7 @@ Writes data/raw/pdf/{doc_id}.pdf, data/raw/documents.csv (one row per document),
 
 Resumable: a PDF already on disk is not fetched again.
 """
-import argparse, csv, os, re, sys, tempfile, time
+import argparse, csv, os, re, sys, threading, time
 import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -78,12 +78,12 @@ def complete_pdf(blob):
 
 
 def write_atomic(dest, blob):
-    """Write aside under a name unique to this call, then rename into place,
-    so two threads fetching one file never share a temporary file."""
-    fd, tmp = tempfile.mkstemp(dir=os.path.dirname(dest),
-                               prefix=os.path.basename(dest) + ".", suffix=".part")
+    """Write aside under a name unique to this process and thread, then rename
+    into place, so two threads fetching one file never share a temporary file
+    (the file keeps the default permissions, unlike a tempfile.mkstemp one)."""
+    tmp = f"{dest}.{os.getpid()}.{threading.get_ident()}.part"
     try:
-        with os.fdopen(fd, "wb") as fh:
+        with open(tmp, "wb") as fh:
             fh.write(blob)
         os.replace(tmp, dest)
     except BaseException:
