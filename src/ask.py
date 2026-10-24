@@ -32,11 +32,10 @@ BATCH = int(os.environ.get("WBG_ASK_BATCH") or panel.get("ask.batch_items", 50))
 BATCH_MAX_CHARS = int(panel.get("ask.batch_max_chars", 80_000))
 MAX_REQUEST_CHARS = int(panel.get("ask.max_request_chars", 30_000))
 WORKERS = 10
-HOW = ("Several items follow, each in its own field ('item 01', 'item 02', ...), and each "
-       "question is set out in full in its own field ('question <id>'). Each short question "
-       "below asks one of those questions about one item: answer it for that item alone, "
-       "reading any field the question names (such as 'sentence', 'paragraph', 'package' or "
-       "'commitment') as that line of the item. The other items are separate.")
+HOW = ("Items i01, i02, ... are each one record. Field 'q <id>' states a question in full. "
+       "Each short question '<id> on i..' asks question <id> about that item alone, reading "
+       "any field the question names ('sentence', 'paragraph', 'package', 'commitment') as "
+       "that line of the item. The other items are separate.")
 
 
 # ----------------------------------------------------------------- the store
@@ -93,7 +92,9 @@ def _spec(q):
 
 
 def _item_question(q, qid, field):
-    return {"type": "score", "instructions": f"Question '{qid}' about {field}.",
+    # The shortest stub the endpoint accepts: "type" is required, and a blank
+    # instruction makes the model answer at random (tested 2026-10-24).
+    return {"type": "score", "instructions": f"{qid} on {field}",
             "criteria": [str(i) for i in range(len(q["criteria"]))]}
 
 
@@ -107,14 +108,14 @@ def body(model, state, qs):
 
 def batch_body(model, states, qs):
     """(body, [(item index, qid, batch qid)]) asking every question of each state."""
-    shared = {"how to answer": HOW, **{f"question {qid}": _spec(q) for qid, q in qs.items()}}
+    shared = {"how": HOW, **{f"q {qid}": _spec(q) for qid, q in qs.items()}}
     bqs, members = {}, []
     for i, s in enumerate(states, 1):
-        f = f"item {i:02d}"
+        f = f"i{i:02d}"
         shared[f] = _item_text(s)
         for qid, q in qs.items():
-            bqs[f"{f} | {qid}"] = _item_question(q, qid, f)
-            members.append((i - 1, qid, f"{f} | {qid}"))
+            bqs[f"{f} {qid}"] = _item_question(q, qid, f)
+            members.append((i - 1, qid, f"{f} {qid}"))
     return body(model, shared, bqs), members
 
 

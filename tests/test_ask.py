@@ -54,7 +54,7 @@ def test_batches_are_split_by_question_set_and_ordered_by_state_hash(pg, fake_mo
     sizes = sorted(len(b["questions"]) for b in fake_model)
     assert sizes == [1, 4]
     big = next(b for b in fake_model if len(b["questions"]) == 4)
-    shown = [big["state"][f"item {i:02d}"] for i in range(1, 5)]
+    shown = [big["state"][f"i{i:02d}"] for i in range(1, 5)]
     expect = sorted(shown, key=lambda s: Q.sha({"sentence": s.split(": ", 1)[1]}))
     assert shown == expect
 

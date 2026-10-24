@@ -259,10 +259,10 @@ def fake_model(monkeypatch):
         calls.append(b)
         out = {}
         for bq, q in b["questions"].items():
-            field = bq.split(" | ")[0] if " | " in bq else None
+            m_ = re.match(r"(i\d\d) (.+)$", bq)                # a batch stub: "i01 fiber"
+            field = m_.group(1) if m_ and m_.group(1) in b["state"] else None
             text = b["state"][field] if field else json.dumps(b["state"])
-            asked = (b["state"].get(f"question {bq.split(' | ')[1]}") if field
-                     else q["instructions"]).lower()
+            asked = (b["state"].get(f"q {m_.group(2)}") if field else q["instructions"]).lower()
             t = text.lower()
             if "carrying out" in asked:                       # the link question reads the package
                 m = re.search(r"package[\"']?: ?[\"']?([^\n\"]*)", text)
