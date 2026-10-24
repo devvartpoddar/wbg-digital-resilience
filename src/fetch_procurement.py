@@ -49,23 +49,61 @@ from clean_procurement import (                        # noqa: E402
 
 WDS = "https://search.worldbank.org/api/v3/wds"
 NOTICES = "https://search.worldbank.org/api/v2/procnotices"
+AWARDS = "https://search.worldbank.org/api/contractdata"
+PLAN_DOCTY = "Procurement Plan"
+PAGE = 500          # records per page from the notices and awards interfaces
+PLAN_PAGE = 200     # documents per page from the documents interface
 
 
-def last_page(batch, records, response, offset, cap=20000):
+def last_page(batch, records, response, offset, cap=20000, page=PAGE):
     """Whether a paged listing is done: the interface's own total is reached
     when it gives one, else a page came back empty or short. A short page
     alone would end early if the interface ever capped pages below PAGE."""
-    try:
-        total = int(response.get("total"))
-    except (TypeError, ValueError):
-        total = None
+    total = _total(response)
     if total is not None:
         return len(records) >= total or not batch or offset > cap
-    return len(batch) < PAGE or offset > cap
-AWARDS = "https://search.worldbank.org/api/contractdata"
+    return len(batch) < page or offset > cap
 
-PLAN_DOCTY = "Procurement Plan"
-PAGE = 500
+
+def _total(response):
+    try:
+        return int(response.get("total"))
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_pages(url, params, items, *, what, expected=(), page=PAGE, delay=0.3, timeout=90,
+                log=None, source=""):
+    """(records, total) of a paged listing. `params` is the query without
+    paging, `items(json)` the page's records; every page is checked for HTML,
+    for JSON and for the `expected` keys, and recorded in `log`. Raises
+    RuntimeError when fewer records came back than the interface's own total,
+    so a truncated list is never written."""
+    records, offset = [], 0
+    while True:
+        q = urllib.parse.urlencode({"format": "json", "rows": str(page), "os": str(offset),
+                                    **params})
+        r = get(f"{url}?{q}", timeout=timeout)
+        j = json_body(r, what)
+        batch = items(j)
+        check_keys(batch, expected, what)
+        if log is not None:
+            log.record(source, url, q, len(batch), sha256_bytes(r.content))
+        records.extend(batch)
+        offset += page
+        if last_page(batch, records, j, offset, page=page):
+            break
+        time.sleep(delay)
+    total = _total(j)
+    if total is not None and len(records) < total:
+        raise RuntimeError(f"{what}: {len(records)} of {total} records returned; "
+                           f"a truncated list is not written")
+    return records, total
+
+
+def _documents(j):
+    """The records of a documents-interface page (its 'facets' entry is not one)."""
+    return [v for k, v in (j.get("documents") or {}).items() if k != "facets"]
 
 
 # A date and a figure as a plan prints them in its milestone and amount cells.
@@ -110,19 +148,19 @@ APPROACH_TOKENS = ("Open - International", "Open - National", "Limited - Interna
                    "Limited - National", "Direct - International", "Direct - National",
                    "Open - international", "Open - national", "Open / National",
                    "Limited", "Direct", "Open")
-PACKAGE_COLS = [
+RAW_PACKAGE_COLS = [
     "package_version_id", "project_id", "plan_version", "plan_doc_id",
     "plan_disclosure_date", "borrower_ref", "description", "category_raw",
     "method_raw", "market_approach", "status_raw", "planned_date", "revised_date",
     "estimated_amount", "actual_amount", "currency", "content_sha256", "fetched_at",
     "section", "record_index", "cells_raw",
 ]
-NOTICE_COLS = [
+RAW_NOTICE_COLS = [
     "notice_id", "project_id", "notice_type", "notice_status", "publication_date",
     "deadline_date", "borrower_ref", "description", "category_raw", "method_code",
     "method_raw", "country_name", "notice_lang",
 ]
-AWARD_COLS = [
+RAW_AWARD_COLS = [
     "contract_id", "project_id", "borrower_ref", "description", "signed_date",
     "no_objection_date", "total_amount", "currency", "category_raw", "method_raw",
     "review_type", "supplier_name", "supplier_country", "supplier_amount", "region",
@@ -170,18 +208,12 @@ class FetchLog:
 # --------------------------------------------------------------- plan listing
 
 def list_plans(project_id, log, delay):
-    q = urllib.parse.urlencode({
-        "format": "json", "rows": "200", "projectid": project_id, "docty": PLAN_DOCTY,
-        "fl": "id,docty,display_title,disclosure_date,txturl,pdfurl,lang,projectid"})
-    url = f"{WDS}?{q}"
-    r = get(url, timeout=60)
-    data = json_body(r, f"plan listing {project_id}")
-    check_keys([v for k, v in (data.get("documents") or {}).items() if k != "facets"],
-               PLAN_LIST_KEYS, f"plan listing {project_id}")
+    recs, _ = fetch_pages(WDS, {"projectid": project_id, "docty": PLAN_DOCTY,
+                                "fl": "id,docty,display_title,disclosure_date,txturl,pdfurl,lang,projectid"},
+                          _documents, what=f"plan listing {project_id}", expected=PLAN_LIST_KEYS,
+                          page=PLAN_PAGE, delay=delay, timeout=60, log=log, source="documents")
     docs = []
-    for key, val in (data.get("documents") or {}).items():
-        if key == "facets":
-            continue
+    for val in recs:
         did = str(val.get("id") or "").strip()
         if not did:
             continue
@@ -195,7 +227,6 @@ def list_plans(project_id, log, delay):
             "lang": val.get("lang") or "",
             "txturl": val.get("txturl") or "",
         })
-    log.record("documents", WDS, q, len(docs), sha256_bytes(r.content))
     time.sleep(delay)
     return docs
 
@@ -972,136 +1003,104 @@ def _without_personal(record):
     return {k: v for k, v in record.items() if k not in PERSONAL}
 
 
-def collect_notices(projects, data, log, refresh, delay):
-    raw_dir = where(data, "notices_json")
+def _stored_records(path, refresh, delay, fetch):
+    """One project's records: the stored response, or `fetch()`ed, stripped of
+    personal fields and stored (an earlier, different copy is kept)."""
+    if os.path.exists(path) and not refresh:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    records = [_without_personal(r) for r in fetch()[0]]
+    store_keeping_old(path, json.dumps(records, ensure_ascii=False, sort_keys=True,
+                                       indent=0).encode())
+    time.sleep(delay)
+    return records
+
+
+def _collect(projects, data, folder, refresh, delay, fetch, to_row):
+    """(rows, failures) over projects: each project's records, stored under
+    data/<folder>/<project_id>.json, made rows by to_row(record, pid)."""
+    raw_dir = where(data, folder)
     os.makedirs(raw_dir, exist_ok=True)
     rows, failures = [], []
     for proj in projects:
         pid = proj["project_id"]
-        path = os.path.join(raw_dir, f"{pid}.json")
-        records = None
         try:
-            if os.path.exists(path) and not refresh:
-                with open(path, encoding="utf-8") as fh:
-                    records = json.load(fh)
-            else:
-                records, pages = [], []
-                offset = 0
-                while True:
-                    q = urllib.parse.urlencode({"format": "json", "rows": str(PAGE),
-                                                "os": str(offset), "project_id": pid})
-                    r = get(f"{NOTICES}?{q}", timeout=90)
-                    j = json_body(r, f"notices {pid}")
-                    batch = j.get("procnotices") or []
-                    check_keys(batch, NOTICE_KEYS, f"notices {pid}")
-                    log.record("notices", NOTICES, q, len(batch), sha256_bytes(r.content))
-                    records.extend(batch)
-                    pages.append(len(batch))
-                    offset += PAGE
-                    if last_page(batch, records, j, offset):
-                        break
-                    time.sleep(delay)
-                records = [_without_personal(r) for r in records]
-                blob = json.dumps(records, ensure_ascii=False, sort_keys=True,
-                                  indent=0).encode()
-                store_keeping_old(path, blob)
-                time.sleep(delay)
+            records = _stored_records(os.path.join(raw_dir, f"{pid}.json"), refresh, delay,
+                                      lambda: fetch(pid))
         except Exception as exc:                       # noqa: BLE001
             failures.append((pid, str(exc)))
             continue
-        for rec in records:
-            rows.append({
-                "notice_id": str(rec.get("id") or ""),
-                "project_id": rec.get("project_id") or pid,
-                "notice_type": rec.get("notice_type") or "",
-                "notice_status": rec.get("notice_status") or "",
-                "publication_date": _iso_date(rec.get("noticedate")),
-                "deadline_date": _iso_date(rec.get("submission_deadline_date")),
-                # The borrower reference the notice was issued under: the key
-                # that ties a notice to its plan package and its award.
-                "borrower_ref": (rec.get("bid_reference_no") or "").strip(),
-                "description": _clean_space(rec.get("bid_description") or ""),
-                "category_raw": rec.get("procurement_group") or "",
-                "method_code": rec.get("procurement_method_code") or "",
-                "method_raw": rec.get("procurement_method_name") or "",
-                "country_name": rec.get("project_ctry_name") or "",
-                "notice_lang": rec.get("notice_lang_name") or "",
-            })
+        rows.extend(to_row(rec, pid) for rec in records)
     return rows, failures
+
+
+def collect_notices(projects, data, log, refresh, delay):
+    def fetch(pid):
+        return fetch_pages(NOTICES, {"project_id": pid}, lambda j: j.get("procnotices") or [],
+                           what=f"notices {pid}", expected=NOTICE_KEYS, delay=delay, log=log,
+                           source="notices")
+    return _collect(projects, data, "notices_json", refresh, delay, fetch, _notice_row)
+
+
+def _notice_row(rec, pid):
+    return {
+        "notice_id": str(rec.get("id") or ""),
+        "project_id": rec.get("project_id") or pid,
+        "notice_type": rec.get("notice_type") or "",
+        "notice_status": rec.get("notice_status") or "",
+        "publication_date": _iso_date(rec.get("noticedate")),
+        "deadline_date": _iso_date(rec.get("submission_deadline_date")),
+        # The borrower reference the notice was issued under: the key
+        # that ties a notice to its plan package and its award.
+        "borrower_ref": (rec.get("bid_reference_no") or "").strip(),
+        "description": _clean_space(rec.get("bid_description") or ""),
+        "category_raw": rec.get("procurement_group") or "",
+        "method_code": rec.get("procurement_method_code") or "",
+        "method_raw": rec.get("procurement_method_name") or "",
+        "country_name": rec.get("project_ctry_name") or "",
+        "notice_lang": rec.get("notice_lang_name") or "",
+    }
 
 
 def collect_awards(projects, data, log, refresh, delay):
-    raw_dir = where(data, "awards_json")
-    os.makedirs(raw_dir, exist_ok=True)
-    rows, failures = [], []
-    for proj in projects:
-        pid = proj["project_id"]
-        path = os.path.join(raw_dir, f"{pid}.json")
-        records = None
+    def fetch(pid):
+        return fetch_pages(AWARDS, {"projectid": pid}, lambda j: j.get("contract") or [],
+                           what=f"awards {pid}", expected=AWARD_KEYS, delay=delay, log=log,
+                           source="awards")
+    return _collect(projects, data, "awards_json", refresh, delay, fetch, _award_row)
+
+
+def _award_row(rec, pid):
+    supp = rec.get("suppinfo") or []
+    if isinstance(supp, dict):
+        supp = [supp]
+    supp = [s for s in supp if isinstance(s, dict)]
+    names = [s.get("name") for s in supp if s.get("name")]
+    countries = [c for c in (s.get("countryname") or s.get("countryshortname") for s in supp) if c]
+    amounts = []
+    for s in supp:
         try:
-            if os.path.exists(path) and not refresh:
-                with open(path, encoding="utf-8") as fh:
-                    records = json.load(fh)
-            else:
-                records = []
-                offset = 0
-                while True:
-                    q = urllib.parse.urlencode({"format": "json", "rows": str(PAGE),
-                                                "os": str(offset), "projectid": pid})
-                    r = get(f"{AWARDS}?{q}", timeout=90)
-                    j = json_body(r, f"awards {pid}")
-                    batch = j.get("contract") or []
-                    check_keys(batch, AWARD_KEYS, f"awards {pid}")
-                    log.record("awards", AWARDS, q, len(batch), sha256_bytes(r.content))
-                    records.extend(batch)
-                    offset += PAGE
-                    if last_page(batch, records, j, offset):
-                        break
-                    time.sleep(delay)
-                records = [_without_personal(r) for r in records]
-                blob = json.dumps(records, ensure_ascii=False, sort_keys=True,
-                                  indent=0).encode()
-                store_keeping_old(path, blob)
-                time.sleep(delay)
-        except Exception as exc:                       # noqa: BLE001
-            failures.append((pid, str(exc)))
-            continue
-        for rec in records:
-            desc = _clean_space(rec.get("contr_desc") or "")
-            supp = rec.get("suppinfo") or []
-            if isinstance(supp, dict):
-                supp = [supp]
-            names = [s.get("name") for s in supp if isinstance(s, dict) and s.get("name")]
-            countries = [s.get("countryname") or s.get("countryshortname")
-                         for s in supp if isinstance(s, dict)]
-            countries = [c for c in countries if c]
-            amounts = []
-            for s in supp:
-                if not isinstance(s, dict):
-                    continue
-                try:
-                    amounts.append(float(s.get("supplier_contr_amount") or 0))
-                except (TypeError, ValueError):
-                    pass
-            rows.append({
-                "contract_id": str(rec.get("contr_id") or ""),
-                "project_id": rec.get("projectid") or pid,
-                "borrower_ref": (rec.get("contr_refnum") or "").strip(),
-                "description": desc,
-                "signed_date": _iso_date(rec.get("contr_sgn_date")),
-                "no_objection_date": _iso_date(rec.get("contr_no_obj_dat")),
-                "total_amount": _num(rec.get("total_contr_amnt")),
-                "currency": "USD",
-                "category_raw": rec.get("procurement_group") or "",
-                "method_raw": (rec.get("procu_meth_text") or "").strip(),
-                "review_type": (rec.get("rvw_type") or "").strip().lower(),
-                "supplier_name": "|".join(dict.fromkeys(n for n in names if n)),
-                "supplier_country": "|".join(dict.fromkeys(countries)),
-                "supplier_amount": "" if not amounts else f"{sum(amounts):.2f}",
-                "region": rec.get("regionname") or "",
-                "sector": _join_sector(rec.get("sector")),
-            })
-    return rows, failures
+            amounts.append(float(s.get("supplier_contr_amount") or 0))
+        except (TypeError, ValueError):
+            pass
+    return {
+        "contract_id": str(rec.get("contr_id") or ""),
+        "project_id": rec.get("projectid") or pid,
+        "borrower_ref": (rec.get("contr_refnum") or "").strip(),
+        "description": _clean_space(rec.get("contr_desc") or ""),
+        "signed_date": _iso_date(rec.get("contr_sgn_date")),
+        "no_objection_date": _iso_date(rec.get("contr_no_obj_dat")),
+        "total_amount": _num(rec.get("total_contr_amnt")),
+        "currency": "USD",
+        "category_raw": rec.get("procurement_group") or "",
+        "method_raw": (rec.get("procu_meth_text") or "").strip(),
+        "review_type": (rec.get("rvw_type") or "").strip().lower(),
+        "supplier_name": "|".join(dict.fromkeys(n for n in names if n)),
+        "supplier_country": "|".join(dict.fromkeys(countries)),
+        "supplier_amount": "" if not amounts else f"{sum(amounts):.2f}",
+        "region": rec.get("regionname") or "",
+        "sector": _join_sector(rec.get("sector")),
+    }
 
 
 def _clean_space(s):
@@ -1206,10 +1205,11 @@ def main():
     notices_ok = asked - {p for p, _ in notice_fail}
     awards_ok = asked - {p for p, _ in award_fail}
     for name, cols, rows, order, ok in (
-            ("packages_raw.csv", PACKAGE_COLS, prep,
+            ("packages_raw.csv", RAW_PACKAGE_COLS, prep,
              ("project_id", "plan_version", "record_index"), plans_ok),
-            ("notices_raw.csv", NOTICE_COLS, notices, ("project_id", "notice_id"), notices_ok),
-            ("awards_raw.csv", AWARD_COLS, awards, ("project_id", "contract_id"), awards_ok)):
+            ("notices_raw.csv", RAW_NOTICE_COLS, notices, ("project_id", "notice_id"),
+             notices_ok),
+            ("awards_raw.csv", RAW_AWARD_COLS, awards, ("project_id", "contract_id"), awards_ok)):
         path = os.path.join(proc_dir, name)
         rows = [r for r in rows if r["project_id"] in ok]
         if os.path.exists(path):

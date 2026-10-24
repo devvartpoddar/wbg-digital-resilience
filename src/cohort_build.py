@@ -17,10 +17,10 @@ Only board-approved operations are listed (a pipeline project has no
 appraisal document), and the interface's own counts are reported so a page
 that failed is visible.
 """
-import argparse, csv, datetime, os, sys, time, urllib.parse
+import argparse, csv, datetime, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fetch import get  # noqa: E402
+from fetch_procurement import fetch_pages  # noqa: E402
 from fetch_projects import PROJECTS  # noqa: E402
 from paths import data_root, where  # noqa: E402
 
@@ -33,33 +33,28 @@ INSTRUMENTS = {"ipf": ("Investment Project Financing",),
                "all": ()}
 
 
-def page(fy, offset, instrument=None):
-    q = {"format": "json", "approvalfy": str(fy), "rows": ROWS, "os": offset,
-         "fl": ",".join(FIELDS)}
-    if instrument:
-        q["lendinginstr"] = instrument
-    d = get(f"{PROJECTS}?{urllib.parse.urlencode(q)}", timeout=90).json()
-    return int(d.get("total") or 0), list((d.get("projects") or {}).values())
-
-
 def listing(from_fy, to_fy, instruments, delay=0.3, log=print):
-    """[(record)] for every operation approved in the years, by instrument."""
+    """([record], {(fy, instrument): (total, listed)}) for every operation
+    approved in the years, by instrument. A listing that comes back shorter
+    than the interface's own total stops the run (fetch_pages)."""
     out, totals = {}, {}
     for fy in range(from_fy, to_fy + 1):
         for inst in (instruments or (None,)):
-            offset, got = 0, 0
-            while True:
-                total, recs = page(fy, offset, inst)
-                for r in recs:
-                    if r.get("boardapprovaldate"):
-                        out.setdefault(r["id"], r)
-                got += len(recs)
-                offset += ROWS
-                if not recs or got >= total:
-                    break
-                time.sleep(delay)
-            totals[(fy, inst or "all")] = (total, got)
-            log(f"  FY{fy} {inst or 'all instruments'}: {got} of {total} listed")
+            params = {"approvalfy": str(fy), "fl": ",".join(FIELDS)}
+            if inst:
+                params["lendinginstr"] = inst
+            what = f"FY{fy} {inst or 'all instruments'}"
+            try:
+                recs, total = fetch_pages(PROJECTS, params,
+                                          lambda d: list((d.get("projects") or {}).values()),
+                                          what=what, expected=("id",), page=ROWS, delay=delay)
+            except RuntimeError as exc:
+                raise SystemExit(f"cohort_build: {exc}") from None
+            for r in recs:
+                if r.get("boardapprovaldate"):
+                    out.setdefault(r["id"], r)
+            totals[(fy, inst or "all")] = (total or 0, len(recs))
+            log(f"  {what}: {len(recs)} of {total or 0} listed")
     return list(out.values()), totals
 
 

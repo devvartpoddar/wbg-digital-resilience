@@ -764,3 +764,34 @@ def test_paging_stops_at_the_interfaces_total():
     assert not F.last_page([1] * 100, [1] * 100, {"total": "250"}, 100)        # capped page
     assert F.last_page([], [1] * 100, {"total": "250"}, 200)                   # nothing more
     assert F.last_page([1] * 3, [1] * 3, {}, F.PAGE)                           # no total: short page
+
+
+def test_a_paged_listing_is_read_to_its_total_or_refused(monkeypatch):
+    import json as _json
+    import urllib.parse as up
+    import fetch_procurement as F
+
+    class R:
+        def __init__(self, obj):
+            self.content = _json.dumps(obj).encode()
+
+        def json(self):
+            return _json.loads(self.content)
+
+    def serve(total, served):
+        def get(url, timeout):
+            q = dict(up.parse_qsl(url.split("?", 1)[1]))
+            start, rows = int(q["os"]), int(q["rows"])
+            return R({"total": str(total),
+                      "procnotices": [{"id": i} for i in range(start, min(start + rows, served))]})
+        monkeypatch.setattr(F, "get", get)
+        monkeypatch.setattr(F.time, "sleep", lambda s: None)
+
+    serve(5, 5)
+    recs, total = F.fetch_pages(F.NOTICES, {"project_id": "P1"}, lambda j: j["procnotices"],
+                                what="notices P1", expected=("id",), page=2)
+    assert [r["id"] for r in recs] == [0, 1, 2, 3, 4] and total == 5
+    serve(5, 3)                                     # the interface stops short of its total
+    with pytest.raises(RuntimeError, match="3 of 5"):
+        F.fetch_pages(F.NOTICES, {"project_id": "P1"}, lambda j: j["procnotices"],
+                      what="notices P1", page=2)
