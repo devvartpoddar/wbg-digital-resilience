@@ -203,7 +203,7 @@ def test_main_publishes_nothing_on_a_dry_run(store, monkeypatch):
     out = _score(store)                                  # a run there to be found
     monkeypatch.setattr(search, "run_folder",
                         lambda *a, **kw: (out, search.load_queries("assets", tax)))
-    monkeypatch.setattr(embed, "read_key", lambda *a, **kw: "k")
+    monkeypatch.setattr(search.api, "key", lambda *a, **kw: "k")
     published = []
     monkeypatch.setitem(sys.modules, "store", types.SimpleNamespace(
         try_publish=lambda *a, **kw: published.append((a, kw))))

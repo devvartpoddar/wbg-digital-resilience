@@ -7,7 +7,7 @@ text below is invented for this test. No document text is ever
 committed.
 
 The second is specific to this stage. An autouse fixture replaces the requests
-module inside src/embed.py with an object that raises on any attribute access,
+module inside src/api.py with an object that raises on any attribute access,
 so a test that reaches the network fails immediately and says so. Everything
 here therefore runs against a stub embed_texts(). That is not a convenience -
 it IS the assertion that the transport seam holds. When the asynchronous batch
@@ -24,6 +24,7 @@ import numpy
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
+import api  # noqa: E402
 import embed as E  # noqa: E402
 
 DIM = 8
@@ -51,15 +52,15 @@ class _NoNetwork:
 
     def __getattr__(self, name):
         raise AssertionError(
-            f"src/embed.py touched requests.{name} during a test. Everything "
+            f"the network (requests.{name}) was reached during a test. Everything "
             f"outside embed_texts() must be transport-agnostic, or the batch "
             f"endpoint will not drop in as one function.")
 
 
 @pytest.fixture(autouse=True)
 def no_network(monkeypatch):
-    monkeypatch.setattr(E, "requests", _NoNetwork())
-    monkeypatch.setenv(E.KEY_VAR, FAKE_KEY)
+    monkeypatch.setattr(api, "requests", _NoNetwork())
+    monkeypatch.setenv(api.KEY_VAR, FAKE_KEY)
 
 
 # ------------------------------------------------------------- the fixtures
@@ -366,11 +367,12 @@ def test_a_changed_clean_file_aborts_the_run(corpus, monkeypatch):
 
 
 def test_missing_key_aborts_before_any_request(corpus, monkeypatch):
-    monkeypatch.delenv(E.KEY_VAR, raising=False)
+    monkeypatch.delenv(api.KEY_VAR, raising=False)
+    monkeypatch.setattr(api, "main_checkout", lambda: str(corpus))
     stub = Stub()
     with pytest.raises(SystemExit) as exc:
         run(corpus, stub, monkeypatch)
-    assert E.KEY_VAR in str(exc.value)
+    assert api.KEY_VAR in str(exc.value)
     assert stub.calls == []
 
 
@@ -484,31 +486,49 @@ def test_a_partly_stored_chunk_is_not_paid_for_twice(corpus, monkeypatch):
 
 # ------------------------------------------------------------------ the key
 
-def test_key_file_is_used_when_the_environment_is_empty(corpus, monkeypatch, tmp_path):
-    monkeypatch.delenv(E.KEY_VAR, raising=False)
-    path = os.path.join(str(tmp_path), "key")
-    with open(path, "w") as fh:
-        fh.write(FAKE_KEY + "\n")
-    os.chmod(path, 0o600)
-    stub = Stub()
-    assert run(corpus, stub, monkeypatch, "--key-file", path) == 0
-    assert stub.calls, "nothing was embedded"
-
-
 def test_a_world_readable_key_file_is_refused(corpus, monkeypatch, tmp_path):
-    """/srv/yggdrasil is a 0755 tree inside raven's read-only file jail. A
-    credential left loose there is readable by every local account and through
-    the MCP mount, so the run stops rather than using it."""
-    monkeypatch.delenv(E.KEY_VAR, raising=False)
-    path = os.path.join(str(tmp_path), "key")
-    with open(path, "w") as fh:
-        fh.write(FAKE_KEY)
+    """A credential left readable by others stops the run before it is used."""
+    monkeypatch.delenv(api.KEY_VAR, raising=False)
+    monkeypatch.setattr(api, "main_checkout", lambda: str(tmp_path))
+    path = tmp_path / api.KEY_FILE
+    path.parent.mkdir()
+    path.write_text(FAKE_KEY)
     os.chmod(path, 0o644)
     stub = Stub()
     with pytest.raises(SystemExit) as exc:
-        run(corpus, stub, monkeypatch, "--key-file", path)
-    assert "0600" in str(exc.value)
+        run(corpus, stub, monkeypatch)
+    assert "chmod 600" in str(exc.value)
     assert stub.calls == [], "the key was used before its mode was checked"
+
+
+def test_the_embeddings_request_pins_the_provider_and_retries_by_status(monkeypatch):
+    sent = []
+
+    class R:
+        def __init__(self, status, body):
+            self.status_code, self._body, self.headers = status, body, {}
+            self.text = json.dumps(body)
+
+        def json(self):
+            return self._body
+
+        def raise_for_status(self):
+            pass
+
+    answers = [R(429, {}), R(200, {"model": MODEL, "usage": {"total_tokens": 3},
+                                   "data": [{"index": 0, "embedding": [1.0]}]})]
+
+    class Net:
+        def request(self, method, url, **kw):
+            sent.append((method, url, kw["json"]))
+            return answers.pop(0)
+    monkeypatch.setattr(api, "requests", Net())
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    vecs, meta = E.embed_texts(["a"], model=MODEL, api_key=FAKE_KEY, dimensions=DIM)
+    assert vecs == [[1.0]] and meta["tokens"] == 3 and len(sent) == 2
+    assert sent[0][1] == E.DEFAULT_BASE + "/embeddings"
+    assert sent[0][2] == {"model": MODEL, "input": ["a"], "dimensions": DIM,
+                          "provider": {"order": ["openai"], "allow_fallbacks": False}}
 
 
 def test_the_credential_never_reaches_disk(corpus, monkeypatch):
@@ -547,16 +567,16 @@ def test_only_paragraphs_marked_for_the_model_are_embedded(tmp_path, monkeypatch
 
 def test_the_key_is_read_from_the_project_key_file_when_the_variable_is_unset(
         tmp_path, monkeypatch):
-    monkeypatch.delenv(E.KEY_VAR, raising=False)
-    monkeypatch.setattr(E, "main_checkout", lambda: str(tmp_path))
-    path = tmp_path / E.KEY_FILE
+    monkeypatch.delenv(api.KEY_VAR, raising=False)
+    monkeypatch.setattr(api, "main_checkout", lambda: str(tmp_path))
+    path = tmp_path / api.KEY_FILE
     path.parent.mkdir()
     path.write_text("sk-test\n")
     os.chmod(path, 0o600)
-    assert E.read_key("") == "sk-test"
+    assert api.key() == "sk-test"
     os.chmod(path, 0o644)
     with pytest.raises(SystemExit):
-        E.read_key("")          # readable beyond its owner: refused
+        api.key()          # readable beyond its owner: refused
 
 
 def test_a_list_item_is_embedded_with_its_lead_in(tmp_path):

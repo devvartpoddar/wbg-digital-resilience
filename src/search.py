@@ -56,6 +56,7 @@ import numpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
+import api  # noqa: E402
 import embed  # noqa: E402
 
 import labels  # noqa: E402
@@ -197,7 +198,7 @@ def query_vectors(queries, data, model, dim, base_url, api_key, log=print):
     if todo:
         if not api_key:
             raise SystemExit(f"search: {len(todo)} query text(s) are not embedded yet and "
-                             f"${embed.KEY_VAR} is not set")
+                             f"${api.KEY_VAR} is not set")
         _stats, failures = embed.fetch_missing(todo, unique, root, dim, model=model,
                                                api_key=api_key, base_url=base_url, log=log)
         if failures:
@@ -416,7 +417,7 @@ def main():
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument("--no-publish", action="store_true")
     args = ap.parse_args()
-    key = "" if args.dry_run else embed.read_key("")
+    key = "" if args.dry_run else api.key()
     out = search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
     # A dry run writes nothing at all: no scores (above), and no publish. It
     # used to publish a run that was already scored for the same version,

@@ -27,25 +27,19 @@ adds. Nothing here is ever re-embedded because a downstream script wanted it.
   python3 src/embed.py                    # the corpus, by sentence
   python3 src/embed.py --unit paragraphs  # the corpus, by paragraph
 """
-import argparse, csv, hashlib, json, os, socket, stat, sys, time
+import argparse, csv, hashlib, json, os, socket, sys, time
 
 import numpy
-import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root, main_checkout, where  # noqa: E402
+import api  # noqa: E402
+from paths import data_root, where  # noqa: E402
 import units  # noqa: E402
 
 DEFAULT_MODEL = "openai/text-embedding-3-large"
 DEFAULT_DIM = 3072
 DEFAULT_BASE = "https://openrouter.ai/api/v1"
-# The project's own key, so it is not mistaken for, or reused as, a general
-# OpenRouter key. Read from $WBG_OPENROUTER_KEY, else from KEY_FILE in the main
-# checkout: a 0600 file owned by the account that runs the pipeline (on the box
-# svc-hermes, so Hephaestus can run it and nothing else can read it).
-KEY_VAR = "WBG_OPENROUTER_KEY"
-KEY_FILE = os.path.join(".secrets", "wbg-openrouter-key")
 
 # For the report only. The provider's invoice is the real number; this exists so
 # a dry run can say roughly what a full run will cost before it costs it.
@@ -127,34 +121,16 @@ def embed_texts(texts, *, model, api_key, base_url=DEFAULT_BASE, dimensions=None
     }
     if dimensions:
         payload["dimensions"] = dimensions
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/devvartpoddar/wbg-digital-resilience",
-        "X-Title": "wbg-digital-resilience",
-    }
-
-    last = None
-    for attempt in range(tries):
-        try:
-            r = requests.post(url, json=payload, headers=headers, timeout=timeout)
-            if r.status_code in (408, 409, 429, 500, 502, 503, 504, 520, 522, 524, 529):
-                # Throttling or a provider hiccup. The same request succeeds later.
-                raise TransportError(f"HTTP {r.status_code}: {r.text[:200]}")
-            if 400 <= r.status_code < 500:
-                # Bad key, bad model, bad payload. Retrying changes nothing and
-                # burning four more attempts only delays a clear message.
-                raise SystemExit(f"embed: HTTP {r.status_code} from {url}\n"
-                                 f"  {r.text[:500]}")
-            r.raise_for_status()
-            return _parse(r, len(texts), model)
-        except TransportError as exc:
-            last = exc
-        except requests.RequestException as exc:
-            last = TransportError(f"{type(exc).__name__}: {str(exc)[:300]}")
-        if attempt < tries - 1:
-            time.sleep(2 ** attempt)
-    raise last
+    try:
+        r = api.request("POST", url, json=payload, timeout=timeout, tries=tries,
+                        headers={"Authorization": f"Bearer {api_key}",
+                                 "Content-Type": "application/json"})
+    except api.Refused as exc:
+        # Bad key, bad model, bad payload: retrying changes nothing.
+        raise SystemExit(f"embed: {exc}") from None
+    except (api.Transport, OSError) as exc:
+        raise TransportError(str(exc)[:500]) from None
+    return _parse(r, len(texts), model)
 
 
 def _model_tail(name):
@@ -208,38 +184,6 @@ def _parse(response, n_expected, model):
         "rate_limit": {k.lower(): v for k, v in response.headers.items()
                        if k.lower().startswith("x-ratelimit")},
     }
-
-
-def read_key(key_file):
-    """The credential, from the environment or from a file named on the command
-    line. Never from an argument: an argument is visible in `ps` to every
-    account on the box and lands in whatever log records the command.
-
-    A key file is checked for its mode before it is read. The project folder
-    on the box is readable by every local account and through raven's
-    read-only file mount, so a credential dropped there casually would be
-    readable by both. Refusing a loose file up front is cheaper than
-    discovering that afterwards.
-    """
-    if not key_file:
-        key = os.environ.get(KEY_VAR, "").strip()
-        default = os.path.join(main_checkout(), KEY_FILE)
-        if key or not os.path.exists(default):
-            return key
-        key_file = default
-    try:
-        mode = stat.S_IMODE(os.stat(key_file).st_mode)
-    except OSError as exc:
-        raise SystemExit(f"embed: cannot read {key_file}: {exc.strerror}")
-    if mode & 0o077:
-        raise SystemExit(
-            f"embed: {key_file} is mode {mode:04o}, readable beyond its owner. "
-            f"A credential file must be 0600 - chmod it and re-run.")
-    with open(key_file, encoding="utf-8") as fh:
-        key = fh.read().strip()
-    if not key:
-        raise SystemExit(f"embed: {key_file} is empty")
-    return key
 
 
 # -------------------------------------------------------------------- the cache
@@ -507,9 +451,6 @@ def main():
     ap.add_argument("--base-url", default=DEFAULT_BASE)
     ap.add_argument("--dry-run", action="store_true",
                     help="counts and estimated spend; makes no network call")
-    ap.add_argument("--key-file", default="",
-                    help="read the credential from this file (mode 0600) rather "
-                         "than from $" + KEY_VAR)
     ap.add_argument("--limit", type=int, default=0,
                     help="first N units; artifacts go to data/embeddings/smoke_*")
     ap.add_argument("--unit", choices=sorted(OUTPUTS), default="sentences",
@@ -569,12 +510,7 @@ def main():
         log("\n--dry-run: no request made, nothing written")
         return 0
 
-    api_key = read_key(args.key_file)
-    if not api_key and todo:
-        raise SystemExit(
-            f"embed: no credential. ${KEY_VAR} is not set, there is no "
-            f"{KEY_FILE} in the main checkout and no --key-file was given. Never "
-            f"pass a key as an argument.")
+    api_key = api.key(required=bool(todo))
 
     stats, failures = ({"requests": 0, "tokens": 0, "stored": 0,
                         "retried_singly": 0, "rate_limit": {}, "served_model": ""}, [])
