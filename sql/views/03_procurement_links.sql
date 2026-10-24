@@ -24,7 +24,7 @@ COMMENT ON VIEW wbg.awards_with_package IS
   'One signed contract with its linked plan package (where the borrower reference identified one) and its project.';
 
 -- When a package falls due: the plan's revised date where it prints one,
--- else its planned date (Dev's rule, 2026-10-20: 807 of the 1,117 pending
+-- else its planned date (most pending packages with a revised date have it later than the planned one
 -- packages past their planned date have a revised date still ahead). The
 -- parser keeps a row's last printed date as revised_date (section 3.1 step
 -- 9), which for a pending package can be a later milestone rather than a
@@ -32,6 +32,14 @@ COMMENT ON VIEW wbg.awards_with_package IS
 DROP FUNCTION IF EXISTS wbg.due_date(date, date) CASCADE;
 CREATE FUNCTION wbg.due_date(planned date, revised date) RETURNS date
 LANGUAGE sql IMMUTABLE AS $$ SELECT coalesce(revised, planned) $$;
+
+-- The plan statuses that mean a package is still to come (the same list
+-- wherever a view asks).
+DROP FUNCTION IF EXISTS wbg.is_upcoming(text) CASCADE;
+CREATE FUNCTION wbg.is_upcoming(status text) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT status IN ('Pending', 'Pending Implementation', 'Under Review', 'Planned')
+$$;
 COMMENT ON FUNCTION wbg.due_date(date, date) IS
   'The date a package falls due: its revised date where the plan prints one, else its planned date.';
 

@@ -1,11 +1,11 @@
 -- Commitments: the grain of every dashboard. A commitment is one project,
--- one digital asset, one measure and one type (Dev's definition), held up by
+-- one digital asset, one measure and one type, held up by
 -- the committed sentences the decision model found. Which sentences count is
 -- set in wbg.dashboard_settings (13_dashboard_settings.sql). The id is the MD5
 -- of the four parts, so it is the same on every load.
 --
--- Package status precedence for a commitment with several packages (Dev,
--- 2026-10-20): Overdue first, then Planned, Tendered, Contract signed,
+-- Package status precedence for a commitment with several packages:
+-- Overdue first, then Planned, Tendered, Contract signed,
 -- Contract completed; Under implementation comes after Tendered (the process
 -- is under way); a package the newest plan dropped, and Cancelled, last.
 DROP VIEW IF EXISTS wbg.package_status_order CASCADE;
@@ -16,13 +16,6 @@ SELECT * FROM (VALUES (1, 'Overdue'), (2, 'Planned'), (3, 'Tendered'),
   AS o(status_rank, package_status);
 COMMENT ON VIEW wbg.package_status_order IS
   'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Not in latest plan, Cancelled.';
-
--- The commitment checks (src/commit_checks.py), loaded by every publish;
--- empty tables until a check run exists, so the views below always build.
-CREATE TABLE IF NOT EXISTS wbg.unit_pair_checks (unit_id text, set_a text, set_b text,
-  decision text, probability numeric, p_only_a numeric, p_only_b numeric, p_both numeric,
-  p_neither numeric, model_served text, model_cost_usd numeric, prior_probability_a numeric,
-  prior_phrase_cosine_a numeric, prior_probability_b numeric, prior_phrase_cosine_b numeric);
 
 -- One row per committed unit that counts, per project: the base of the
 -- views below. Committed is the one decision (is_committed: the posterior of
@@ -137,10 +130,9 @@ ANALYZE wbg.commitment_package_status;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_package_status IS
   'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability): the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
 
--- Near-identical wording across projects. Word-for-word equality found 17
--- of 2,150 commitments, while four operations of one programme (DRC,
--- Malawi, Angola and the regional Eastern and Southern Africa project)
--- print one climate section with small edits. So each committed unit's text
+-- Near-identical wording across projects: word-for-word equality is rare,
+-- while the operations of one programme print one climate section with
+-- small edits. So each committed unit's text
 -- is cut into runs of six words (lower case, letters and digits only), and
 -- another project counts when its committed units hold at least half of the
 -- unit's runs (dashboard_settings.near_copy_share). Materialised: computed
@@ -200,10 +192,7 @@ SELECT u.commitment_id, u.unit_id,
               WHERE u.project_id = ANY (c.project_ids) AND c.read_from = 'restructuring'
                 AND c.restructuring_action = 'Marked for Deletion'
                 AND c.disclosure_date > d0.disclosure_date
-                AND (c.name_key = u.component_key
-                     OR (least(length(c.name_key), length(u.component_key)) >= 12
-                         AND (c.name_key LIKE u.component_key || '%'
-                              OR u.component_key LIKE c.name_key || '%'))))
+                AND wbg.same_component(c.name_key, u.component_key))
        END AS dropped
 FROM wbg.commitment_units u;
 COMMENT ON VIEW wbg.unit_dropped_by_restructuring IS
@@ -212,7 +201,7 @@ COMMENT ON VIEW wbg.unit_dropped_by_restructuring IS
 -- One row per commitment: the grain every dashboard page reads. Materialised
 -- with commitment_units: built once per load, indexed, so a Metabase card
 -- returns in milliseconds (a read of the plain view ran for over ten minutes
--- on 2026-10-20 and held the views' locks while it did).
+-- and held the views' locks while it did).
 DO $do$
 DECLARE kind "char";
 BEGIN
@@ -306,7 +295,7 @@ CREATE UNIQUE INDEX ON wbg.commitments (commitment_id);
 CREATE INDEX ON wbg.commitments (label_set);
 ANALYZE wbg.commitments;
 COMMENT ON MATERIALIZED VIEW wbg.commitments IS
-  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest posterior probability; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether a sentence of the project names this asset in the asset map (wbg.project_assets). status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen (Dev): project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms disagree on 30 of 131 projects), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names the asset, else paragraph.';
+  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest posterior probability; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether a sentence of the project names this asset in the asset map (wbg.project_assets). status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen: project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms can disagree), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names the asset, else paragraph.';
 
 -- The commitment's sentences, one row per distinct wording (the strongest
 -- unit printing it).
