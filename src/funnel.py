@@ -84,6 +84,24 @@ def stored_units(conn, model, corpus, qshas, states):
     return out
 
 
+def up_to_date(conn, kind, name, fingerprint):
+    """True when the last finished run of this set had the same fingerprint and
+    its scores are still there: nothing a run could ask or change."""
+    row = db.one(conn, f"SELECT fingerprint FROM {db.SCHEMA}.funnel_state WHERE kind = %s AND label_set = %s",
+                 (kind, name))
+    if not row or row[0] != fingerprint:
+        return False
+    n = db.one(conn, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = %s AND label_set = %s", (kind, name))
+    return bool(n and n[0])
+
+
+def summary_from_scores(conn, kind, name, qs, ask_floor):
+    rows = db.rows(conn, f"SELECT label_id, count(*), count(*) FILTER (WHERE score >= %s) FROM {db.SCHEMA}.scores "
+                         f"WHERE kind = %s AND label_set = %s GROUP BY label_id", (ask_floor, kind, name))
+    got = {lid: (a, y) for lid, a, y in rows}
+    return {lid: {"asked": got.get(lid, (0, 0))[0], "yes": got.get(lid, (0, 0))[1], "rounds": []} for lid in qs}
+
+
 def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
         log=print, projects=None):
     """The set through the funnel; writes its scores. Returns a summary dict
@@ -98,6 +116,15 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
     pats = {}
     for pt in labels.load_patterns(name):
         pats.setdefault(pt["label_id"], []).append(pt)
+    t = table(conn)
+    print_ = Q.sha({"model": model, "questions": sorted(qshas.values()), "gate": sorted(gate.items()),
+                    "patterns": sorted((p["label_id"], p["pattern"], p["regex"].flags) for ps in pats.values() for p in ps),
+                    "settings": sorted(s.items()), "search": run_name, "context": corpus.context})
+    if projects is None and not dry_run and up_to_date(conn, kind, name, print_):
+        log(f"{name}: up to date (same questions, gates, patterns, search run and settings as the "
+            f"last finished run); nothing asked, scores kept")
+        return {"labels": summary_from_scores(conn, kind, name, qs, s["ask_floor"]), "calls": 0,
+                "cost_usd": 0.0, "skipped": True}
     scope = [r["unit_id"] for r in corpus.index if corpus.in_scope(r["unit_id"], projects)]
     states = {u: Q.sha(corpus.state(u)) for u in scope}
     stored = stored_units(conn, model, corpus, qshas, states)
@@ -155,6 +182,15 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
     going = set(qs) if s["max_rounds"] and s["gate"] else set()
     if corpus.matrix is None:
         going = set()
+    # a sentence asked in an earlier run keeps the route and round it was first
+    # asked by; and when round 0 asked nothing new of a set already scored, the
+    # rounds have nothing new to learn from: re-seeding them from a larger pool
+    # would only move the admitted set between otherwise identical runs
+    earlier = {(u, lid): (r, k) for u, lid, r, k in db.rows(
+        conn, f"SELECT item_id, label_id, route, round FROM {t} WHERE kind = %s AND label_set = %s",
+        (kind, name))}
+    if earlier and st["to_ask"] == 0:
+        going = set()
     for rnd in range(1, s["max_rounds"] + 1):
         lids, queries = [], []
         for lid in sorted(going):
@@ -197,13 +233,9 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
         log(f"  round {rnd}: {sum(len(v) for v in new.values()):,} questions, "
             f"{sum(found.values())} at the ask floor or more")
     # write the scores; a sentence asked in an earlier run keeps the route and
-    # round it was first asked by
-    t = table(conn)
-    earlier = {(u, lid): (r, k) for u, lid, r, k in db.rows(
-        conn, f"SELECT item_id, label_id, route, round FROM {t} WHERE kind = %s AND label_set = %s",
-        (kind, name))}
+    # round it first entered the pool by, whatever gate or pattern admits it now
     for k, v in earlier.items():
-        if route.get(k) == "stored":
+        if k in route:
             route[k], rnd_of[k] = v
     rows = []
     for u, ls in asked.items():
@@ -222,6 +254,10 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
             where += " AND item_id = ANY(%s)"
             params.append(scope)
         db.replace(conn, t, SCORE_COLS, rows, where, params)
+        if projects is None:
+            conn.execute(f"INSERT INTO {db.SCHEMA}.funnel_state (kind, label_set, fingerprint, finished_at) "
+                         f"VALUES (%s, %s, %s, now()) ON CONFLICT (kind, label_set) DO UPDATE SET "
+                         f"fingerprint = EXCLUDED.fingerprint, finished_at = now()", (kind, name, print_))
     conn.commit()
     summary = {lid: {"asked": sum(1 for u, ls in asked.items() if lid in ls),
                      "yes": sum(1 for u, ls in asked.items() if lid in ls and yes(u, lid)),

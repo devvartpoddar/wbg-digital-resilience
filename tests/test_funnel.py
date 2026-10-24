@@ -33,11 +33,28 @@ def test_the_asset_map_is_the_same_funnel_label_by_label(pg, corpus, fake_model)
     assert float(by[("fiber", c.index[0]["unit_id"])][0]) < 0.1
 
 
-def test_a_rerun_asks_nothing_and_rewrites_the_same_scores(pg, corpus, fake_model):
+def test_a_rerun_is_skipped_as_up_to_date_and_keeps_the_scores(pg, corpus, fake_model):
     funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None)
     before = scores(pg, "cra")
     n = len(fake_model)
+    lines = []
+    out = funnel.run(pg, corpus, "cra", api_key="k", log=lines.append)
+    assert out["skipped"] and out["labels"]["cra"]["asked"] == len(before) and out["labels"]["cra"]["yes"] == 1
+    assert any("up to date" in x for x in lines)
+    assert len(fake_model) == n and scores(pg, "cra") == before
+
+
+def test_a_changed_gate_runs_again_but_rounds_wait_for_something_new(pg, corpus, fake_model, monkeypatch):
     funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None)
+    before = scores(pg, "cra")
+    n = len(fake_model)
+    import panel
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "measure.gate_cosine": 0.95})
+    out = funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None)
+    # a new fingerprint: the set is run, but round 0 asks nothing new (every
+    # stored sentence stays), so no feedback round is seeded and nothing moves
+    assert not out.get("skipped") and out["labels"]["cra"]["rounds"] == []
     assert len(fake_model) == n and scores(pg, "cra") == before
 
 
@@ -57,11 +74,11 @@ def test_a_sentence_once_answered_stays_scored_whatever_the_gate(pg, corpus, fak
 
 def test_a_dry_run_asks_nothing_and_writes_nothing(pg, corpus, fake_model):
     assert funnel.run(pg, corpus, "cra", dry_run=True, log=lambda *_: None) is None
-    assert not fake_model and not db.exists(pg, f"{db.SCHEMA}.scores")
+    assert not fake_model and not scores(pg, "cra")
 
 
 def test_a_failed_request_writes_nothing(pg, corpus, monkeypatch):
     import api
     monkeypatch.setattr(api, "post", lambda *a, **k: {"model": "m", "answers": {}})
     assert funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None) is None
-    assert not db.exists(pg, f"{db.SCHEMA}.scores")
+    assert not scores(pg, "cra")

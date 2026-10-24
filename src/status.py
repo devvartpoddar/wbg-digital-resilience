@@ -5,6 +5,7 @@ import os
 import db
 import labels
 import questions as Q
+from paths import main_checkout
 
 
 def _n(conn, sql, params=()):
@@ -54,9 +55,13 @@ def brief(data=None):
         r = _n(conn, "SELECT count(*) FROM wbg_requests.measure_requests WHERE status IN ('queued', 'running')")
         if r and r[0]:
             lines.append(f"requests: {r[0]} waiting (./wbg requests)")
-    key = os.environ.get("WBG_OPENROUTER_KEY") or os.path.exists(os.path.join(os.path.dirname(os.path.dirname(
-        os.path.abspath(__file__))), ".secrets", "wbg-openrouter-key"))
-    lines.append(f"key:      {'present' if key else 'not found: set $WBG_OPENROUTER_KEY or .secrets/wbg-openrouter-key'}")
+    try:                                              # api.key() finds the key in the main checkout
+        import api
+        key = "present" if api.key() else (
+            f"not found: set ${api.KEY_VAR} or {os.path.join(main_checkout(), api.KEY_FILE)}")
+    except SystemExit as exc:                         # world-readable: say so, do not guess
+        key = str(exc)
+    lines.append(f"key:      {key}")
     lines.append("read:     docs/methodology.md, then the docs/method/ file for what you change; "
                  ".agents/skills/wbg/SKILL.md says how to explore")
     return lines

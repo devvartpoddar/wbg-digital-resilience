@@ -30,6 +30,8 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 
 The model stages run in one process, with one Postgres connection and one reading of the corpus. Each asks only what the store lacks and stops on a failed request; the next run resumes. **Spend.** `--max-spend X` caps what the whole run may spend: the ledger (`wbg_store.spend`) is read before each step and the step stops before a request that would pass what is left; a stop or a refusal still lands in the ledger. `--dry-run` skips fetch and prepare and prints each model stage's estimate (stored answers, requests to make, about how much) without writing anything.
 
+**What a run cost.** The run prints one line per stage when it ends and appends it to `data/reports/run_stages.jsonl`, one line per run; a run that stops on a failed stage records what ran before it. `src/run_report.py` reads the last line, the spend ledger for that run's window (folded to the pipeline stages) and the evaluation's precision and recall per measure, and writes the note a person reads (AGENTS.md rule 8). The note carries numbers only; the reader adds the decisions.
+
 **No option overrides a threshold.** Every gate, floor, depth and round setting is a line of `inputs/config/control_panel.csv` (section 5g); the commands take a selection, `--dry-run`, `--max-spend` and the worker count, nothing else that moves a number.
 
 **Selecting projects.** Filters on the included rows of `inputs/config/cohort.csv`: `--project`; `--country` (code); `--region` (part of the name); `--fy` (approval fiscal year); `--practice` (Global Practice name or code, or part); `--unit` (managing unit or code, or part); `--set` (`digital` or `digital_contributor`). Each takes several values; different filters combine with "and". A project outside the cohort is refused. A run over named projects writes scores for those units only and is not published (set `WBG_PUBLISH_SCOPED=1` for a scratch database). `./wbg list` prints a selection, `./wbg summary` where each project stands.
@@ -38,9 +40,10 @@ The model stages run in one process, with one Postgres connection and one readin
 
 Answers are the only thing that costs money. An answer is stored under the model, the exact state sent (the sentence with its lead-in, section and component; a package with its component; a commitment and a package) and the exact question (its wording and scale, not its id). A stage asks only the keys the store lacks. So:
 
+- **Nothing**: a set whose questions, gates, patterns, search run and round settings match its last finished run is skipped whole (`wbg.funnel_state` holds the fingerprint): no store read, no scores rewritten. The pair-check and link stages always cover every active measure, whatever subset a run names, because each replaces its whole kind.
 - **A decision floor, `asset.*`, `types.multiple`, `floor.pair_check`, `posterior.*`, `dashboard.*`**: nothing. `./wbg publish` rereads the scores (a minute or two).
 - **A definition, a phrase or a pattern edit**: only the sentences whose question changed, or that the new gate or pattern newly admits. `./wbg run --from search --measures <set>`.
-- **An ask floor (`floor.ask`, `asset.ask_floor`), a gate, a round setting, `link.*`**: the sentences or pairs newly let in.
+- **An ask floor (`floor.ask`, `asset.ask_floor`), a gate, a round setting, `link.*`**: the sentences or pairs newly let in. The feedback rounds run only when round 0 asked something new of a set already scored, so a re-run after a refit does not move the admitted pool.
 - **`ask.context`**: every sentence-level question is a new state. A whole-cohort re-ask (about US$6 to 9 at the current corpus and gates). Test it first on the graded sentences.
 - **A new document**: its own sentences only.
 - **The model snapshot (`questions.MODEL`)**: everything; a deliberate step followed by re-measurement.

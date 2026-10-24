@@ -710,7 +710,8 @@ def run(args, data):
         os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"
         os.environ["WBG_SPEND_SINCE"] = datetime.datetime.now(
             datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sets = args.measures or [n for n in labels_mod.label_sets() if n != Q.ASSETS]
+    every = [n for n in labels_mod.label_sets() if n != Q.ASSETS]
+    sets = args.measures or every
     projects = sorted(_sel(args).ids) if _scope(args) else None
     dry = ["--dry-run"] if args.dry_run else []
     key = "" if args.dry_run else api.key()
@@ -753,11 +754,13 @@ def run(args, data):
                             and not args.dry_run:
                         ok = False
                 if ok:
-                    ok = checks.pairs(conn, data, corpus, sets, **{k: v for k, v in kw.items()
+                    # across every active measure, whatever subset this run was given:
+                    # the pair and link stages replace their whole kind
+                    ok = checks.pairs(conn, data, corpus, every, **{k: v for k, v in kw.items()
                                                                      if k != "projects"}) is not None \
                         or args.dry_run
             elif stage == "link":
-                ok = checks.links(conn, data, corpus, sets, **kw) is not None or args.dry_run
+                ok = checks.links(conn, data, corpus, every, **kw) is not None or args.dry_run
             elif stage == "publish" and not args.dry_run:
                 if projects and os.environ.get("WBG_PUBLISH_SCOPED") != "1":
                     print("  postgres: not written: a run over named projects would replace the "
@@ -767,10 +770,29 @@ def run(args, data):
         timings.append((stage, time.time() - t0))
         if not ok:
             print(f"run: {stage} failed; stopped. Run again to resume.")
+            stage_times(data, t_all, timings, ended_early=True)
             return 1
     print("run: " + ", ".join(f"{s} {t:.0f}s" for s, t in timings)
           + f"; everything {time.time() - t_all:.0f}s", flush=True)
+    if not args.dry_run:
+        stage_times(data, t_all, timings)
     return 0
+
+
+def stage_times(data, started, timings, ended_early=False):
+    """Append this run's wall clock per stage to data/reports/run_stages.jsonl,
+    one line per run, so a run note (src/run_report.py) can report it without
+    reading a screen that has scrolled away. A run that stopped on a failed
+    stage records what ran before it, so the file always says what happened."""
+    path = where(data, "reports", "run_stages.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    row = {"started": datetime.datetime.fromtimestamp(started, datetime.timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "ended": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "seconds": {s: round(t, 1) for s, t in timings},
+           "ended_early": ended_early}
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
 
 
 def check(args, data):

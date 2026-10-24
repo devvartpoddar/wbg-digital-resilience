@@ -368,5 +368,10 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
             written[table] = load_pg.load_rows(conn, table, cols, rows, "decide")[0]
         if views:
             load_pg.finish(conn, log=log)
+    # The reads above opened a transaction on this connection, so the block's
+    # load_rows ran as savepoints inside it. Only this commit makes the publish
+    # real: without it, ./wbg run's publish stage prints its counts and the
+    # process exit throws them away, leaving the dashboards at the last publish.
+    conn.commit()
     log("  postgres: " + ", ".join(f"{t} {n:,}" for t, n in written.items()) + f" ({time.time() - t0:.0f}s)")
     return written
