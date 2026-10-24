@@ -767,10 +767,29 @@ def run(args, data):
         timings.append((stage, time.time() - t0))
         if not ok:
             print(f"run: {stage} failed; stopped. Run again to resume.")
+            stage_times(data, t_all, timings, ended_early=True)
             return 1
     print("run: " + ", ".join(f"{s} {t:.0f}s" for s, t in timings)
           + f"; everything {time.time() - t_all:.0f}s", flush=True)
+    if not args.dry_run:
+        stage_times(data, t_all, timings)
     return 0
+
+
+def stage_times(data, started, timings, ended_early=False):
+    """Append this run's wall clock per stage to data/reports/run_stages.jsonl,
+    one line per run, so a run note (src/run_report.py) can report it without
+    reading a screen that has scrolled away. A run that stopped on a failed
+    stage records what ran before it, so the file always says what happened."""
+    path = where(data, "reports", "run_stages.jsonl")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    row = {"started": datetime.datetime.fromtimestamp(started, datetime.timezone.utc)
+                        .strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "ended": datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
+           "seconds": {s: round(t, 1) for s, t in timings},
+           "ended_early": ended_early}
+    with open(path, "a", encoding="utf-8") as fh:
+        fh.write(json.dumps(row) + "\n")
 
 
 def check(args, data):
