@@ -20,13 +20,9 @@ or elusion draw put before a person, so a gate can rise above where no yes
 has been seen; the elusion draw (./wbg check <set> --elusion) is what looks
 below it.
 """
-import hashlib
-import json
 import math
-import os
 
 import panel
-from paths import where
 
 
 def settings():
@@ -80,34 +76,8 @@ def loss_bound(lost, weights, conf=0.95):
     return round(hi, 4)
 
 
-def path(data, name):
-    return where(data, "labels", f"{name}_gate.json")
 
 
-def write(data, name, gates):
-    """gates = {label_id: {gate, lost, positives, question_sha256, search_run}}."""
-    p = path(data, name)
-    os.makedirs(os.path.dirname(p), exist_ok=True)
-    with open(p + ".part", "w", encoding="utf-8") as fh:
-        json.dump(gates, fh, indent=1, sort_keys=True)
-    os.replace(p + ".part", p)
 
 
-def read(data, name, question_shas, search_run):
-    """{label_id: gate} of the fitted gates that match the label's current
-    question and the search run whose cosines a stage reads."""
-    p = path(data, name)
-    if not os.path.exists(p):
-        return {}
-    with open(p, encoding="utf-8") as fh:
-        gates = json.load(fh)
-    run = os.path.basename(search_run or "")
-    return {lid: float(g["gate"]) for lid, g in gates.items()
-            if g.get("question_sha256") == question_shas.get(lid) and g.get("search_run") == run}
 
-
-def digest(gates):
-    """A short hash of the gates a stage applies (part of its run key)."""
-    if not gates:
-        return ""
-    return hashlib.sha256(json.dumps(gates, sort_keys=True).encode()).hexdigest()[:12]
