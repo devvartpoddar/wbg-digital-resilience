@@ -46,7 +46,8 @@ import argparse, csv, hashlib, json, os, re, sys
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root, where  # noqa: E402
+from paths import data_root, file_sha256, where  # noqa: E402
+from common import write_csv  # noqa: E402
 from keys import name_key, project_parts, project_at  # noqa: E402
 from pdf_layout import _title_line  # noqa: E402
 
@@ -509,15 +510,6 @@ def read_headings(rows, text):
     return out
 
 
-def _sha256_file(path):
-    import hashlib
-    h = hashlib.sha256()
-    with open(path, "rb") as fh:
-        for block in iter(lambda: fh.read(1 << 20), b""):
-            h.update(block)
-    return h.hexdigest()
-
-
 def read_table_pages(pdf_path, pages):
     """The component list from the first of these pages that holds one.
 
@@ -644,8 +636,8 @@ def main():
             found = []
             # Keyed on the PDF, the pages searched and this module's code, so a
             # change to any of them reads the tables again.
-            sha = doc.get("pdf_sha256") or (_sha256_file(pdf_path) if os.path.exists(pdf_path)
-                                            else "")
+            sha = doc.get("pdf_sha256") or (file_sha256(pdf_path, remember=False)
+                                            if os.path.exists(pdf_path) else "")
             key = ":".join([sha, ",".join(map(str, pages)), READER_VERSION])
             if pages and os.path.exists(pdf_path):
                 if key in cache:
@@ -679,11 +671,7 @@ def main():
     out.sort(key=lambda r: (r["doc_id"], r["project_ids"], r["source"], r["level"],
                             [int(x) for x in r["number"].split(".") if x.isdigit()]))
     dest = where(args.data, "appraisal", "components.csv")
-    with open(dest + ".part", "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=COMP_COLS, lineterminator="\n", extrasaction="ignore")
-        w.writeheader()
-        w.writerows(out)
-    os.replace(dest + ".part", dest)
+    write_csv(dest, COMP_COLS, out)
 
     projects = defaultdict(set)
     for r in out:

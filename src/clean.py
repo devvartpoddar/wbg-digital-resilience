@@ -25,11 +25,12 @@ versions. Changing any of them re-reads every PDF once. The first run after
 the version took this form (it used to hash the two files' bytes) re-reads
 every PDF once.
 """
-import argparse, csv, hashlib, os, re, sys
+import argparse, hashlib, os, re, sys
 from collections import Counter
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, file_sha256, where  # noqa: E402
+from common import read_csv, sha_text, write_csv  # noqa: E402
 from pdf_layout import SECTION_TITLE_MAX_CHARS  # noqa: E402
 from text_rules import TOKEN, ROMAN, annex_match  # noqa: E402
 from keys import project_parts, project_at  # noqa: E402
@@ -201,11 +202,7 @@ def layout_cached(data, docs, workers):
 
 def previous_hashes(path):
     """paragraph_id -> (text_sha256, parser) from the last run, if there was one."""
-    if not os.path.exists(path):
-        return {}
-    with open(path, newline="", encoding="utf-8") as fh:
-        return {r["paragraph_id"]: (r["text_sha256"], r.get("parser", ""))
-                for r in csv.DictReader(fh)}
+    return {r["paragraph_id"]: (r["text_sha256"], r.get("parser", "")) for r in read_csv(path)}
 
 
 def main():
@@ -222,8 +219,10 @@ def main():
               where(args.data, "pdf_text")):
         os.makedirs(d, exist_ok=True)
 
-    with open(where(args.data, "documents"), newline="", encoding="utf-8") as fh:
-        docs = list(csv.DictReader(fh))
+    docs_path = where(args.data, "documents")
+    if not os.path.exists(docs_path):
+        raise SystemExit(f"clean: {docs_path} is missing; run src/fetch.py first")
+    docs = read_csv(docs_path)
 
     layouts = layout_cached(args.data, docs, args.workers)
     version = parser_version()
@@ -283,7 +282,7 @@ def main():
                 "project_ids": project_at(parts, a), "ordinal": ordinal,
                 "section_path": path, "section_title": title[:SECTION_TITLE_MAX_CHARS], "block": block,
                 "char_start": a, "char_end": b, "n_tokens": ntok,
-                "text_sha256": hashlib.sha256(body.encode("utf-8")).hexdigest(),
+                "text_sha256": sha_text(body),
                 "page_from": p0, "page_to": p1, "parser": version,
                 "for_model": str(block in MODEL_BLOCKS
                                  and not citation_only(body, block)).lower(),
@@ -305,7 +304,7 @@ def main():
                         "doc_id": did, "ordinal": k,
                         "char_start": a + sa, "char_end": a + sb,
                         "n_tokens": len(TOKEN.findall(st)),
-                        "text_sha256": hashlib.sha256(st.encode("utf-8")).hexdigest(),
+                        "text_sha256": sha_text(st),
                     })
         paras.extend(doc_paras)
         # Retention: how much of the PDF's text survives cleaning. Headers,
@@ -357,12 +356,7 @@ def main():
                              ("rejected.csv", rejected, REJ_COLS),
                              ("sentences.csv", sents, SENT_COLS),
                              ("document_parts.csv", doc_parts, DOC_PART_COLS)):
-        path = where(args.data, "appraisal", name)
-        with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
-            w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n")
-            w.writeheader()
-            w.writerows(rows)
-        os.replace(path + ".part", path)
+        write_csv(where(args.data, "appraisal", name), cols, rows)
 
     blocks = Counter(p["block"] for p in paras)
     sections = Counter(p["section_path"] for p in paras)

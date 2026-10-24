@@ -17,12 +17,13 @@ Only board-approved operations are listed (a pipeline project has no
 appraisal document), and the interface's own counts are reported so a page
 that failed is visible.
 """
-import argparse, csv, datetime, os, sys
+import argparse, datetime, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from fetch_procurement import fetch_pages  # noqa: E402
 from fetch_projects import PROJECTS  # noqa: E402
 from paths import data_root, where  # noqa: E402
+from common import write_csv  # noqa: E402
 
 ROWS = 200
 FIELDS = ("id", "project_name", "approvalfy", "boardapprovaldate", "status", "regionname",
@@ -95,11 +96,7 @@ def main():
         return 0
     rows = rows_for(recs, datetime.date.today().isoformat())
     out = where(args.data, "reports", f"cohort_candidates_fy{args.from_fy}-{args.to_fy}.csv")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=COLS, lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
+    write_csv(out, COLS, rows)
     print(f"wrote {out}; copy the rows you want into inputs/config/cohort.csv")
     return 0
 

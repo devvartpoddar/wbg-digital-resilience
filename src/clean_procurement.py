@@ -27,7 +27,7 @@ glyphs in both corpora.
 Every output is rebuilt from the raw tables in one pass, so a re-run on
 unchanged input is byte-identical.
 """
-import argparse, csv, hashlib, os, re, sys
+import argparse, os, re, sys
 import unicodedata
 from collections import Counter, defaultdict
 
@@ -68,12 +68,6 @@ def collapse(text):
 
 def count_replacement_chars(text):
     return (text or "").count("\ufffd")
-
-
-def casefold_key(text):
-    """A matching copy. Case folding is for matching only; the published
-    string is kept verbatim in `description` for display."""
-    return collapse(text).casefold()
 
 
 def match_key(text):
@@ -318,10 +312,7 @@ class Components:
 
 def read_components(data):
     path = where(data, "appraisal", "components.csv")
-    if not os.path.exists(path):
-        return Components()
-    with open(path, newline="", encoding="utf-8") as fh:
-        return Components(list(csv.DictReader(fh)))
+    return Components(common.read_csv(path)) if os.path.exists(path) else Components()
 
 
 
@@ -416,9 +407,6 @@ def is_placeholder(description):
 # stay different, and 'Completed' is not folded into 'Signed'. Every key below
 # was mined from the corpus, not translated at a desk; `collapse` and enum_key
 # fold accents first, so the keys are ASCII ('Achevé' arrives as 'acheve').
-STATUS_LABELS = ("Pending", "Pending Implementation", "Under Implementation",
-                 "Under Review", "Signed", "Completed", "Canceled", "Terminated",
-                 "Planned")
 STATUS_MAP = plan_table.VOCAB["status_map"]
 # A status that says the contract exists. An award in the contracts data is not
 # allowed to overwrite one of these with a bare 'Signed'.
@@ -653,12 +641,6 @@ def money_value(figure, scale=""):
     return value
 
 
-def desc_sha256(text):
-    """SHA-256 of the cleaned description: the key a label is stored under
-    (AGENTS.md rule 9), so a label follows the words, not the row."""
-    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
-
-
 def extract_amount_and_date(text):
     """Amounts and dates sometimes sit inside the description string. Pull them
     out so they are not matched as text later."""
@@ -779,7 +761,7 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
             "description": raw_desc,
             "description_clean": clean,
             "description_match": match_key(clean),
-            "description_sha256": desc_sha256(clean),
+            "description_sha256": common.sha_text(clean),
             "description_lang": lang,
             "lot_or_phase": marks["lot_or_phase"],
             "component_number": number,
@@ -866,7 +848,7 @@ def dedupe_packages(rows, counters):
         suffix = ""
         if key in shared:
             key += (r["description_match"],)
-            suffix = ":" + hashlib.sha256(key[2].encode()).hexdigest()[:8]
+            suffix = ":" + common.sha_text(key[2])[:8]
         occurrence[(r["plan_version"],) + key] += 1
         n = occurrence[(r["plan_version"],) + key]
         if n > 1:
@@ -972,7 +954,7 @@ def clean_notices(rows, counters, vocab=None, names=None):
             "borrower_ref_norm": norm_ref(plan_table.chain_ref(r.get("borrower_ref"))),
             "description": raw, "description_clean": clean,
             "description_match": match_key(clean),
-            "description_sha256": desc_sha256(clean),
+            "description_sha256": common.sha_text(clean),
             "description_lang": lang,
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "glue_repairs": repairs,
@@ -1004,7 +986,7 @@ def clean_awards(rows, counters, vocab=None, names=None):
             "borrower_ref_norm": norm_ref(plan_table.chain_ref(r["borrower_ref"])),
             "description": raw, "description_clean": clean,
             "description_match": match_key(clean),
-            "description_sha256": desc_sha256(clean),
+            "description_sha256": common.sha_text(clean),
             "description_lang": lang,
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "glue_repairs": repairs,

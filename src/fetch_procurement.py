@@ -32,7 +32,7 @@ fixed-width print of a STEP table whose cells clip mid-word at the column edge.
 The parser for it is `parse_plan_text` and it is deliberately conservative - it
 recovers what it can and reports what it could not key.
 """
-import argparse, csv, hashlib, json, os, re, sys, threading, time, unicodedata, urllib.parse
+import argparse, json, os, re, sys, threading, time, unicodedata, urllib.parse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -41,7 +41,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where, write_fetch_status  # noqa: E402
 
 import plan_table                                     # noqa: E402
-from fetch import get, read_cohort            # noqa: E402
+from fetch import get, now_stamp, read_cohort  # noqa: E402
+from common import read_csv, sha_text, write_csv  # noqa: E402
 from dates import iso_date                    # noqa: E402
 from clean_procurement import (                        # noqa: E402
     STATUS_MAP, METHOD_TEXT, fold_chars,
@@ -88,7 +89,7 @@ def fetch_pages(url, params, items, *, what, expected=(), page=PAGE, delay=0.3, 
         batch = items(j)
         check_keys(batch, expected, what)
         if log is not None:
-            log.record(source, url, q, len(batch), sha256_bytes(r.content))
+            log.record(source, url, q, len(batch), sha_text(r.content))
         records.extend(batch)
         offset += page
         if last_page(batch, records, j, offset, page=page):
@@ -171,30 +172,15 @@ FETCH_LOG_COLS = ["fetch_id", "source", "endpoint", "query_params", "fetched_at"
 
 # ------------------------------------------------------------------ utilities
 
-def now_stamp():
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def sha256_bytes(blob):
-    return hashlib.sha256(blob).hexdigest()
-
-
-from common import write_csv  # noqa: E402
-
-
 class FetchLog:
     """Append every interface call, keyed so a re-run updates rather than repeats."""
 
     def __init__(self, path):
         self.path = path
-        self.rows = {}
-        if os.path.exists(path):
-            with open(path, newline="", encoding="utf-8") as fh:
-                for r in csv.DictReader(fh):
-                    self.rows[r["fetch_id"]] = r
+        self.rows = {r["fetch_id"]: r for r in read_csv(path)}
 
     def record(self, source, endpoint, params, record_count, response_sha256):
-        fid = sha256_bytes("|".join([source, endpoint, params]).encode())[:16]
+        fid = sha_text("|".join([source, endpoint, params]).encode())[:16]
         self.rows[fid] = {
             "fetch_id": fid, "source": source, "endpoint": endpoint,
             "query_params": params, "fetched_at": now_stamp(),
@@ -891,7 +877,7 @@ def collect_plans(projects, data, log, refresh, delay, workers=6, previous=None)
             # A bundle that does not name this project: kept on disk, counted,
             # and not parsed, so no other operation's packages land here.
             continue
-        sha = sha256_bytes(blob)
+        sha = sha_text(blob)
         old_sha, old_at = previous.get(d["doc_id"], ("", ""))
         meta = {
             "project_id": pid, "doc_id": d["doc_id"],
@@ -928,11 +914,12 @@ def store_keeping_old(path, blob):
     beside it, named by its own checksum, never overwritten."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path):
-        old = open(path, "rb").read()
+        with open(path, "rb") as fh:
+            old = fh.read()
         if old == blob:
             return
         stem, ext = os.path.splitext(path)
-        keep = f"{stem}.{sha256_bytes(old)[:12]}{ext}.old"
+        keep = f"{stem}.{sha_text(old)[:12]}{ext}.old"
         if not os.path.exists(keep):
             os.replace(path, keep)
     tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.part"
@@ -1048,8 +1035,8 @@ def _notice_row(rec, pid):
         "project_id": rec.get("project_id") or pid,
         "notice_type": rec.get("notice_type") or "",
         "notice_status": rec.get("notice_status") or "",
-        "publication_date": _iso_date(rec.get("noticedate")),
-        "deadline_date": _iso_date(rec.get("submission_deadline_date")),
+        "publication_date": iso_date(rec.get("noticedate")),
+        "deadline_date": iso_date(rec.get("submission_deadline_date")),
         # The borrower reference the notice was issued under: the key
         # that ties a notice to its plan package and its award.
         "borrower_ref": (rec.get("bid_reference_no") or "").strip(),
@@ -1088,8 +1075,8 @@ def _award_row(rec, pid):
         "project_id": rec.get("projectid") or pid,
         "borrower_ref": (rec.get("contr_refnum") or "").strip(),
         "description": _clean_space(rec.get("contr_desc") or ""),
-        "signed_date": _iso_date(rec.get("contr_sgn_date")),
-        "no_objection_date": _iso_date(rec.get("contr_no_obj_dat")),
+        "signed_date": iso_date(rec.get("contr_sgn_date")),
+        "no_objection_date": iso_date(rec.get("contr_no_obj_dat")),
         "total_amount": _num(rec.get("total_contr_amnt")),
         "currency": "USD",
         "category_raw": rec.get("procurement_group") or "",
@@ -1118,12 +1105,6 @@ def _join_sector(v):
     if isinstance(v, list):
         return "|".join(str(x) for x in v)
     return str(v or "")
-
-
-def _iso_date(v):
-    """The interfaces mix ISO timestamps and '14-Sep-2026'; anything else
-    is stored blank (dates.iso_date), never as printed."""
-    return iso_date(v)
 
 
 # -------------------------------------------------------------------- the diff
@@ -1163,18 +1144,15 @@ def main():
     bundle_docs, empty_docs = [], []
     if not args.skip_plans:
         previous = {}
-        packages_csv = os.path.join(proc_dir, "packages_raw.csv")
-        if os.path.exists(packages_csv):
-            with open(packages_csv, newline="", encoding="utf-8") as fh:
-                for r in csv.DictReader(fh):
-                    previous.setdefault(r["plan_doc_id"], (r["content_sha256"], r["fetched_at"]))
+        for r in read_csv(os.path.join(proc_dir, "packages_raw.csv")):
+            previous.setdefault(r["plan_doc_id"], (r["content_sha256"], r["fetched_at"]))
         (plan_rows, listing_fail, no_plan, plan_fail, free_chars, bundle_docs,
          empty_docs) = collect_plans(projects, args.data, log, args.refresh,
                                      args.delay, workers=args.workers, previous=previous)
 
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
-    prep, wrap_seams_total, planned_only = [], 0, 0
+    prep, wrap_seams_total = [], 0
     section_columns = Counter()
     no_estimated_column = 0
     for r in plan_rows:
@@ -1211,10 +1189,8 @@ def main():
              notices_ok),
             ("awards_raw.csv", RAW_AWARD_COLS, awards, ("project_id", "contract_id"), awards_ok)):
         path = os.path.join(proc_dir, name)
-        rows = [r for r in rows if r["project_id"] in ok]
-        if os.path.exists(path):
-            with open(path, newline="", encoding="utf-8") as fh:
-                rows = rows + [r for r in csv.DictReader(fh) if r["project_id"] not in ok]
+        rows = [r for r in rows if r["project_id"] in ok] + \
+            [r for r in read_csv(path) if r["project_id"] not in ok]
         rows.sort(key=lambda r: tuple(str(r.get(k, "")).zfill(8) if k == "record_index"
                                       else str(r.get(k, "")) for k in order))
         write_csv(path, cols, rows)

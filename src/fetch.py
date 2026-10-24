@@ -9,12 +9,13 @@ Writes data/raw/pdf/{doc_id}.pdf   the PDF, which src/pdf_layout.py reads
 Resumable: a document whose PDF already exists is not re-fetched.
 Run again after an interruption and it picks up where it stopped.
 """
-import argparse, csv, hashlib, json, os, re, sys, tempfile, time
+import argparse, csv, os, re, sys, tempfile, time
 import urllib.parse
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import api  # noqa: E402
+from common import read_csv, sha_text, write_csv  # noqa: E402
 from paths import data_root, where, write_fetch_status  # noqa: E402
 WDS = "https://search.worldbank.org/api/v3/wds"
 
@@ -213,10 +214,7 @@ def main():
         return pid, True, got, c, nts
 
     docs_csv = where(args.out, "documents")
-    previous = {}
-    if os.path.exists(docs_csv):
-        with open(docs_csv, newline="", encoding="utf-8") as fh:
-            previous = {r["doc_id"]: r for r in csv.DictReader(fh)}
+    previous = {r["doc_id"]: r for r in read_csv(docs_csv)}
 
     from concurrent.futures import ThreadPoolExecutor
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as pool:
@@ -235,7 +233,7 @@ def main():
                     continue
                 if not pdf_blob:
                     continue
-                sha = hashlib.sha256(pdf_blob).hexdigest()
+                sha = sha_text(pdf_blob)
                 # An unchanged PDF keeps the time it was first fetched, so a
                 # re-listing leaves documents.csv as it was.
                 old = previous.get(doc["doc_id"], {})
@@ -283,15 +281,8 @@ def main():
         row = dict(by_doc[did])
         row["project_ids"] = "|".join(sorted(row.pop("_projects")))
         rows.append(row)
-    # Deterministic order so a re-run produces the same file.
     rows.sort(key=lambda r: r["doc_id"])
-    # Written aside and renamed, so an interrupted write never leaves a
-    # truncated document list for the next partial run to merge from.
-    with open(docs_csv + ".part", "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=DOC_COLS, lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(docs_csv + ".part", docs_csv)
+    write_csv(docs_csv, DOC_COLS, rows)
     # A project whose listing or a PDF download failed is not counted as
     # fetched: the next run tries it again. (A document that publishes no PDF
     # is a fact about the document, not a failure, and is not retried.)

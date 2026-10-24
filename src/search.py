@@ -76,6 +76,7 @@ BLOCK = 20_000
 # ------------------------------------------------------------------ the labels
 
 from common import read_csv as _rows, file_sha256 as _sha_file  # noqa: E402
+from common import write_csv as _write  # noqa: E402
 
 
 def _active(r):
@@ -399,14 +400,6 @@ def paragraph_rollup(rows):
             "units_hit": count[key]} for key, h in best.items()]
     out.sort(key=lambda r: (r["label_id"], -float(r["best_score"]), r["paragraph_id"]))
     return out
-
-
-def _write(path, cols, rows):
-    with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n", extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(path + ".part", path)
 
 
 def main():

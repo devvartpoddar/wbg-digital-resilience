@@ -25,7 +25,7 @@ Nothing the pipeline writes is changed; the report is the only output.
   python src/sensitivity.py --docs 20
   python src/sensitivity.py --skip-paragraphs
 """
-import argparse, csv, hashlib, os, sys, time
+import argparse, hashlib, os, sys
 from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))

@@ -54,7 +54,6 @@ def test_step1_does_not_nfkc_normalise():
 
 def test_step2_folds_a_matching_copy_and_keeps_the_original():
     marks = P.split_markers("Supply of ICT Equipment")
-    assert P.casefold_key(marks["description"]) == "supply of ict equipment"
     assert marks["description"] == "Supply of ICT Equipment"
 
 
@@ -268,8 +267,8 @@ def test_clean_packages_prefers_the_parsed_amount_over_one_found_in_the_text():
 def test_step10_hashes_raw_and_cleaned_separately():
     raw = "Supply of cable - LOT 2"
     clean = P.split_markers(raw)["description"]
-    assert P.desc_sha256(raw) != P.desc_sha256(clean)
-    assert P.desc_sha256(raw) == P.desc_sha256("Supply of cable - LOT 2")
+    assert P.common.sha_text(raw) != P.common.sha_text(clean)
+    assert P.common.sha_text(raw) == P.common.sha_text("Supply of cable - LOT 2")
 
 
 # ---------------------------------------------------------------- step 8
@@ -397,7 +396,7 @@ class TestMatchKey:
     def test_glued_term_is_found_after_despacing(self):
         """'Data Center' lost its space when the cell was clipped at the column
         edge. Despacing both sides puts them back in step."""
-        assert "data center" not in P.casefold_key(self.GLUED), \
+        assert "data center" not in P.collapse(self.GLUED).casefold(), \
             "fixture is wrong - it should carry the glue"
         assert P.match_key("data center") in P.match_key(self.GLUED)
 
@@ -414,7 +413,7 @@ class TestMatchKey:
         share their letters, and the reasoning would not hold."""
         for text in (self.GLUED, "Réhabilitation du réseau", "LOT 2 (REBID)"):
             assert P.match_key(text) == "".join(
-                c for c in P.casefold_key(text) if not c.isspace())
+                c for c in P.collapse(text).casefold() if not c.isspace())
 
     def test_published_text_is_untouched(self):
         """match_key is for matching. The published string keeps its spaces,
@@ -429,7 +428,7 @@ def _pkg_row(project, ref, version, date, description, status="planned"):
     return {"package_id": ref, "project_id": project, "borrower_ref": ref,
             "borrower_ref_norm": P.norm_ref(ref), "description": description,
             "description_clean": description, "description_match": P.match_key(description),
-            "description_sha256": P.desc_sha256(description), "description_lang": "en",
+            "description_sha256": P.common.sha_text(description), "description_lang": "en",
             "lot": "", "phase": "", "is_rebid": "false", "is_placeholder": "false",
             "superseded_by": "", "clean_version": P.CLEAN_VERSION, "category": "goods",
             "method": "open_national", "status": status, "status_raw": status,

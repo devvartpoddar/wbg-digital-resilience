@@ -45,7 +45,6 @@ tables is the bound and the heading band, which is where the real defects were.
 import json
 import os
 import re
-import unicodedata
 
 # The procurement vocabularies (section names, column catalogues, status,
 # method, category, language and placeholder words) are data, kept beside the
@@ -330,11 +329,6 @@ HEADER_NOISE_RE = re.compile(
     re.I)
 
 
-def strip_header_noise(lines):
-    """Drop the reprinted column-heading band from a run of data lines."""
-    return [l for l in lines if not HEADER_NOISE_RE.match(l)]
-
-
 def _atoms(band):
     """A record's lines as a stream of typed tokens, in print order.
 
@@ -412,7 +406,7 @@ def read_collapsed_table(table, has_estimated=None):
         # because the result looks like data. Such a record keeps its reference
         # and its description and gives up its figures.
         interleaved = any(HEADER_NOISE_RE.match(l) for l in raw_band)
-        band = strip_header_noise(raw_band)
+        band = [l for l in raw_band if not HEADER_NOISE_RE.match(l)]
         stream = list(_atoms(band))
         amounts = [i for i, (k, _) in enumerate(stream) if k == "amount"]
         row = {"section": table.section, "estimated_amount": "", "actual_amount": "",

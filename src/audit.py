@@ -18,6 +18,7 @@ from collections import Counter, defaultdict
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
+from common import read_csv  # noqa: E402
 from clean_procurement import norm_ref, REF_INLINE  # noqa: E402
 import glue  # noqa: E402
 
@@ -415,10 +416,7 @@ ENUM_FIELDS = {
 
 def load(data, table):
     path = where(data, "procurement", f"{table}.csv")
-    if not os.path.exists(path):
-        return None
-    with open(path, newline="", encoding="utf-8") as fh:
-        return list(csv.DictReader(fh))
+    return read_csv(path) if os.path.exists(path) else None
 
 
 def load_vocab(data):

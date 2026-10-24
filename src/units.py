@@ -65,7 +65,7 @@ expert listed sits in a table.
 embed.py embeds and indexes every unit that is neither left out nor a copy.
 Nothing is deleted: search_units() still lists them all.
 """
-import csv, json
+import json
 import hashlib
 import os
 import re

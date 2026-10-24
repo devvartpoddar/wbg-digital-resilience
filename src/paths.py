@@ -16,7 +16,6 @@ written down once:
   data/raw/          what was fetched, exactly as published
        pdf/            appraisal documents (PDF)
        pdf_text/       each PDF's text exactly as read, before cleaning
-       text/           the Bank's text renditions (no longer fetched; kept)
        plans/ notices/ awards/   procurement plans and interface responses
        projects/       each project's record from the projects interface
        documents.csv   the document list; fetch_log.csv the procurement
@@ -83,7 +82,6 @@ def data_root():
 
 LAYOUT = {
     "pdf": "raw/pdf",
-    "rendition": "raw/text",
     "pdf_text": "raw/pdf_text",
     "plans": "raw/plans",
     "notices_json": "raw/notices",
@@ -172,78 +170,3 @@ def write_fetch_status(data, kind, ok, failed):
     with open(path + ".part", "w", encoding="utf-8") as fh:
         json.dump({"ok": sorted(ok), "failed": sorted(failed)}, fh, indent=1)
     os.replace(path + ".part", path)
-
-
-# The layout before everything had a home: (old, new), relative to data/. A
-# directory entry moves its files one by one; a glob takes what it matches.
-_MOVES = [
-    ("raw/*.txt", "raw/text/"),
-    ("api_fetch_log.csv", "raw/fetch_log.csv"),
-    ("documents.csv", "raw/documents.csv"),
-    ("clean/*.txt", "appraisal/text/"),
-    ("clean/*.json", "appraisal/cache/"),
-    ("paragraphs.csv", "appraisal/paragraphs.csv"),
-    ("sentences.csv", "appraisal/sentences.csv"),
-    ("rejected.csv", "appraisal/rejected.csv"),
-    ("components.csv", "appraisal/components.csv"),
-    ("intermediate/procurement/*.csv", "procurement/"),
-    ("intermediate/procurement/fetch_procurement_report.txt", "reports/fetch_procurement.txt"),
-    ("intermediate/procurement/clean_procurement_report.txt", "reports/clean_procurement.txt"),
-    ("intermediate/procurement/audit_procurement_report.txt", "reports/audit_procurement.txt"),
-    ("intermediate/procurement/v6_link_test.txt", "reports/v6_link_test.txt"),
-    ("fetch_report.txt", "reports/fetch.txt"),
-    ("clean_report.txt", "reports/clean.txt"),
-    ("audit_report.txt", "reports/audit.txt"),
-    ("components_report.txt", "reports/components.txt"),
-    ("review_sample.txt", "review/review_sample.txt"),
-    # Tables an earlier version wrote and nothing reads any more. Never
-    # deleted (AGENTS.md rule 1): moved aside, out of every stage's way.
-    ("appraisal/document_projects.csv", "archive/"),
-    ("procurement/package_changes.csv", "archive/"),
-    ("review/review_sample.txt", "archive/"),
-]
-
-
-def migrate(data, dry_run=False):
-    """Move files from the old layout into LAYOUT. Move only: nothing is
-    deleted or overwritten, a file whose new home is taken stays where it is
-    and is reported, and running it twice does nothing the second time.
-    Directories the moves leave empty are removed."""
-    import glob
-    moved, clashes = [], []
-    for old, new in _MOVES:
-        for src in sorted(glob.glob(os.path.join(data, old))):
-            if not os.path.isfile(src):
-                continue
-            dst = os.path.join(data, new)
-            if new.endswith("/"):
-                dst = os.path.join(dst, os.path.basename(src))
-            if os.path.exists(dst):
-                clashes.append((src, dst))
-                continue
-            moved.append((src, dst))
-            if not dry_run:
-                os.makedirs(os.path.dirname(dst), exist_ok=True)
-                os.rename(src, dst)
-    if not dry_run:
-        for d in ("clean", "intermediate/procurement", "intermediate"):
-            path = os.path.join(data, d)
-            if os.path.isdir(path) and not os.listdir(path):
-                os.rmdir(path)
-    return moved, clashes
-
-
-if __name__ == "__main__":
-    import argparse
-    ap = argparse.ArgumentParser(description="Move data/ into its current layout.")
-    ap.add_argument("--data", default=data_root())
-    ap.add_argument("--dry-run", action="store_true")
-    a = ap.parse_args()
-    moved, clashes = migrate(a.data, a.dry_run)
-    print(f"{'would move' if a.dry_run else 'moved'} {len(moved)} files")
-    for src, dst in clashes:
-        print(f"left in place (new home taken): {src} -> {dst}")
-    loose = [f for f in sorted(os.listdir(a.data))
-             if f not in {p.split("/")[0] for p in LAYOUT.values()}]
-    if loose:
-        print("not in the layout: " + ", ".join(loose))
