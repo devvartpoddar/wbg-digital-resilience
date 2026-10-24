@@ -1,0 +1,185 @@
+{
+  "plan_sections": ["WORKS", "GOODS", "NON CONSULTING SERVICES", "CONSULTING FIRMS", "INDIVIDUAL CONSULTANTS"],
+  "plan_columns": {
+    "base": [
+      ["borrower_ref", "Activity Reference No."],
+      ["loan", "Loan / Credit No."],
+      ["component", "Component"],
+      ["review_type", "Review Type"],
+      ["method_raw", "Method"],
+      ["market_approach", "Market Approach"]
+    ],
+    "goods_tail": [
+      ["procurement_process", "Procurement Process"],
+      ["prequalification", "Prequalification (Y/N)"],
+      ["sea_sh_risk", "High SEA/SH Risk"],
+      ["procurement_doc_type", "Procurement Document Type"]
+    ],
+    "consulting_tail": [
+      ["contract_type", "Contract Type"]
+    ],
+    "money": [
+      ["estimated_amount", "Estimated Amount (US$)"],
+      ["actual_amount", "Actual Amount (US$)"],
+      ["status_raw", "Process Status"]
+    ]
+  },
+  "plan_milestones": {
+    "WORKS": [
+      "Draft Pre-qualification Documents", "Prequalification Evaluation Report", "Draft Bidding Document / Justification"
+    ],
+    "GOODS": [
+      "Draft Pre-qualification Documents", "Prequalification Evaluation Report", "Draft Bidding Document / Justification"
+    ],
+    "NON CONSULTING SERVICES": [
+      "Draft Pre-qualification Documents", "Terms of Reference", "Expression of Interest",
+      "Short List"
+    ],
+    "CONSULTING FIRMS": ["Terms of Reference", "Expression of Interest", "Short List"],
+    "INDIVIDUAL CONSULTANTS": ["Terms of Reference", "Invitation to Identified", "Draft Negotiated Contract"]
+  },
+  "status_map": {
+    "pending": "Pending",
+    "pendiente": "Pending",
+    "pending implementation": "Pending Implementation",
+    "en attente d'execution": "Pending Implementation",
+    "ejecucion pendiente": "Pending Implementation",
+    "implementacao pendente": "Pending Implementation",
+    "under implementation": "Under Implementation",
+    "en cours d'execution": "Under Implementation",
+    "en ejecucion": "Under Implementation",
+    "em fase de implementacao": "Under Implementation",
+    "em execucao": "Under Implementation",
+    "under review": "Under Review",
+    "en cours d'examen": "Under Review",
+    "em analise": "Under Review",
+    "signed": "Signed",
+    "signe": "Signed",
+    "assinado": "Signed",
+    "firmado": "Signed",
+    "completed": "Completed",
+    "acheve": "Completed",
+    "concluido": "Completed",
+    "finalizado": "Completed",
+    "canceled": "Canceled",
+    "cancelled": "Canceled",
+    "annule": "Canceled",
+    "cancelado": "Canceled",
+    "anulado": "Canceled",
+    "terminated": "Terminated",
+    "resilie": "Terminated",
+    "rescindido": "Terminated",
+    "planned": "Planned",
+    "planifie": "Planned"
+  },
+  "method_names": {
+    "RFB": "Request for Bids",
+    "RFQ": "Request for Quotations",
+    "RFP": "Request for Proposals",
+    "DIR": "Direct Selection",
+    "CDS": "Direct Selection (consulting services)",
+    "QCBS": "Quality and Cost-Based Selection",
+    "QBS": "Quality-Based Selection",
+    "FBS": "Fixed Budget Selection",
+    "LCS": "Least Cost Selection",
+    "CQS": "Consultant's Qualification-Based Selection",
+    "INDV": "Individual Consultant Selection",
+    "UN": "Procurement from United Nations agencies",
+    "FA": "Framework Agreement"
+  },
+  "method_text": {
+    "request for bids": "RFB",
+    "appel d'offres": "RFB",
+    "request for quotations": "RFQ",
+    "demande de prix": "RFQ",
+    "request for proposals": "RFP",
+    "direct selection": "DIR",
+    "direct contracting": "DIR",
+    "entente directe": "DIR",
+    "passation de marche de gre a gre": "DIR",
+    "un agencies (direct)": "UN",
+    "quality and cost-based selection": "QCBS",
+    "quality and cost based selection": "QCBS",
+    "selection fondee sur la qualite et le cout": "QCBS",
+    "quality based selection": "QBS",
+    "fixed budget selection": "FBS",
+    "least cost selection": "LCS",
+    "selection au moindre cout": "LCS",
+    "consultant qualification selection": "CQS",
+    "consultant qualification  selection": "CQS",
+    "selection fondee sur les qualifications des consultants": "CQS",
+    "individual consultant selection": "INDV",
+    "consultant individuel": "INDV",
+    "individuel": "INDV",
+    "framework agreement": "FA",
+    "selecao baseada na qualidade e custo": "QCBS",
+    "selecao baseada nas qualificacoes dos consultores": "CQS",
+    "solicitacao de cotacoes": "RFQ",
+    "solicitacao de ofertas": "RFB",
+    "solicitacao de propostas": "RFP",
+    "selecao direta": "DIR",
+    "consultor individual": "INDV",
+    "consultoria individual": "INDV",
+    "seleccion basada en calidad y costo": "QCBS",
+    "seleccion basada en las calificaciones de los consultores": "CQS",
+    "seleccion basada en el menor costo": "LCS",
+    "solicitud de cotizaciones": "RFQ",
+    "solicitud de ofertas": "RFB",
+    "solicitud de propuestas": "RFP",
+    "seleccion directa": "DIR"
+  },
+  "ref_method_aliases": {
+    "CI": "INDV",
+    "IC": "INDV",
+    "IND": "INDV",
+    "QCB": "QCBS",
+    "SFQC": "QCBS",
+    "SQC": "CQS",
+    "ED": "DIR"
+  },
+  "category_map": {
+    "goods": "goods",
+    "go": "goods",
+    "g": "goods",
+    "works": "works",
+    "cw": "works",
+    "w": "works",
+    "consulting services": "consultant_services",
+    "consultant services": "consultant_services",
+    "cs": "consultant_services",
+    "consultancy": "consultant_services",
+    "consulting firms": "consultant_services",
+    "individual consultants": "consultant_services",
+    "non consulting services": "non_consulting_services",
+    "non-consulting services": "non_consulting_services",
+    "non consulting service": "non_consulting_services",
+    "nc": "non_consulting_services"
+  },
+  "lang_markers": {
+    "en": [
+      "a", "and", "construction", "for", "installation", "of", "provision", "services", "study",
+      "supply", "support", "the", "to", "with"
+    ],
+    "fr": [
+      "acquisition", "au", "aux", "construction", "d", "dans", "de", "des", "du", "et", "fourniture",
+      "l", "la", "le", "les", "pour", "prestation", "recrutement", "travaux"
+    ],
+    "es": [
+      "adquisición", "con", "construcción", "consultoría", "de", "del", "el", "en", "la", "las",
+      "los", "obras", "para", "servicios", "suministro", "y"
+    ],
+    "pt": [
+      "a", "aquisição", "as", "com", "construção", "contratação", "da", "de", "do", "e", "em",
+      "fornecimento", "o", "obras", "os", "para", "serviços"
+    ]
+  },
+  "placeholder_exact": [
+    "-", "a definir", "aucun", "aucune", "n/a", "na", "nao", "nil", "none", "not applicable",
+    "não", "por definir", "tba", "tbc", "tbd", "to be defined", "to be determined", "unknown",
+    "à définir"
+  ],
+  "placeholder_category": [
+    "civil works", "consultancy", "consultant services", "consulting", "furniture", "general",
+    "goods", "non consulting services", "services", "supply", "works"
+  ]
+}

@@ -345,19 +345,7 @@ def norm_ref(ref):
 # Function words that separate the four languages this corpus actually carries.
 # A description is five to fifteen words, so a handful of markers is a strong
 # signal and a word list would not be: nothing here translates anything.
-LANG_MARKERS = {
-    "en": {"the", "of", "and", "for", "supply", "services", "installation",
-           "construction", "provision", "with", "to", "a", "study", "support"},
-    "fr": {"de", "des", "du", "et", "pour", "la", "le", "les", "d",
-           "fourniture", "travaux", "recrutement", "prestation", "acquisition",
-           "construction", "l", "au", "aux", "dans"},
-    "es": {"de", "del", "y", "para", "la", "el", "los", "las", "suministro",
-           "obras", "servicios", "consultoría", "adquisición", "con", "en",
-           "construcción"},
-    "pt": {"de", "do", "da", "e", "para", "a", "o", "os", "as",
-           "fornecimento", "obras", "serviços", "aquisição", "com", "em",
-           "construção", "contratação"},
-}
+LANG_MARKERS = {lang: set(words) for lang, words in plan_table.VOCAB["lang_markers"].items()}
 
 WORD_RE = re.compile(r"[a-záàâãéêíóôõúüçñ]+", re.I)
 
@@ -386,13 +374,8 @@ def detect_lang(text, default="en"):
 
 
 
-PLACEHOLDER_EXACT = {"tbd", "tba", "n/a", "na", "none", "nil", "unknown", "-",
-                     "not applicable", "to be determined", "to be defined",
-                     "tbc", "aucun", "aucune", "por definir", "a definir",
-                     "à définir", "nao", "não"}
-PLACEHOLDER_CATEGORY = {"goods", "works", "services", "consultancy", "consulting",
-                        "non consulting services", "supply", "furniture",
-                        "consultant services", "civil works", "general"}
+PLACEHOLDER_EXACT = set(plan_table.VOCAB["placeholder_exact"])
+PLACEHOLDER_CATEGORY = set(plan_table.VOCAB["placeholder_category"])
 REF_ONLY_RE = re.compile(r"^[A-Z]{2}-[A-Z0-9]{1,12}-\d{2,10}-[A-Z]{2}-[A-Z0-9]{2,6}$")
 
 
@@ -436,41 +419,7 @@ def is_placeholder(description):
 STATUS_LABELS = ("Pending", "Pending Implementation", "Under Implementation",
                  "Under Review", "Signed", "Completed", "Canceled", "Terminated",
                  "Planned")
-STATUS_MAP = {
-    "pending": "Pending",
-    "pendiente": "Pending",
-    "pending implementation": "Pending Implementation",
-    "en attente d'execution": "Pending Implementation",
-    "ejecucion pendiente": "Pending Implementation",
-    "implementacao pendente": "Pending Implementation",
-    "under implementation": "Under Implementation",
-    "en cours d'execution": "Under Implementation",
-    "en ejecucion": "Under Implementation",
-    "em fase de implementacao": "Under Implementation",
-    "em execucao": "Under Implementation",
-    "under review": "Under Review",
-    "en cours d'examen": "Under Review",
-    "em analise": "Under Review",
-    "signed": "Signed",
-    "signe": "Signed",
-    "assinado": "Signed",
-    "firmado": "Signed",
-    "completed": "Completed",
-    "acheve": "Completed",
-    "concluido": "Completed",
-    "finalizado": "Completed",
-    "canceled": "Canceled",
-    "cancelled": "Canceled",
-    "annule": "Canceled",
-    "cancelado": "Canceled",
-    "anulado": "Canceled",
-    # Signed, then ended early: its own STEP value, neither signed nor canceled.
-    "terminated": "Terminated",
-    "resilie": "Terminated",
-    "rescindido": "Terminated",
-    "planned": "Planned",
-    "planifie": "Planned",
-}
+STATUS_MAP = plan_table.VOCAB["status_map"]
 # A status that says the contract exists. An award in the contracts data is not
 # allowed to overwrite one of these with a bare 'Signed'.
 CONTRACT_EXISTS = {"Signed", "Completed", "Terminated"}
@@ -479,63 +428,17 @@ CONTRACT_EXISTS = {"Signed", "Completed", "Terminated"}
 # reference ('...-GO-RFB', '...-CS-QCBS'), with the name the Procurement
 # Regulations give each. The plan's Method cell is mapped to the same code, so
 # `method` has one vocabulary whichever of the two supplied it.
-METHOD_NAMES = {
-    "RFB": "Request for Bids",
-    "RFQ": "Request for Quotations",
-    "RFP": "Request for Proposals",
-    "DIR": "Direct Selection",
-    "CDS": "Direct Selection (consulting services)",
-    "QCBS": "Quality and Cost-Based Selection",
-    "QBS": "Quality-Based Selection",
-    "FBS": "Fixed Budget Selection",
-    "LCS": "Least Cost Selection",
-    "CQS": "Consultant's Qualification-Based Selection",
-    "INDV": "Individual Consultant Selection",
-    "UN": "Procurement from United Nations agencies",
-    "FA": "Framework Agreement",
-}
+METHOD_NAMES = plan_table.VOCAB["method_names"]
 # The Method cell's words, in the four languages the plans use. 'Direct
 # Selection' is DIR for goods, works and non-consulting services and CDS for
 # consulting services; that is how STEP itself numbers them, and the corpus
 # bears it out (4,516 consulting references end in CDS, 103 in DIR).
-METHOD_TEXT = {
-    "request for bids": "RFB", "appel d'offres": "RFB",
-    "request for quotations": "RFQ", "demande de prix": "RFQ",
-    "request for proposals": "RFP",
-    "direct selection": "DIR", "direct contracting": "DIR",
-    "entente directe": "DIR", "passation de marche de gre a gre": "DIR",
-    "un agencies (direct)": "UN",
-    "quality and cost-based selection": "QCBS",
-    "quality and cost based selection": "QCBS",
-    "selection fondee sur la qualite et le cout": "QCBS",
-    "quality based selection": "QBS",
-    "fixed budget selection": "FBS",
-    "least cost selection": "LCS", "selection au moindre cout": "LCS",
-    "consultant qualification selection": "CQS",
-    "consultant qualification  selection": "CQS",
-    "selection fondee sur les qualifications des consultants": "CQS",
-    "individual consultant selection": "INDV", "consultant individuel": "INDV",
-    "individuel": "INDV",
-    "framework agreement": "FA",
-    # Portuguese
-    "selecao baseada na qualidade e custo": "QCBS",
-    "selecao baseada nas qualificacoes dos consultores": "CQS",
-    "solicitacao de cotacoes": "RFQ", "solicitacao de ofertas": "RFB",
-    "solicitacao de propostas": "RFP", "selecao direta": "DIR",
-    "consultor individual": "INDV", "consultoria individual": "INDV",
-    # Spanish
-    "seleccion basada en calidad y costo": "QCBS",
-    "seleccion basada en las calificaciones de los consultores": "CQS",
-    "seleccion basada en el menor costo": "LCS",
-    "solicitud de cotizaciones": "RFQ", "solicitud de ofertas": "RFB",
-    "solicitud de propuestas": "RFP", "seleccion directa": "DIR",
-}
+METHOD_TEXT = plan_table.VOCAB["method_text"]
 # The code at the end of a borrower reference, including the older and
 # French spellings the corpus carries. 'RF' is a clipped RFB, RFQ or RFP and
 # is left unread rather than guessed.
 REF_METHOD = {code: code for code in METHOD_NAMES}
-REF_METHOD.update({"CI": "INDV", "IC": "INDV", "IND": "INDV", "QCB": "QCBS",
-                   "SFQC": "QCBS", "SQC": "CQS", "ED": "DIR"})
+REF_METHOD.update(plan_table.VOCAB["ref_method_aliases"])
 REF_METHOD_RE = re.compile(r"(?:^|-)(?:CW|GO|CS|NC)-?([A-Z]+)")
 
 
@@ -553,19 +456,7 @@ def ref_method(ref):
     return next((REF_METHOD[k] for k in sorted(REF_METHOD, key=lambda c: (-len(c), c))
                  if token == k or (len(k) > 2 and token.startswith(k))), "")
 
-CATEGORY_MAP = {
-    "goods": "goods", "go": "goods", "g": "goods",
-    "works": "works", "cw": "works", "w": "works",
-    "consulting services": "consultant_services", "consultant services":
-        "consultant_services", "cs": "consultant_services",
-    "consultancy": "consultant_services",
-    "consulting firms": "consultant_services",
-    "individual consultants": "consultant_services",
-    "non consulting services": "non_consulting_services",
-    "non-consulting services": "non_consulting_services",
-    "non consulting service": "non_consulting_services",
-    "nc": "non_consulting_services",
-}
+CATEGORY_MAP = plan_table.VOCAB["category_map"]
 
 
 def norm_category(value):

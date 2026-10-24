@@ -42,11 +42,19 @@ does - already recovers 80% of statuses and 77% of amounts, and positional
 slicing was never shown to beat it. What this module contributes to those
 tables is the bound and the heading band, which is where the real defects were.
 """
+import json
+import os
 import re
 import unicodedata
 
-SECTION_NAMES = ("WORKS", "GOODS", "NON CONSULTING SERVICES",
-                 "CONSULTING FIRMS", "INDIVIDUAL CONSULTANTS")
+# The procurement vocabularies (section names, column catalogues, status,
+# method, category, language and placeholder words) are data, kept beside the
+# code in procurement_vocab.json; clean_procurement reads them from VOCAB too.
+VOCAB_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "procurement_vocab.json")
+with open(VOCAB_FILE, encoding="utf-8") as _fh:
+    VOCAB = json.load(_fh)
+
+SECTION_NAMES = tuple(VOCAB["plan_sections"])
 SECTION_RE = re.compile(
     r"^\s*(" + "|".join(n.replace(" ", r"[- ]") for n in SECTION_NAMES) + r")\s*$",
     re.I)
@@ -72,41 +80,14 @@ ROW_START_RE = re.compile(rf"^\s*({REF_TOKEN})\s*(/|$)")
 # heading across lines, and omits columns the plan does not use, but it never
 # reorders or renames them - which is why order alone resolves an ambiguous
 # heading match, and why a catalogue is enough without a per-borrower rule.
-_BASE = [
-    ("borrower_ref", "Activity Reference No."),
-    ("loan", "Loan / Credit No."),
-    ("component", "Component"),
-    ("review_type", "Review Type"),
-    ("method_raw", "Method"),
-    ("market_approach", "Market Approach"),
-]
-_GOODS_TAIL = [
-    ("procurement_process", "Procurement Process"),
-    ("prequalification", "Prequalification (Y/N)"),
-    ("sea_sh_risk", "High SEA/SH Risk"),
-    ("procurement_doc_type", "Procurement Document Type"),
-]
-_CONSULTING_TAIL = [("contract_type", "Contract Type")]
-_MONEY = [
-    ("estimated_amount", "Estimated Amount (US$)"),
-    ("actual_amount", "Actual Amount (US$)"),
-    ("status_raw", "Process Status"),
-]
+_BASE, _GOODS_TAIL, _CONSULTING_TAIL, _MONEY = (
+    [tuple(c) for c in VOCAB["plan_columns"][k]]
+    for k in ("base", "goods_tail", "consulting_tail", "money"))
 # The first milestone heading of each section. Nothing is read out of the
 # milestone columns, but the leftmost one has to be found: it is what bounds
 # the Process Status column on the right, and without it a status cell runs on
 # into a column of dates.
-_MILESTONES = {
-    "WORKS": ["Draft Pre-qualification Documents", "Prequalification Evaluation Report",
-              "Draft Bidding Document / Justification"],
-    "GOODS": ["Draft Pre-qualification Documents", "Prequalification Evaluation Report",
-              "Draft Bidding Document / Justification"],
-    "NON CONSULTING SERVICES": ["Draft Pre-qualification Documents", "Terms of Reference",
-                                "Expression of Interest", "Short List"],
-    "CONSULTING FIRMS": ["Terms of Reference", "Expression of Interest", "Short List"],
-    "INDIVIDUAL CONSULTANTS": ["Terms of Reference", "Invitation to Identified",
-                               "Draft Negotiated Contract"],
-}
+_MILESTONES = VOCAB["plan_milestones"]
 
 
 def catalogue(section):
