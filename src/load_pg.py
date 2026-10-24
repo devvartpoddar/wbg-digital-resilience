@@ -204,6 +204,7 @@ def prepare(conn):
     for table, cols in DECISION_TABLES.items():
         if not db.exists(conn, ident(table)):
             create_table(conn, table, cols)
+    db.scores_table(conn)
 
 
 # ---------------------------------------------------------------- the corpus

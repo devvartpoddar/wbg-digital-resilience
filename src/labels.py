@@ -61,13 +61,28 @@ def requested_dir():
     return where(data_root(), "requested_labels")
 
 
-def _dirs(dirs):
-    """The folders to read: those given, else the two kept by people and,
-    when it exists, the requested folder."""
+def scratch_dir():
+    """data/scratch/ under the data root: sets written by ./wbg try, read by
+    name only (never listed, never published)."""
+    from paths import data_root, where
+    return where(data_root(), "scratch")
+
+
+def is_scratch(name, dirs=None):
+    return os.path.exists(os.path.join(scratch_dir(), f"{name}.csv")) and not any(
+        os.path.exists(os.path.join(d, f"{name}.csv")) for d in _dirs(dirs, scratch=False))
+
+
+def _dirs(dirs, scratch=True):
+    """The folders to read: those given, else the two kept by people, the
+    requested folder and the scratch folder when they exist."""
     if dirs:
         return dirs
-    req = requested_dir()
-    return tuple(LABEL_DIRS) + ((req,) if os.path.isdir(req) else ())
+    out = list(LABEL_DIRS)
+    for d in (requested_dir(), scratch_dir() if scratch else ""):
+        if d and os.path.isdir(d):
+            out.append(d)
+    return tuple(out)
 
 
 def _is_set(path):
@@ -81,7 +96,7 @@ def label_sets(dirs=None, include_inactive=False):
     left out (not run, and its rows leave Postgres at the next load, as a
     removed set's do), unless `include_inactive`. Its stored answers stay,
     so switching it back on asks nothing again."""
-    dirs = _dirs(dirs)
+    dirs = _dirs(dirs, scratch=False)
     out, seen = [], {}
     for d in dirs:
         for path in sorted(glob.glob(os.path.join(d, "*.csv"))):

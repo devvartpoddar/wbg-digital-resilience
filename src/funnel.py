@@ -31,22 +31,18 @@ import search
 
 SCORE_COLS = ["kind", "label_set", "label_id", "item_id", "state_sha", "question_sha", "score",
               "answer", "served", "route", "round", "cosine", "rank"]
-DDL = """CREATE TABLE IF NOT EXISTS {t} (
-  kind text NOT NULL, label_set text NOT NULL, label_id text NOT NULL, item_id text NOT NULL,
-  state_sha text, question_sha text, score numeric, answer jsonb, served text, route text,
-  round integer, cosine numeric, rank integer, PRIMARY KEY (kind, label_set, label_id, item_id));
-CREATE INDEX IF NOT EXISTS scores_item ON {t} (item_id);"""
 
 
 def table(conn):
-    t = f"{db.SCHEMA}.scores"
-    conn.execute(f"CREATE SCHEMA IF NOT EXISTS {db.SCHEMA}")
-    conn.execute(DDL.format(t=t))
-    return t
+    return db.scores_table(conn)
 
 
 def kind_of(name):
-    return "asset" if name == Q.ASSETS else "measure"
+    """asset for the asset set, scratch for a set under data/scratch/
+    (./wbg try), measure otherwise."""
+    if name == Q.ASSETS:
+        return "asset"
+    return "scratch" if labels.is_scratch(name) else "measure"
 
 
 def settings(name):

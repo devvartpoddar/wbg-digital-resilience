@@ -188,9 +188,10 @@ def _paths(data):
             where(data, "embeddings", "sentence_index.csv"))
 
 
-def run_folder(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
+def run_folder(name, data, model=embed.DEFAULT_MODEL, dim=None,
                taxonomy=TAXONOMY):
     """(folder, queries) for the label set as it stands now."""
+    dim = dim or embed.DEFAULT_DIM
     queries = load_queries(name, taxonomy)
     npy, idx = _paths(data)
     if not (os.path.exists(npy) and os.path.exists(idx)):
@@ -198,11 +199,12 @@ def run_folder(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
     return where(data, "search", f"{name}-{run_version(queries, model, dim, idx)}"), queries
 
 
-def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
+def search(name, data, model=embed.DEFAULT_MODEL, dim=None,
            base_url=embed.DEFAULT_BASE, api_key="", taxonomy=TAXONOMY, dry_run=False,
            log=print):
     """Score every unit against every query of the label set; returns the run
     folder (None on a dry run)."""
+    dim = dim or embed.DEFAULT_DIM
     if dry_run and not all(os.path.exists(p) for p in _paths(data)):
         # Before the first embedding run there is no index to version against: say what the
         # label set holds and what its queries would cost.

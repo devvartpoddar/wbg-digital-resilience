@@ -221,7 +221,9 @@ def corpus(tmp_path, monkeypatch):
     os.makedirs(tmp_path / "analysis" / "labels")
     os.replace(str(lab / "scale.csv"), str(tmp_path / "analysis" / "labels" / "scale.csv"))
     # scored search runs: cosine 0.9 for the sentences each label is about
+    import embed
     import search
+    monkeypatch.setattr(embed, "DEFAULT_DIM", 4)
     for name, hits in (("cra", {0: 0.9}), ("assets", {0: 0.9, 1: 0.9})):
         queries = search.load_queries(name)
         folder, _ = search.run_folder(name, str(data))
@@ -237,7 +239,6 @@ def corpus(tmp_path, monkeypatch):
             json.dump({"index_sha256": search._sha_file(str(emb / "sentence_index.csv"))}, fh)
     import embed
     root = embed.cache_root(str(data), embed.DEFAULT_MODEL, 4)
-    monkeypatch.setattr(embed, "DEFAULT_DIM", 4)
     vec = lambda i: numpy.eye(4, dtype="float32")[i].tobytes()
     for name, hits in (("cra", {"q1": 0}), ("assets", {"t1": 0, "f1": 1})):
         for q in search.load_queries(name):

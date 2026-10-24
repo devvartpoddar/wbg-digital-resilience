@@ -7,6 +7,7 @@
     ./wbg publish             every decision read again from the scores, then the views
     ./wbg check draw|fill|evaluate|spotcheck|import   the grading cycle (src/grading.py)
     ./wbg list|prepare|summary [filters]              the cohort, the corpus, where each project stands
+    ./wbg try <slug> --expand "..." | --definition ... --phrase ...   a scratch measure in minutes (src/scratch.py)
     ./wbg status | release | audit | sensitivity | requests
 
 Projects are selected from inputs/config/cohort.csv (included rows), kept by
@@ -826,6 +827,21 @@ def main(argv=None):
     p.add_argument("--max-spend", type=float, default=None)
     _filters(p)
     sub.add_parser("publish", help="every decision read again from the scores, then the views")
+    p = sub.add_parser("try", help="a scratch measure against the corpus in minutes (src/scratch.py)")
+    p.add_argument("slug", nargs="?", help="a short name: e_waste")
+    p.add_argument("--expand", metavar="ASK", help="one cheap generative call writes the definition, phrases and patterns from this ask")
+    p.add_argument("--name")
+    p.add_argument("--definition")
+    p.add_argument("--phrase", action="append", help="a search phrase (repeat)")
+    p.add_argument("--pattern", action="append", help="a whole-word regular expression (repeat)")
+    p.add_argument("--note")
+    p.add_argument("--list", action="store_true", help="what has been tried, with counts")
+    p.add_argument("--workers", type=int, default=10)
+    p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--max-spend", type=float, default=None, help="US$ the try may spend on models")
+    for k in ("project", "country", "region", "fy", "practice", "unit"):
+        p.add_argument(f"--{k}", action="append")
+    p.add_argument("--set", action="append", dest="cohort_set")
     p = sub.add_parser("check", help="the grading cycle (src/grading.py)")
     p.add_argument("what", choices=("draw", "fill", "evaluate", "spotcheck", "import"))
     p.add_argument("--seed", type=int, default=1)
@@ -860,9 +876,15 @@ def main(argv=None):
         return 0
     if args.cmd == "check":
         return check(args, data)
+    if args.cmd == "try":
+        import scratch
+        args.projects = sorted(_sel(args).ids) if _scope(args) else None
+        return scratch.run(args, data)
     if args.cmd == "status":
         import release
+        import status
         print("\n".join(release.status(data)))
+        print("\n".join(status.brief(data)))
         return 0
     if args.cmd == "release":
         _run("release.py", data=data)

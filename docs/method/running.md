@@ -67,8 +67,23 @@ A measure is three small files and one command; the only part a person must writ
 
 The grade scale is shared (`analysis/labels/scale.csv`); a `<id>_scale.csv` beside the set overrides it. Then `./wbg add <id>` (several: `./wbg add a b c`). Stop and ask if the stage's estimate is above US$1 or the search finds under 20 candidates. Merging two types (`merge_into`) or renaming one (`display_name`) is a file edit and a publish; dropping a type or changing its definition re-asks that measure's types.
 
+## Exploring: a scratch measure
+
+`./wbg try <slug>` answers "what is there on X?" before X is a measure. It writes the three label files under `data/scratch/` (outside git), then runs the measures' own search and funnel: the phrases are embedded, the gate and the word patterns choose the sentences, the decision model grades each on the shared scale, the feedback rounds look below the gate, and every answer is stored and reused. The scores land in `wbg.scores` with kind `scratch`, which the publish never reads, so the commitments pages do not move; `wbg.scratch_findings` and `wbg.scratch_summary` (`sql/views/20_explore.sql`) show them, and the Explore dashboard reads those.
+
+```
+./wbg try e_waste --expand "e-waste: collection, recycling or safe disposal of ICT equipment" --max-spend 0.50
+./wbg try e_waste --definition "..." --phrase "..." --phrase "..." --pattern '\be-waste\b'
+./wbg try e_waste --project P171305           # one project only
+./wbg try --list                              # what has been tried, with counts
+```
+
+`--expand` is one generative call (`scratch.GEN_MODEL`, a few cents, stored under its ask so the same ask gives the same files) that writes a name, a definition of 60 to 100 words, 8 to 10 phrases and up to 3 patterns; they are printed, and `--definition`, `--phrase` or `--pattern` given alongside override them. A sentence counts at `floor.default`. Trying again with a sharper definition re-asks only the sentences whose question changed. A scratch set graduates when a person copies its files into `analysis/labels/` (a pull request) and runs `./wbg add <slug>`; the stored answers are reused.
+
+`./wbg status` prints the brief an agent or a person needs at the start of a session (`src/status.py`): the release lines, the active measures, scores per kind, stored answers, grades, fits, spend, the last publish, the scratch measures tried, waiting requests, whether a key is present.
+
 ## What Metabase sees
 
-Schema `wbg` only; start cards from the views (section 5f). Hide `loads`, `data_release`, `paragraph_projects`, `scores` and `sentence_vectors` in Metabase's table settings; the record schema `wbg_store` is for the pipeline and for querying grades and spend, not for cards. Every count in the findings is the pipeline's decision, not a person's: an evaluation draw's weighted precision and recall (`wbg.measure_quality` with `sheet` = evaluation) is the number to quote beside it.
+Schema `wbg` only; start cards from the views (section 5f). Hide `loads`, `data_release`, `paragraph_projects`, `scores`, `scratch_sets` and `sentence_vectors` in Metabase's table settings; the record schema `wbg_store` is for the pipeline and for querying grades and spend, not for cards. Every count in the findings is the pipeline's decision, not a person's: an evaluation draw's weighted precision and recall (`wbg.measure_quality` with `sheet` = evaluation) is the number to quote beside it.
 
 **Requested measures.** `./wbg requests` runs what the dashboard's New measure form queued in `wbg_requests.measure_requests`, one at a time, under `requests.cap_per_request_usd` and `requests.cap_per_day_usd`, by calling `./wbg add`. A requested measure's files sit in `data/requested_labels/` until a person copies them into `analysis/labels/`. The Postgres role, the Metabase connection and the timer are yggdrasil changes, not this repository's.

@@ -54,7 +54,7 @@ The method is split by stage so a change reads only its part. **When you change 
 
 | Section | File | Covers (code) |
 |---|---|---|
-| 0 | `docs/method/running.md` | `./wbg run`, its stages, what each costs, the clean run, adding a measure, what Metabase sees (`wbg.py`) |
+| 0 | `docs/method/running.md` | `./wbg run`, its stages, what each costs, the clean run, adding a measure, a scratch measure (`./wbg try`), the status brief, what Metabase sees (`wbg.py`, `scratch.py`, `status.py`) |
 | 1 | `docs/method/fetch.md` | what is pulled, the projects table (`fetch.py`, `fetch_projects.py`, `projects.py`) |
 | 2 | `docs/method/appraisal.md` | PDF reading, folding, paragraphs, sentences, components (`pdf_layout.py`, `text_rules.py`, `clean.py`, `sentences.py`, `components.py`, `keys.py`) |
 | 3 | `docs/method/procurement.md` | plans, notices, awards, word repair, links (`fetch_procurement.py`, `clean_procurement.py`, `plan_table.py`, `glue.py`, `links.py`, `procurement_vocab.json`) |
@@ -63,7 +63,7 @@ The method is split by stage so a change reads only its part. **When you change 
 | 5b | `docs/method/asset-map.md` | the asset map and how a sentence gets its asset |
 | 5c, 5d | `docs/method/measures.md` | a measure through the funnel, types, pair checks (`checks.py`) |
 | 5e | `docs/method/links.md` | packages to assets and to commitments |
-| 5f | `docs/method/dashboards.md` | the dashboards' views, package status, requested measures (`sql/views/13-19`, `measure_requests.py`) |
+| 5f | `docs/method/dashboards.md` | the dashboards' views, package status, requested measures, the Explore views (`sql/views/13-20`, `measure_requests.py`) |
 | 5g | `docs/method/decisions.md` | one decision system: the asker, the funnel, the floors, the probability layer, the skip rule, grading and evaluation, the control panel (`api.py`, `ask.py`, `questions.py`, `funnel.py`, `decide.py`, `grading.py`, `posterior.py`, `skip.py`, `fits.py`, `panel.py`) |
 | 6 | `docs/method/storage.md` | `data/` layout, joins, the cohort (`paths.py`, `cohort_build.py`) |
 | 7 | `docs/method/limits.md` | known limits |

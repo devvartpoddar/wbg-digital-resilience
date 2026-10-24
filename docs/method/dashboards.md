@@ -49,3 +49,5 @@ The dashboards (Metabase collection "WBG v2": Overview, Measure, Project, Commit
 **Asset map agreement.** `asset_in_asset_map` says whether a sentence of the project names the commitment's asset (`project_assets.sentences_naming_it`): a commitment whose asset no sentence names is worth a second look.
 
 **Requested measures.** `src/measure_requests.py` and `./wbg requests` run a queue in `wbg_requests.measure_requests` one at a time, each by `./wbg add <set>` under `requests.cap_per_request_usd` and `requests.cap_per_day_usd`, the spend read from `wbg_store.spend`. Nothing schedules it: the write-only Metabase connection, its role and a timer are yggdrasil changes.
+
+**Explore** (`sql/views/20_explore.sql`). `scratch_findings` is every sentence a scratch measure (`./wbg try`) asked about, with its probability, whether it reaches the floor it was tried at, its route into the pool, project, document, component and text; `scratch_summary` is one row per scratch measure with its wording and counts. `try_phrase(phrase, k)` (view 19) is the no-model tier: the nearest sentences to a typed phrase. Nothing in these views reaches the commitments.

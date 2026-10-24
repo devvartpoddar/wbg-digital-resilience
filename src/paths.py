@@ -57,6 +57,7 @@ LAYOUT = {
     "classify": "classify",
     "labels": "labels",
     "requested_labels": "requested_labels",
+    "scratch": "scratch",
     "releases": "releases",
     "fetch_status": "reports/fetch_status",
     "archive": "archive",
