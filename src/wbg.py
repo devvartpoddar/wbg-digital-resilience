@@ -1,31 +1,19 @@
 #!/usr/bin/env python3
-"""The pipeline as one module: choose projects, prepare them, read the results.
+"""The pipeline's command line and the one place its stages are ordered.
 
-    import wbg
-    sel = wbg.select(country="KE")               # or region=, fy=, project=, all
-    wbg.prepare(sel)                             # fetch what is missing, rebuild what changed
-    t = wbg.tables(sel)                          # the cleaned tables, cut to the selection
-    wbg.summary(sel)                             # one row per project: where it stands
-    wbg.upcoming(sel), wbg.open_notices(sel)     # package and notice detail
-    wbg.export(sel)                              # optional: data/runs/<name>/
+    ./wbg run [--from S] [--to S] [--only S] [--measures a b] [--max-spend US$] [--dry-run]
+        fetch > prepare > embed > search > classify > measure > link > publish (> audit)
+    ./wbg add <set>...        a measure from its files to Postgres (run --from search --to measure)
+    ./wbg publish             every decision read again from the scores, then the views
+    ./wbg check draw|fill|evaluate|spotcheck|import   the grading cycle (src/grading.py)
+    ./wbg list|prepare|summary [filters]              the cohort, the corpus, where each project stands
+    ./wbg status | release | audit | sensitivity | requests
 
-The same from the command line (./wbg, see `./wbg --help`):
-
-    ./wbg list    --region "Western and Central Africa"
-    ./wbg prepare --project P171528 --project P176932
-    ./wbg summary --country KE
-    ./wbg export  --fy 2024 --tables
-    ./wbg pipeline                               # everything, as run.sh does
-
-Projects are selected from the cohort (inputs/config/cohort.csv, included rows
-only); that file is kept by people and only read here.
-
-Nothing is redone that has not changed. Fetching is per project: a project is
-fetched once, and again only with update=True. Every later stage runs over the
-whole store from its caches, and only when its code or its inputs changed since
-it last ran: data/reports/stages.json records what each stage last ran on. The
-store is shared, so a selection prepared once is there for every later
-selection that includes it.
+Projects are selected from inputs/config/cohort.csv (included rows), kept by
+people and only read here. The corpus stages (fetch, prepare) skip what is up
+to date by fingerprint (data/reports/stages.json); the model stages ask only
+what the answer store lacks (src/ask.py). Every threshold is a line of the
+control panel; no option here moves a number.
 """
 import argparse, csv, datetime, glob, hashlib, json, os, re, subprocess, sys
 from collections import Counter, defaultdict
@@ -36,7 +24,6 @@ sys.path.insert(0, SRC)
 from paths import data_root, where  # noqa: E402
 
 COHORT = os.path.join(ROOT, "inputs", "config", "cohort.csv")
-# Statuses that mean the package is still to come.
 UPCOMING = ("Pending", "Pending Implementation", "Under Review", "Planned")
 
 
@@ -203,26 +190,6 @@ def _library_versions():
         return "pdfplumber=unknown"
 
 
-ADD_WORKERS = 10   # parallel decision-model requests per set under ./wbg run
-# The pipeline, in order. ./wbg run walks it from --from to --to (fetch to
-# publish by default; audit only when asked); every stage skips what is up
-# to date, so running from an earlier stage than needed costs seconds.
-RUN_STAGES = ("fetch", "prepare", "embed", "search", "classify", "measure", "link", "publish",
-              "audit")
-
-
-def stages_between(start=None, stop=None, only=None):
-    """The stages ./wbg run walks: one with --only, else from start (fetch)
-    to stop (publish; audit must be asked for)."""
-    if only:
-        return [only]
-    i = RUN_STAGES.index(start) if start else 0
-    j = RUN_STAGES.index(stop) if stop else RUN_STAGES.index("publish")
-    if j < i:
-        raise SystemExit(f"run: --to {stop} comes before --from {start}")
-    return list(RUN_STAGES[i:j + 1])
-
-
 def _parallel(jobs, names, commands, data):
     """Run commands (name -> [[script, *args], ...]) for several names at
     once, each name's commands in order in its own process. Prints each
@@ -252,103 +219,6 @@ def _parallel(jobs, names, commands, data):
     return failed
 
 
-def run(args, data):
-    """The whole pipeline, or any stretch of it, in one command:
-
-      fetch     the documents, procurement and project records the cohort lacks
-      prepare   read the PDFs, clean, components, procurement; load the corpus
-                tables and cut the release when they changed
-      embed     the sentence vectors (only what is not cached)
-      search    every label set's phrases against the vectors (assets and the
-                measures, side by side)
-      classify  the asset map
-      measure   every measure through the funnel together, its types proposed
-                and assigned, then the pair checks: one process
-      link      which asset each package buys, which commitments it carries out
-      publish   every current run into Postgres (the stages do this themselves;
-                this is the catch-up)
-      audit     the parse and procurement audits (only with --to audit or --only)
-
-    Every stage skips what is up to date, and the model stages read their
-    answer store, so --from an early stage is cheap; --measures names the
-    sets (default: every set in analysis/labels/). Prints the time per
-    stage and overall."""
-    import labels as labels_mod
-    import time
-    t_all = time.time()
-    stages = stages_between(args.from_stage, args.to_stage, args.only)
-    if args.dry_run:
-        # fetch and prepare call no model: a dry run is for the model stages'
-        # estimates, against the corpus as it stands.
-        skipped = [s for s in stages if s in ("fetch", "prepare")]
-        stages = [s for s in stages if s not in ("fetch", "prepare")]
-        if skipped:
-            print(f"run: --dry-run skips {', '.join(skipped)} (no model calls); the "
-                  f"estimates are for the corpus as it stands", flush=True)
-    if getattr(args, "max_spend", None) is not None:
-        # One cap for the whole run: each stage's answer store stops before a
-        # request that would pass what is left of it (src/answers.py).
-        os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"
-        os.environ["WBG_SPEND_SINCE"] = datetime.datetime.now(
-            datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sets = args.measures or [n for n in labels_mod.label_sets() if n != "assets"]
-    scope = _scope(args)
-    dry = ["--dry-run"] if args.dry_run else []
-    timings = []
-    for stage in stages:
-        t0 = time.time()
-        print(f"#### {stage}", flush=True)
-        failed = []
-        if stage == "fetch":
-            prepare(_sel(args), update=args.update, data=data, fetch=True,
-                    refresh_projects=getattr(args, "refresh_projects", False))
-        elif stage == "prepare":
-            prepare(_sel(args), data=data, fetch=False)
-        elif stage == "embed":
-            _run("embed.py", *dry, "--context", "none", data=data)
-        elif stage == "search":
-            # --no-publish: the search stage writes nothing itself. A publish
-            # rebuilds every view, so one per set was 13 rebuilds a run, and
-            # each waited on the dashboards' locks. The measure stage and the
-            # publish stage write every set's rows (search_paragraphs among
-            # them).
-            failed = _parallel(args.jobs, ["assets", *sets],
-                               lambda n: [["search.py", n, *dry, "--no-publish"]], data)
-        elif stage == "classify":
-            _run("classify.py", "assets", *dry, *scope, data=data)
-        elif stage == "measure":
-            # One process for every set (src/measure_stage.py): the funnel of
-            # every measure together, then each set's types, then the pair
-            # checks across them; the corpus and the answer store are read
-            # once. It leaves Postgres alone. The workers are shared by
-            # every measure, so they are the sets' requests at once.
-            print(f"== measure_stage.py {' '.join(sets)}", flush=True)
-            done = subprocess.run(
-                [_python(), os.path.join(SRC, "measure_stage.py"), *sets, "--workers",
-                 str(args.workers * max(1, args.jobs)), *dry, *scope],
-                env=dict(os.environ, WBG_DATA=data), cwd=ROOT)
-            failed = ["measure"] if done.returncode else []
-            # one publish a run: the publish stage writes every table that
-            # moved; only a run that stops here publishes here
-            if not failed and not args.dry_run and "publish" not in stages:
-                _run("store.py", *sets, *scope, data=data)
-        elif stage == "link":
-            _run("link_packages.py", *dry, *scope, data=data)
-        elif stage == "publish":
-            if not args.dry_run:
-                _run("store.py", "--links", *scope, data=data)
-        elif stage == "audit":
-            _run("audit.py", data=data, tail=2)
-            _run("audit_procurement.py", data=data, tail=2)
-        timings.append((stage, time.time() - t0))
-        if failed:
-            print(f"run: {stage} failed for {', '.join(failed)}; stopped. Run again to resume.")
-            return 1
-    print("run: " + ", ".join(f"{s} {t:.0f}s" for s, t in timings)
-          + f"; everything {time.time() - t_all:.0f}s", flush=True)
-    return 0
-
-
 def _python():
     box = "/opt/yggdrasil/venvs/work/bin/python"
     return os.environ.get("WBG_PY") or (box if os.path.exists(box) else sys.executable)
@@ -368,7 +238,6 @@ def _run(script, *args, data, tail=0):
     if done.returncode:
         sys.stderr.write(done.stderr)
         raise subprocess.CalledProcessError(done.returncode, cmd)
-
 
 def _fingerprint(data, code, inputs):
     """SHA-256 over the stage's code and the bytes of its input files. A PDF
@@ -498,6 +367,7 @@ def _record_due(pid, fetched_on, today, data, _status={}):
     return age >= PROJECT_REFRESH_DAYS
 
 
+
 def prepare(sel=None, update=False, data=None, fetch=True, refresh_projects=False):
     """Bring the store up to date for a selection.
 
@@ -511,7 +381,6 @@ def prepare(sel=None, update=False, data=None, fetch=True, refresh_projects=Fals
     Returns the names of the stages that ran."""
     data = data or data_root()
     sel = sel if sel is not None else select()
-    _run("paths.py", data=data)
     state = _load_state(data)
     ran = []
     if fetch:
@@ -569,6 +438,7 @@ def prepare(sel=None, update=False, data=None, fetch=True, refresh_projects=Fals
 # ------------------------------------------------------------------ reading
 
 from common import read_csv as _read  # noqa: E402
+
 
 
 def _in(sel, ids):
@@ -763,65 +633,6 @@ def open_notices(sel=None, data=None, today=None, t=None):
         row["package_status"] = p.get("status", "")
         row["package_estimated_amount"] = p.get("estimated_amount", "")
         rows.append(row)
-    return sorted(rows, key=lambda r: (r["deadline_date"], r["project_id"], r["notice_id"]))
-
-
-# ------------------------------------------------------------------ writing
-
-def _write_csv(path, rows):
-    if not rows:
-        # An empty file rather than none, so a CSV from an earlier export into
-        # the same folder is not left behind looking current.
-        open(path, "w").close()
-        return
-    with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=list(rows[0]), lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(path + ".part", path)
-
-
-def export(sel=None, name=None, data=None, include_tables=False, today=None):
-    """Write a selection's results to data/runs/<name>/ and return the folder.
-
-    summary.xlsx  sheets: projects (summary), upcoming packages, open notices,
-                  components
-    *.csv         with include_tables=True, every table cut to the selection
-
-    Only what is asked for is written; nothing else reads these folders."""
-    from openpyxl import Workbook
-    from openpyxl.styles import Font
-    data = data or data_root()
-    sel = sel if sel is not None else select()
-    today = today or datetime.date.today().isoformat()
-    out = where(data, "runs", f"{name or sel.name}-{today}")
-    os.makedirs(out, exist_ok=True)
-    t = tables(sel, data)
-    sheets = [("projects", summary(sel, data, today, t)),
-              ("upcoming packages", upcoming(sel, data, t)),
-              ("open notices", open_notices(sel, data, today, t)),
-              ("components", t["components"])]
-    wb = Workbook()
-    wb.remove(wb.active)
-    for title, rows in sheets:
-        ws = wb.create_sheet(title)
-        if not rows:
-            ws.append(["(none)"])
-            continue
-        ws.append(list(rows[0]))
-        for cell in ws[1]:
-            cell.font = Font(bold=True)
-        for r in rows:
-            ws.append([r.get(k, "") for k in rows[0]])
-        ws.freeze_panes = "A2"
-    path = os.path.join(out, "summary.xlsx")
-    wb.save(path + ".part")
-    os.replace(path + ".part", path)
-    if include_tables:
-        for tname, rows in t.items():
-            _write_csv(os.path.join(out, f"{tname}.csv"), rows)
-    return out
-
 
 # ------------------------------------------------------------------ command line
 
@@ -866,148 +677,190 @@ def _print_rows(rows, cols):
         print("  ".join(str(r.get(c, ""))[:40].ljust(width[c]) for c in cols))
 
 
+
+# ------------------------------------------------------------------ the run
+
+RUN_STAGES = ("fetch", "prepare", "embed", "search", "classify", "measure", "link", "publish", "audit")
+
+
+def stages_between(start=None, stop=None, only=None):
+    if only:
+        return [only]
+    i = RUN_STAGES.index(start) if start else 0
+    j = RUN_STAGES.index(stop) if stop else RUN_STAGES.index("publish")
+    if j < i:
+        raise SystemExit(f"run: --to {stop} comes before --from {start}")
+    return list(RUN_STAGES[i:j + 1])
+
+
+def run(args, data):
+    """The pipeline, or any stretch of it. The model stages share one
+    process, one Postgres connection and one reading of the corpus; a
+    failed step stops the run, and a run again resumes from the store."""
+    import time
+    import api
+    import db
+    import labels as labels_mod
+    import questions as Q
+    t_all = time.time()
+    stages = stages_between(args.from_stage, args.to_stage, args.only)
+    if args.dry_run:
+        stages = [s for s in stages if s not in ("fetch", "prepare")]
+    if getattr(args, "max_spend", None) is not None:
+        os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"
+        os.environ["WBG_SPEND_SINCE"] = datetime.datetime.now(
+            datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    sets = args.measures or [n for n in labels_mod.label_sets() if n != Q.ASSETS]
+    projects = sorted(_sel(args).ids) if _scope(args) else None
+    dry = ["--dry-run"] if args.dry_run else []
+    key = "" if args.dry_run else api.key()
+    kw = dict(api_key=key, dry_run=args.dry_run, workers=args.workers, projects=projects)
+    conn = corpus = None
+    timings = []
+    for stage in stages:
+        t0 = time.time()
+        print(f"#### {stage}", flush=True)
+        ok = True
+        if stage == "fetch":
+            prepare(_sel(args), update=args.update, data=data, fetch=True,
+                    refresh_projects=args.refresh_projects)
+        elif stage == "prepare":
+            prepare(_sel(args), data=data, fetch=False)
+        elif stage == "embed":
+            _run("embed.py", *dry, "--context", "none", data=data)
+        elif stage == "search":
+            ok = not _parallel(args.jobs, [Q.ASSETS, *sets], lambda n: [["search.py", n, *dry]], data)
+        elif stage == "audit":
+            _run("audit.py", data=data, tail=2)
+        else:
+            if conn is None:
+                conn = db.connect()
+                db.ensure(conn)
+                corpus = Q.Corpus(data)
+            import checks
+            import decide
+            import funnel
+            if stage == "classify":
+                ok = funnel.run(conn, data, Q.ASSETS, corpus=corpus, **kw) is not None or args.dry_run
+            elif stage == "measure":
+                for name in sets:
+                    if funnel.run(conn, data, name, corpus=corpus, **kw) is None and not args.dry_run:
+                        ok = False
+                        continue
+                    checks.propose(conn, data, corpus, name, api_key=key, dry_run=args.dry_run)
+                    if checks.types(conn, data, corpus, name, **{k: v for k, v in kw.items()
+                                                                  if k != "projects"}) is None \
+                            and not args.dry_run:
+                        ok = False
+                if ok:
+                    ok = checks.pairs(conn, data, corpus, sets, **{k: v for k, v in kw.items()
+                                                                     if k != "projects"}) is not None \
+                        or args.dry_run
+            elif stage == "link":
+                ok = checks.links(conn, data, corpus, sets, **kw) is not None or args.dry_run
+            elif stage == "publish" and not args.dry_run:
+                if projects and os.environ.get("WBG_PUBLISH_SCOPED") != "1":
+                    print("  postgres: not written: a run over named projects would replace the "
+                          "cohort's rows (set WBG_PUBLISH_SCOPED=1 for a scratch database)")
+                else:
+                    decide.publish(conn, data, corpus=corpus)
+        timings.append((stage, time.time() - t0))
+        if not ok:
+            print(f"run: {stage} failed; stopped. Run again to resume.")
+            return 1
+    print("run: " + ", ".join(f"{s} {t:.0f}s" for s, t in timings)
+          + f"; everything {time.time() - t_all:.0f}s", flush=True)
+    return 0
+
+
+def check(args, data):
+    import db
+    import grading
+    import questions as Q
+    conn = db.connect()
+    db.ensure(conn)
+    if args.what == "import":
+        return 0 if grading.import_legacy(conn, data) >= 0 else 1
+    if args.what == "fill":
+        grading.fill(conn, data, args.seed, args.file, grader=args.grader or "")
+        return 0
+    if args.what == "spotcheck":
+        out = args.out or where(data, "review", f"spotcheck_s{args.seed}.xlsx")
+        print(f"wrote {grading.spotcheck(data, args.seed, args.file, out)}")
+        return 0
+    corpus = Q.Corpus(data)
+    if args.what == "draw":
+        grading.draw(conn, data, corpus, args.seed, design=args.design, dry_run=args.dry_run)
+    else:
+        grading.evaluate(conn, data, corpus, grid=args.grid)
+    return 0
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="wbg", description=__doc__.split("\n\n")[0])
+    ap.add_argument("--data", default=None, help="data folder (default: the main checkout's data/)")
     sub = ap.add_subparsers(dest="cmd", required=True)
-    p = sub.add_parser("list", help="show the projects a selection covers")
-    _filters(p)
-    p = sub.add_parser("prepare", help="fetch what is missing and rebuild what changed")
-    _filters(p)
-    p.add_argument("--update", action="store_true",
-                   help="fetch the selected projects again, even if fetched before")
-    p = sub.add_parser("summary", help="where each selected project stands")
-    _filters(p)
-    p = sub.add_parser("export", help="write a selection's results to data/runs/")
-    _filters(p)
-    p.add_argument("--name", help="folder name (default: from the filters)")
-    p.add_argument("--tables", action="store_true", help="also write every table as CSV")
-    p = sub.add_parser("search", help="embed the sentences (only what is not cached) and "
-                                      "score them against a label set (inputs/taxonomy/ or "
-                                      "analysis/labels/)")
-    p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
-    p.add_argument("--dry-run", action="store_true", help="what it would embed, and cost")
-    p.add_argument("--embed-context", choices=("none", "section"), default="none",
-                   help="embed each sentence with its section title and component heading in "
-                        "front (a re-embedding; the index, the search and every run keyed on "
-                        "them are new)")
-    p = sub.add_parser("classify", help="grade every sentence the search reads against a "
-                                        "label set with the decision model (only what is not "
-                                        "stored; gates and floors from the control panel)")
-    p.add_argument("label_set", help="assets, measures, or any set in analysis/labels/")
-    _filters(p)
-    p.add_argument("--dry-run", action="store_true", help="what it would ask, and cost")
-    p.add_argument("--limit", type=int, default=0, help="first N sentences (smoke test)")
-    p = sub.add_parser("measure", help="grade a measure's pool with the decision model "
-                                       "(after ./wbg search <set> and ./wbg classify assets; "
-                                       "every threshold from the control panel)")
-    p.add_argument("label_set", help="a set in analysis/labels/")
-    _filters(p)
-    p.add_argument("--dry-run", action="store_true")
-    p = sub.add_parser("run", help="the pipeline, or any stretch of it: fetch > prepare > embed "
-                                   "> search > classify > measure > link > publish (> audit)")
-    _filters(p)
-    p.add_argument("--from", dest="from_stage", choices=RUN_STAGES, default=None,
-                   help="first stage (default fetch)")
-    p.add_argument("--to", dest="to_stage", choices=RUN_STAGES, default=None,
-                   help="last stage (default publish; audit only when asked)")
-    p.add_argument("--only", choices=RUN_STAGES, default=None, help="one stage alone")
-    p.add_argument("--measures", nargs="*", default=None,
-                   help="measure sets (default: every set in analysis/labels/)")
-    p.add_argument("--jobs", type=int, default=3,
-                   help="search: sets run at once (one core each); measure: --workers times "
-                        "this many requests at once, over every measure")
-    p.add_argument("--workers", type=int, default=ADD_WORKERS,
-                   help="parallel requests to the decision model per set")
+    for name, text in (("list", "show the projects a selection covers"),
+                       ("prepare", "fetch what is missing and rebuild what changed"),
+                       ("summary", "where each selected project stands")):
+        p = sub.add_parser(name, help=text)
+        _filters(p)
+        if name == "prepare":
+            p.add_argument("--update", action="store_true", help="fetch the selected projects again")
+    p = sub.add_parser("run", help="the pipeline, or any stretch of it")
+    p.add_argument("--from", dest="from_stage", choices=RUN_STAGES, default=None)
+    p.add_argument("--to", dest="to_stage", choices=RUN_STAGES, default=None)
+    p.add_argument("--only", choices=RUN_STAGES, default=None)
+    p.add_argument("--measures", nargs="*", default=None, help="the sets (default: every set)")
+    p.add_argument("--jobs", type=int, default=3, help="search sets side by side")
+    p.add_argument("--workers", type=int, default=10, help="model requests in flight")
     p.add_argument("--update", action="store_true", help="fetch the selected projects again")
-    p.add_argument("--refresh-projects", action="store_true",
-                   help="fetch every selected project's record again (not its documents)")
-    p.add_argument("--dry-run", action="store_true",
-                   help="the model stages' estimates only (fetch and prepare are skipped)")
-    p.add_argument("--max-spend", type=float, default=None,
-                   help="US$ the whole run may spend on models: a stage stops before a "
-                        "request that would pass it (no dry run needed)")
-    p = sub.add_parser("add", help="a measure from its files to Postgres: run --from search "
-                                   "--to measure --measures <set>...")
-    p.add_argument("label_set", nargs="+", help="set(s) in analysis/labels/")
+    p.add_argument("--refresh-projects", action="store_true", help="fetch every project record again")
+    p.add_argument("--dry-run", action="store_true", help="estimates only; nothing asked or written")
+    p.add_argument("--max-spend", type=float, default=None, help="US$ the run may spend on models")
     _filters(p)
+    p = sub.add_parser("add", help="a measure from its files to Postgres (run --from search --to measure)")
+    p.add_argument("label_set", nargs="+")
     p.add_argument("--jobs", type=int, default=3)
-    p.add_argument("--workers", type=int, default=ADD_WORKERS)
+    p.add_argument("--workers", type=int, default=10)
     p.add_argument("--dry-run", action="store_true")
-    p.add_argument("--max-spend", type=float, default=None,
-                   help="US$ the run may spend on models (stops before passing it)")
-    p = sub.add_parser("publish", help="write the current runs of the sets named (or every "
-                                       "set) into Postgres; the stages do this themselves, "
-                                       "this catches up after a database was unreachable")
-    p.add_argument("label_set", nargs="*")
+    p.add_argument("--max-spend", type=float, default=None)
     _filters(p)
-    p.add_argument("--links", action="store_true", help="also the package-link tables")
-    p = sub.add_parser("link", help="which asset each procurement package buys and which "
-                                    "commitments it would carry out (decision model, stored; "
-                                    "after ./wbg measure)")
-    _filters(p)
-    p.add_argument("--label-set", action="append", dest="sets",
-                   help="measure set(s) to pair; default: every set with a current run")
-    p.add_argument("--dry-run", action="store_true")
-    p = sub.add_parser("types", help="propose a measure's types from its committed units "
-                                     "(generative model, stored), or --assign them with the "
-                                     "decision model once a person has approved the list")
-    p.add_argument("label_set")
-    _filters(p)
-    p.add_argument("--assign", action="store_true")
-    p.add_argument("--runs", type=int, default=3)
-    p.add_argument("--dry-run", action="store_true")
-    p = sub.add_parser("check", help="draw a measure's units for a person to grade, or "
-                                     "--evaluate the grades: precision and recall with intervals")
-    p.add_argument("label_set")
-    _filters(p)
-    p.add_argument("--evaluate", action="store_true")
-    p.add_argument("--elusion", action="store_true",
-                   help="draw (or evaluate) units the funnel never read, below the pool")
+    sub.add_parser("publish", help="every decision read again from the scores, then the views")
+    p = sub.add_parser("check", help="the grading cycle (src/grading.py)")
+    p.add_argument("what", choices=("draw", "fill", "evaluate", "spotcheck", "import"))
     p.add_argument("--seed", type=int, default=1)
-    p.add_argument("--design", choices=("train", "eval", "bands", "floor", "tune"),
-                   help="train (the default): near each floor; eval: a random draw by the "
-                        "decision, kept out of every fit; bands, floor, tune: by band of the "
-                        "posterior or around the floor. With 'all', train and eval draw the "
-                        "combined sheets (one of sentences, one of packages)")
-    p.add_argument("--near-gate", action="store_true",
-                   help="with 'all': also draw sentences just below each measure's gate")
-    p.add_argument("--dry-run", action="store_true",
-                   help="with 'all': how many sentences and packages the draw would bring")
-    p = sub.add_parser("evaluate", help="measure the funnel for a set against the "
-                                        "hand-labelled activities workbook")
-    p.add_argument("label_set")
-    _filters(p)
-    p.add_argument("--column", required=True)
-    p.add_argument("--text-regex")
-    p = sub.add_parser("requests", help="run the measures asked for from the dashboard "
-                                        "(wbg_requests.measure_requests), one at a time, "
-                                        "US$1 cap each")
-    p.add_argument("--once", action="store_true", help="one request, then stop")
-    p.add_argument("--schema", action="store_true", help="create the request table only")
+    p.add_argument("--design", choices=("train", "eval", "elusion"), default="train")
+    p.add_argument("--file", help="fill: the JSONL of answers; spotcheck: the fills to check")
+    p.add_argument("--grader", help="fill: who or what graded (recorded on every grade)")
+    p.add_argument("--out", help="spotcheck: the workbook to write")
+    p.add_argument("--grid", action="store_true", help="evaluate: also rank the layer settings (slow)")
+    p.add_argument("--dry-run", action="store_true")
+    p = sub.add_parser("requests", help="run the measures asked for from the dashboard")
+    p.add_argument("--once", action="store_true")
+    p.add_argument("--schema", action="store_true")
     sub.add_parser("audit", help="the parse and procurement audits (reports in data/reports/)")
-    p = sub.add_parser("sensitivity", help="how much the cleaned text depends on the "
-                                           "paragraph, component-tag and sentence settings")
-    p.add_argument("--docs", type=int, default=10,
-                   help="documents to re-read from the PDF for the paragraph test")
-    p.add_argument("--skip-paragraphs", action="store_true",
-                   help="skip the slow paragraph test")
-    sub.add_parser("status", help="which code and which data release the store is at, "
-                                  "and what is out of date")
-    sub.add_parser("release", help="record the store's current data as a release "
-                                   "(data/releases/), if it changed")
-    p = sub.add_parser("pipeline", help="the same as run with no options: every stage, "
-                                        "fetch to publish, over the whole cohort")
-    p.add_argument("--update", action="store_true", help="fetch every project again")
+    p = sub.add_parser("sensitivity", help="how much the cleaned text depends on its settings")
+    p.add_argument("--docs", type=int, default=10)
+    sub.add_parser("status", help="which code and which data release the store is at")
+    sub.add_parser("release", help="record the store's current data as a release")
     args = ap.parse_args(argv)
-
-    data = data_root()
-    if args.cmd in ("pipeline", "run"):
-        if args.cmd == "pipeline":
-            args.from_stage, args.to_stage, args.only = None, None, None
-            args.measures, args.jobs, args.workers, args.dry_run = None, 3, ADD_WORKERS, False
-            for k in ("project", "cohort_set", "country", "region", "fy", "practice", "unit"):
-                setattr(args, k, None)
+    data = args.data or data_root()
+    if args.cmd == "run":
         return run(args, data)
+    if args.cmd == "add":
+        args.from_stage, args.to_stage, args.only = "search", "measure", None
+        args.measures, args.update, args.refresh_projects = args.label_set, False, False
+        return run(args, data)
+    if args.cmd == "publish":
+        import db
+        import decide
+        with db.connect() as conn:
+            db.ensure(conn)
+            decide.publish(conn, data)
+        return 0
+    if args.cmd == "check":
+        return check(args, data)
     if args.cmd == "status":
         import release
         print("\n".join(release.status(data)))
@@ -1015,78 +868,29 @@ def main(argv=None):
     if args.cmd == "release":
         _run("release.py", data=data)
         return 0
-    if args.cmd == "search":
-        dry = ["--dry-run"] if args.dry_run else []
-        _run("embed.py", *dry, "--context", args.embed_context, data=data)
-        _run("search.py", args.label_set, *dry, data=data)
-        return 0
-    if args.cmd == "classify":
-        extra = (["--dry-run"] if args.dry_run else []) + \
-            (["--limit", str(args.limit)] if args.limit else [])
-        _run("classify.py", args.label_set, *extra, *_scope(args), data=data)
-        return 0
-    if args.cmd == "measure":
-        _run("measure.py", args.label_set, *(["--dry-run"] if args.dry_run else []),
-             *_scope(args), data=data)
-        return 0
-    if args.cmd == "add":
-        args.from_stage, args.to_stage, args.only = "search", "measure", None
-        args.measures, args.update = args.label_set, False
-        return run(args, data)
-    if args.cmd == "link":
-        _run("link_packages.py",
-             *[x for st in (args.sets or []) for x in ("--label-set", st)],
-             *(["--dry-run"] if args.dry_run else []), *_scope(args), data=data)
-        return 0
-    if args.cmd == "publish":
-        _run("store.py", *args.label_set, *(["--links"] if args.links else []),
-             *_scope(args), data=data)
-        return 0
-    if args.cmd == "types":
-        _run("kinds.py", args.label_set, *(["--assign"] if args.assign else []),
-             "--runs", str(args.runs), *(["--dry-run"] if args.dry_run else []),
-             *_scope(args), data=data)
-        return 0
-    if args.cmd == "check":
-        _run("check_units.py", args.label_set, *(["--evaluate"] if args.evaluate else []),
-             *(["--elusion"] if args.elusion else []), "--seed", str(args.seed),
-             *(["--design", args.design] if args.design else []),
-             *(["--near-gate"] if args.near_gate else []),
-             *(["--dry-run"] if args.dry_run else []), *_scope(args), data=data)
-        return 0
-    if args.cmd == "evaluate":
-        _run("evaluate_activities.py", args.label_set, "--column", args.column,
-             *(["--text-regex", args.text_regex] if args.text_regex else []),
-             *_scope(args), data=data)
-        return 0
     if args.cmd == "requests":
         _run("measure_requests.py", *(["--once"] if args.once else []),
              *(["--schema"] if args.schema else []), data=data)
         return 0
     if args.cmd == "audit":
         _run("audit.py", data=data, tail=2)
-        _run("audit_procurement.py", data=data, tail=2)
         return 0
     if args.cmd == "sensitivity":
-        _run("sensitivity.py", "--docs", str(args.docs),
-             *(["--skip-paragraphs"] if args.skip_paragraphs else []), data=data)
+        _run("sensitivity.py", "--docs", str(args.docs), data=data)
         return 0
     sel = _sel(args)
     if args.cmd == "list":
-        _print_rows(sel.rows, ["project_id", "country_code", "region", "approval_fy",
-                               "status", "closing_date", "practice", "unit_code"])
+        _print_rows(sel.rows, ["project_id", "country_code", "region", "approval_fy", "status",
+                               "closing_date", "practice", "unit_code"])
         print(f"\n{len(sel)} projects")
     elif args.cmd == "prepare":
         prepare(sel, update=args.update, data=data)
     elif args.cmd == "summary":
-        _print_rows(summary(sel, data), ["project_id", "country_code", "status",
-                                         "closing_date", "latest_plan_date",
-                                         "packages", "upcoming_packages",
+        _print_rows(summary(sel, data), ["project_id", "country_code", "status", "closing_date",
+                                         "latest_plan_date", "packages", "upcoming_packages",
                                          "upcoming_not_in_latest_plan", "upcoming_estimated_usd",
                                          "upcoming_planned_date_passed", "next_planned_date",
                                          "open_notices", "contracts_signed"])
-    elif args.cmd == "export":
-        print(f"wrote {export(sel, args.name, data, include_tables=args.tables)}")
     return 0
 
 

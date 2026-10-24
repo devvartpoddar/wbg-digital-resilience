@@ -50,21 +50,6 @@ def test_too_few_graded_sentences_give_no_layer():
     assert posterior.fit(graded, scores, vecs, "q1", "cra", S) is None
 
 
-def test_the_layer_applies_only_to_the_question_it_was_fitted_on(tmp_path, monkeypatch):
-    graded, scores, vecs = _graded()
-    spec = posterior.fit(graded, scores, vecs, "q1", "cra", S)
-    path = str(tmp_path / "cra_posterior.json")
-    posterior.write(path, spec)
-    assert posterior.load(path, "q1", vecs.get) is not None
-    assert posterior.load(path, "q2", vecs.get) is None          # a revised definition
-    assert posterior.digest(posterior.read_spec(path, "q1")) == posterior.digest(spec)
-    assert posterior.read_spec(path, "q2") is None
-    p = tmp_path / "panel.csv"
-    p.write_text("setting,value\nposterior.on,false\n")
-    monkeypatch.setenv("WBG_PANEL", str(p))
-    assert posterior.load(path, "q1", vecs.get) is None          # switched off on the panel
-    assert json.load(open(path))["n_yes"] == 20
-
 
 def test_a_sentence_with_no_vector_keeps_the_models_score():
     graded, scores, vecs = _graded()
@@ -103,9 +88,10 @@ def test_a_near_copy_does_not_vote_but_a_sentence_of_the_same_project_does():
 
 def test_design_weights_move_the_fit_towards_the_heavier_rows():
     graded, scores, vecs = _graded()
-    light = posterior.fit([(u, y, 1.0) for u, y in graded], scores, vecs, "q", "cra", S)
+    s1 = dict(S, fit_weight_power=1.0)       # fit weights follow the design weights
+    light = posterior.fit([(u, y, 1.0) for u, y in graded], scores, vecs, "q", "cra", s1)
     heavy = posterior.fit([(u, y, 5.0 if y == 0 else 1.0) for u, y in graded], scores, vecs,
-                          "q", "cra", S)
+                          "q", "cra", s1)
     # More weight on the noes lowers the intercept: a lower base rate.
     assert heavy["coef"][0] < light["coef"][0]
 

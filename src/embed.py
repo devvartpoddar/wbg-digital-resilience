@@ -628,9 +628,12 @@ def main():
 
     spend = stats["tokens"] / 1e6 * PRICE_PER_MTOK
     if stats["requests"]:
-        import classify
-        classify.record_spend(args.data, "embed", args.unit, args.model, stats["requests"],
-                              spend, elapsed)
+        import api
+        import db
+        with db.connect() as conn:
+            db.ensure(conn)
+            with api.Spend(conn, "embed", args.unit, args.model) as sp:
+                sp.calls, sp.cost = stats["requests"], spend
     manifest = {
         "model_requested": args.model,
         "model_served": stats["served_model"] or None,

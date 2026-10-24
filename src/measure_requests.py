@@ -14,17 +14,17 @@ request that failed: a person looks at it and queues it again.
 
 The cap is per request (REQUEST_CAP_USD) and per day across requests
 (DAILY_CAP_USD); the stages enforce it themselves through
-$WBG_SPEND_CAP_USD (src/answers.py), so a request that would pass it stops
+$WBG_SPEND_CAP_USD (src/api.py), so a request that would pass it stops
 with what is stored, as status 'stopped'.
 
   python3 src/measure_requests.py            run the queue until it is empty
   python3 src/measure_requests.py --once     one request
   python3 src/measure_requests.py --schema   create the schema and table only
 
-Reads  wbg_requests.measure_requests; analysis/labels/backup_power_scale.csv
-       (the common grade scale every measure uses)
-Writes data/requested_labels/<set>.csv, <set>_queries.csv, <set>_scale.csv,
-       <set>_patterns.csv; the request row's status, stage, spend and result
+Reads  wbg_requests.measure_requests
+Writes data/requested_labels/<set>.csv, <set>_queries.csv, <set>_patterns.csv
+       (the shared analysis/labels/scale.csv is the scale); the request row's
+       status, stage, spend and result
 """
 import argparse, csv, datetime, os, re, subprocess, sys, time
 
@@ -39,12 +39,7 @@ import panel  # noqa: E402
 REQUEST_CAP_USD = float(panel.get("requests.cap_per_request_usd", 1.0))
 DAILY_CAP_USD = float(panel.get("requests.cap_per_day_usd", 3.0))
 NAME_RULE = re.compile(r"^[a-z][a-z0-9_]{2,40}$")
-SCALE_TEMPLATE = os.path.join(labels.ROOT, "analysis", "labels", "backup_power_scale.csv")
-STAGES = (("search", ["search.py", "{set}"]),
-          ("measure", ["measure.py", "{set}", "--no-publish"]),
-          ("types", ["kinds.py", "{set}"]),
-          ("assign", ["kinds.py", "{set}", "--assign", "--no-publish"]),
-          ("publish", ["store.py", "{set}"]))
+STAGES = (("add", ["wbg.py", "add", "{set}"]),)
 
 DDL = f"""
 CREATE SCHEMA IF NOT EXISTS {SCHEMA};
@@ -69,8 +64,8 @@ COMMENT ON TABLE {TABLE} IS 'Measures asked for from the dashboard''s New measur
 
 
 def connect():
-    import store
-    return store.connect()
+    import db
+    return db.connect(autocommit=True)
 
 
 def ensure_schema(conn):
@@ -118,9 +113,6 @@ def write_files(req, folder):
     put(f"{name}_queries.csv", ["measure_id", "query_id", "query", "active"],
         [{"measure_id": name, "query_id": f"q{i}", "query": p, "active": "true"}
          for i, p in enumerate(phrases, 1)])
-    with open(SCALE_TEMPLATE, newline="", encoding="utf-8") as fh:
-        scale = list(csv.DictReader(fh))
-    put(f"{name}_scale.csv", ["grade", "description"], scale)
     pats = [p.strip() for p in (req["patterns"] or "").splitlines() if p.strip()]
     if pats:
         put(f"{name}_patterns.csv", ["measure_id", "pattern_id", "pattern", "active"],
@@ -128,26 +120,18 @@ def write_files(req, folder):
              for i, p in enumerate(pats, 1)])
 
 
-def spent(data, name, since):
+def spent(conn, name, since):
     """US$ the spend ledger records for this set since a moment."""
-    import classify
-    path = where(data, "reports", "spend.csv")
-    total = 0.0
-    if os.path.exists(path):
-        with open(path, newline="", encoding="utf-8") as fh:
-            for r in csv.DictReader(fh):
-                if r["label_set"] == name and r["at"] >= since:
-                    total += float(r["cost_usd"] or 0)
-    return total
+    import db
+    return float(db.one(conn, f"SELECT coalesce(sum(cost_usd), 0) FROM {db.STORE}.spend "
+                        f"WHERE label_set = %s AND at >= %s", (name, since))[0])
 
 
-def committed(data, name, projects):
-    import measure
-    folder = measure.current_run(name, data, projects=projects)
-    if not folder:
-        return None
-    return sum(1 for u in measure.read_units(folder, data, links=False)
-               if u["sent"] == "true" and u["committed"] == "true")
+def committed(conn, data, name):
+    import decide
+    import questions
+    units = decide.measure_units(conn, questions.Corpus(data, vectors=False), name)
+    return sum(1 for u in units.values() if u["committed"]) if units else None
 
 
 def run_one(conn, data, log=print, runner=subprocess.run):
@@ -191,25 +175,25 @@ def run_one(conn, data, log=print, runner=subprocess.run):
     if req["cohort_set"]:
         from wbg import select
         projects = sorted(select(cohort_set=req["cohort_set"], data=data).ids)
-        scope = ["--projects", ",".join(projects)]
+        scope = ["--set", req["cohort_set"]]
     since = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
     py = sys.executable
     for stage, cmd in STAGES:
-        cost = spent(data, name, since)
+        cost = spent(conn, name, since)
         conn.execute(f"UPDATE {TABLE} SET stage = %s, spend_usd = %s WHERE request_id = %s",
                      (stage, round(cost, 4), req["request_id"]))
         env = dict(os.environ, WBG_DATA=data,
                    WBG_SPEND_CAP_USD=f"{max(left - cost, 0):.4f}")
-        args = [a.format(set=name) for a in cmd] + (scope if stage != "search" else [])
+        args = [a.format(set=name) for a in cmd] + scope
         done = runner([py, os.path.join(os.path.dirname(os.path.abspath(__file__)), args[0]),
                        *args[1:]], env=env, capture_output=True, text=True)
         if done.returncode:
             tail = (done.stderr or done.stdout or "").strip().splitlines()[-3:]
-            cost = spent(data, name, since)
+            cost = spent(conn, name, since)
             if any("spend cap" in t for t in tail):
                 return finish("stopped", f"{stage}: " + " | ".join(tail), cost=cost)
             return finish("failed", f"{stage}: " + " | ".join(tail), cost=cost)
-    return finish("done", found=committed(data, name, projects), cost=spent(data, name, since))
+    return finish("done", found=committed(conn, data, name), cost=spent(conn, name, since))
 
 
 def main():

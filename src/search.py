@@ -414,17 +414,9 @@ def main():
                                       "(the file name without .csv): assets, measures")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--no-publish", action="store_true")
     args = ap.parse_args()
     key = "" if args.dry_run else embed.read_key("")
-    out = search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
-    # A dry run writes nothing at all: no scores (above), and no publish. It
-    # used to publish a run that was already scored for the same version,
-    # which made a dry run take a lock on every view (and wait behind a
-    # dashboard's query) while claiming to change nothing.
-    if out and not args.no_publish and not args.dry_run:
-        import store
-        store.try_publish(args.data, sets=[args.label_set])
+    search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
     return 0
 
 
