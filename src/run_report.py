@@ -108,7 +108,7 @@ def build(data, topic, today):
         + (" - see Problems found." if defects else "."),
         "",
         "## What ran",
-        "- The pipeline (`./wbg pipeline`, which `./run.sh` runs), from the main checkout.",
+        "- The pipeline (`./wbg run`, which `./run.sh` runs), from the main checkout.",
         "",
         "## Numbers",
         "| | Count |",

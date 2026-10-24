@@ -428,7 +428,7 @@ TABLES = {
     "measure_quality": dict(
         key=("label_set", "question_sha256", "sheet"), foreign=[],
         comment="How well the pipeline decides a measure, against a sheet a person graded "
-                "(./wbg check <set> --evaluate): one row per measure, exact question wording "
+                "(./wbg check evaluate): one row per measure, exact question wording "
                 "and kind of sheet, the latest evaluation. Precision and recall are of the "
                 "decision (posterior at the floor) against the person's grade 2 or more, "
                 "weighted back to the pool, with recall within the graded pool, not the "
