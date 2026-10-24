@@ -710,7 +710,8 @@ def run(args, data):
         os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"
         os.environ["WBG_SPEND_SINCE"] = datetime.datetime.now(
             datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    sets = args.measures or [n for n in labels_mod.label_sets() if n != Q.ASSETS]
+    every = [n for n in labels_mod.label_sets() if n != Q.ASSETS]
+    sets = args.measures or every
     projects = sorted(_sel(args).ids) if _scope(args) else None
     dry = ["--dry-run"] if args.dry_run else []
     key = "" if args.dry_run else api.key()
@@ -753,11 +754,13 @@ def run(args, data):
                             and not args.dry_run:
                         ok = False
                 if ok:
-                    ok = checks.pairs(conn, data, corpus, sets, **{k: v for k, v in kw.items()
+                    # across every active measure, whatever subset this run was given:
+                    # the pair and link stages replace their whole kind
+                    ok = checks.pairs(conn, data, corpus, every, **{k: v for k, v in kw.items()
                                                                      if k != "projects"}) is not None \
                         or args.dry_run
             elif stage == "link":
-                ok = checks.links(conn, data, corpus, sets, **kw) is not None or args.dry_run
+                ok = checks.links(conn, data, corpus, every, **kw) is not None or args.dry_run
             elif stage == "publish" and not args.dry_run:
                 if projects and os.environ.get("WBG_PUBLISH_SCOPED") != "1":
                     print("  postgres: not written: a run over named projects would replace the "
