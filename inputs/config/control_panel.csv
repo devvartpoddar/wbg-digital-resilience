@@ -29,7 +29,7 @@ posterior.min_each,5,every graded question,Fewer graded yes or no than this: no 
 posterior.near_copy,off,every graded question,Leave graded near-copies above this similarity out of the vote; off = only the sentence itself.
 posterior.folds,5,evaluation report,Folds (whole projects) for the out-of-fold check.
 posterior.fit_weight_power,0,evaluation (src/grading.py),"Fits weight each graded row by its design weight to this power: 0 = every row once; 1 = the reporting weights (which span 2 to 9,000)."
-floor.default,0.73,commitment,A sentence counts for a measure at this posterior or above (read at publish). floor.<set> overrides it for one measure.
+floor.default,0.8,commitment,A sentence counts for a measure at this posterior or above (read at publish). floor.<set> overrides it for one measure.
 floor.ask,0.73,commitment,"What a measure's rounds count as a yes, and which sentences the types, pair checks and links ask about (in what is asked). Keep at or below every decision floor."
 floor.target_precision,0.85,evaluation report,The evaluation suggests the floor with the most recall at this precision.
 floor.types,0.7,types (src/checks.py),A type counts at this P(yes) or above.
