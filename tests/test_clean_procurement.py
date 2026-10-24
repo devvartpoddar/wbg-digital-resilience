@@ -765,3 +765,43 @@ def test_a_paged_listing_is_read_to_its_total_or_refused(monkeypatch):
     with pytest.raises(RuntimeError, match="3 of 5"):
         F.fetch_pages(F.NOTICES, {"project_id": "P1"}, lambda j: j["procnotices"],
                       what="notices P1", page=2)
+
+
+# ------------------------------------------- glue rules on an invented vocabulary
+
+def _rule_vocab(counts, prose=None):
+    v = glue.Vocab(counts)
+    v.prose = glue.Vocab(prose or {})
+    v.foreign = glue.Vocab(counts)
+    return v
+
+
+def test_a_word_two_common_words_were_fused_into_is_split():
+    # 'unconsultant' recurs (a clipped cell repeats it) but both halves are far
+    # more common.
+    v = _rule_vocab({"un": 5000, "consultant": 2500, "unconsultant": 150})
+    assert glue.unfuse("Recrutement d'unconsultant", v)[0] == "Recrutement d'un consultant"
+
+
+def test_a_word_the_prose_uses_whole_is_not_unfused():
+    v = _rule_vocab({"an": 5000, "other": 900, "another": 60}, prose={"another": 40})
+    assert glue.unfuse("another phase", v)[0] == "another phase"
+
+
+def test_two_content_words_are_not_unfused():
+    # Neither half is a function word: 'unidos' stays.
+    v = _rule_vocab({"uni": 900, "dos": 900, "unidos": 10})
+    assert glue.unfuse("Estados Unidos", v)[0] == "Estados Unidos"
+
+
+def test_an_english_prefix_is_not_taken_for_a_fused_word():
+    v = _rule_vocab({"in": 9000, "eligibility": 300, "ineligibility": 20})
+    assert glue.unfuse("ineligibility of firms", v)[0] == "ineligibility of firms"
+
+
+def test_of_two_possible_joins_the_more_common_word_wins():
+    # 'prior itaires ayant': 'prioritaires' (54) beats 'prioritairesayant' (3).
+    v = _rule_vocab({"prioritaires": 54, "prioritairesayant": 3, "ayant": 13, "prior": 1,
+                "itaires": 0})
+    assert glue.rejoin("filières prior itaires ayant un", v)[0] == \
+        "filières prioritaires ayant un"

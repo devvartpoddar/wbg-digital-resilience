@@ -6,6 +6,7 @@ what the suite proves.
 import csv
 import hashlib
 import json
+from pathlib import Path
 import os
 import sys
 
@@ -321,8 +322,8 @@ def test_index_rows_are_contiguous_from_zero(corpus, monkeypatch):
 
 def test_manifest_records_what_was_run(corpus, monkeypatch):
     run(corpus, Stub(), monkeypatch)
-    manifest = json.load(open(os.path.join(str(corpus), "data", "embeddings",
-                                           "embedding_manifest.json"), encoding="utf-8"))
+    manifest = json.loads(Path(corpus, "data", "embeddings", "embedding_manifest.json")
+                          .read_text(encoding="utf-8"))
     assert manifest["model_requested"] == MODEL
     assert manifest["dimensions"] == DIM
     assert manifest["rows_embedded"] == 6
@@ -335,8 +336,8 @@ def test_manifest_records_what_was_run(corpus, monkeypatch):
 
 def test_manifest_counts_paragraphs_left_without_a_vector(corpus, monkeypatch):
     run(corpus, Stub(fail_on=[DOCS["D002"][1]]), monkeypatch)
-    manifest = json.load(open(os.path.join(str(corpus), "data", "embeddings",
-                                           "embedding_manifest.json"), encoding="utf-8"))
+    manifest = json.loads(Path(corpus, "data", "embeddings", "embedding_manifest.json")
+                          .read_text(encoding="utf-8"))
     assert manifest["paragraphs_without_a_vector"] == 1
     assert manifest["rows_embedded"] == 5
 
@@ -348,7 +349,7 @@ def test_a_changed_clean_file_aborts_the_run(corpus, monkeypatch):
     regenerated the offsets still parse and still yield something - just not
     what was audited. That has to stop the run, not colour the corpus."""
     path = os.path.join(str(corpus), "data", "appraisal", "text", "D001.txt")
-    body = open(path, encoding="utf-8").read()
+    body = Path(path).read_text(encoding="utf-8")
     open(path, "w", encoding="utf-8").write("x" + body[1:])
     with pytest.raises(SystemExit) as exc:
         run(corpus, Stub(), monkeypatch)
