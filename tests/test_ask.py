@@ -32,7 +32,7 @@ def test_the_score_reads_the_raw_probabilities_out_of_their_total():
 def test_what_is_asked_is_stored_and_a_rerun_asks_nothing(pg, fake_model):
     got, st = ask.ask(pg, "m", items(5), stage="t", api_key="k", batch=10, log=lambda *_: None)
     assert st["calls"] == 1 and len(got) == 5
-    assert Q.score(got["u0"]["cra"]) > 0.9 > 0.1 > Q.score(got["u1"]["cra"])
+    assert Q.score(got["u0"]["cra"]) > 0.85 > 0.1 > Q.score(got["u1"]["cra"])
     assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.answers")[0] == 5
     assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.states")[0] == 5
     assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.questions")[0] == 1

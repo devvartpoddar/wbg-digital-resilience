@@ -63,6 +63,14 @@ def get(key, default=None):
     return default if v is None else v
 
 
+def require(key):
+    """A setting's value; a line the panel lacks is an error, never a default."""
+    v = settings().get(key)
+    if v is None:
+        raise SystemExit(f"panel: {key} is not set in {path()}")
+    return v
+
+
 def floor(measure):
     """The probability at or above which a sentence counts for the measure:
     floor.<measure> if written, else floor.default (None if neither is)."""

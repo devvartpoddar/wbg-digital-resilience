@@ -183,7 +183,7 @@ TABLES = {
         columns={
             "cohort_set": "Which hand-kept set of the cohort the project is in: digital (its object is a digital asset) or digital_contributor (a digital asset contributes to another sector's object). The filter every report should carry.",
             "in_projects_interface": "Whether the projects interface had a record for this id.",
-            "commitment_usd_millions": "Total commitment, US$ millions, from the projects interface: its v3 form where it gives one, else v2. Not always the current Bank financing: the two forms disagree on 30 of 131 projects, and v3 can show a cancelled amount (P171305: US$50m where US$150m remains). See the two columns below.",
+            "commitment_usd_millions": "Total commitment, US$ millions, from the projects interface: its v3 form where it gives one, else v2. Not always the current Bank financing: the two forms can disagree, and v3 can show a cancelled amount. See the two columns below.",
             "commitment_v2_usd_millions": "The v2 form's curr_total_commitment, US$ millions: usually the amount at approval, not updated after a cancellation.",
             "commitment_v3_usd_millions": "The v3 form's curr_total_commitment, US$ millions: includes additional financing; after a cancellation it has been seen to show the cancelled amount.",
             "record_source": "Which form of the projects interface gave the record: v2, v3 or v2+v3. v3 is preferred for name, status, dates, place and commitment (the more current); v2 alone gives the fiscal year, lending instrument, Global Practice and sectors, so a v3-only record has those blank (the fiscal year is then computed from the approval date).",
@@ -696,4 +696,5 @@ TABLES = {
 
 def qualified(table):
     """schema.table for a table name, as created."""
-    return f"{TABLES[table]['schema']}.{table}"
+    import db
+    return f"{db.SCHEMA}.{table}"

@@ -5,6 +5,7 @@ import csv
 import hashlib
 import json
 import os
+import re
 import sys
 import tempfile
 import uuid
@@ -122,8 +123,58 @@ def corpus(tmp_path, monkeypatch):
     write_csv(str(data / "appraisal" / "sentences.csv"),
               ["sentence_id", "paragraph_id", "doc_id", "char_start", "char_end", "n_tokens",
                "text_sha256"], sents)
-    write_csv(str(data / "appraisal" / "components.csv"), ["doc_id", "source", "number", "name"],
-              [{"doc_id": "D", "source": "datasheet", "number": "1", "name": "Connectivity"}])
+    write_csv(str(data / "appraisal" / "components.csv"),
+              ["project_ids", "doc_id", "doc_kind", "disclosure_date", "source", "level", "number", "name",
+               "name_key", "cost_usd_m", "cost_before_usd_m", "action", "page"],
+              [{"project_ids": "P1", "doc_id": "D", "doc_kind": "pad", "disclosure_date": "2024-01-02",
+                "source": "datasheet", "level": "component", "number": "1", "name": "Connectivity",
+                "name_key": "connectivity", "cost_usd_m": "10", "page": "3"}])
+    write_csv(str(data / "projects" / "projects.csv"),
+              ["project_id", "cohort_set", "in_projects_interface", "project_name", "status", "approval_date",
+               "approval_fy", "closing_date", "region", "country_code", "country_name", "lending_instrument",
+               "commitment_usd_m", "commitment_v2_usd_m", "commitment_v3_usd_m", "record_source", "practice",
+               "practice_code", "sectors", "managing_unit", "unit_code", "unit_doc_id", "unit_as_of"],
+              [{"project_id": "P1", "cohort_set": "digital", "in_projects_interface": "true",
+                "project_name": "Connect", "status": "Active", "approval_date": "2023-06-01", "approval_fy": "2023",
+                "closing_date": "2029-06-30", "region": "Africa", "country_code": "KE", "country_name": "Kenya",
+                "lending_instrument": "Investment Project Financing", "commitment_usd_m": "100",
+                "record_source": "v2+v3", "practice": "Digital"}])
+    write_csv(str(data / "raw" / "documents.csv"),
+              ["doc_id", "project_ids", "doc_type", "doc_kind", "title", "disclosure_date", "lang", "fetched_at",
+               "pdf_url", "pdf_bytes", "pdf_sha256", "owner_unit"],
+              [{"doc_id": "D", "project_ids": "P1", "doc_type": "Project Appraisal Document", "doc_kind": "pad",
+                "title": "Connect PAD", "disclosure_date": "2024-01-02", "lang": "English",
+                "fetched_at": "2026-10-01T00:00:00Z", "pdf_url": "https://x/D.pdf", "pdf_bytes": "1",
+                "pdf_sha256": "0" * 64}])
+    pk_cols = ["package_id", "project_id", "borrower_ref", "borrower_ref_norm", "description", "description_clean",
+               "description_match", "description_sha256", "description_lang", "lot_or_phase", "component_number",
+               "component", "component_source", "component_doc_id", "glue_repairs", "is_rebid", "is_placeholder",
+               "clean_version", "category", "method", "method_name", "method_source", "method_raw",
+               "market_approach", "status", "status_raw", "status_source", "status_as_of", "planned_date",
+               "revised_date", "estimated_amount", "currency", "amount_source", "actual_amount", "plan_version",
+               "plan_disclosure_date", "in_latest_plan", "fetched_at"]
+    write_csv(str(data / "procurement" / "packages.csv"), pk_cols,
+              [{"package_id": "P1-1", "project_id": "P1", "borrower_ref": "KE-1", "borrower_ref_norm": "ke1",
+                "description": "Supply of towers", "description_clean": "Supply of towers", "description_lang": "en",
+                "component_number": "1", "component": "Connectivity", "is_rebid": "false",
+                "is_placeholder": "false", "category": "Goods", "method": "RFB", "status": "Pending",
+                "planned_date": "2027-01-01", "estimated_amount": "1000", "currency": "USD",
+                "in_latest_plan": "true"},
+               {"package_id": "P1-2", "project_id": "P1", "borrower_ref": "KE-2", "borrower_ref_norm": "ke2",
+                "description": "Consulting on roads", "description_clean": "Consulting on roads",
+                "description_lang": "en", "is_rebid": "false", "is_placeholder": "false", "category": "Consulting",
+                "method": "QCBS", "status": "Signed", "planned_date": "2025-01-01", "in_latest_plan": "true"}])
+    write_csv(str(data / "procurement" / "notices.csv"),
+              ["notice_id", "project_id", "notice_type", "notice_status", "publication_date", "deadline_date",
+               "borrower_ref", "borrower_ref_norm", "description", "description_clean", "description_match",
+               "description_sha256", "description_lang", "is_placeholder", "glue_repairs", "category", "method",
+               "method_name", "country_name", "package_id", "package_link", "clean_version"], [])
+    write_csv(str(data / "procurement" / "awards.csv"),
+              ["contract_id", "project_id", "borrower_ref", "borrower_ref_norm", "description", "description_clean",
+               "description_match", "description_sha256", "description_lang", "is_placeholder", "glue_repairs",
+               "clean_version", "signed_date", "no_objection_date", "total_amount", "currency", "category",
+               "method", "method_name", "review_type", "supplier_name", "supplier_country", "supplier_amount",
+               "region", "sector", "package_id", "package_link", "notice_ids"], [])
     import units
     us = [u for u in units.search_units(str(data)) if not u["left_out"] and not u["copy_of"]]
     index_cols = ["row"] + [c for c in units.UNIT_COLS
@@ -184,6 +235,15 @@ def corpus(tmp_path, monkeypatch):
         numpy.save(os.path.join(folder, "scores.npy"), scores)
         with open(os.path.join(folder, "manifest.json"), "w") as fh:
             json.dump({"index_sha256": search._sha_file(str(emb / "sentence_index.csv"))}, fh)
+    import embed
+    root = embed.cache_root(str(data), embed.DEFAULT_MODEL, 4)
+    monkeypatch.setattr(embed, "DEFAULT_DIM", 4)
+    vec = lambda i: numpy.eye(4, dtype="float32")[i].tobytes()
+    for name, hits in (("cra", {"q1": 0}), ("assets", {"t1": 0, "f1": 1})):
+        for q in search.load_queries(name):
+            embed.write_cached(root, q["text_sha256"], vec(hits.get(q["query_id"], 3)))
+    for text, i in (("Supply of towers", 0), ("Consulting on roads", 2)):
+        embed.write_cached(root, hashlib.sha256(text.encode()).hexdigest(), vec(i))
     return str(data)
 
 
@@ -203,14 +263,22 @@ def fake_model(monkeypatch):
             text = b["state"][field] if field else json.dumps(b["state"])
             asked = (b["state"].get(f"question {bq.split(' | ')[1]}") if field
                      else q["instructions"]).lower()
-            yes = ("hazard assessment" in text.lower() and "hazard" in asked) or \
-                  ("tower" in text.lower() and "mobile" in asked) or \
-                  ("fibre" in text.lower() and "fibre" in asked) or \
-                  ("site" in text.lower() and "site" in asked)
+            t = text.lower()
+            if "carrying out" in asked:                       # the link question reads the package
+                m = re.search(r"package[\"']?: ?[\"']?([^\n\"]*)", text)
+                t = m.group(1).lower() if m else ""
+            if len(q["criteria"]) == 3:                       # a fit question: Does <label> apply
+                label = asked.split("does ", 1)[1].split(" apply", 1)[0]
+                yes = (("site" in label and "site" in t) or ("route" in label and "corridor" in t)
+                       or ("mobile" in label and "tower" in t) or ("fibre" in label and "fibre" in t)
+                       or ("carrying out" in label and "tower" in t))
+            else:                                             # a graded question: relate to <label>
+                yes = (("hazard" in asked and "hazard assessment" in t) or ("mobile" in asked and "tower" in t)
+                       or ("fibre" in asked and "fibre" in t))
             n = len(q["criteria"])
             probs = {str(i): 0.0 for i in range(n)}
             probs[str(n - 1) if yes else "0"] = 0.9
-            probs[str(n - 2) if yes else "1"] = 0.1
+            probs["1"] = 0.1
             out[bq] = {"type": "score", "probabilities": probs}
         return {"model": "m", "usage": {"cost": 0.0001}, "answers": out}
     monkeypatch.setattr(api, "post", post)

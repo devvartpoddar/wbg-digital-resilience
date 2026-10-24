@@ -30,11 +30,11 @@ import questions as Q
 import search
 
 SCORE_COLS = ["kind", "label_set", "label_id", "item_id", "state_sha", "question_sha", "score",
-              "answer", "served", "route", "round", "cosine"]
+              "answer", "served", "route", "round", "cosine", "rank"]
 DDL = """CREATE TABLE IF NOT EXISTS {t} (
   kind text NOT NULL, label_set text NOT NULL, label_id text NOT NULL, item_id text NOT NULL,
   state_sha text, question_sha text, score numeric, answer jsonb, served text, route text,
-  round integer, cosine numeric, PRIMARY KEY (kind, label_set, label_id, item_id));
+  round integer, cosine numeric, rank integer, PRIMARY KEY (kind, label_set, label_id, item_id));
 CREATE INDEX IF NOT EXISTS scores_item ON {t} (item_id);"""
 
 
@@ -217,7 +217,8 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
                          "state_sha": states[u], "question_sha": qshas[lid],
                          "score": round(Q.score(a), 6), "answer": {k: v for k, v in a.items() if k != "served"},
                          "served": a.get("served", ""), "route": route[(u, lid)],
-                         "round": rnd_of[(u, lid)], "cosine": round(cosine.get((u, lid), 0.0), 6)})
+                         "round": rnd_of[(u, lid)], "cosine": round(cosine.get((u, lid), 0.0), 6),
+                         "rank": None})
     with conn.transaction():
         where = "kind = %s AND label_set = %s"
         params = [kind, name]

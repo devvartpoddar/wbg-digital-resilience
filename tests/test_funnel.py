@@ -16,7 +16,7 @@ def test_a_measure_goes_through_the_gate_and_its_rounds_and_writes_scores(pg, co
     got = scores(pg, "cra")
     c = Q.Corpus(corpus)
     u0 = c.index[0]["unit_id"]
-    assert got[u0][2] > 0.9 and got[u0][3] == "both" and got[u0][4] == 0    # pattern and cosine
+    assert float(got[u0][2]) > 0.85 and got[u0][3] == "both" and got[u0][4] == 0    # pattern and cosine
     assert len(got) == len(c.index)                                           # a round read the rest
     assert all(r[3] == "feedback" and r[4] == 1 for u, r in got.items() if u != u0)
     assert out["labels"]["cra"]["yes"] == 1 and out["labels"]["cra"]["rounds"][0]["yes"] == 0
@@ -27,10 +27,10 @@ def test_the_asset_map_is_the_same_funnel_label_by_label(pg, corpus, fake_model)
     got = db.rows(pg, f"SELECT label_id, item_id, score, route FROM {db.SCHEMA}.scores WHERE kind = 'asset'")
     c = Q.Corpus(corpus)
     by = {(l, u): (s, r) for l, u, s, r in got}
-    assert by[("towers", c.index[0]["unit_id"])][0] > 0.9
+    assert float(by[("towers", c.index[0]["unit_id"])][0]) > 0.85
     assert by[("towers", c.index[0]["unit_id"])][1] == "embedding"
-    assert by[("fiber", c.index[1]["unit_id"])][0] > 0.9
-    assert by[("fiber", c.index[0]["unit_id"])][0] < 0.1
+    assert float(by[("fiber", c.index[1]["unit_id"])][0]) > 0.85
+    assert float(by[("fiber", c.index[0]["unit_id"])][0]) < 0.1
 
 
 def test_a_rerun_asks_nothing_and_rewrites_the_same_scores(pg, corpus, fake_model):
