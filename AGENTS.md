@@ -10,10 +10,11 @@ The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement
 
 Reading and model calls are what a task costs. So:
 
+- Start with `./wbg status`: one screen saying what the store holds, what was spent and what is waiting. `.agents/skills/wbg/SKILL.md` is the session-start skill for any agent working here, Claude or Hephaestus; read it once.
 - Read `docs/methodology.md` (a short index), then **only** the `docs/method/` file for the code you change. `docs/method/history.md` is evidence, not instructions: open it only when a choice needs its numbers.
 - Find code with a search, then read the lines around it. Do not read a whole source file over 300 lines, a whole method file you are not changing, or anything under `data/` beyond the rows you need.
 - Every threshold is one line of `inputs/config/control_panel.csv` (read by `src/panel.py`; a missing line fails loudly); never put a number a person tunes back into code.
-- A measure is files, not code: adding or revising one needs no reading of `src/` (`docs/method/running.md`, "Adding a measure").
+- A measure is files, not code: adding or revising one needs no reading of `src/` (`docs/method/running.md`, "Adding a measure"). A question with no measure yet ("what is there on e-waste?") is a scratch measure: `./wbg try <slug> --expand "..." --max-spend 0.50` (`docs/method/running.md`, "Exploring"); it never touches the label files or the commitments.
 - What a change costs and why a stage asks again: `docs/method/running.md`, "What a change costs". An answer is stored under the model, the exact state and the exact question; a stage asks only what the store lacks. Do not re-derive this from `src/`.
 - Run any stage that calls a model with `--max-spend <US$>`, set to what you expect it to cost (a run rebuilt from stored answers: a few cents). The run reads the ledger before each step and stops before any request that would pass the cap; `--dry-run` prints the estimates without running. Report the spend afterwards. If the cap stops a run, report what it would ask; stop and ask if it would re-ask what is already stored (a whole measure or the whole asset map). Never run the whole cohort to check a change: use `--project <id>`.
 - Report in a few lines: what changed, what was run, the spend (`wbg_store.spend` in Postgres).
