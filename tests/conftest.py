@@ -95,8 +95,9 @@ PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
 
 @pytest.fixture
 def corpus(tmp_path, monkeypatch):
-    """data/ with one document of five sentences (two about towers, one about
-    fibre), embedded as unit vectors, one measure (cra) with a word pattern
+    """data/ with one document of four search units (row 0 a hazard assessment
+    of towers, row 1 fibre, rows 2 and 3 neither; one sentence is too short
+    and left out), embedded as unit vectors, one measure (cra) with a word pattern
     and one asset set (towers, fiber), each with a scored search run. Returns
     the data root."""
     data = tmp_path / "data"
@@ -170,7 +171,7 @@ def corpus(tmp_path, monkeypatch):
     os.replace(str(lab / "scale.csv"), str(tmp_path / "analysis" / "labels" / "scale.csv"))
     # scored search runs: cosine 0.9 for the sentences each label is about
     import search
-    for name, hits in (("cra", {0: 0.9}), ("assets", {0: 0.9, 2: 0.9})):
+    for name, hits in (("cra", {0: 0.9}), ("assets", {0: 0.9, 1: 0.9})):
         queries = search.load_queries(name)
         folder, _ = search.run_folder(name, str(data))
         os.makedirs(folder)
