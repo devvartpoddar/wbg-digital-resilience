@@ -1,14 +1,6 @@
-"""Unit tests for reading the STEP tables out of a procurement plan rendition.
-
-Two defects are under test here and they are independent, which is why they get
-one file between them rather than one each: the rendition can separate a
-borrower reference from the description it belongs to, and the closed value sets
-the parser matches against were written in English while the plans are not.
-
-Every fixture below is invented. No document text is ever
-committed. What these
-reproduce is the SHAPE of the rendition - where it breaks a line, what it puts
-in the gap - not any borrower's words.
+"""Reading the STEP tables out of a procurement plan rendition: references separated
+from their descriptions, and value sets in four languages. Every fixture is
+invented in the rendition's shape.
 """
 import os
 import sys
@@ -24,12 +16,7 @@ import clean_procurement as C  # noqa: E402
 
 class TestOrphanedReference:
     """A reference complete on its own line, with its '/ description' arriving
-    one to four lines later and another column's text in the gap.
-
-    Before this was handled the reference was invisible and, worse, its text was
-    swallowed into the PREVIOUS package's description, so one row went missing
-    and another was corrupted. Both halves are asserted.
-    """
+    one to four lines later and another column's text in the gap."""
 
     def test_the_reference_and_its_description_are_rejoined(self):
         out = F._join_wrapped_refs([
@@ -73,12 +60,7 @@ class TestOrphanedReference:
 
 
 class TestClosedValueSets:
-    """The Method, Market Approach and Process Status cells.
-
-    These were matched against English-only token lists, so a francophone
-    borrower's packages came back with no status and no method at all - Niger
-    read 3% of rows populated and it was mistaken for a layout failure.
-    """
+    """The Method, Market Approach and Process Status cells."""
 
     def test_an_accented_status_is_recognised(self):
         assert F._first_token("... 50,000.00  Achevé  2019-11-20", F.STATUS_TOKENS)
@@ -288,24 +270,11 @@ META = {"project_id": "P1", "doc_id": "d1", "disclosure_date": "2024-01-01",
 
 
 class TestOnlyTheStepTables:
-    """A plan document is two things bolted together and one is not data. This
-    used to be true by luck - the whole document was scanned, and stayed inside
-    the tables only because a borrower reference never appears in prose."""
+    """Only the STEP tables are read, never the borrower's narrative around them."""
 
     def test_nothing_before_the_first_table_is_read(self):
         """The narrative front of a plan runs to dozens of pages and carries the
-        borrower's own annex tables. None of it is data.
-
-        The right-hand bound is weaker and worth stating: the LAST table runs to
-        the end of the document, because nothing marks where it stops. Two
-        things say that is safe rather than lucky. STEP generates the five
-        sections consecutively at the end, and on the corpus the borrower
-        annexes do not use STEP-shaped references - the four renditions whose
-        annex falls after the first table yield zero reference-shaped lines
-        near it. A gap-based bound was measured and rejected: legitimate gaps
-        between records inside properly bounded tables reach 1,982 lines, so any
-        threshold that caught an annex would cut real records first.
-        """
+        borrower's own annex tables. None of it is data."""
         text = ("Annexe: Libelle du marche\n"
                 "ZZ-BBB-222 / A borrower annex row   IBRD / 900   99.00\n"
                 "more preamble prose here\n"
@@ -408,14 +377,7 @@ class TestTheWrapJoinAndTheLoanCell:
         assert out == ["BB-RADIO-222222-CW-RFB / Estudio de las torres"]
 
     def test_a_tail_that_lands_after_the_loan_line_still_joins(self):
-        """The shape that cost 218 rows of the 70-project corpus.
-
-        A wide layout prints the row's other cells between the two halves of a
-        clipped reference, so the tail is not on the adjacent line. Looking only
-        at the next line never joins it, and once the loan guard stopped the
-        parser fabricating an identity out of the loan number, the record
-        vanished instead of being mis-keyed. The layout reproduced, the text
-        invented."""
+        """The loan line between a clipped reference and its tail is skipped."""
         out = F._join_wrapped_refs([
             " ZZ-AAAAA-111111-CS-IND      Component 4. Project Manag   Individual Consult",
             "                             IDA / 11111   Prior   Open - National   48,000.00",
@@ -451,7 +413,6 @@ class TestTheWrapJoinAndTheLoanCell:
         ])
         assert not any("ZZ-AAAAA-111111-CS-INDV / Belongs to neither" in l for l in out)
         assert any("ZZ-BBBBB-222222-GO-RFQ / A different package" in l for l in out)
-
 
 
 @pytest.mark.parametrize("line,ref", [

@@ -1,19 +1,7 @@
-"""Unit tests for the procurement cleaning rules, then gates on the real tables.
-
-The fixtures are invented. No document text is ever committed, so no
-description below is taken from a World Bank plan. What they reproduce is the SHAPE of the real thing:
-the wrap artefacts the plan rendition produces, the lot/phase/rebid markers, the
-four languages, and the placeholder forms.
-
-The second half imports src/audit.py and asserts a maximum rate per
-check against the prepared tables, in the shape of tests/test_corpus_quality.py.
-Those tests skip cleanly when data/ is absent, because data/ is gitignored by
-design and a checkout without the corpus must still pass.
-
-Thresholds are set just above the rates measured on the corpus when they were
-written, so a real regression fails and ordinary variation as plans are
-re-published does not. If one trips, read the examples the audit prints before
-relaxing the number.
+"""The procurement cleaning rules on invented fixtures (shaped like the plans'
+wrap artefacts, markers, four languages and placeholders), then the procurement
+audit's rates gated against the prepared tables (skipped when data/ is absent).
+Gates sit just above the measured rates; read the audit's examples before moving one.
 """
 import csv
 import os
@@ -317,20 +305,6 @@ def _load(table):
 
 
 # check name -> maximum share of its scope, as a percentage.
-#
-# Every number here was measured on the full 70-project run before it was set,
-# and each one sits just above the measurement, not at a round number chosen in
-# advance. The measured rate is in the comment. If one trips after a re-fetch,
-# read the examples the audit prints before moving it.
-#
-# Measured on the 70-project corpus after the October 2026 consistency pass. Each gate
-# sits just above the measured rate, so a regression fails and ordinary
-# variation as plans are re-published does not.
-#
-# Checks marked "source" describe the published data, not the cleaning: a plan
-# that prints a planned date after its revised date, an award whose supplier
-# amount exceeds the contract, a notice published with no description. They are
-# reported, and gated against getting worse, but cleaning cannot fix them.
 MAX_RATE = {
     "private use area character": 0.0,           # 0.00%
     "unicode replacement character": 0.0,        # 0.00%
@@ -464,11 +438,8 @@ def test_step8_still_folds_two_versions_of_one_project_package():
 
 # ------------------------------------------- the reference that wrapped in two
 
-# A minimal but complete STEP table: the section heading, the column heading
-# band that tells it from the same word in a sentence, and one row whose
-# reference wrapped. Records are only read from inside such a table, so the
-# heading band is not decoration here - without it there is no table and the
-# rendition correctly parses to nothing.
+# A minimal but complete STEP table: the section heading, the column heading band that tells
+# it from the same word in a sentence, and one row whose reference wrapped.
 WRAPPED = ("Project information\n"
            "WORKS\n"
            "Activity Reference No. /   Loan / Credit N   Market Approac   Estimated Am\n"
@@ -502,7 +473,7 @@ def test_a_line_with_the_shape_but_no_number_is_left_alone():
 def test_parse_plan_text_recovers_a_wrapped_reference_end_to_end():
     """Without the merge REF_RE matches nothing in this rendition, every line is
     preamble and the document parses to zero package rows - which no counter in
-    the report used to distinguish from a plan with an empty package table."""
+    the report could distinguish from a plan with an empty package table."""
     meta = {"project_id": "P1", "doc_id": "d1", "disclosure_date": "2024-01-01",
             "content_sha256": "x", "fetched_at": "t"}
     lines = WRAPPED.split("\n")

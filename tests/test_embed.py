@@ -1,18 +1,7 @@
-"""Unit tests for the embedding run, on a synthetic corpus, with no network.
-
-Two rules shape this file.
-
-The first is the same one that governs tests/test_clean_rules.py: the paragraph
-text below is invented for this test. No document text is ever
-committed.
-
-The second is specific to this stage. An autouse fixture replaces the requests
-module inside src/api.py with an object that raises on any attribute access,
-so a test that reaches the network fails immediately and says so. Everything
-here therefore runs against a stub embed_texts(). That is not a convenience -
-it IS the assertion that the transport seam holds. When the asynchronous batch
-endpoint is added for a larger cohort it replaces exactly one function, and
-this suite is what proves nothing else was entangled with it.
+"""The embedding run on a synthetic, invented corpus with no network: an autouse
+fixture replaces requests inside src/api.py with an object that fails on any use,
+so everything outside embed_texts() runs against a stub and the transport seam is
+what the suite proves.
 """
 import csv
 import hashlib

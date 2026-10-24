@@ -1,21 +1,13 @@
 #!/usr/bin/env python3
-"""List the World Bank operations a cohort could hold, from the projects
-interface, by approval fiscal year and lending instrument, so a person can
-decide the cohort (inputs/config/cohort.csv is hand-kept and never written
-here: this writes a candidate list next to the reports).
+"""List the operations a cohort could hold, from the projects interface, by
+approval fiscal year and lending instrument, for a person to choose from.
 
-  python3 src/cohort_build.py --from-fy 2020                       # IPF, FY2020 to now
-  python3 src/cohort_build.py --from-fy 2020 --to-fy 2026 --instrument all
-  python3 src/cohort_build.py --from-fy 2020 --count                # totals only, no file
+  python3 src/cohort_build.py --from-fy 2020 [--to-fy 2026] [--instrument all] [--count]
 
-Writes data/reports/cohort_candidates_fy<from>-<to>.csv in cohort.csv's
-columns (project_id, country_code, region, approval_fy, practice, included,
-exclusion_reason, cohort_version) plus project_name, lending_instrument,
-status and commitment_usd_millions for choosing. Every row is included=true;
-a person edits and copies the rows they want into inputs/config/cohort.csv.
-Only board-approved operations are listed (a pipeline project has no
-appraisal document), and the interface's own counts are reported so a page
-that failed is visible.
+Writes data/reports/cohort_candidates_fy<from>-<to>.csv in cohort.csv's columns
+plus project_name, lending_instrument, status and commitment_usd_millions; it
+never writes inputs/config/cohort.csv. Only board-approved operations are listed,
+and a listing shorter than the interface's own count stops the run.
 """
 import argparse, datetime, os, sys
 

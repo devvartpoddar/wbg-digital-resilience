@@ -1,16 +1,6 @@
-"""Corpus-level quality gates.
-
-src/audit.py reports defect rates; this asserts them. A report has to be read
-to be useful, and nobody reads one on every run. These thresholds are what stop
-a cleaning change quietly degrading the corpus when the cohort grows.
-
-Skips cleanly when data/ is absent, so the suite passes in a checkout without
-the corpus (data/ is gitignored by design).
-
-Thresholds are set a little above the rates measured when they were written, so
-a real regression fails while ordinary variation as documents are added does
-not. If adding projects pushes one over, look at the examples the audit prints
-before relaxing the number - the point is to notice.
+"""Corpus-level quality gates: src/audit.py's defect rates asserted (skipped when
+data/ is absent), and the audit's checks on invented text. Gates sit a little above
+the measured rates; read the audit's examples before relaxing one.
 """
 import csv
 import os
@@ -27,8 +17,7 @@ import audit as A  # noqa: E402
 
 PROSE = A.PROSE_BLOCKS
 
-# check name -> maximum share of its scope, as a percentage. Measured on the
-# 147-document corpus read from PDF (October 2026), each gate just above it.
+# check name -> maximum share of its scope, as a percentage, just above the measured rate.
 MAX_RATE = {
     "footnote marker glued to a word": 0.1,              # 0.03%
     "paragraph opens as a footnote body": 0.05,          # 0.01%

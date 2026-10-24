@@ -1,25 +1,10 @@
-"""Links between the procurement tables: which plan package a notice or a
-contract award belongs to.
+"""Link notices and awards to the plan package they belong to.
 
-A notice and an award each carry the borrower reference the package was
-procured under. That reference, normalised the same way (clean_procurement
-.norm_ref), is the link. It is only unique within a project, so the key is
-(project_id, normalised reference). A generic reference that one plan uses for
-several packages ('CS-INDV' for every individual consultant) points at more
-than one package; the description's match key then decides, and when it cannot
-the record is left unlinked and says so. Nothing is linked on a guess.
-
-Every award also names the notices issued under the same reference
-(notice_ids), so a tender and its contract meet even when no disclosed plan
-holds the package.
-
-Every notice and award gets two columns:
-
-  package_id    the package it belongs to, or blank
-  package_link  how: reference, reference_and_description, ambiguous (the
-                reference names several packages and the description does not
-                pick one), not_in_plan (no package has this reference), or
-                no_reference (the record carries none)
+The key is (project_id, normalised borrower reference; clean_procurement.norm_ref).
+When a reference names several packages the description's match key decides, and
+otherwise the record stays unlinked. Each notice and award gets package_id and
+package_link (reference, reference_and_description, ambiguous, not_in_plan,
+no_reference); each award also gets the notices issued under its reference.
 """
 from collections import defaultdict
 

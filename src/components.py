@@ -1,46 +1,15 @@
 #!/usr/bin/env python3
-"""Collect each project's components, and tag paragraphs with the component
-they belong to.
+"""Collect each project's components and tag paragraphs with the component they
+belong to.
 
-Reads  data/raw/documents.csv, data/appraisal/paragraphs.csv, data/appraisal/text/{doc_id}.txt,
-       data/raw/pdf/{doc_id}.pdf (only the pages that hold a component table)
-Writes data/appraisal/components.csv  one row per component or sub-component,
-                                    per document that states it
-       data/reports/components.txt   coverage, per project
+Reads  data/raw/documents.csv, data/appraisal/paragraphs.csv and text/,
+       data/raw/pdf/{doc_id}.pdf (only the pages holding a component table)
+Writes data/appraisal/components.csv (one row per component or sub-component, per
+       document and source: datasheet, restructuring or heading),
+       data/reports/components.txt
 
-A component is how an appraisal document divides what a project finances, and
-the procurement plan files every package under one. Knowing the components is
-what lets a paragraph about "Component 2" be read against the packages filed
-under Component 2.
-
-No interface publishes components as data; the World Bank projects interface
-carries only project totals. So they are read from the documents, from three
-places, each recorded with its source:
-
-  datasheet      the data sheet's 'Component Name | Cost' table at the front of
-                 a Project Appraisal Document. Numbered or not (the row order is
-                 the number), in US$ millions or, in the 2024 template, in full
-                 dollars
-  restructuring  the 'Current Component Name ... Proposed Cost' table of a
-                 restructuring or additional-financing paper, which revises
-                 names and costs
-  heading        the body's own headings, 'Component 1: Digital Ecosystem
-                 (US$28.7 million equivalent)', and sub-component headings
-                 '1.1 Digital Enabling Environment (US$13.4 million)'
-
-Nothing is merged or reconciled across sources here: a later stage picks what
-it needs, and a disagreement between the data sheet and the body stays visible.
-
-The paragraph tags (`Tagger`, `mentions`) are applied by clean.py as it writes
-paragraphs.csv:
-
-  component / subcomponent   structural - the paragraph sits under that
-                             component's heading, until the next component
-                             heading or the next section
-  component_mentions         textual - the component numbers the paragraph
-                             itself names, wherever it sits
-
-  python3 src/components.py
+Sources are not reconciled here. Tagger and mentions() are applied by clean.py:
+the component a paragraph sits under, and the component numbers it names.
 """
 import argparse, csv, hashlib, json, os, re, sys
 from collections import Counter, defaultdict
@@ -52,8 +21,8 @@ from keys import name_key, project_parts, project_at  # noqa: E402
 from pdf_layout import _title_line  # noqa: E402
 
 COMP_WORD = r"(?:Component|Composante|Componente|Komponen)"
-# The number is followed by punctuation ('Component 2: ...') or, in some
-# templates, by the title alone ('Component 1 Extending digital connectivity').
+# The number is followed by punctuation ('Component 2: ...') or, in some templates, by the
+# title alone ('Component 1 Extending digital connectivity').
 COMP_HEAD = re.compile(
     rf"^\s*{COMP_WORD}\s*(\d{{1,2}})(?:\s*[:.\-–)]\s*|\s+(?=(?-i:[A-Z(])))(.+?)\s*$", re.I)
 SUB_HEAD = re.compile(
@@ -106,15 +75,15 @@ class Tagger:
     'II.B Project Components', 'II.C Project Beneficiaries' belongs to none."""
 
     def __init__(self, close_at_section=True):
-        # close_at_section=False keeps a component open until the next
-        # component heading; src/sensitivity.py compares the two.
+        # close_at_section=False keeps a component open until the next component heading;
+        # src/sensitivity.py compares the two.
         self.close_at_section = close_at_section
         self._close()
 
     def _close(self):
         self.comp, self.sub, self.home = "", "", None
-        # The titles as the headings print them, so a paragraph under a
-        # component the data sheet did not list still carries its name.
+        # The titles as the headings print them, so a paragraph under a component the data
+        # sheet did not list still carries its name.
         self.comp_name, self.sub_name = "", ""
 
     def _open(self, comp, name, path):
@@ -123,9 +92,9 @@ class Tagger:
         return self.comp, ""
 
     def _open_sub(self, m, name, path):
-        # A sub-component heading N.M belongs to component N: if another
-        # component is open, the heading that would have opened N was missed,
-        # so N is opened here rather than the sub-component ignored.
+        # A sub-component heading N.M belongs to component N: if another component is open,
+        # the heading that would have opened N was missed, so N is opened here rather than
+        # the sub-component ignored.
         if m.group(1) != self.comp:
             self.comp, self.comp_name, self.home = m.group(1), "", path
         self.sub, self.sub_name = f"{m.group(1)}.{m.group(2)}", clean_name(name)
@@ -139,9 +108,8 @@ class Tagger:
         if block not in TAGGED_BLOCKS:
             return "", ""
         short = len(text.split()) <= 30
-        # A run-in title opening a long numbered paragraph: '31. Subcomponent
-        # 2.2: Data centre. This subcomponent will finance ...'. Only with the
-        # word itself, so an ordinary '1.2' numbered paragraph is not read as one.
+        # A run-in title opening a long numbered paragraph: '31. Subcomponent 2.2: Data
+        # centre. This subcomponent will finance ...'.
         if not short and block in ("narrative", "annex"):
             head = RUN_IN_NUMBER.sub("", text, count=1)
             m = SUB_WORD_HEAD.match(head[:200])
@@ -152,21 +120,20 @@ class Tagger:
             m = RUN_IN_COMP.match(head)
             if m:
                 return self._open(m.group(1), title, path)
-        # A short footnote or table row that names a component ("Component 2:
-        # see Annex 3", a cost table's row) refers to it; it does not open it.
+        # A short footnote or table row that names a component ("Component 2: see Annex 3",
+        # a cost table's row) refers to it; it does not open it.
         if block == "heading" or (short and block in ("narrative", "annex")):
             m = COMP_HEAD.match(text)
             if m:
                 return self._open(m.group(1), m.group(2), path)
-            # A numbered sub-component title is a heading even when set in
-            # plain type, if it carries a cost: '1.2. Infrastructure ... (US$15.3
-            # million equivalent)'.
+            # A numbered sub-component title is a heading even when set in plain type, if it
+            # carries a cost: '1.2. Infrastructure ... (US$15.3 million equivalent)'.
             titled = block == "heading" or bool(COST_IN_TEXT.search(text))
             m = SUB_WORD_HEAD.match(text)
             if m:
                 return self._open_sub(m, text, path)
-            # A bare 'N.M Title' is a sub-component only under component N:
-            # elsewhere it is as likely a numbered paragraph or a table row.
+            # A bare 'N.M Title' is a sub-component only under component N: elsewhere it is
+            # as likely a numbered paragraph or a table row.
             m = SUB_HEAD.match(text) if titled else None
             if m and self.comp and m.group(1) == self.comp:
                 return self._open_sub(m, text, path)
@@ -175,15 +142,14 @@ class Tagger:
 
 # ------------------------------------------------------------- extraction
 
-# name_key (keys.name_key) is what the same component shares across
-# documents and with procurement: a paragraph and a package under one
-# component meet on it even when a restructuring renumbered it.
+# name_key (keys.name_key) is what the same component shares across documents and with
+# procurement: a paragraph and a package under one component meet on it even when a
+# restructuring renumbered it.
 COMP_COLS = ["project_ids", "doc_id", "doc_kind", "disclosure_date", "source", "level",
              "number", "name", "name_key", "cost_usd_m", "cost_before_usd_m", "action",
              "page"]
 NUM = re.compile(r"^\s*\$?\s*([\d,]+(?:\.\d+)?)\s*$")
 # A row that ends the component list: what the data sheet prints after it.
-# The lender's name ("IDA") and the front-end fee are financing lines.
 STOP_ROW = re.compile(r"^(?:implementing agency|organizations|project financing|total"
                       r"|borrower|financing|summary|front.end fee|(?:ida|ibrd)\s*$)", re.I)
 
@@ -195,8 +161,8 @@ def _has_name(name):
 
 
 def _num(v):
-    # A figure wrapped inside its cell ('125,000,000.0' over '0') comes back
-    # with a space in it; digits on both sides of a space are one figure.
+    # A figure wrapped inside its cell ('125,000,000.0' over '0') comes back with a space in
+    # it; digits on both sides of a space are one figure.
     v = re.sub(r"(?<=[\d,.])\s+(?=\d)", "", v or "") if re.fullmatch(r"[\d,.\s$]+", v or "") else v
     m = NUM.match(v or "")
     return float(m.group(1).replace(",", "")) if m else None
@@ -283,12 +249,7 @@ def _explode(grid):
 
 
 def read_datasheet(grid):
-    """Components from a data-sheet table grid, or [].
-
-    Rows start after the 'Component Name' header cell (or, in the 2024
-    template, at the first 'Component 1.' cell) and run until a row that opens
-    another part of the data sheet. A row with a name and no cost continues
-    the name above it."""
+    """Components from a data-sheet table grid, or []."""
     rows = [[_cell(c) for c in r] for r in _explode(grid)]
     start, header_text = None, ""
     for i, r in enumerate(rows):
@@ -316,12 +277,12 @@ def read_datasheet(grid):
             if out:
                 break
             continue
-        # In the 2024 template a header cell repeats every name; take the cell
-        # that names one component.
+        # In the 2024 template a header cell repeats every name; take the cell that names
+        # one component.
         name = next((t for t in texts if re.match(rf"^{COMP_WORD}\s*\d", t, re.I)),
                     texts[-1] if texts else "")
-        # ... unless it opens with the next component's number ("3. Increasing
-        # access ...": a row whose cost is printed on the next page).
+        # ... unless it opens with the next component's number ("3. Increasing access ...":
+        # a row whose cost is printed on the next page).
         opens_next = re.match(rf"^(?:{COMP_WORD}\s*)?{len(out) + 1}\s*[.:]\s", name, re.I)
         if not nums and out and name and not opens_next \
                 and not re.match(rf"^{COMP_WORD}\s*\d", name, re.I):
@@ -364,9 +325,8 @@ def read_restructuring(grid):
     for r in rows[i + 1:]:
         if not any(r):
             continue
-        # Merged cells put a figure one column off its heading, so figures are
-        # placed by side of the Action column: before it the current cost,
-        # after it the proposed one.
+        # Merged cells put a figure one column off its heading, so figures are placed by
+        # side of the Action column: before it the current cost, after it the proposed one.
         nums = [(j, _num(v)) for j, v in enumerate(r) if v and _num(v) is not None]
         before = [v for j, v in nums if j < a_col]
         after = [v for j, v in nums if j > a_col]
@@ -399,8 +359,8 @@ def read_restructuring(grid):
         number, clean_name, printed = _split_number(name, len(out) + 1)
         out.append({"number": number, "name": clean_name, "number_printed": printed,
                     "cost_usd_m": _to_millions(cost, "millions"),
-                    # The cost before the paper, when it prints one beside the
-                    # proposed cost: a restructuring that cuts or adds funds.
+                    # The cost before the paper, when it prints one beside the proposed
+                    # cost: a restructuring that cuts or adds funds.
                     "cost_before_usd_m": _to_millions(before[-1], "millions")
                     if before and after else "",
                     "action": action})
@@ -425,8 +385,8 @@ def clean_name(name):
     n = re.sub(r"(?:\s+(?:[\d.,]+|N/A))+$", "", n)
     n = re.sub(r"\s+The World Bank$", "", n)     # the page footer, read into the cell
     n = n.strip(" :-\u2013(.;,")
-    # A cell read twice over: 'National Digital Connectivity Infrastructure
-    # Digital Connectivity Infrastructure' is the name and the tail of it again.
+    # A cell read twice over: 'National Digital Connectivity Infrastructure Digital
+    # Connectivity Infrastructure' is the name and the tail of it again.
     words = n.split()
     # 'Project Management Management' is the same with one word.
     for k in range(len(words) // 2, 0, -1):
@@ -442,8 +402,7 @@ def _tidy(found):
     not components - unallocated funds, contingency - out of the numbering."""
     out, seen = [], {}
     for c in found:
-        # Budget lines, not components. The Contingent Emergency Response
-        # Component (CERC) is a real, numbered component and keeps its number.
+        # Budget lines, not components.
         if re.match(r"^(?:unallocated|contingenc(?:y|ies)\s+(?:and|for|reserve)\b)",
                     c["name"], re.I):
             c = dict(c, number="")
@@ -468,9 +427,9 @@ def read_headings(rows, text):
     for r in rows:
         s = text[int(r["char_start"]):int(r["char_end"])]
         if r["block"] != "heading":
-            # A title that leads in a list ('Component 3: Growing the Digital
-            # Economy. The proposed changes include:' then its items) heads
-            # the paragraph that holds the list: its first line is read.
+            # A title that leads in a list ('Component 3: Growing the Digital Economy. The
+            # proposed changes include:' then its items) heads the paragraph that holds the
+            # list: its first line is read.
             first = s.split("\n", 1)[0]
             if r["block"] not in ("narrative", "annex") or first == s \
                     or not _title_line(first):
@@ -481,8 +440,8 @@ def read_headings(rows, text):
         if m:
             level, number, name = "component", m.group(1), m.group(2)
         else:
-            # 'Sub-component 2.1: ...' always; a bare '2.1 Title' only once
-            # component 2 has been seen, else it is a numbered section.
+            # 'Sub-component 2.1: ...' always; a bare '2.1 Title' only once component 2 has
+            # been seen, else it is a numbered section.
             m = SUB_WORD_HEAD.match(s)
             if not m:
                 m = SUB_HEAD.match(s)
@@ -492,9 +451,9 @@ def read_headings(rows, text):
                 level, number, name = "subcomponent", f"{m.group(1)}.{m.group(2)}", m.group(3)
         if not level or (level, number) in seen:
             continue
-        # A results indicator numbered like a component ("2. Number of
-        # servers planned ...") is not one, nor an exchange rate read as a
-        # sub-component number ("5.72 BRL = US$1").
+        # A results indicator numbered like a component ("2. Number of servers planned ...")
+        # is not one, nor an exchange rate read as a sub-component number ("5.72 BRL =
+        # US$1").
         if re.match(r"(?:Number|Percentage|Share|Proportion)\s+of\b", name, re.I) \
                 or "=" in name:
             continue
@@ -511,12 +470,7 @@ def read_headings(rows, text):
 
 
 def read_table_pages(pdf_path, pages):
-    """The component list from the first of these pages that holds one.
-
-    A data sheet is often drawn as one small table per row, and runs onto the
-    next page: every piece on a page and the next is read, top to bottom, as
-    one grid. Rows with no name are a misread grid and are dropped, so a table
-    that yields only those is passed over."""
+    """The component list from the first of these pages that holds one."""
     import pdfplumber
     with pdfplumber.open(pdf_path) as pdf:
         for pno in pages:
@@ -546,13 +500,10 @@ def _same_component(a, b):
 
 
 def number_by_name(rows):
-    """A table that prints no component numbers is numbered by row order,
-    and a restructuring paper may list its components in another order
-    (P171305's 2026 paper puts component 2 first): such a row takes the
-    number the project's headings and numbered tables give the same name,
-    preferring the same document. A row no name matches keeps its position
-    unless that number is taken, and then gets the smallest number free.
-    Rows whose number was printed are left alone."""
+    """Number the rows of a table that printed no numbers (row order may differ
+    from the project's): each takes the number the project's headings and numbered
+    tables give the same name, preferring the same document; else its position, or
+    the smallest number free. Printed numbers are left alone."""
     by_doc = defaultdict(list)
     for r in rows:
         by_doc[(r["doc_id"], r["project_ids"])].append(r)
@@ -614,16 +565,12 @@ def main():
             text = fh.read()
         base = {"doc_id": did, "doc_kind": doc["doc_kind"],
                 "disclosure_date": doc["disclosure_date"]}
-        # A combined appraisal document is split at its data sheets, each part
-        # belonging to its own operation (keys.project_parts); a document of
-        # one project is one part. Each part's tables and headings are read
-        # on their own, so one country's "Component 1" does not hide another's.
+        # A combined appraisal document is split at its data sheets, each part belonging to
+        # its own operation (keys.project_parts); a document of one project is one part.
         parts = project_parts(text, doc["project_ids"])
 
-        # Pages holding a component table, found in the cleaned text so the
-        # PDF is opened only at those pages. Searched over the whole text, not
-        # paragraph by paragraph: a table's heading line can fall between two
-        # kept paragraphs, and then belongs to the page of the one before it.
+        # Pages holding a component table, found in the cleaned text so the PDF is opened
+        # only at those pages.
         starts = sorted((int(r["char_start"]), int(r["page_from"] or 0)) for r in rows)
         pages_by_part = defaultdict(set)
         for m in re.finditer(r"component\s*name|current component", text, re.I):
@@ -634,8 +581,8 @@ def main():
         for owners in dict.fromkeys(p[2] for p in parts):
             pages = sorted(pages_by_part.get(owners, ()))
             found = []
-            # Keyed on the PDF, the pages searched and this module's code, so a
-            # change to any of them reads the tables again.
+            # Keyed on the PDF, the pages searched and this module's code, so a change to
+            # any of them reads the tables again.
             sha = doc.get("pdf_sha256") or (file_sha256(pdf_path, remember=False)
                                             if os.path.exists(pdf_path) else "")
             key = ":".join([sha, ",".join(map(str, pages)), READER_VERSION])

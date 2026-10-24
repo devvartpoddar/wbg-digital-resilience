@@ -1,29 +1,12 @@
 #!/usr/bin/env python3
-"""How much the cleaned appraisal text depends on three settings.
+"""How much the cleaned appraisal text depends on three settings: paragraph joining
+(pdf_layout LINE_GAP, LOOSE_GAP; re-reads a sample of PDFs), component tags
+(components.Tagger) and sentence splitting (sentences MIN_WORDS, ABBREV).
 
-Reads  data/raw/documents.csv, data/raw/pdf/*.pdf (paragraph test only),
-       data/appraisal/{paragraphs.csv, text/}
-Writes data/reports/sensitivity.md
+Reads  data/raw/documents.csv, data/raw/pdf/*.pdf, data/appraisal/{paragraphs.csv,text/}
+Writes data/reports/sensitivity.md (nothing the pipeline writes is changed)
 
-1. Paragraph joining (src/pdf_layout.py LINE_GAP, LOOSE_GAP). A sample of
-   documents is read again from the PDF at settings around the default, and
-   each setting's model paragraphs are compared with the default's: how many
-   paragraphs, and what share of the default's model text sits in paragraphs
-   that no longer exist word for word. This re-reads PDFs and is the slow one.
-2. Component tags (src/components.py Tagger). Every document is tagged with a
-   component's tag closing at the section change (the default) and with it
-   running on to the next component heading: how many model paragraphs gain
-   or change a tag.
-3. Sentences (src/sentences.py MIN_WORDS, ABBREV). Every model paragraph is
-   split at the default, with the word minimum at 2 and 4, and without the
-   abbreviation list: how many sentences, and how many paragraphs split
-   differently.
-
-Nothing the pipeline writes is changed; the report is the only output.
-
-  python src/sensitivity.py              all three, 10 documents for the first
-  python src/sensitivity.py --docs 20
-  python src/sensitivity.py --skip-paragraphs
+  python src/sensitivity.py [--docs 20] [--skip-paragraphs]
 """
 import argparse, hashlib, os, sys
 from collections import Counter, defaultdict

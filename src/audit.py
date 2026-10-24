@@ -22,22 +22,20 @@ from common import read_csv  # noqa: E402
 from clean_procurement import norm_ref, REF_INLINE  # noqa: E402
 import glue  # noqa: E402
 
-# Blocks meant to read as prose; tables and front matter are not, so the prose
-# checks run on these only.
+# Blocks meant to read as prose; tables and front matter are not, so the prose checks run on
+# these only.
 PROSE_BLOCKS = ("narrative", "annex")
 PROCUREMENT_TABLES = ("packages", "notices", "awards")
 
-# Model tokens per word for openai/text-embedding-3-large on this corpus, as
-# billed (3,027,632 tokens for 2,287,945 words); used for an estimate column.
+# Model tokens per word for openai/text-embedding-3-large on this corpus, as billed
+# (3,027,632 tokens for 2,287,945 words); used for an estimate column.
 TOKENS_PER_WORD = 3_027_632 / 2_287_945
 
-# {"appraisal": [(name, scope, severity, fn)], "procurement": [...]}. An
-# appraisal check takes a paragraph's text and is scoped to blocks (None: all);
-# a procurement check takes a row and is scoped to tables.
+# {"appraisal": [(name, scope, severity, fn)], "procurement": [...]}.
 CHECKS = {"appraisal": [], "procurement": []}
 
-# Set by load_vocab(): the run's vocabulary, so the word checks judge by the
-# words the cleaner used.
+# Set by load_vocab(): the run's vocabulary, so the word checks judge by the words the
+# cleaner used.
 VOCAB, NAMES = {}, None
 
 
@@ -87,8 +85,8 @@ APPRAISAL_PATTERNS = (
     ("whitespace run of 3-5 spaces", "defect", r"\S {3,5}\S"),
     # A wide run is a column gutter that survived: table content, not prose.
     ("whitespace run of 6+ spaces (column gutter)", "defect", r"\S {6,}\S"),
-    # What text_rules.fold_chars should have folded; U+2010 looks like '-' and
-    # tokenises as something else.
+    # What text_rules.fold_chars should have folded; U+2010 looks like '-' and tokenises as
+    # something else.
     ("smart quote, ligature or hyphen left unfolded", "defect",
      "[‘’“”–‐‑­ﬁﬂ ]"),
 )
@@ -450,8 +448,8 @@ def procurement(data, examples=5):
             out.append(f"      {_desc(row)[:160]}")
         out.append("")
 
-    # Despacing can make two different descriptions one match key; the count
-    # says what the despaced matching copy costs.
+    # Despacing can make two different descriptions one match key; the count says what the
+    # despaced matching copy costs.
     out += ["despacing collisions - descriptions that differ but despace alike", "=" * 86]
     for t in PROCUREMENT_TABLES:
         rows = tables[t]

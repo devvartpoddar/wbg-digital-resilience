@@ -1,29 +1,16 @@
 #!/usr/bin/env python3
-"""Turn appraisal documents into clean, addressable paragraphs and sentences.
+"""Turn appraisal PDFs into clean, addressable paragraphs and sentences.
 
-Reads  data/raw/pdf/{doc_id}.pdf   the PDF, read by layout (src/pdf_layout.py)
-       data/raw/documents.csv
-Writes data/raw/pdf_text/{doc_id}.txt            the PDF's text as read, before cleaning
-       data/appraisal/text/{doc_id}.txt          the cleaned reference text
-       data/appraisal/cache/{doc_id}.layout.json the cached PDF read, keyed on checksums
-       data/appraisal/paragraphs.csv  one row per paragraph, offsets into the clean file
-       data/appraisal/sentences.csv   one row per sentence, offsets into the same file
-       data/appraisal/rejected.csv    every unit dropped, with a reason
-       data/appraisal/document_parts.csv     which project each stretch of a document belongs to
-       data/reports/clean.txt
+Reads  data/raw/pdf/{doc_id}.pdf (read by src/pdf_layout.py), data/raw/documents.csv
+Writes data/raw/pdf_text/{doc_id}.txt (as read), data/appraisal/text/{doc_id}.txt (cleaned),
+       data/appraisal/cache/{doc_id}.layout.json, data/appraisal/{paragraphs,sentences,
+       rejected,document_parts}.csv, data/reports/clean.txt
 
-Paragraph text is not stored in the table. To read a paragraph, slice its clean
-file with char_start:char_end; to see where it came from, slice the PDF text
-with raw_start:raw_end.
-
-Only the PDF is read. A document whose PDF is missing, unreadable or a scan
-(no text layer) is not cleaned, and the report lists it.
-
-Each PDF read is cached under the parser version: PARSER, a checksum of the
-constants of pdf_layout.py and text_rules.py, and the pdfplumber and pdfminer
-versions. Changing any of them re-reads every PDF once. The first run after
-the version took this form (it used to hash the two files' bytes) re-reads
-every PDF once.
+Tables carry offsets, not text. A PDF that is missing, unreadable or a scan is
+not cleaned and is reported. Each read is cached under parser_version(), which
+covers the reader's constants and library versions: changing one re-reads every
+PDF once, and the first run after parser_version took this form re-reads every
+PDF once.
 """
 import argparse, hashlib, os, re, sys
 from collections import Counter
@@ -35,9 +22,8 @@ from pdf_layout import SECTION_TITLE_MAX_CHARS  # noqa: E402
 from text_rules import TOKEN, ROMAN, annex_match  # noqa: E402
 from keys import project_parts, project_at  # noqa: E402
 
-# Which project each stretch of a document belongs to (keys.project_parts):
-# one part holding the interface's listing, or a combined document split at
-# its data sheets.
+# Which project each stretch of a document belongs to (keys.project_parts): one part holding
+# the interface's listing, or a combined document split at its data sheets.
 DOC_PART_COLS = ["doc_id", "part", "char_start", "char_end", "project_ids", "assigned_by",
                  "listed_project_ids"]
 PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
@@ -49,26 +35,20 @@ PARA_COLS = ["paragraph_id", "doc_id", "project_ids", "ordinal", "section_path",
 REJ_COLS = ["unit_id", "doc_id", "reason", "n_chars"]
 
 
-# A PDF whose text layer holds fewer characters than this is a scan, not a
-# document that can be read by layout.
+# A PDF whose text layer holds fewer characters than this is a scan, not a document that can
+# be read by layout.
 PDF_MIN_CHARS = 2000
-# A unit with fewer words than this is dropped (headings and section titles
-# aside). Varying it would change rejected.csv with nothing recording why,
-# so it is a constant, not a flag.
+# A unit with fewer words than this is dropped (headings and section titles aside).
 MIN_TOKENS = 5
-# Footnotes are mostly references ('ITU. 2021. Global Cybersecurity Index
-# 2020.'), which a sentence splitter can only cut into nonsense.
+# Footnotes are mostly references ('ITU. 2021. Global Cybersecurity Index 2020.'), which a
+# sentence splitter can only cut into nonsense.
 SENTENCE_BLOCKS = {"narrative", "annex"}
-# What the embedding and the decision model are given: the body prose and
-# its footnotes. Front matter and tables stay in the tables for reading, but
-# are not cleaned to the standard prose is and add little the prose does not
-# say; component names and costs are read from the front matter separately
-# (src/components.py), straight from the PDF.
+# What the embedding and the decision model are given: the body prose and its footnotes.
 MODEL_BLOCKS = {"narrative", "annex", "footnote"}
 # A footnote holding a link and fewer words than this is a bibliography entry.
 CITATION_MAX_WORDS = 15
-# The PDF reader's own version: bump it when pdf_layout.py or text_rules.py
-# change how a PDF is read in a way their constants do not show.
+# The PDF reader's own version: bump it when pdf_layout.py or text_rules.py change how a PDF
+# is read in a way their constants do not show.
 PARSER = "pdf-layout-2"
 
 
@@ -154,11 +134,7 @@ def _layout_job(args):
 
 def layout_cached(data, docs, workers):
     """{doc_id: (text, spans, stats, error, raw)} for every document with a PDF;
-    raw is the PDF's text as read, before cleaning.
-
-    Each result is cached in data/appraisal/cache/{doc_id}.layout.json, keyed on the PDF's
-    SHA-256 and the parser version, so a re-run reads the cache and only a
-    changed PDF or a changed parser costs a re-read."""
+    raw is the PDF's text as read, before cleaning."""
     import json
     from concurrent.futures import ProcessPoolExecutor
     version = parser_version()
@@ -187,8 +163,8 @@ def layout_cached(data, docs, workers):
                 sha, cache = meta[did]
                 out[did] = (text, spans, stats, err, raw)
                 if err:
-                    # Not cached: a failed read may be the box, not the PDF
-                    # (memory, a half-written file), and is tried again.
+                    # Not cached: a failed read may be the box, not the PDF (memory, a half-
+                    # written file), and is tried again.
                     continue
                 tmp = cache + ".part"
                 with open(tmp, "w", encoding="utf-8") as fh:
@@ -232,9 +208,8 @@ def main():
     paras, rejected, sents, stats = [], [], [], Counter()
     doc_parts = []
     per_doc, not_cleaned = [], []
-    # The text files are written only once every check below has passed, so
-    # a run that stops writes nothing: the tables and the text files always
-    # belong to the same read.
+    # The text files are written only once every check below has passed, so a run that stops
+    # writes nothing: the tables and the text files always belong to the same read.
     staged = []
 
     for n, doc in enumerate(docs, 1):
@@ -256,8 +231,8 @@ def main():
         staged.append((where(args.data, "pdf_text", f"{did}.txt"), raw))
         staged.append((os.path.join(clean_dir, f"{did}.txt"), clean))
 
-        # Which project each stretch of the document belongs to: a combined
-        # appraisal document is split at its data sheets (keys.py).
+        # Which project each stretch of the document belongs to: a combined appraisal
+        # document is split at its data sheets (keys.py).
         parts = project_parts(clean, doc["project_ids"])
         for k, (start, end, owners, how) in enumerate(parts, 1):
             doc_parts.append({"doc_id": did, "part": k, "char_start": start,
@@ -307,9 +282,7 @@ def main():
                         "text_sha256": sha_text(st),
                     })
         paras.extend(doc_paras)
-        # Retention: how much of the PDF's text survives cleaning. Headers,
-        # page numbers, contents lines and footnote markers are a few per
-        # cent; anything much lower wants looking at.
+        # Retention: how much of the PDF's text survives cleaning.
         rn = len(re.sub(r"\s", "", raw))
         cn = len(re.sub(r"\s", "", clean))
         per_doc.append((did, doc["doc_kind"], len(spans), kept,
@@ -318,21 +291,14 @@ def main():
         if n % 25 == 0:
             print(f"  ...{n}/{len(docs)} documents, {len(paras)} paragraphs", flush=True)
 
-    # A shared regional document serves several projects. If it ever lands in
-    # documents.csv once per project again, every one of its paragraphs is
-    # emitted several times under the same identifier - which is silent, and
-    # poisons any count or join downstream. Fail loudly instead.
+    # A shared regional document serves several projects.
     dupes = [k for k, v in Counter(p["paragraph_id"] for p in paras).items() if v > 1]
     if dupes:
         raise SystemExit(
             f"{len(dupes)} duplicate paragraph_id values, e.g. {dupes[:3]}. "
             "documents.csv must hold one row per doc_id, with project_ids pipe-delimited.")
 
-    # The re-parse check. Identifiers are positional, so a paragraph whose text
-    # changed under the SAME parser means the read is not reproducible, and
-    # every label keyed to that position would point at different words. That
-    # stops the run. Under a changed parser, a changed text is expected and is
-    # counted, so its effect on labels is visible.
+    # The re-parse check.
     unstable, changed, gone = [], 0, 0
     now = {p["paragraph_id"]: p for p in paras}
     for pid, (sha, parser) in before.items():

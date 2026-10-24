@@ -1,8 +1,5 @@
-"""Unit tests for the PDF reader's rules and the sentence splitter.
-
-No PDF is needed: each rule is a function of line text or of character
-records, and the records below are invented in the shape pdfplumber returns.
-No document text is ever committed.
+"""The PDF reader's rules and the sentence splitter, on invented line text and
+character records shaped like pdfplumber's; no PDF needed.
 """
 import os
 import sys

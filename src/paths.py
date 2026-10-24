@@ -1,59 +1,9 @@
-"""Where the data lives.
+"""Where the data lives: the MAIN checkout's data/ folder, never a worktree's
+(a board card's worktree is deleted when the card completes).
 
-One rule: data goes in the MAIN checkout's data/ folder, never in a worktree's.
-
-On the box the main checkout is /ygg/projects/wbg-digital-resilience, and every
-board card works in /ygg/projects/wbg-digital-resilience/.worktrees/<task-id>.
-That worktree is deleted when the card completes. A script that wrote to
-"data/ next to the code" would write into the worktree and the data would go
-with it. So the data root is found through git: the shared .git directory sits
-in the main checkout, whichever worktree the code is run from.
-
-Every file has one home inside data/, named in LAYOUT below; scripts ask
-`where(data, name)` rather than building paths themselves, so the layout is
-written down once:
-
-  data/raw/          what was fetched, exactly as published
-       pdf/            appraisal documents (PDF)
-       pdf_text/       each PDF's text exactly as read, before cleaning
-       plans/ notices/ awards/   procurement plans and interface responses
-       projects/       each project's record from the projects interface
-       documents.csv   the document list; fetch_log.csv the procurement
-                       listings, notices and awards requests
-  data/appraisal/    what the appraisal stages make
-       text/           cleaned text, one file per document
-       cache/          per-document reads kept to skip unchanged work
-       paragraphs.csv sentences.csv rejected.csv components.csv
-       document_parts.csv
-  data/procurement/  packages, notices, awards: raw and cleaned tables
-  data/projects/     projects.csv: one row per project (src/projects.py)
-  data/embeddings/   the vector cache, sentence_emb.npy, sentence_index.csv
-  data/classify/     every decision-model answer (answers/) and one folder per
-                     label set and version of the asset map (src/classify.py)
-  data/labels/       grades a person gave (src/check_units.py) and
-                     the hand-labelled activities workbook (src/evaluate_activities.py)
-  data/releases/     one folder per data release, and index.csv (src/release.py)
-  data/reports/      every stage's report, the run notes for the vault, and
-                     fetch_status/ (what each fetcher fully read)
-  data/review/       spreadsheets for reading the output by eye
-  data/runs/         a selection's exported results, when asked for (src/wbg.py)
-  data/archive/      tables an earlier version wrote and nothing reads (kept, never deleted)
-  data/search/       a label set's scores over the sentences, one folder per
-                     label set and version (src/search.py)
-  data/measures/     a measure's pool graded by the decision model, with
-                     the asset map's columns, one folder per label set and
-                     version (src/measure.py)
-  data/types/        a measure's types: stored generative-model proposals and
-                     the decision model's assignments, one folder per label
-                     set and version (src/kinds.py)
-  data/links/        which asset each package buys and which commitments it
-                     would carry out, one folder per version
-                     (src/link_packages.py)
-
-Order of precedence for the data root:
-  1. $WBG_DATA, if set
-  2. <main checkout>/data, found with `git rev-parse --git-common-dir`
-  3. <this checkout>/data, when git is unavailable
+The data root is $WBG_DATA if set, else <main checkout>/data (found with
+`git rev-parse --git-common-dir`), else <this checkout>/data. Every file has one
+home, named in LAYOUT; scripts ask where(data, name).
 """
 import os
 import subprocess
@@ -117,16 +67,10 @@ REMEMBER_MIN_BYTES = 1 << 20
 
 
 def file_sha256(path, remember=True):
-    """The SHA-256 of a file, remembered beside it: <path>.sha256 holds the
-    size, the modification time and the digest, and is trusted while both
-    match. Every stage keys its runs on the big files (the 1.8 GB sentence
-    matrix, the paragraphs table), and hashing them again on every call was
-    minutes of each run on this hardware; a stale sidecar can only name a
-    digest for bytes that have since changed, and the size and mtime check
-    rules that out. A file under REMEMBER_MIN_BYTES is hashed afresh and
-    gets no sidecar: it costs microseconds, and the hand-kept inputs
-    (inputs/, analysis/labels/) are small and must not gain files beside
-    them on every run."""
+    """The SHA-256 of a file, streamed. With remember, a file of at least
+    REMEMBER_MIN_BYTES keeps <path>.sha256 (size, mtime, digest) beside it, trusted
+    while size and mtime match, so big files are not hashed again on every call;
+    small files (the hand-kept inputs among them) never gain a sidecar."""
     import hashlib
     st = os.stat(path)
     side = path + ".sha256"

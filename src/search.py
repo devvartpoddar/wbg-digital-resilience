@@ -1,53 +1,16 @@
 #!/usr/bin/env python3
 """Score every search unit against every query of a label set, then filter.
-Sentences are where we search, paragraphs where we work.
 
-A label set is two files in inputs/taxonomy/ or analysis/labels/ (src/labels.py),
-kept by people and only read here:
+A label set (src/labels.py) is <set>.csv (one row per label) and an optional
+<set>_queries.csv (search phrases); each label is searched with its definition and
+each phrase. search() writes data/search/<set>-<version>/ (queries.csv, scores.npy
+of every unit x query cosine, manifest.json), versioned on the query texts, model,
+dimensions and sentence index. hits() filters the scores (min_score,
+min_percentile within a query, top, labels, projects, kinds); paragraph_rollup()
+gives one row per label and paragraph. Which filter works is decided against
+examples a person checked.
 
-  <set>.csv           one row per label: <x>_id, <x>_name, definition, active
-  <set>_queries.csv   any number of search phrases per label: <x>_id,
-                      query_id, query, active (optional file)
-
-Every label is searched with its definition ("<name>: <definition>") and
-with each of its phrases. A phrase finds what a definition is too broad to
-rank first ("cable landing station", "tier III data centre"), so a label has
-as many queries as it needs.
-
-Scoring (search) is done once per version of the label set and keeps every
-score; nothing is cut off there. Filtering (hits) reads the scores and keeps
-what a filter asks for. So a filter can be tightened, loosened or compared
-without embedding or scoring anything again.
-
-  search    data/search/<set>-<version>/
-              queries.csv     query_id, label_id, kind (definition | phrase),
-                              text, text_sha256
-              scores.npy      (units, queries) cosine similarities, float32,
-                              rows in sentence_index.csv order
-              manifest.json   what was run
-            <version> is a SHA-256 over the query texts, the model, the
-            dimensions and the sentence index: a revised phrase or definition
-            is a new version, which embeds only what changed; an unchanged
-            set is not scored again.
-
-  hits()    a function, for analysis: for each unit and label, the best
-            score over the label's queries, the query that gave it, that
-            score's percentile among all units for the same query, and how
-            many of the label's queries rank the unit at or above
-            min_percentile. Keeps what passes every filter given: min_score,
-            min_percentile (within its query: raw cosine is not comparable
-            between a short phrase and a long definition, a percentile is),
-            top (best N per label), labels, projects, kinds.
-            paragraph_rollup() turns hits into one row per label and paragraph.
-
-No filter is the right one by default: which works is decided against
-examples a person checked (AGENTS.md).
-
-  python src/search.py assets           # or ./wbg search assets
-
-  import search
-  folder, _ = search.run_folder("assets", data)
-  rows = search.hits(folder, data, min_percentile=99.5, top=100)
+  python src/search.py assets
 """
 import argparse, csv, hashlib, json, os, sys, time
 from collections import defaultdict
@@ -61,12 +24,12 @@ import embed  # noqa: E402
 
 import labels  # noqa: E402
 
-# Label sets live in inputs/taxonomy/ (the pipeline's) and analysis/labels/
-# (analysis sets); `taxonomy=None` finds the set in either (src/labels.py).
+# Label sets live in inputs/taxonomy/ (the pipeline's) and analysis/labels/ (analysis sets);
+# `taxonomy=None` finds the set in either (src/labels.py).
 TAXONOMY = None
 QUERY_COLS = ["query_id", "label_id", "kind", "text", "text_sha256"]
-# 'copies': the units printing the same text in other documents (an
-# additional financing repeating its appraisal document), searched once.
+# 'copies': the units printing the same text in other documents (an additional financing
+# repeating its appraisal document), searched once.
 CONTEXT = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "component_number",
            "subcomponent_number", "component_key", "copies"]
 # Rows of the sentence matrix scored at a time, so memory stays flat.
@@ -241,8 +204,8 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
     """Score every unit against every query of the label set; returns the run
     folder (None on a dry run)."""
     if dry_run and not all(os.path.exists(p) for p in _paths(data)):
-        # Before the first embedding run there is no index to version against:
-        # say what the label set holds and what its queries would cost.
+        # Before the first embedding run there is no index to version against: say what the
+        # label set holds and what its queries would cost.
         queries = load_queries(name, taxonomy)
         for line in coverage_lines(name, queries, taxonomy):
             log(line)
@@ -283,15 +246,14 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
                    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
                   fh, indent=2, sort_keys=True)
         fh.write("\n")
-    # The folder appears whole or not at all: an interrupted run leaves only
-    # the .part folder, which the next run overwrites.
+    # The folder appears whole or not at all: an interrupted run leaves only the .part
+    # folder, which the next run overwrites.
     os.replace(part, out)
     log("  scored")
     return out
 
 
 # ---------------------------------------------------------------- the filters
-
 
 
 _INDEX = {}
@@ -412,10 +374,7 @@ def main():
     args = ap.parse_args()
     key = "" if args.dry_run else api.key()
     out = search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
-    # A dry run writes nothing at all: no scores (above), and no publish. It
-    # used to publish a run that was already scored for the same version,
-    # which made a dry run take a lock on every view (and wait behind a
-    # dashboard's query) while claiming to change nothing.
+    # A dry run writes nothing at all: no scores (above), and no publish.
     if out and not args.no_publish and not args.dry_run:
         import store
         store.try_publish(args.data, sets=[args.label_set])

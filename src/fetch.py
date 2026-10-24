@@ -1,13 +1,11 @@
 #!/usr/bin/env python3
-"""Fetch World Bank appraisal documents (PDFs) for the cohort.
+"""Fetch the cohort's appraisal documents (PDFs).
 
-Reads  inputs/config/cohort.csv  (hand-maintained; included=true rows only)
-Writes data/raw/pdf/{doc_id}.pdf   the PDF, which src/pdf_layout.py reads
-       data/raw/documents.csv      (one row per fetched document)
-       data/reports/fetch.txt      (what was skipped and why)
+Reads  inputs/config/cohort.csv (included=true rows)
+Writes data/raw/pdf/{doc_id}.pdf, data/raw/documents.csv (one row per document),
+       data/reports/fetch.txt, data/reports/fetch_status/appraisal.json
 
-Resumable: a document whose PDF already exists is not re-fetched.
-Run again after an interruption and it picks up where it stopped.
+Resumable: a PDF already on disk is not fetched again.
 """
 import argparse, csv, os, re, sys, tempfile, time
 import urllib.parse
@@ -23,16 +21,10 @@ WDS = "https://search.worldbank.org/api/v3/wds"
 HEADERS = {"User-Agent": "wbg-digital-resilience/0.1 (research; "
                          "+https://github.com/devvartpoddar/wbg-digital-resilience)"}
 
-# The appraisal document of an investment operation, and of its additional
-# financings. A project routinely has one PAD and several Project Papers.
+# The appraisal document of an investment operation, and of its additional financings.
 DOC_TYPES = ("Project Appraisal Document", "Project Paper")
 
-# One row per document, not per project-document pair. A regional programme
-# discloses one appraisal document that serves several projects, so project_ids
-# is pipe-delimited: keying on project_id instead would repeat the document and
-# emit duplicate paragraph identifiers downstream.
-# owner_unit is the unit the documents interface records as the document's
-# owner, as printed ("Digital Dev - AFR EAST/SOUTH (IDD04)"); often blank.
+# One row per document, not per project-document pair.
 DOC_COLS = ["doc_id", "project_ids", "doc_type", "doc_kind", "title",
             "disclosure_date", "lang", "fetched_at", "pdf_url", "pdf_bytes", "pdf_sha256",
             "owner_unit"]
@@ -52,14 +44,12 @@ def classify(doc_type, title):
     return "project_paper_other"
 
 
-# Status codes asked again (with connection errors). A 403 from the content
-# delivery network is throttling: the same URL succeeds moments later. A 404,
-# or any other 4xx, is final (api.Refused).
+# Status codes asked again (with connection errors).
 RETRY = frozenset({403, 408, 429} | set(range(500, 600)))
 REDIRECTS = (301, 302, 303, 307, 308)
 MAX_REDIRECTS = 5
-# A PDF is whole when it opens with %PDF and its %%EOF marker sits in this many
-# final bytes (an incremental update or trailing newline can follow it).
+# A PDF is whole when it opens with %PDF and its %%EOF marker sits in this many final bytes
+# (an incremental update or trailing newline can follow it).
 PDF_TAIL = 2048
 
 
@@ -146,9 +136,9 @@ def fetch_pdf(doc, pdf_dir, counts, notes, pid, delay):
         notes.append(f"{pid}\t{doc['doc_id']}\tPDF FETCH FAILED\t{exc}")
         return None, ""
     if not complete_pdf(blob):
-        # A throttled interface answers with an HTML page and status 200, and a
-        # cut connection leaves a truncated file: a failed download, tried again
-        # on the next run, not a fact about the document.
+        # A throttled interface answers with an HTML page and status 200, and a cut
+        # connection leaves a truncated file: a failed download, tried again on the next
+        # run, not a fact about the document.
         counts["pdf_missing"] += 1
         notes.append(f"{pid}\t{doc['doc_id']}\tPDF FETCH FAILED\t"
                      f"pdfurl did not return a whole PDF ({len(blob)} bytes)")
@@ -234,8 +224,8 @@ def main():
                 if not pdf_blob:
                     continue
                 sha = sha_text(pdf_blob)
-                # An unchanged PDF keeps the time it was first fetched, so a
-                # re-listing leaves documents.csv as it was.
+                # An unchanged PDF keeps the time it was first fetched, so a re-listing
+                # leaves documents.csv as it was.
                 old = previous.get(doc["doc_id"], {})
                 if old.get("pdf_sha256") == sha and old.get("fetched_at"):
                     stamp = old["fetched_at"]
@@ -246,8 +236,8 @@ def main():
                     "title": doc["title"], "disclosure_date": doc["disclosure_date"],
                     "lang": doc["lang"],
                     "fetched_at": stamp or now_stamp(),
-                    # The interface gives some addresses as http; the same
-                    # address serves https, which a browser will open.
+                    # The interface gives some addresses as http; the same address serves
+                    # https, which a browser will open.
                     "pdf_url": re.sub(r"^http://", "https://", doc["pdfurl"]),
                     "pdf_bytes": len(pdf_blob),
                     "pdf_sha256": sha,
@@ -256,16 +246,15 @@ def main():
             if n % 10 == 0:
                 print(f"  ...{n}/{len(projects)} projects, {len(by_doc)} documents", flush=True)
 
-    # A project this run did not list - outside a --limit smoke run, or its
-    # listing failed - keeps the documents an earlier run recorded for it, so a
-    # partial run never shrinks the corpus.
+    # A project this run did not list - outside a --limit smoke run, or its listing failed -
+    # keeps the documents an earlier run recorded for it, so a partial run never shrinks the
+    # corpus.
     for old in previous.values():
         kept = {p for p in old["project_ids"].split("|") if p and p not in listed}
         if not kept and old["doc_id"] not in by_doc and \
                 os.path.exists(os.path.join(pdf_dir, f"{old['doc_id']}.pdf")):
-            # Listed this run, but the listing no longer names a document whose
-            # PDF is on disk: a shorter listing (a paged or throttled answer)
-            # must not shrink the corpus.
+            # Listed, but the listing omits a document whose PDF is on disk: a shorter
+            # (paged or throttled) listing must not shrink the corpus.
             kept = {p for p in old["project_ids"].split("|") if p}
             counts["kept_not_relisted"] = counts.get("kept_not_relisted", 0) + 1
         if not kept:
@@ -283,9 +272,8 @@ def main():
         rows.append(row)
     rows.sort(key=lambda r: r["doc_id"])
     write_csv(docs_csv, DOC_COLS, rows)
-    # A project whose listing or a PDF download failed is not counted as
-    # fetched: the next run tries it again. (A document that publishes no PDF
-    # is a fact about the document, not a failure, and is not retried.)
+    # A project whose listing or a PDF download failed is not counted as fetched: the next
+    # run tries it again.
     asked = {p["project_id"] for p in projects}
     failed = {n.split("\t")[0] for n in notes if "FAILED" in n} & asked
     write_fetch_status(args.out, "appraisal", sorted(asked - failed), sorted(failed))

@@ -1,28 +1,15 @@
 #!/usr/bin/env python3
 """Build the projects table: one row per cohort project.
 
-Reads  data/raw/projects/{project_id}.json   (src/fetch_projects.py)
-       data/raw/documents.csv               (owner_unit, from src/fetch.py)
-       inputs/config/cohort.csv
-Writes data/projects/projects.csv
-       data/reports/projects.txt
+Reads  data/raw/projects/{project_id}.json (src/fetch_projects.py),
+       data/raw/documents.csv (owner_unit), inputs/config/cohort.csv
+Writes data/projects/projects.csv, data/reports/projects.txt
 
-Two sources, each named in the columns it fills:
-
-  projects interface   name, status, approval and closing dates, region,
-                       country, lending instrument, commitment, the Global
-                       Practice(s) and the top sectors
-  appraisal documents  managing_unit: the owner the documents interface
-                       records for the project's most recent appraisal
-                       document that records one, with that document and its
-                       date. It is usually a practice unit ("Digital Dev -
-                       AFR EAST/SOUTH (IDD04)"), sometimes a country office
-                       or a regional vice presidency's office; it is printed
-                       as recorded, never interpreted.
-
-Neither source publishes the vice presidency as a field, so there is no such
-column. A project the interface has no record of keeps its cohort row with
-in_projects_interface=false.
+The projects interface gives name, status, dates, region, country, instrument,
+commitment, Global Practices and sectors; managing_unit is the owner the
+documents interface records for the newest appraisal document that has one,
+printed as recorded. A project the interface does not know keeps its cohort
+row with in_projects_interface=false.
 """
 import argparse, json, os, re, sys
 
@@ -41,8 +28,8 @@ COLS = ["project_id", "cohort_set", "in_projects_interface", "project_name", "st
 
 _GP_CODE = re.compile(r"<GP_PRACTICE_CODE>([^<]*)</GP_PRACTICE_CODE>")
 _GP_NAME = re.compile(r"<GP_PRACTICE_NAME><!\[CDATA\[(.*?)\]\]")
-# A unit code in brackets ("... (IDD04)"), or a bare code opening the text
-# ("IDD02 - Digital Dev ...", "LCC3C"). Three-letter region names are not codes.
+# A unit code in brackets ("... (IDD04)"), or a bare code opening the text ("IDD02 - Digital
+# Dev ...", "LCC3C").
 _UNIT_IN_BRACKETS = re.compile(r"\(([A-Z][A-Z0-9]{3,5})\)")
 _UNIT_LEADING = re.compile(r"^([A-Z][A-Z0-9]{3,5})\b")
 _NOT_A_UNIT = {"", "N/A", "NA"}
@@ -105,9 +92,9 @@ def project_row(pid, rec, docs, cohort_set=""):
     return {
         "project_id": pid,
         "cohort_set": cohort_set,
-        # true, false (the interface has no record), or blank (not fetched)
-        # A record holding nothing but its own id is no record: the
-        # interface lists the id of a dropped project and nothing else.
+        # true, false (the interface has no record), or blank (not fetched) A record holding
+        # nothing but its own id is no record: the interface lists the id of a dropped
+        # project and nothing else.
         "in_projects_interface": str(bool(set(rec or {}) - {"id"})).lower()
         if fetched else "",
         "project_name": " ".join((rec.get("project_name") or "").split()),

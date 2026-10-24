@@ -1,7 +1,6 @@
-"""The few helpers every stage needs, defined once: reading and writing a
-CSV table, the checksum of a file, and a small content-addressed JSON
-store (one file per SHA-256, written aside and renamed, so a reader never
-sees a torn write)."""
+"""Helpers every stage needs: CSV tables, checksums of text and files, and a small
+content-addressed JSON store written aside and renamed.
+"""
 import csv
 import hashlib
 import json

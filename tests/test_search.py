@@ -195,10 +195,7 @@ def test_a_label_set_with_no_active_label_is_refused(tmp_path):
 
 
 def test_main_publishes_nothing_on_a_dry_run(store, monkeypatch):
-    """--dry-run must not touch Postgres. main() used to publish a run that was
-    already scored for the same version, so a dry run took a lock on every view
-    (and waited behind a dashboard's query) while claiming to change nothing.
-    The same run without --dry-run still publishes."""
+    """--dry-run publishes nothing (no lock on the views); without it, main publishes."""
     data, tax, _ = store
     out = _score(store)                                  # a run there to be found
     monkeypatch.setattr(search, "run_folder",
