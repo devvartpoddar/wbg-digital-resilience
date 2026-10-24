@@ -40,9 +40,10 @@ The model stages run in one process, with one Postgres connection and one readin
 
 Answers are the only thing that costs money. An answer is stored under the model, the exact state sent (the sentence with its lead-in, section and component; a package with its component; a commitment and a package) and the exact question (its wording and scale, not its id). A stage asks only the keys the store lacks. So:
 
+- **Nothing**: a set whose questions, gates, patterns, search run and round settings match its last finished run is skipped whole (`wbg.funnel_state` holds the fingerprint): no store read, no scores rewritten. The pair-check and link stages always cover every active measure, whatever subset a run names, because each replaces its whole kind.
 - **A decision floor, `asset.*`, `types.multiple`, `floor.pair_check`, `posterior.*`, `dashboard.*`**: nothing. `./wbg publish` rereads the scores (a minute or two).
 - **A definition, a phrase or a pattern edit**: only the sentences whose question changed, or that the new gate or pattern newly admits. `./wbg run --from search --measures <set>`.
-- **An ask floor (`floor.ask`, `asset.ask_floor`), a gate, a round setting, `link.*`**: the sentences or pairs newly let in.
+- **An ask floor (`floor.ask`, `asset.ask_floor`), a gate, a round setting, `link.*`**: the sentences or pairs newly let in. The feedback rounds run only when round 0 asked something new of a set already scored, so a re-run after a refit does not move the admitted pool.
 - **`ask.context`**: every sentence-level question is a new state. A whole-cohort re-ask (about US$6 to 9 at the current corpus and gates). Test it first on the graded sentences.
 - **A new document**: its own sentences only.
 - **The model snapshot (`questions.MODEL`)**: everything; a deliberate step followed by re-measurement.

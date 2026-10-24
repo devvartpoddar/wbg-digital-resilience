@@ -43,14 +43,17 @@ SCORES_DDL = """CREATE TABLE IF NOT EXISTS {s}.scores (
   state_sha text, question_sha text, score numeric, answer jsonb, served text, route text,
   round integer, cosine numeric, rank integer, PRIMARY KEY (kind, label_set, label_id, item_id));
 CREATE INDEX IF NOT EXISTS scores_item ON {s}.scores (item_id);
+CREATE TABLE IF NOT EXISTS {s}.funnel_state (
+  kind text NOT NULL, label_set text NOT NULL, fingerprint text NOT NULL, finished_at timestamptz,
+  PRIMARY KEY (kind, label_set));
 CREATE TABLE IF NOT EXISTS {s}.scratch_sets (
   label_set text PRIMARY KEY, label_name text, definition text, phrases text[], patterns text[],
   asked_by text, written_at timestamptz, floor numeric, note text);"""
 
 
 def scores_table(conn):
-    """The derived scores table (and the scratch sets' record), created where
-    missing; returns the scores table's name."""
+    """The derived scores table (with the funnel's up-to-date record and the
+    scratch sets' record), created where missing; returns the scores table's name."""
     conn.execute(f"CREATE SCHEMA IF NOT EXISTS {SCHEMA}")
     conn.execute(SCORES_DDL.format(s=SCHEMA))
     return f"{SCHEMA}.scores"
