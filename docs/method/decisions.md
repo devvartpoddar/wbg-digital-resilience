@@ -69,4 +69,4 @@ Release v1.0 (2026-10-23) decides on the raw score: `posterior.on` is false. On 
 | Package to asset | `link.asset_yes` 0.67 | 85% | 73% | 65 package lines |
 | Commitment to package | `dashboard.package_link_min_probability` 0.7 | never reaches 85% (AUC 0.66) | | 60 links, 13 yes |
 
-Read the commitment-to-package links as low confidence. A commitment counts without an asset; when one is given it is the sentence's best asset at 0.8 or more, read from the sentence alone. The tuning notes behind each panel value are in `docs/method/history.md` ("Control panel notes").
+Read the commitment-to-package links as low confidence. A commitment counts without an asset; when one is given it is the sentence's best asset at 0.8 or more, read from the sentence alone. The tuning notes behind each panel value are in `docs/method/history.md` ("Why each control panel value is what it is").
