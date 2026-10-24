@@ -1,16 +1,6 @@
-"""Corpus-level quality gates.
-
-src/audit.py reports defect rates; this asserts them. A report has to be read
-to be useful, and nobody reads one on every run. These thresholds are what stop
-a cleaning change quietly degrading the corpus when the cohort grows.
-
-Skips cleanly when data/ is absent, so the suite passes in a checkout without
-the corpus (data/ is gitignored by design).
-
-Thresholds are set a little above the rates measured when they were written, so
-a real regression fails while ordinary variation as documents are added does
-not. If adding projects pushes one over, look at the examples the audit prints
-before relaxing the number - the point is to notice.
+"""Corpus-level quality gates: src/audit.py's defect rates asserted (skipped when
+data/ is absent), and the audit's checks on invented text. Gates sit a little above
+the measured rates; read the audit's examples before relaxing one.
 """
 import csv
 import os
@@ -27,8 +17,7 @@ import audit as A  # noqa: E402
 
 PROSE = A.PROSE_BLOCKS
 
-# check name -> maximum share of its scope, as a percentage. Measured on the
-# 147-document corpus read from PDF (October 2026), each gate just above it.
+# check name -> maximum share of its scope, as a percentage, just above the measured rate.
 MAX_RATE = {
     "footnote marker glued to a word": 0.1,              # 0.03%
     "paragraph opens as a footnote body": 0.05,          # 0.01%
@@ -72,11 +61,11 @@ def scanned():
                 cache[did] = fh.read()
         return cache[did][int(row["char_start"]):int(row["char_end"])]
 
-    hits = {name: [] for name, *_ in A.CHECKS}
-    scope = {name: 0 for name, *_ in A.CHECKS}
+    hits = {name: [] for name, *_ in A.CHECKS["appraisal"]}
+    scope = {name: 0 for name, *_ in A.CHECKS["appraisal"]}
     for row in rows:
         body = text_of(row)
-        for name, only, _sev, fn in A.CHECKS:
+        for name, only, _sev, fn in A.CHECKS["appraisal"]:
             if only and row["block"] not in only:
                 continue
             scope[name] += 1
@@ -104,7 +93,7 @@ def test_most_prose_is_defect_free(scanned):
     if not prose:
         pytest.skip("no prose paragraphs")
     dirty = set()
-    for name, _only, severity, _fn in A.CHECKS:
+    for name, _only, severity, _fn in A.CHECKS["appraisal"]:
         if severity == "defect":
             dirty.update(pid for pid, _b in hits[name])
     clean = prose - dirty
@@ -117,7 +106,7 @@ def test_most_prose_is_defect_free(scanned):
 def test_every_check_has_a_threshold():
     """A check added to audit.py without a threshold here would report but never
     fail, which is the failure mode this file exists to prevent."""
-    missing = sorted({name for name, *_ in A.CHECKS} - set(MAX_RATE))
+    missing = sorted({name for name, *_ in A.CHECKS["appraisal"]} - set(MAX_RATE))
     assert not missing, f"checks with no threshold in MAX_RATE: {missing}"
 
 
@@ -217,3 +206,49 @@ def test_no_row_is_a_zero_vector():
     assert not bad, (f"rows {bad} are not unit vectors "
                      f"(first norm {norms[bad[0]]:.4f}) - "
                      f"{index[bad[0]]['paragraph_id']}")
+
+
+# ------------------------------------------------------- the checks themselves
+
+def _fn(kind, name):
+    return next(fn for n, _s, _sev, fn in A.CHECKS[kind] if n == name)
+
+
+def test_a_character_defect_is_one_rule_for_both_audits():
+    text = "Fibre� link\x07 to the  hub"
+    assert _fn("appraisal", "unicode replacement character")(text) == ["�"]
+    assert _fn("appraisal", "control or format character")(text) == ["\x07"]
+    assert _fn("appraisal", "private use area character")(text) == [""]
+    row = {"description": text, "supplier_name": "Acme"}
+    assert _fn("procurement", "unicode replacement character")(row) == ["description:U+FFFD"]
+    assert _fn("procurement", "control or format character")(row) == ["description:U+0007"]
+    assert _fn("procurement", "private use area character")(row) == \
+        ["description:U+E000", "supplier_name:U+F0B7"]
+    assert not _fn("procurement", "private use area character")({"description": "plain"})
+
+
+def test_pattern_rules_keep_their_scope():
+    scope = {n: s for n, s, _sev, _fn in A.CHECKS["appraisal"]}
+    assert scope["footnote marker glued to a word"] == PROSE
+    assert not scope["smart quote, ligature or hyphen left unfolded"]       # every block
+    assert _fn("appraisal", "footnote marker glued to a word")("the project34 will") == ["34"]
+    assert _fn("procurement", "table header text leaked into a description")(
+        {"description_clean": "Servers Activity Reference No. 4"}) == ["Activity Reference No."]
+
+
+def test_the_appraisal_audit_writes_its_report(tmp_path, capsys):
+    text = "The towers were built.  Page 4 of the plan.\n"
+    (tmp_path / "appraisal" / "text").mkdir(parents=True)
+    (tmp_path / "appraisal" / "text" / "D1.txt").write_text(text, encoding="utf-8")
+    cols = ["paragraph_id", "doc_id", "block", "section_path", "char_start", "char_end",
+            "n_tokens", "for_model"]
+    with open(tmp_path / "appraisal" / "paragraphs.csv", "w", newline="", encoding="utf-8") as fh:
+        w = csv.writer(fh)
+        w.writerow(cols)
+        w.writerow(["D1:p1", "D1", "narrative", "", 0, len(text) - 1, 9, "true"])
+    assert A.main(["--appraisal", "--data", str(tmp_path)]) == 0
+    report = (tmp_path / "reports" / "audit.txt").read_text(encoding="utf-8")
+    assert "page number left inline" in report and "D1:p1" in report
+    with pytest.raises(SystemExit, match="clean_procurement"):
+        A.main(["--procurement", "--data", str(tmp_path)])
+    assert A.main(["--data", str(tmp_path)]) == 0           # both: the absent one is skipped

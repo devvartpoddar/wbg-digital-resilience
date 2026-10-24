@@ -154,7 +154,8 @@ def test_a_new_phrase_is_a_new_version_embedding_only_that_phrase(store):
 
 def test_the_manifest_says_what_was_run(store):
     out = _score(store)
-    m = json.load(open(os.path.join(out, "manifest.json")))
+    with open(os.path.join(out, "manifest.json")) as fh:
+        m = json.load(fh)
     assert (m["labels"], m["queries"], m["units"]) == (2, 4, len(UNITS))
 
 
@@ -193,27 +194,6 @@ def test_a_label_set_with_no_active_label_is_refused(tmp_path):
     with pytest.raises(SystemExit):
         search.load_queries("x", str(tmp_path))
 
-
-def test_main_publishes_nothing_on_a_dry_run(store, monkeypatch):
-    """--dry-run must not touch Postgres. main() used to publish a run that was
-    already scored for the same version, so a dry run took a lock on every view
-    (and waited behind a dashboard's query) while claiming to change nothing.
-    The same run without --dry-run still publishes."""
-    data, tax, _ = store
-    out = _score(store)                                  # a run there to be found
-    monkeypatch.setattr(search, "run_folder",
-                        lambda *a, **kw: (out, search.load_queries("assets", tax)))
-    monkeypatch.setattr(embed, "read_key", lambda *a, **kw: "k")
-    published = []
-    monkeypatch.setitem(sys.modules, "store", types.SimpleNamespace(
-        try_publish=lambda *a, **kw: published.append((a, kw))))
-
-    monkeypatch.setattr(sys, "argv", ["search.py", "assets", "--data", data, "--dry-run"])
-    assert search.main() == 0 and published == []
-
-    monkeypatch.setattr(sys, "argv", ["search.py", "assets", "--data", data])
-    assert search.main() == 0
-    assert published == [((data,), {"sets": ["assets"]})]
 
 
 def test_types_with_no_phrase_written_for_them_are_listed(tmp_path):

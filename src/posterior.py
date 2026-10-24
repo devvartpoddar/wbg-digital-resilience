@@ -1,52 +1,13 @@
-"""The probability layer after every graded model question.
-
-The decision model gives each sentence a score for a label: its probability
-of the grades the control panel counts (read.grades, 2 and 3). This layer
-turns that score into the probability that a person would grade the sentence
-so: a logistic regression stacked on the score and on how similar the
-sentence is, by its embedding, to the sentences a person graded for the same
-label. Stacking, not strict Bayes: the score and the similarities read the
-same sentence, so they are not independent, and a fitted weight on each
-absorbs what they share (docs/method/decisions.md).
-
-Two similarity numbers, both from the graded sentences of the label:
-
-  vote      a weighted vote of the graded sentences, each weighted by its
-            design weight times exp(sharpness x (similarity - 1)): the
-            closest count most.
-  centroid  similarity to the (weighted) average graded yes minus
-            similarity to the average graded no.
-
-A graded sentence never votes for itself: its features leave its own
-grade out, as an ungraded sentence's never include one, so the weights
-learned are the weights used. Every other graded sentence votes, of the same
-project or a near-copy alike: appraisal documents reuse wording, and a
-sentence whose graded near-copy says yes usually is yes. posterior.near_copy
-can leave near-copies out too (off by default; the tuning report,
-src/tune.py, compares). Leakage between projects is the out-of-fold check's
-job (folds by whole project), not the vote's.
-
-With posterior.pool (on) the labels of one decision share the weights on
-the score and the similarities, each label keeping its own intercept (its
-base rate) and its own graded sentences: a measure has 40 or so graded
-rows, a type or an asset fewer, few for four weights of its own. The same
-setting governs every decision: measures, assets, and the four after them
-(src/judged.py).
-
-The grades come from sheets drawn by band, not at random, so each graded
-sentence carries its design weight (the stratum's size over the rows drawn
-from it) into the fit, the vote and every precision and recall reported.
-The fit is checked out of sample: folds by project (no project in two
-folds), each fold scored by a layer fitted on the others; the floor the
-evaluation suggests is read off those out-of-fold probabilities.
-
-The fit is made by the evaluation (src/check_units.py --evaluate, the only
-reader of grades, AGENTS.md rule 9), on the grades given under the exact
-question now asked, and written to a file of identifiers, numbers and
-weights keyed on that question; a run reads the file. With no file, another
-question, or too few graded sentences, the probability is the model's score.
+"""The probability layer: a logistic regression stacked on the model's score
+and on the sentence's similarity to the sentences a person graded for the
+same label (a sharpness-weighted vote, and the distance between the graded
+yes and no centroids). A graded sentence never votes for itself. Labels of
+one decision kind are pooled (posterior.pool): one intercept each, shared
+slopes. Checked out of fold by project; fits weight each row by its design
+weight to posterior.fit_weight_power, reports by the full weight.
+Fitted by src/grading.py, read through src/fits.py (docs/method/decisions.md).
 """
-import hashlib, json, math, os, zlib
+import hashlib, json, math, zlib
 
 import numpy
 
@@ -89,7 +50,8 @@ def settings():
             "min_each": int(panel.get("posterior.min_each", 5)),
             "near_copy": _near(panel.get("posterior.near_copy", "off")),
             "pool": bool(panel.get("posterior.pool", True)),
-            "folds": int(panel.get("posterior.folds", 5))}
+            "folds": int(panel.get("posterior.folds", 5)),
+            "fit_weight_power": float(panel.get("posterior.fit_weight_power", 0.0))}
 
 
 class _Graded:
@@ -174,11 +136,12 @@ def _rows(graded, scores, vectors, groups):
 
 
 def _design(rows, scores, vectors, s):
-    """The fit's inputs: X (logit score, vote[, centroid]), y, w. Each
-    graded sentence's similarities leave itself out, as an ungraded
-    sentence's never include it."""
+    """The fit's inputs: X (logit score, vote[, centroid]), y, w. w is the
+    design weight raised to posterior.fit_weight_power (0 = every graded
+    row counts once in the fit; the reports keep the full weights). Each
+    graded sentence's similarities leave itself out."""
     y = numpy.array([r[1] for r in rows], dtype="float64")
-    w = numpy.array([r[2] for r in rows], dtype="float64")
+    w = numpy.array([r[2] for r in rows], dtype="float64") ** s.get("fit_weight_power", 0.0)
     gr = _Graded(numpy.array([_unit(vectors[r[0]]) for r in rows]), y, w)
     X = numpy.array([[_logit(scores[u])] + gr.features(
         gr.S[i], gr.drop(gr.S[i], s["near_copy"], i), s["sharpness"], s["centroid"])
@@ -317,18 +280,8 @@ def out_of_fold_all(blocks, s=None):
     return out
 
 
-def write(path, layer):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path + ".part", "w", encoding="utf-8") as fh:
-        json.dump(layer, fh, indent=1)
-    os.replace(path + ".part", path)
 
 
-def digest(layer):
-    """A short hash of a layer (part of a run's key), '' for none."""
-    if not layer:
-        return ""
-    return hashlib.sha256(json.dumps(layer, sort_keys=True).encode()).hexdigest()[:12]
 
 
 class Layer:
@@ -364,43 +317,10 @@ class Layer:
         return 1 / (1 + math.exp(-z))
 
 
-def vector_lookup(data):
-    """vector_of(unit_id) over the sentence embeddings (None for a unit
-    not embedded)."""
-    return lookups(data)[0]
 
 
-_LOOKUPS = {}
 
 
-def lookups(data):
-    """(vector_of, projects_of) over the sentence index: a unit's embedding
-    (None when not embedded) and its projects ('P1|P2'). Read once per
-    process for an unchanged index (it is called by many readers)."""
-    from paths import where
-    path = where(data, "embeddings", "sentence_index.csv")
-    npy = where(data, "embeddings", "sentence_emb.npy")
-    stamp = tuple((os.path.getmtime(p), os.path.getsize(p)) if os.path.exists(p) else None
-                  for p in (path, npy))
-    if _LOOKUPS.get(path, (None,))[0] != stamp:
-        _LOOKUPS[path] = (stamp, _lookups(data))
-    return _LOOKUPS[path][1]
-
-
-def _lookups(data):
-    import csv
-    from paths import where
-    row_of, proj = {}, {}
-    with open(where(data, "embeddings", "sentence_index.csv"), newline="", encoding="utf-8") as fh:
-        for i, r in enumerate(csv.DictReader(fh)):
-            row_of[r["unit_id"]] = i
-            proj[r["unit_id"]] = r.get("project_ids", "")
-    npy = where(data, "embeddings", "sentence_emb.npy")
-    if not os.path.exists(npy):                     # nothing embedded yet: no vectors
-        return (lambda u: None), (lambda u: proj.get(u, ""))
-    matrix = numpy.load(npy, mmap_mode="r")
-    vector_of = lambda u: numpy.asarray(matrix[row_of[u]], dtype="float64") if u in row_of else None
-    return vector_of, lambda u: proj.get(u, "")
 
 
 def weighted_pr(probs, ys, ws, t):
@@ -413,14 +333,14 @@ def weighted_pr(probs, ys, ws, t):
 
 
 def suggest_floor(probs, ys, target, ws=None):
-    """(floor, precision, recall) on a 0.05 grid with the most recall whose
+    """(floor, precision, recall) on a 0.01 grid with the most recall whose
     weighted precision reaches target (the highest such floor on ties, for
     margin), or the most precise one when none does. Read it off
     out-of-fold probabilities: a floor chosen on the rows a layer was fitted
     on looks better than it is."""
     ws = ws or [1.0] * len(probs)
     best, top = None, None
-    for t in [x / 20 for x in range(1, 20)]:
+    for t in [x / 100 for x in range(1, 100)]:
         prec, rec, kept = weighted_pr(probs, ys, ws, t)
         if not kept:
             continue
@@ -431,23 +351,21 @@ def suggest_floor(probs, ys, target, ws=None):
     return best or top
 
 
+def wauc(ps, ys, ws):
+    """Weighted AUC: the weighted share of (yes, no) pairs ranked right; None
+    without both classes."""
+    pos = [(p, w) for p, y, w in zip(ps, ys, ws) if y]
+    neg = [(p, w) for p, y, w in zip(ps, ys, ws) if not y]
+    if not pos or not neg:
+        return None
+    num = sum(wp * wn * (1.0 if pp > pn else 0.5 if pp == pn else 0.0) for pp, wp in pos for pn, wn in neg)
+    return num / (sum(w for _, w in pos) * sum(w for _, w in neg))
+
+
 def effective_n(ws):
     """Kish's effective sample size of weighted rows."""
     s, s2 = sum(ws), sum(w * w for w in ws)
     return (s * s / s2) if s2 else 0.0
 
 
-def load(path, question_sha256, vector_of, projects_of=None):
-    """The layer at path when the panel has it on and it was fitted on the
-    same question, else None (the model's score stands)."""
-    spec = read_spec(path, question_sha256)
-    return Layer(spec, vector_of, projects_of) if spec else None
 
-
-def read_spec(path, question_sha256):
-    """The layer's file contents when it applies (for a run key), else None."""
-    if not panel.get("posterior.on", True) or not os.path.exists(path):
-        return None
-    with open(path, encoding="utf-8") as fh:
-        spec = json.load(fh)
-    return spec if spec.get("question_sha256") == question_sha256 else None

@@ -148,14 +148,6 @@ def test_a_shared_document_belongs_to_each_of_its_projects(store, cohort):
     assert [d["doc_id"] for d in wbg.tables(sel, data=store)["documents"]] == ["D2"]
 
 
-def test_export_writes_the_summary_workbook(store, cohort):
-    from openpyxl import load_workbook
-    sel = wbg.select(project="P000001", path=cohort)
-    out = wbg.export(sel, data=store, today="2026-10-10")
-    assert out.endswith(os.path.join("runs", "project-p000001-2026-10-10"))
-    wb = load_workbook(os.path.join(out, "summary.xlsx"))
-    assert wb.sheetnames == ["projects", "upcoming packages", "open notices", "components"]
-
 
 def test_prepare_fetches_only_what_is_new_and_skips_what_did_not_change(
         store, cohort, monkeypatch):
@@ -178,7 +170,7 @@ def test_prepare_fetches_only_what_is_new_and_skips_what_did_not_change(
     assert {s for s, _ in calls} >= {"clean.py", "components.py"}
     calls.clear()
     wbg.prepare(sel, data=store)
-    assert [s for s, _ in calls] == ["paths.py"], "nothing changed, nothing reruns"
+    assert calls == [], "nothing changed, nothing reruns"
     calls.clear()
     os.remove(wbg.where(store, "appraisal", "components.csv"))
     wbg.prepare(sel, data=store)

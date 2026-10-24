@@ -1,53 +1,16 @@
 #!/usr/bin/env python3
 """Score every search unit against every query of a label set, then filter.
-Sentences are where we search, paragraphs where we work.
 
-A label set is two files in inputs/taxonomy/ or analysis/labels/ (src/labels.py),
-kept by people and only read here:
+A label set (src/labels.py) is <set>.csv (one row per label) and an optional
+<set>_queries.csv (search phrases); each label is searched with its definition and
+each phrase. search() writes data/search/<set>-<version>/ (queries.csv, scores.npy
+of every unit x query cosine, manifest.json), versioned on the query texts, model,
+dimensions and sentence index. hits() filters the scores (min_score,
+min_percentile within a query, top, labels, projects, kinds); paragraph_rollup()
+gives one row per label and paragraph. Which filter works is decided against
+examples a person checked.
 
-  <set>.csv           one row per label: <x>_id, <x>_name, definition, active
-  <set>_queries.csv   any number of search phrases per label: <x>_id,
-                      query_id, query, active (optional file)
-
-Every label is searched with its definition ("<name>: <definition>") and
-with each of its phrases. A phrase finds what a definition is too broad to
-rank first ("cable landing station", "tier III data centre"), so a label has
-as many queries as it needs.
-
-Scoring (search) is done once per version of the label set and keeps every
-score; nothing is cut off there. Filtering (hits) reads the scores and keeps
-what a filter asks for. So a filter can be tightened, loosened or compared
-without embedding or scoring anything again.
-
-  search    data/search/<set>-<version>/
-              queries.csv     query_id, label_id, kind (definition | phrase),
-                              text, text_sha256
-              scores.npy      (units, queries) cosine similarities, float32,
-                              rows in sentence_index.csv order
-              manifest.json   what was run
-            <version> is a SHA-256 over the query texts, the model, the
-            dimensions and the sentence index: a revised phrase or definition
-            is a new version, which embeds only what changed; an unchanged
-            set is not scored again.
-
-  hits()    a function, for analysis: for each unit and label, the best
-            score over the label's queries, the query that gave it, that
-            score's percentile among all units for the same query, and how
-            many of the label's queries rank the unit at or above
-            min_percentile. Keeps what passes every filter given: min_score,
-            min_percentile (within its query: raw cosine is not comparable
-            between a short phrase and a long definition, a percentile is),
-            top (best N per label), labels, projects, kinds.
-            paragraph_rollup() turns hits into one row per label and paragraph.
-
-No filter is the right one by default: which works is decided against
-examples a person checked (AGENTS.md).
-
-  python src/search.py assets           # or ./wbg search assets
-
-  import search
-  folder, _ = search.run_folder("assets", data)
-  rows = search.hits(folder, data, min_percentile=99.5, top=100)
+  python src/search.py assets
 """
 import argparse, csv, hashlib, json, os, sys, time
 from collections import defaultdict
@@ -56,16 +19,17 @@ import numpy
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
+import api  # noqa: E402
 import embed  # noqa: E402
 
 import labels  # noqa: E402
 
-# Label sets live in inputs/taxonomy/ (the pipeline's) and analysis/labels/
-# (analysis sets); `taxonomy=None` finds the set in either (src/labels.py).
+# Label sets live in inputs/taxonomy/ (the pipeline's) and analysis/labels/ (analysis sets);
+# `taxonomy=None` finds the set in either (src/labels.py).
 TAXONOMY = None
 QUERY_COLS = ["query_id", "label_id", "kind", "text", "text_sha256"]
-# 'copies': the units printing the same text in other documents (an
-# additional financing repeating its appraisal document), searched once.
+# 'copies': the units printing the same text in other documents (an additional financing
+# repeating its appraisal document), searched once.
 CONTEXT = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "component_number",
            "subcomponent_number", "component_key", "copies"]
 # Rows of the sentence matrix scored at a time, so memory stays flat.
@@ -75,6 +39,7 @@ BLOCK = 20_000
 # ------------------------------------------------------------------ the labels
 
 from common import read_csv as _rows, file_sha256 as _sha_file  # noqa: E402
+from common import write_csv as _write  # noqa: E402
 
 
 def _active(r):
@@ -197,7 +162,7 @@ def query_vectors(queries, data, model, dim, base_url, api_key, log=print):
     if todo:
         if not api_key:
             raise SystemExit(f"search: {len(todo)} query text(s) are not embedded yet and "
-                             f"${embed.KEY_VAR} is not set")
+                             f"${api.KEY_VAR} is not set")
         _stats, failures = embed.fetch_missing(todo, unique, root, dim, model=model,
                                                api_key=api_key, base_url=base_url, log=log)
         if failures:
@@ -223,9 +188,10 @@ def _paths(data):
             where(data, "embeddings", "sentence_index.csv"))
 
 
-def run_folder(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
+def run_folder(name, data, model=embed.DEFAULT_MODEL, dim=None,
                taxonomy=TAXONOMY):
     """(folder, queries) for the label set as it stands now."""
+    dim = dim or embed.DEFAULT_DIM
     queries = load_queries(name, taxonomy)
     npy, idx = _paths(data)
     if not (os.path.exists(npy) and os.path.exists(idx)):
@@ -233,14 +199,15 @@ def run_folder(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
     return where(data, "search", f"{name}-{run_version(queries, model, dim, idx)}"), queries
 
 
-def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
+def search(name, data, model=embed.DEFAULT_MODEL, dim=None,
            base_url=embed.DEFAULT_BASE, api_key="", taxonomy=TAXONOMY, dry_run=False,
            log=print):
     """Score every unit against every query of the label set; returns the run
     folder (None on a dry run)."""
+    dim = dim or embed.DEFAULT_DIM
     if dry_run and not all(os.path.exists(p) for p in _paths(data)):
-        # Before the first embedding run there is no index to version against:
-        # say what the label set holds and what its queries would cost.
+        # Before the first embedding run there is no index to version against: say what the
+        # label set holds and what its queries would cost.
         queries = load_queries(name, taxonomy)
         for line in coverage_lines(name, queries, taxonomy):
             log(line)
@@ -281,15 +248,14 @@ def search(name, data, model=embed.DEFAULT_MODEL, dim=embed.DEFAULT_DIM,
                    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())},
                   fh, indent=2, sort_keys=True)
         fh.write("\n")
-    # The folder appears whole or not at all: an interrupted run leaves only
-    # the .part folder, which the next run overwrites.
+    # The folder appears whole or not at all: an interrupted run leaves only the .part
+    # folder, which the next run overwrites.
     os.replace(part, out)
     log("  scored")
     return out
 
 
 # ---------------------------------------------------------------- the filters
-
 
 
 _INDEX = {}
@@ -400,31 +366,15 @@ def paragraph_rollup(rows):
     return out
 
 
-def _write(path, cols, rows):
-    with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=cols, lineterminator="\n", extrasaction="ignore")
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(path + ".part", path)
-
-
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     ap.add_argument("label_set", help="a label set in inputs/taxonomy/ or analysis/labels/ "
                                       "(the file name without .csv): assets, measures")
     ap.add_argument("--data", default=data_root())
     ap.add_argument("--dry-run", action="store_true")
-    ap.add_argument("--no-publish", action="store_true")
     args = ap.parse_args()
-    key = "" if args.dry_run else embed.read_key("")
-    out = search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
-    # A dry run writes nothing at all: no scores (above), and no publish. It
-    # used to publish a run that was already scored for the same version,
-    # which made a dry run take a lock on every view (and wait behind a
-    # dashboard's query) while claiming to change nothing.
-    if out and not args.no_publish and not args.dry_run:
-        import store
-        store.try_publish(args.data, sets=[args.label_set])
+    key = "" if args.dry_run else api.key()
+    search(args.label_set, args.data, api_key=key, dry_run=args.dry_run)
     return 0
 
 

@@ -103,9 +103,8 @@ SELECT x.project_id, x.document_id, x.disclosure_date AS document_date, x.compon
        k.cost_before_restructuring_usd_millions, k.restructuring_action,
        k.document_id AS cost_document_id, k.disclosure_date AS cost_document_date,
        k.matched_by AS cost_matched_by,
-       -- The tables give one cost per component, all funding sources together:
-       -- in 32 of 148 projects they add up to more than 1.5 times the Bank's
-       -- financing. No table read here splits the sources.
+       -- The tables give one cost per component, all funding sources together,
+       -- which can exceed the Bank's financing; no table read here splits them.
        CASE WHEN k.cost_usd_millions IS NOT NULL THEN 'All sources (Bank and others)' END
          AS cost_covers,
        x.read_from
@@ -114,22 +113,14 @@ LEFT JOIN LATERAL (
   SELECT o.cost_usd_millions, o.cost_before_restructuring_usd_millions, o.restructuring_action,
          o.document_id, o.disclosure_date,
          CASE WHEN o.document_id = x.document_id THEN 'same document'
-              WHEN (o.name_key <> '' AND o.name_key = x.name_key)
-                OR (least(length(o.name_key), length(x.name_key)) >= 12
-                    AND (o.name_key LIKE x.name_key || '%' OR x.name_key LIKE o.name_key || '%'))
-                THEN 'name'
+              WHEN wbg.same_component(o.name_key, x.name_key) THEN 'name'
               ELSE 'number' END AS matched_by
   FROM c o
   WHERE o.project_id = x.project_id AND o.component_level = x.component_level
     AND o.cost_usd_millions IS NOT NULL
-    AND ((o.name_key <> '' AND o.name_key = x.name_key)
-         OR (least(length(o.name_key), length(x.name_key)) >= 12
-             AND (o.name_key LIKE x.name_key || '%' OR x.name_key LIKE o.name_key || '%'))
-         OR o.component_number = x.component_number)
+    AND (wbg.same_component(o.name_key, x.name_key) OR o.component_number = x.component_number)
   ORDER BY (o.document_id = x.document_id) DESC,
-           ((o.name_key <> '' AND o.name_key = x.name_key)
-            OR (least(length(o.name_key), length(x.name_key)) >= 12
-                AND (o.name_key LIKE x.name_key || '%' OR x.name_key LIKE o.name_key || '%'))) DESC,
+           wbg.same_component(o.name_key, x.name_key) DESC,
            o.disclosure_date DESC NULLS LAST, o.document_id DESC
   LIMIT 1
 ) k ON true;

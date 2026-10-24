@@ -7,6 +7,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
+import dates  # noqa: E402
 import projects  # noqa: E402
 
 RECORD = {
@@ -84,3 +85,83 @@ def test_the_v3_record_is_preferred_and_fills_what_v2_lacks():
     assert row["project_name"] == "X" and row["approval_fy"] == "2027"
     assert row["in_projects_interface"] == "true" and row["record_source"] == "v3"
     assert F.merge({}, {}) == {}
+
+
+class _Resp:
+    def __init__(self, status, content=b"", headers=None):
+        self.status_code, self.content, self.headers = status, content, headers or {}
+        self.text = content.decode("latin-1")
+
+    def raise_for_status(self):
+        if self.status_code >= 400:
+            raise RuntimeError(f"HTTP {self.status_code}")
+
+
+def _serve(monkeypatch, answers):
+    import api
+    seen = []
+
+    def fake(method, url, **kw):
+        seen.append(url)
+        return answers.pop(0)
+    monkeypatch.setattr(api.requests, "request", fake)
+    monkeypatch.setattr(api.time, "sleep", lambda s: None)
+    return seen
+
+
+def test_a_redirect_to_http_is_upgraded_and_throttling_is_asked_again(monkeypatch):
+    import fetch
+    seen = _serve(monkeypatch, [_Resp(302, headers={"location": "http://d.example/x.pdf"}),
+                                _Resp(403), _Resp(200, b"%PDF-1.7 ... %%EOF\n")])
+    assert fetch.get("https://a.example/x").status_code == 200
+    assert seen == ["https://a.example/x", "https://d.example/x.pdf", "https://d.example/x.pdf"]
+
+
+def test_a_missing_document_is_not_asked_again(monkeypatch):
+    import api
+    import fetch
+    seen = _serve(monkeypatch, [_Resp(404), _Resp(200)])
+    with pytest.raises(api.Refused):
+        fetch.get("https://a.example/gone")
+    assert len(seen) == 1
+
+
+def test_only_a_whole_pdf_counts_as_fetched(tmp_path, monkeypatch):
+    import fetch
+    assert fetch.complete_pdf(b"%PDF-1.4\n" + b"x" * 5000 + b"\n%%EOF\n")
+    assert not fetch.complete_pdf(b"%PDF-1.4\n" + b"x" * 5000)          # cut short
+    assert not fetch.complete_pdf(b"<html>%%EOF</html>")
+    monkeypatch.setattr(fetch, "get", lambda url, timeout: _Resp(200, b"%PDF-1.4 truncated"))
+    counts, notes = {"pdf_missing": 0, "pdf_cached": 0, "pdf_fetched": 0}, []
+    doc = {"doc_id": "D1", "pdfurl": "https://a.example/D1.pdf"}
+    assert fetch.fetch_pdf(doc, str(tmp_path), counts, notes, "P1", 0) == (None, "")
+    assert counts["pdf_missing"] == 1 and "FAILED" in notes[0]
+    assert os.listdir(tmp_path) == []
+    whole = b"%PDF-1.4\nbody\n%%EOF\n"
+    monkeypatch.setattr(fetch, "get", lambda url, timeout: _Resp(200, whole))
+    blob, stamp = fetch.fetch_pdf(doc, str(tmp_path), counts, notes, "P1", 0)
+    assert blob == whole and stamp.endswith("Z")
+    assert os.listdir(tmp_path) == ["D1.pdf"]
+    assert fetch.fetch_pdf(doc, str(tmp_path), counts, notes, "P1", 0) == (whole, "")
+
+
+# ------------------------------------------------------------- dates.iso_date
+
+def test_every_interface_shape_reads_to_iso():
+    assert dates.iso_date("2023-03-31T00:00:00Z") == "2023-03-31"
+    assert dates.iso_date("2023-03-31") == "2023-03-31"
+    assert dates.iso_date("14-Sep-2026") == "2026-09-14"
+    assert dates.iso_date("14 Sep 2026") == "2026-09-14"
+    assert dates.iso_date("10/31/2028 12:00:00 AM", "mdy") == "2028-10-31"
+    assert dates.iso_date("31/10/2028") == "2028-10-31"
+    assert dates.iso_date("12-03-24", "dmy") == "2024-03-12"
+
+
+def test_nothing_unreadable_or_ambiguous_passes_through():
+    assert dates.iso_date("") == ""
+    assert dates.iso_date(None) == ""
+    assert dates.iso_date("9/14/2026") == "2026-09-14"      # only one reading fits
+    assert dates.iso_date("03/06/2024") == ""                # two readings fit
+    assert dates.iso_date("03/06/2024", "mdy") == "2024-03-06"
+    assert dates.iso_date("2024-13-01") == ""                # not a date
+    assert dates.iso_date("soon") == ""

@@ -1,38 +1,18 @@
 #!/usr/bin/env python3
-"""Fetch procurement data for the cohort: plans, solicitation notices, awards.
+"""Fetch the cohort's procurement plans, notices and awards.
 
 Reads  inputs/config/cohort.csv
-       data/raw/plans/{doc_id}.txt              cached plan text renditions
-       data/raw/notices/{project_id}.json       cached notice responses
-       data/raw/awards/{project_id}.json        cached award responses
-Writes data/raw/...                              (gitignored raw artefacts)
-       data/raw/fetch_log.csv                    every interface call
-       data/procurement/packages_raw.csv
-       data/procurement/notices_raw.csv
-       data/procurement/awards_raw.csv
+Writes data/raw/{plans,notices,awards}/ (stored responses), data/raw/fetch_log.csv,
+       data/procurement/{packages,notices,awards}_raw.csv,
        data/reports/fetch_procurement.txt
 
-Built for re-running, because the procurement plan is the document that recurs:
-
-  * Every artefact is content-hashed: the hash is the identity of a plan
-    rendition, recorded on each of its rows.
-  * Every plan version is kept. Each plan document is its own set of rows in
-    packages_raw; clean_procurement assembles one row per package from them.
-  * Nothing fetched is overwritten. A plan, notice or award file already on disk
-    is not downloaded again; --refresh downloads again and, when the bytes
-    differ, keeps the earlier file beside the new one rather than replacing it.
-
-This stage records what was published. Everything derived from it - the method
-code, the status label, the language, the placeholder flag, hashes of the
-cleaned text - is computed in clean_procurement.
-
-Two of the three sources are structured JSON. The third is not: procurement plans
-are published only as a PDF and its text rendition, and the text rendition is a
-fixed-width print of a STEP table whose cells clip mid-word at the column edge.
-The parser for it is `parse_plan_text` and it is deliberately conservative - it
-recovers what it can and reports what it could not key.
+Every plan version is kept and content-hashed; a stored file is not fetched again
+and --refresh keeps an earlier, different copy beside the new one. Plan renditions
+are fixed-width text whose cells clip at the column edge; parse_plan_text reads
+the STEP tables in them. Everything derived (codes, labels, language) is computed
+in clean_procurement.
 """
-import argparse, csv, hashlib, json, os, re, sys, threading, time, unicodedata, urllib.parse
+import argparse, json, os, re, sys, time, unicodedata, urllib.parse
 from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -41,7 +21,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where, write_fetch_status  # noqa: E402
 
 import plan_table                                     # noqa: E402
-from fetch import get, read_cohort            # noqa: E402
+from fetch import get, now_stamp, read_cohort, write_atomic  # noqa: E402
+from common import read_csv, sha_text, write_csv  # noqa: E402
 from dates import iso_date                    # noqa: E402
 from clean_procurement import (                        # noqa: E402
     STATUS_MAP, METHOD_TEXT, fold_chars,
@@ -49,80 +30,103 @@ from clean_procurement import (                        # noqa: E402
 
 WDS = "https://search.worldbank.org/api/v3/wds"
 NOTICES = "https://search.worldbank.org/api/v2/procnotices"
+AWARDS = "https://search.worldbank.org/api/contractdata"
+PLAN_DOCTY = "Procurement Plan"
+PAGE = 500          # records per page from the notices and awards interfaces
+PLAN_PAGE = 200     # documents per page from the documents interface
 
 
-def last_page(batch, records, response, offset, cap=20000):
-    """Whether a paged listing is done: the interface's own total is reached
-    when it gives one, else a page came back empty or short. A short page
-    alone would end early if the interface ever capped pages below PAGE."""
-    try:
-        total = int(response.get("total"))
-    except (TypeError, ValueError):
-        total = None
+def last_page(batch, records, response, offset, cap=20000, page=PAGE):
+    """Whether a paged listing is done: its own total is reached when it gives
+    one, else a page came back empty or short."""
+    total = _total(response)
     if total is not None:
         return len(records) >= total or not batch or offset > cap
-    return len(batch) < PAGE or offset > cap
-AWARDS = "https://search.worldbank.org/api/contractdata"
+    return len(batch) < page or offset > cap
 
-PLAN_DOCTY = "Procurement Plan"
-PAGE = 500
+
+def _total(response):
+    try:
+        return int(response.get("total"))
+    except (TypeError, ValueError):
+        return None
+
+
+def fetch_pages(url, params, items, *, what, expected=(), page=PAGE, delay=0.3, timeout=90,
+                log=None, source=""):
+    """(records, total) of a paged listing. `params` is the query without
+    paging, `items(json)` the page's records; every page is checked for HTML,
+    for JSON and for the `expected` keys, and recorded in `log`. Raises
+    RuntimeError when fewer records came back than the interface's own total,
+    so a truncated list is never written."""
+    records, offset = [], 0
+    while True:
+        q = urllib.parse.urlencode({"format": "json", "rows": str(page), "os": str(offset),
+                                    **params})
+        r = get(f"{url}?{q}", timeout=timeout)
+        j = json_body(r, what)
+        batch = items(j)
+        check_keys(batch, expected, what)
+        if log is not None:
+            log.record(source, url, q, len(batch), sha_text(r.content))
+        records.extend(batch)
+        offset += page
+        if last_page(batch, records, j, offset, page=page):
+            break
+        time.sleep(delay)
+    total = _total(j)
+    if total is not None and len(records) < total:
+        raise RuntimeError(f"{what}: {len(records)} of {total} records returned; "
+                           f"a truncated list is not written")
+    return records, total
+
+
+def _documents(j):
+    """The records of a documents-interface page (its 'facets' entry is not one)."""
+    return [v for k, v in (j.get("documents") or {}).items() if k != "facets"]
 
 
 # A date and a figure as a plan prints them in its milestone and amount cells.
 DATE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2})\b")
 AMOUNT_RE = re.compile(r"^[\d,]+\.\d{2}$")
-# The reference grammar is plan_table's (REF_TOKEN), so where a table's rows
-# begin and where a record begins are one rule.
+# The reference grammar is plan_table's (REF_TOKEN), so where a table's rows begin and where
+# a record begins are one rule.
 _SEP, _FIELD = plan_table.REF_SEP, plan_table.REF_FIELD
 REF_TOKEN = plan_table.REF_TOKEN
 REF_RE = re.compile(rf"^\s*({REF_TOKEN})\s*/\s*(.*)$")
-# Does a rendition's text look like it carries borrower references at all? Used
-# only to tell an empty package table apart from a parse failure.
+# Does a rendition's text look like it carries borrower references at all?
 PLAN_REF_SHAPE = re.compile(r"\b[A-Z]{2,}[-\u2013][A-Z0-9]{1,12}[-\u2013][0-9]{3,}")
 LENDER_RE = re.compile(r"\s*" + plan_table.LOAN_INLINE.pattern + r"\s*$")
-# Column headings the rendition repeats down every page. A heading taken as a
-# continuation line is how "Activity Reference No." ends up inside a package
-# description - found by reading the first full run, where 213 of 4,077 rows
-# (5.22%) carried one.
+# Column headings the rendition repeats down every page.
 HEADER_LINE_RE = re.compile(
     r"^\s*(Activity Reference No\.|Project information|"
     r"Project Implementation agency|Loan / Credit No|Description\b.*Component|"
     r"General Information|Country:|Project ID|Project Name|Executing Agency|"
     r"Date of the Procurement Plan|Period covered|Revised Plan Date|"
     r"PROCUREMENT|PLAN\s*$|"
-    # The 'Planned  Actual' band under the milestone headings, reprinted on
-    # a page turn: read as a cell it was taken for the status 'Planned'.
+    # The 'Planned  Actual' band under the milestone headings, reprinted on a page turn:
+    # read as a cell it was taken for the status 'Planned'.
     r"(?:Planned|Actual)(?:\s+(?:Planned|Actual))*\s*$)")
-# The closed value sets STEP prints in the Method, Market Approach and Process
-# Status cells. The method and status words are the keys of the maps that
-# clean_procurement turns into the Bank's codes and STEP's labels, so the word
-# the parser can find and the word the cleaner can map are one list, in four
-# languages. Longest first, because _first_token returns the first that
-# matches: 'Pending Implementation' must be tried before 'Pending'.
-#
-# The vocabularies were mined from the plans themselves, not translated at a
-# desk: the Process Status cell is whatever sits between the Actual Amount and
-# the first milestone date, so a regex over that gap enumerates the set. Adding
-# a borrower in a new language means re-running that mining step.
+# The closed value sets STEP prints in the Method, Market Approach and Process Status cells.
 METHOD_TOKENS = tuple(sorted(METHOD_TEXT, key=lambda k: (-len(k), k)))
 STATUS_TOKENS = tuple(sorted(STATUS_MAP, key=lambda k: (-len(k), k)))
 APPROACH_TOKENS = ("Open - International", "Open - National", "Limited - International",
                    "Limited - National", "Direct - International", "Direct - National",
                    "Open - international", "Open - national", "Open / National",
                    "Limited", "Direct", "Open")
-PACKAGE_COLS = [
+RAW_PACKAGE_COLS = [
     "package_version_id", "project_id", "plan_version", "plan_doc_id",
     "plan_disclosure_date", "borrower_ref", "description", "category_raw",
     "method_raw", "market_approach", "status_raw", "planned_date", "revised_date",
     "estimated_amount", "actual_amount", "currency", "content_sha256", "fetched_at",
     "section", "record_index", "cells_raw",
 ]
-NOTICE_COLS = [
+RAW_NOTICE_COLS = [
     "notice_id", "project_id", "notice_type", "notice_status", "publication_date",
     "deadline_date", "borrower_ref", "description", "category_raw", "method_code",
     "method_raw", "country_name", "notice_lang",
 ]
-AWARD_COLS = [
+RAW_AWARD_COLS = [
     "contract_id", "project_id", "borrower_ref", "description", "signed_date",
     "no_objection_date", "total_amount", "currency", "category_raw", "method_raw",
     "review_type", "supplier_name", "supplier_country", "supplier_amount", "region",
@@ -133,30 +137,15 @@ FETCH_LOG_COLS = ["fetch_id", "source", "endpoint", "query_params", "fetched_at"
 
 # ------------------------------------------------------------------ utilities
 
-def now_stamp():
-    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-
-
-def sha256_bytes(blob):
-    return hashlib.sha256(blob).hexdigest()
-
-
-from common import write_csv  # noqa: E402
-
-
 class FetchLog:
     """Append every interface call, keyed so a re-run updates rather than repeats."""
 
     def __init__(self, path):
         self.path = path
-        self.rows = {}
-        if os.path.exists(path):
-            with open(path, newline="", encoding="utf-8") as fh:
-                for r in csv.DictReader(fh):
-                    self.rows[r["fetch_id"]] = r
+        self.rows = {r["fetch_id"]: r for r in read_csv(path)}
 
     def record(self, source, endpoint, params, record_count, response_sha256):
-        fid = sha256_bytes("|".join([source, endpoint, params]).encode())[:16]
+        fid = sha_text("|".join([source, endpoint, params]).encode())[:16]
         self.rows[fid] = {
             "fetch_id": fid, "source": source, "endpoint": endpoint,
             "query_params": params, "fetched_at": now_stamp(),
@@ -170,21 +159,17 @@ class FetchLog:
 # --------------------------------------------------------------- plan listing
 
 def list_plans(project_id, log, delay):
-    q = urllib.parse.urlencode({
-        "format": "json", "rows": "200", "projectid": project_id, "docty": PLAN_DOCTY,
-        "fl": "id,docty,display_title,disclosure_date,txturl,pdfurl,lang,projectid"})
-    url = f"{WDS}?{q}"
-    r = get(url, timeout=60)
-    data = r.json()
+    recs, _ = fetch_pages(WDS, {"projectid": project_id, "docty": PLAN_DOCTY,
+                                "fl": "id,docty,display_title,disclosure_date,txturl,pdfurl,lang,projectid"},
+                          _documents, what=f"plan listing {project_id}", expected=PLAN_LIST_KEYS,
+                          page=PLAN_PAGE, delay=delay, timeout=60, log=log, source="documents")
     docs = []
-    for key, val in (data.get("documents") or {}).items():
-        if key == "facets":
-            continue
+    for val in recs:
         did = str(val.get("id") or "").strip()
         if not did:
             continue
-        # The documents interface returns the identifier with a D prefix on some
-        # routes and without it on others. One form, so a re-run matches.
+        # The documents interface returns the identifier with a D prefix on some routes and
+        # without it on others.
         did = did[1:] if did.startswith("D") and did[1:].isdigit() else did
         docs.append({
             "doc_id": did,
@@ -193,7 +178,6 @@ def list_plans(project_id, log, delay):
             "lang": val.get("lang") or "",
             "txturl": val.get("txturl") or "",
         })
-    log.record("documents", WDS, q, len(docs), sha256_bytes(r.content))
     time.sleep(delay)
     return docs
 
@@ -201,133 +185,37 @@ def list_plans(project_id, log, delay):
 # ---------------------------------------------------------------- plan parsing
 
 def _join_wrapped(parts):
-    """Stitch a column's line fragments back into one string.
-
-    The rendition clips each cell at the column edge, so a fragment usually ends
-    mid-word - 'S' + 'upply', 'commi' + 'ssion', 'equipm' + 'ent' - and the two
-    halves must be glued with nothing between them. Occasionally the clip lands
-    exactly ON a space instead, which is then stripped as trailing whitespace,
-    and gluing runs two words together: 'Data' + 'Center' becomes 'DataCenter'.
-
-    From the text alone the two cases are indistinguishable. The fragments in
-    one real cell end at 26, 29, 27, 26, 27 and 29 characters, so "did this line
-    fill the column?" does not separate them either, and neither does anything
-    else in the rendition. So this does NOT guess: it always glues, and returns
-    the number of seams so the loss has a number attached.
-
-    An earlier version consulted /usr/share/dict/words to decide. It was removed
-    for two reasons. Its space-inserting branch was unreachable - the elif above
-    it fired whenever the first condition was false - so it always glued anyway
-    and the list only inflated a counter. And a dictionary cannot settle this in
-    principle: 'Equipment,Servers' in the corpus was typed without a space by
-    the borrower, so there is no correct answer to look up.
-
-    The loss is handled where it belongs, in the matching copy. Gluing only ever
-    DELETES a space, never alters a character, so comparing on a
-    whitespace-stripped copy makes it invisible: 'DataCenter' and 'data center'
-    both reduce to 'datacenter'. See description_match in clean_procurement.py.
-    """
+    """Stitch a column's line fragments back into one string."""
     out, seams = "", 0
     for p in parts:
         p = p.strip()
         if not p:
             continue
         if out and out[-1].isalnum() and p[0].isalnum():
-            # Two alphanumerics run together with nothing between them, which is
-            # the only seam where a space could have been lost. Counted, not
-            # repaired: see the docstring.
+            # Two alphanumerics run together with nothing between them, which is the only
+            # seam where a space could have been lost.
             seams += 1
         out += p
     return out, seams
 
 
-# Some renditions clip the column edge INSIDE the reference itself, so the last
-# segment of the reference sits at the start of the next line and NO line carries
-# 'reference /'. REF_RE then matches nothing in the whole document, every line is
-# treated as preamble, and the document parses to zero package rows while looking
-# perfectly healthy in the report - 218 of the 2,463 cached renditions did that.
-# Both halves are reference-shaped, so this is a shape test, not a guess at
-# wording. Three shapes are in the corpus:
-#
-#   ' BB-RADIO-222222-CW-'          the reference alone on its line
-#   'RFB / Elaboración del'
-#
-#   'SO-AAA-BBB-358521-CS-IN       Component 4. Project Manag  ...'
-#   'DV / PIU Project Coordinator    Component 4. Project Manag  ...'
-#   the reference line also carries that row's other columns
-#
-#   'XX-AGENCY-220449-CS-QCB'           the clip fell inside the token, so the
-#   'S / Upgrades to the establish'    join needs no separator at all
-#
-# The digit requirement keeps this from firing on a heading: an all-caps section
-# line like 'NON-CONSULTING SERVICES' is the same shape, and every borrower
-# reference in this corpus carries a number. The second guard is stronger: the
-# merged line has to be a record boundary REF_RE accepts, so a merge that would
-# produce something that is not a reference at all is not made.
+# Some renditions clip the column edge INSIDE the reference itself, so the last segment of
+# the reference sits at the start of the next line and NO line carries 'reference /'.
 REF_WRAP_HEAD = re.compile(
     rf"^\s*({REF_TOKEN}(?:[-\u2013\u2014]\(?[0-9.]*)?)(\s{{2,}}.*)?$")
 REF_WRAP_TAIL = re.compile(r"^\s*([A-Z0-9(][A-Z0-9().\u2013\u2014-]{0,20})\s*/\s*(.*)$")
 
-# A second, different separation, and the one that costs the most. Here the
-# reference is COMPLETE on its own line and the '/ description' that belongs
-# with it arrives one to four lines later, with other columns' text in between:
-#
-#   ' NE-PCU-SV-229733-GO-RFQ'
-#   '                    4. Strengthening project ma'      <- a different column
-#   "/ Fourniture et installation d'        Single Stage - One E"
-#
-# In a wide-layout rendition the columns wrap independently and the extractor
-# emits them interleaved by vertical position, so the reference's own line ends
-# before the slash is reached. REF_RE wants both on one line and matches
-# neither, and the record is lost.
-#
-# Measured on the biggest plan of each country in the first, eight-country sample: Mozambique parses 3
-# references normally against 47 orphaned this way, Niger 128 against 61,
-# Uganda 153 against 21. Tanzania, Nigeria and Kenya have none - their
-# renditions keep the slash on the reference's line.
-# Alone in its COLUMN, not necessarily alone on its line: a fixed-width
-# rendition prints the row's other columns beside it, and requiring the whole
-# line to hold nothing else misses the shape wherever the layout kept its
-# columns: 474 of the first sample's 496 renditions.
+# A reference complete on its own line whose '/ description' arrives one to four lines
+# later, other columns' text in between (wide layouts interleave columns).
 REF_ALONE = re.compile(
     rf"^\s*([A-Z][A-Z0-9]{{1,}}(?:{_SEP}{_FIELD}){{2,7}})(\s{{2,}}\S.*)?\s*$")
 SLASH_TAIL = re.compile(r"^\s*(/\s*\S.*)$")
-# The observed gap is one or two lines. Four allows some slack without letting
-# the scan wander into the next record.
-MAX_ORPHAN_GAP = 4
-# How long a wrapped reference's tail may be when it is NOT on the adjacent
-# line. A clipped fragment is 'V', 'DV', 'RFB' - never a phrase.
-MAX_GAPPED_TAIL = 6
+MAX_ORPHAN_GAP = 4      # lines a wrapped reference's tail may sit below its head
+MAX_GAPPED_TAIL = 6     # characters of a tail not on the adjacent line ('V', 'DV', 'RFB')
 
 
 def _join_wrapped_refs(lines):
-    """Put a reference that wrapped across two physical lines back on one.
-
-    Returns a new line list; nothing else about the rendition is touched. The
-    second half of the reference is glued to the first, the description that
-    followed it stays where it was, and the rest of the line - the row's other
-    columns, which carry the method, the status and the dates - is kept.
-
-        [' BB-RADIO-222222-CW-',      ->  ['BB-RADIO-222222-CW-RFB / Estudio de las']
-         'RFB / Elaboración del']
-
-        ['SO-AAA-BBB-358521-CS-IN   Component 4. ...',  ->  ['...CS-INDV / PIU Project
-         'DV / PIU Project Coordinator   Component 4. ...']       Coordinator   Component 4. ...']
-
-    The tail is not always on the next line. In a wide layout the row's other
-    cells print between the two halves, and the Loan/Amount line lands in the
-    gap:
-
-        ' GH-AAAAA-481188-CS-IND     Component 4. Project Manag   Individual Consult'
-        '                             IDA / 11111   Prior   Open - National   48,000.00'
-        ' V / A consultant role   ement and Implementation    ant Selection'
-
-    That is one record - 'GH-AAAAA-481188-CS-INDV / A consultant role' -
-    and looking only at the adjacent line never joins it. 218 rows of the
-    70-project corpus were lost that way, in Ghana's P176126 and Burundi's
-    P176396, once the loan guard stopped the parser fabricating an identity out
-    of the loan number instead.
-    """
+    """Put a reference that wrapped across two physical lines back on one."""
     out, i = [], 0
     while i < len(lines):
         head = REF_WRAP_HEAD.match(lines[i])
@@ -337,10 +225,8 @@ def _join_wrapped_refs(lines):
                 j = i + d
                 if j >= len(lines):
                     break
-                # A head that ends on a dash or an open bracket was clipped
-                # mid-reference, so a next line like 'GO-RFB / Procurement of'
-                # is its tail, not a new record - though it has a record's
-                # shape. A tail carries no activity number; a new record does.
+                # A head ending on a dash or bracket was clipped: a record-shaped next line
+                # ('GO-RFB / Procurement of') is its tail.
                 clipped = re.search(r"[-\u2013\u2014(.]$", head.group(1))
                 early = REF_WRAP_TAIL.match(lines[j]) if clipped and d == 1 else None
                 if early and not re.search(r"\d{3,}", early.group(1)):
@@ -354,49 +240,25 @@ def _join_wrapped_refs(lines):
                 if REF_RE.match(lines[j]) or REF_ALONE.match(lines[j]):
                     break               # the next record started; do not cross it
                 if SLASH_TAIL.match(lines[j]):
-                    # A line that OPENS with the slash is this record's
-                    # description arriving on its own, which is the orphan shape
-                    # below - and it means the reference on the head line was
-                    # complete, not clipped. Stopping here is what keeps the
-                    # scan from reaching past it and gluing a later fragment on:
-                    # 'MZ-AAA-423912-GO-RFQ' whose description reads
-                    # '/ o Urgent consumables for' then 'DNRN / DNIC / PIU' two
-                    # lines on became 'MZ-AAA-423912-GO-RFQDNRN', a
-                    # legitimate package turned into a fabricated one. The
-                    # orphan branch handles this record correctly; the wrap
-                    # branch only has to get out of its way.
+                    # A line opening with the slash is the orphan shape below: the head
+                    # was complete, not clipped.
                     break
-                # A Loan / Credit cell has the same shape as the tail of a
-                # wrapped reference - 'IDA / X1111' reads as the token 'IDA'
-                # followed by a slash and a description - and gluing one on
-                # destroys the package: 'MZ-AAA-423921-GO-RFQ' plus
-                # 'IDA / X1111' becomes 'MZ-AAA-111-GO-RFQIDA / X1111',
-                # which REF_RE happily accepts and which matches no package that
-                # exists. Skipped rather than stopped at, because in the wide
-                # layouts the loan cell is exactly what sits BETWEEN a clipped
-                # reference and its tail.
+                # A Loan / Credit cell ('IDA / X1111') has a tail's shape; gluing it on
+                # would fabricate a reference. It sits between head and tail, so skip it.
                 if plan_table.LOAN_RE.match(lines[j]):
                     continue
                 tail = REF_WRAP_TAIL.match(lines[j])
                 if not tail:
                     continue
-                # Beyond the adjacent line, the tail has to look like a tail: a
-                # clipped fragment is a character or three, never a phrase. The
-                # scan reaches four lines now, and without this a long token
-                # belonging to some other cell could be glued on to produce a
-                # reference that REF_RE accepts and no package matches - which
-                # is the same failure the loan guard above exists to prevent.
+                # Beyond the adjacent line a tail is a clipped fragment, never a phrase.
                 if d > 1 and len(tail.group(1)) > MAX_GAPPED_TAIL:
                     continue
-                # The head is re-glued with the tail's token, and everything
-                # else - the description the tail carried and the columns the
-                # head carried - is appended after it.
+                # Head + tail token, then the tail's description and the head's columns.
                 candidate = f"{head.group(1)}{tail.group(1)} / {tail.group(2)}"
                 candidate += head.group(2) or ""
                 if REF_RE.match(candidate):
                     out.append(candidate)
-                    # The lines in between hold this same record's other cells -
-                    # the loan, the amounts - and are kept where they were.
+                    # The lines in between are this record's other cells; kept in place.
                     out.extend(lines[i + 1:j])
                     i = j + 1
                     joined = True
@@ -404,10 +266,7 @@ def _join_wrapped_refs(lines):
             if joined:
                 continue
 
-        # The orphaned-reference shape: a complete reference alone on its line,
-        # with its slash arriving a line or two later. The scan stops at the
-        # next reference so it cannot reach across a record boundary, and the
-        # joined line still has to be something REF_RE accepts.
+        # The orphan shape: a complete reference alone, its slash a line or two later.
         alone = REF_ALONE.match(lines[i])
         if alone and re.search(r"\d", alone.group(1)):
             joined = False
@@ -422,14 +281,9 @@ def _join_wrapped_refs(lines):
                     continue
                 candidate = f"{alone.group(1)} {tail.group(1)}"
                 if REF_RE.match(candidate):
-                    # Whatever else printed on the reference's own line belongs
-                    # to this row's other columns - the component, the review
-                    # type - and is carried onto the joined line rather than
-                    # dropped with it.
+                    # The reference line's other columns are carried onto the joined line,
+                    # the lines between kept in place; only the slash line is consumed.
                     out.append(candidate + (alone.group(2) or ""))
-                    # The lines between the two belong to other columns of this
-                    # same record and are kept where they were; only the slash
-                    # line is consumed, because it is now part of the join.
                     out.extend(lines[i + 1:j])
                     i = j + 1
                     joined = True
@@ -443,18 +297,7 @@ def _join_wrapped_refs(lines):
 
 
 def segment_for_project(text, project_id):
-    """Cut a bundled rendition down to this project's own plan.
-
-    Some plan documents are published with a text rendition that concatenates
-    the plans of many operations - one rendition returned for a single project
-    carries preambles for 59. Parsing it whole would attribute other projects'
-    packages to this one, which is worse than not parsing it, because the rows
-    look valid. A rendition with more than one preamble is therefore split at
-    the preambles and only the segment naming this project is used.
-
-    Returns (text, kind): kind is "single" for an ordinary rendition, "cut" when
-    this project's segment was found in a bundle, "not_found" when it was not.
-    """
+    """Cut a bundled rendition down to this project's own plan."""
     lines = text.split("\n")
     preambles = [i for i, ln in enumerate(lines) if ln.startswith("Project information")]
     if len(preambles) < 2:
@@ -468,22 +311,7 @@ def segment_for_project(text, project_id):
 
 
 def _parse_collapsed(tables, doc_meta):
-    """Rows out of a rendition that prints the table with no column positions.
-
-    These were 22 of the first sample's 496 renditions and they used to yield nothing
-    at all - the parser for the fixed-width layout splits a line at the first
-    run of two spaces, and in a collapsed rendition there are none, so every
-    line became the description and no metadata column was ever found. They
-    matter far out of proportion to their number: the newest rendition of six
-    of the eight projects is one, and the newest rendition is what the
-    current-state table reads.
-
-    A document whose columns came apart gives up its figures wholesale rather
-    than risk attaching one package's amount to another's reference. It keeps
-    its references and descriptions, which are still the borrower's and still
-    correct; its packages carry no figures (nothing is carried forward from
-    an earlier rendition).
-    """
+    """Rows out of a rendition that prints the table with no column positions."""
     rows, all_rows, refused = [], [], False
     per_table = []
     for table in tables:
@@ -547,33 +375,7 @@ def collapse_ws(text):
 
 
 def parse_plan_text(text, doc_meta):
-    """Pull the STEP plan tables out of a plan's text rendition.
-
-    Only the tables. A plan document is two things bolted together and one of
-    them is not data: the front is narrative the borrower writes, sometimes with
-    annex tables of its own, and the back is generated by STEP. plan_table finds
-    the five STEP sections exactly - every rendition of the first, eight-country
-    sample carries all five, with the "Activity Reference No." heading as the test
-    that tells a heading from the same word in a sentence - and records are
-    built from inside those bounds and nowhere else.
-
-    This used to scan the whole document, and got away with it: no record has
-    ever been built from outside a table, because REF_RE needs a borrower
-    reference at the start of a line and the narrative has none. That is a
-    property of eight countries' prose, not a property the code enforced, and
-    70 projects is a larger sample of borrower annexes. Now it is enforced, and
-    what falls outside is counted as free text rather than silently skipped.
-
-    Each of the five tables is read with its own heading band, because they do
-    not carry the same columns. The section comes from the table rather than
-    from a heading matched anywhere in the document, which alone corrected the
-    category of 4,003 records in 34 renditions where a bare "CONSULTING FIRMS"
-    in a preamble was re-labelling every record after it.
-
-    Within a table, the metadata columns are still located by matching their
-    closed value sets across the record block rather than by character
-    position - see the note in plan_table on why slicing was not adopted.
-    """
+    """Pull the STEP plan tables out of a plan's text rendition."""
     lines = _join_wrapped_refs(text.replace("\r\n", "\n").split("\n"))
     tables = plan_table.find_tables(lines)
     if not tables:
@@ -586,10 +388,7 @@ def parse_plan_text(text, doc_meta):
     for table in tables:
         start, end = plan_table.table_span(table)
         covered.update(range(start, end))
-        # Asked of THIS table's heading band. About a fifth of renditions print no
-        # Estimated Amount column at all, and on those the figure on the row is
-        # the actual - filing it as an estimate would invent a number the plan
-        # never stated.
+        # Asked of THIS table's heading band.
         has_estimated = plan_table.has_column(table, plan_table.ESTIMATED_LABEL)
         columns = "|".join(plan_table.present_columns(table))
         for rec in _records_in_table(table):
@@ -603,14 +402,7 @@ def parse_plan_text(text, doc_meta):
 
 
 def _records_in_table(table):
-    """Split one table's rows into records.
-
-    A record opens on the line whose first column holds a borrower reference and
-    runs to the next one, because that reference is the first thing STEP prints
-    in the first column of every row of every section. Column zero - the
-    reference and the description - is taken exactly; everything to the right of
-    the first gap is the record's body, where the metadata cells are matched.
-    """
+    """Split one table's rows into records."""
     records, cur = [], None
     for ln in table.data:
         m = REF_RE.match(ln)
@@ -643,10 +435,8 @@ def _plan_row(rec, section, has_estimated, doc_meta, index):
     ref, desc = plan_table.split_ref_chain(desc, rec["ref"])
     body = " ".join(rec["body"])
     numbers = DATE_RE.findall(body)
-    # The figures in print order: Estimated then Actual where the table has an
-    # Estimated column; only the Actual where it does not (older plans).
-    # Figures never hold a space, so any whitespace separates them: two
-    # figures printed one space apart are two figures.
+    # The figures in print order: Estimated then Actual where the table has an Estimated
+    # column; only the Actual where it does not (older plans).
     figures = []
     for tok in re.split(r"\s+", body):
         if AMOUNT_RE.match(tok.strip()):
@@ -698,21 +488,7 @@ def _clip_tail(cell):
 
 
 def _match_form(value):
-    """Fold a cell to the form the closed value sets are written in.
-
-    Three foldings, each answering a way the rendition disguises a known value:
-    accents, because the token lists are ASCII and the plans are not; the
-    curly apostrophe, because STEP prints both; and case.
-
-    Returns (folded, despaced). The despaced form exists because a cell that is
-    too wide for its column wraps mid-word, and the two halves reach this
-    function with a gap between them - 'Under Implementati' and 'on' is 9,036
-    rows of the corpus. Removing every space from both the text and the token
-    turns that back into a match, and it is safe for the same reason the
-    procurement match_key is safe: wrapping only ever inserts a gap, never a
-    character, so despacing both sides cannot make two different values equal
-    unless they differed by spacing alone.
-    """
+    """Fold a cell to the form the closed value sets are written in."""
     folded = unicodedata.normalize("NFKD", value or "")
     folded = "".join(c for c in folded if not unicodedata.combining(c))
     folded = folded.replace("\u2019", "'").replace("\u02bc", "'").casefold()
@@ -731,10 +507,7 @@ def _status_token(body):
         return "Pending Implementation"
     if found:
         return found
-    # Each status by the longest head of it the row prints (ten characters
-    # at least). The longest wins, so 'en cours d'execut' is d'exécution and
-    # not d'examen, and a status's full head beats a short one found inside
-    # another cell ('implementa' in a component named '... implementation').
+    # Each status by the longest head of it the row prints (ten characters at least).
     best, length = set(), 0
     for tok in STATUS_TOKENS:
         _, dt = _match_form(tok)
@@ -762,15 +535,7 @@ def _fold_same_length(text):
 
 
 def _first_token(text, tokens):
-    """The words of the first of `tokens` found in `text`, as printed, or ''.
-
-    Two passes, and never one: an exact match on the folded text is tried for
-    every token before any despaced match is considered. Doing it token by token
-    instead would let a despaced match on a short token beat an exact match on a
-    longer one further down the list. An exact match returns the cell's own
-    words ('Achevé'); a despaced one, where the cell is broken up, returns the
-    vocabulary word it matched.
-    """
+    """The words of the first of `tokens` found in `text`, as printed, or ''."""
     ftext = _fold_same_length(text)
     _, dtext = _match_form(text)
     for t in tokens:
@@ -787,19 +552,9 @@ def _first_token(text, tokens):
 
 # ---------------------------------------------------------------- main stages
 
-def collect_plans(projects, data, log, refresh, delay, workers=6):
-    """List every project's plans, download the renditions, then parse them.
-
-    Listing is serial because it is one request per project and the interface is
-    shared; downloads run in a thread pool because they are the expensive part -
-    a 150 KB rendition from documents.worldbank.org takes several seconds, and
-    this cohort publishes about thirty plan revisions per project, which is over
-    two thousand files. The pool is modest on purpose: the box has four cores and
-    the constraint here is the far side's latency, not ours.
-
-    Parsing stays serial and in a deterministic order, so a re-run produces the
-    same rows whatever order the downloads completed in.
-    """
+def collect_plans(projects, data, log, refresh, delay, workers=6, previous=None):
+    """List every project's plans, download the renditions, then parse them."""
+    previous = previous or {}
     raw_dir = where(data, "plans")
     os.makedirs(raw_dir, exist_ok=True)
     listing_failures, no_plan, tasks = [], [], []
@@ -823,7 +578,7 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
 
     rows, fetch_failures, free_text_chars, bundle_docs = [], [], [], []
     empty_docs = []
-    blobs = {}
+    blobs, stamps = {}, {}
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {
             pool.submit(_fetch_plan_file, os.path.join(raw_dir, f"{d['doc_id']}.txt"),
@@ -835,8 +590,9 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
             pid, d = futures[fut]
             done += 1
             try:
-                blob, _fetched = fut.result()
+                blob, stamp = fut.result()
                 blobs[(pid, d["doc_id"])] = blob
+                stamps[d["doc_id"]] = stamp
             except Exception as exc:                   # noqa: BLE001
                 fetch_failures.append((pid, d["doc_id"], str(exc)))
             if done % 200 == 0:
@@ -846,35 +602,33 @@ def collect_plans(projects, data, log, refresh, delay, workers=6):
         blob = blobs.get((pid, d["doc_id"]))
         if blob is None:
             continue
-        path = os.path.join(raw_dir, f"{d['doc_id']}.txt")
         text = blob.decode("utf-8", errors="replace")
         text, kind = segment_for_project(text, pid)
         if kind != "single":
             bundle_docs.append((d["doc_id"], kind))
         if kind == "not_found":
-            # A bundle that does not name this project: kept on disk, counted,
-            # and not parsed, so no other operation's packages land here.
+            # A bundle that does not name this project: kept on disk, counted, and not
+            # parsed, so no other operation's packages land here.
             continue
+        sha = sha_text(blob)
+        old_sha, old_at = previous.get(d["doc_id"], ("", ""))
         meta = {
             "project_id": pid, "doc_id": d["doc_id"],
             "disclosure_date": d["disclosure_date"],
-            "content_sha256": sha256_bytes(blob),
-            "fetched_at": time.strftime("%Y-%m-%dT%H:%M:%SZ",
-                                        time.gmtime(os.path.getmtime(path))),
+            "content_sha256": sha,
+            "fetched_at": (old_at if old_sha == sha and old_at else
+                           stamps.get(d["doc_id"]) or now_stamp()),
         }
         parsed, free = parse_plan_text(text, meta)
         free_text_chars.append(sum(len(x) for x in free))
         if not parsed:
-            # A rendition that parsed to nothing is either a plan whose package
-            # table is genuinely empty (common: 648 of them carry no
-            # reference-shaped token anywhere) or a parse failure. The two must
-            # not be the same number in the report, or a silent partial reads as
-            # an empty plan.
+            # Parsed to nothing: an empty package table (no reference-shaped token
+            # anywhere) or a parse failure; the report counts them apart.
             empty_docs.append((d["doc_id"], pid,
                                bool(PLAN_REF_SHAPE.search(text))))
         for r in parsed:
-            # Position in the plan, not the reference: a plan can list two
-            # packages under one generic reference ('CS-INDV').
+            # Position in the plan, not the reference: a plan can list two packages under
+            # one generic reference ('CS-INDV').
             r["package_version_id"] = f"{d['doc_id']}:{r['record_index']:05d}"
             rows.append(r)
 
@@ -890,166 +644,176 @@ def store_keeping_old(path, blob):
     beside it, named by its own checksum, never overwritten."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     if os.path.exists(path):
-        old = open(path, "rb").read()
+        with open(path, "rb") as fh:
+            old = fh.read()
         if old == blob:
             return
         stem, ext = os.path.splitext(path)
-        keep = f"{stem}.{sha256_bytes(old)[:12]}{ext}.old"
+        keep = f"{stem}.{sha_text(old)[:12]}{ext}.old"
         if not os.path.exists(keep):
             os.replace(path, keep)
-    tmp = f"{path}.{os.getpid()}.{threading.get_ident()}.part"
-    with open(tmp, "wb") as fh:
-        fh.write(blob)
-    os.replace(tmp, path)
+    write_atomic(path, blob)
+
+
+def refuse_page(blob, what):
+    """Raise when a body is empty or an HTML page: a throttled or failing
+    interface answers 200 with one, and it must not be stored as data."""
+    head = blob[:512].lstrip().lower()
+    if not head:
+        raise RuntimeError(f"{what}: empty body, not stored")
+    if head.startswith((b"<!doctype html", b"<html")) or b"<html" in head:
+        raise RuntimeError(f"{what}: an HTML page, not stored")
+
+
+def json_body(r, what):
+    """The parsed JSON of a response, refusing an empty body or HTML page."""
+    refuse_page(r.content, what)
+    try:
+        return r.json()
+    except ValueError:
+        raise RuntimeError(f"{what}: response is not JSON") from None
+
+
+def check_keys(records, expected, what):
+    """Stop the run when the interface renamed a field: an expected key absent
+    from every record of a non-empty page would otherwise be read as blank."""
+    if not records:
+        return
+    for k in expected:
+        if not any(isinstance(r, dict) and k in r for r in records):
+            raise SystemExit(f"{what}: no record carries '{k}'; the interface's "
+                             f"response changed, update the reader")
 
 
 def _fetch_plan_file(path, url, refresh, delay):
+    """(bytes, fetched_at) of a plan rendition; fetched_at is blank when the
+    file was already on disk."""
     if os.path.exists(path) and not refresh:
-        return open(path, "rb").read(), False
-    r = get(url, timeout=120)
-    blob = r.content
+        with open(path, "rb") as fh:
+            return fh.read(), ""
+    stamp = now_stamp()
+    blob = get(url, timeout=120).content
+    refuse_page(blob, f"plan rendition {os.path.basename(path)}")
     store_keeping_old(path, blob)
     time.sleep(delay)
-    return blob, True
+    return blob, stamp
 
 
-# Fields naming or reaching a person: the procurement contact on a notice and
-# the Bank staff member on an award. Nothing reads them, and they are not
-# kept: a response is stored without them.
+# Fields naming or reaching a person: the procurement contact on a notice and the Bank staff
+# member on an award.
 PERSONAL = {"contact_name", "contact_email", "contact_phone_no", "contact_address",
             "teammemfullname"}
+
+
+# Keys every page of the interface's records carries; absent from a whole page, the
+# interface changed (check_keys).
+NOTICE_KEYS = ("id", "notice_type", "noticedate")
+AWARD_KEYS = ("contr_id", "contr_desc", "contr_sgn_date")
+PLAN_LIST_KEYS = ("id", "display_title")
 
 
 def _without_personal(record):
     return {k: v for k, v in record.items() if k not in PERSONAL}
 
 
-def collect_notices(projects, data, log, refresh, delay):
-    raw_dir = where(data, "notices_json")
+def _stored_records(path, refresh, delay, fetch):
+    """One project's records: the stored response, or `fetch()`ed, stripped of
+    personal fields and stored (an earlier, different copy is kept)."""
+    if os.path.exists(path) and not refresh:
+        with open(path, encoding="utf-8") as fh:
+            return json.load(fh)
+    records = [_without_personal(r) for r in fetch()[0]]
+    store_keeping_old(path, json.dumps(records, ensure_ascii=False, sort_keys=True,
+                                       indent=0).encode())
+    time.sleep(delay)
+    return records
+
+
+def _collect(projects, data, folder, refresh, delay, fetch, to_row):
+    """(rows, failures) over projects: each project's records, stored under
+    data/<folder>/<project_id>.json, made rows by to_row(record, pid)."""
+    raw_dir = where(data, folder)
     os.makedirs(raw_dir, exist_ok=True)
     rows, failures = [], []
     for proj in projects:
         pid = proj["project_id"]
-        path = os.path.join(raw_dir, f"{pid}.json")
-        records = None
         try:
-            if os.path.exists(path) and not refresh:
-                records = json.load(open(path, encoding="utf-8"))
-            else:
-                records, pages = [], []
-                offset = 0
-                while True:
-                    q = urllib.parse.urlencode({"format": "json", "rows": str(PAGE),
-                                                "os": str(offset), "project_id": pid})
-                    r = get(f"{NOTICES}?{q}", timeout=90)
-                    j = r.json()
-                    batch = j.get("procnotices") or []
-                    log.record("notices", NOTICES, q, len(batch), sha256_bytes(r.content))
-                    records.extend(batch)
-                    pages.append(len(batch))
-                    offset += PAGE
-                    if last_page(batch, records, j, offset):
-                        break
-                    time.sleep(delay)
-                records = [_without_personal(r) for r in records]
-                blob = json.dumps(records, ensure_ascii=False, sort_keys=True,
-                                  indent=0).encode()
-                store_keeping_old(path, blob)
-                time.sleep(delay)
+            records = _stored_records(os.path.join(raw_dir, f"{pid}.json"), refresh, delay,
+                                      lambda: fetch(pid))
         except Exception as exc:                       # noqa: BLE001
             failures.append((pid, str(exc)))
             continue
-        for rec in records:
-            rows.append({
-                "notice_id": str(rec.get("id") or ""),
-                "project_id": rec.get("project_id") or pid,
-                "notice_type": rec.get("notice_type") or "",
-                "notice_status": rec.get("notice_status") or "",
-                "publication_date": _iso_date(rec.get("noticedate")),
-                "deadline_date": _iso_date(rec.get("submission_deadline_date")),
-                # The borrower reference the notice was issued under: the key
-                # that ties a notice to its plan package and its award.
-                "borrower_ref": (rec.get("bid_reference_no") or "").strip(),
-                "description": _clean_space(rec.get("bid_description") or ""),
-                "category_raw": rec.get("procurement_group") or "",
-                "method_code": rec.get("procurement_method_code") or "",
-                "method_raw": rec.get("procurement_method_name") or "",
-                "country_name": rec.get("project_ctry_name") or "",
-                "notice_lang": rec.get("notice_lang_name") or "",
-            })
+        rows.extend(to_row(rec, pid) for rec in records)
     return rows, failures
+
+
+def collect_notices(projects, data, log, refresh, delay):
+    def fetch(pid):
+        return fetch_pages(NOTICES, {"project_id": pid}, lambda j: j.get("procnotices") or [],
+                           what=f"notices {pid}", expected=NOTICE_KEYS, delay=delay, log=log,
+                           source="notices")
+    return _collect(projects, data, "notices_json", refresh, delay, fetch, _notice_row)
+
+
+def _notice_row(rec, pid):
+    return {
+        "notice_id": str(rec.get("id") or ""),
+        "project_id": rec.get("project_id") or pid,
+        "notice_type": rec.get("notice_type") or "",
+        "notice_status": rec.get("notice_status") or "",
+        "publication_date": iso_date(rec.get("noticedate")),
+        "deadline_date": iso_date(rec.get("submission_deadline_date")),
+        # The borrower reference the notice was issued under: the key that ties a notice to
+        # its plan package and its award.
+        "borrower_ref": (rec.get("bid_reference_no") or "").strip(),
+        "description": _clean_space(rec.get("bid_description") or ""),
+        "category_raw": rec.get("procurement_group") or "",
+        "method_code": rec.get("procurement_method_code") or "",
+        "method_raw": rec.get("procurement_method_name") or "",
+        "country_name": rec.get("project_ctry_name") or "",
+        "notice_lang": rec.get("notice_lang_name") or "",
+    }
 
 
 def collect_awards(projects, data, log, refresh, delay):
-    raw_dir = where(data, "awards_json")
-    os.makedirs(raw_dir, exist_ok=True)
-    rows, failures = [], []
-    for proj in projects:
-        pid = proj["project_id"]
-        path = os.path.join(raw_dir, f"{pid}.json")
-        records = None
+    def fetch(pid):
+        return fetch_pages(AWARDS, {"projectid": pid}, lambda j: j.get("contract") or [],
+                           what=f"awards {pid}", expected=AWARD_KEYS, delay=delay, log=log,
+                           source="awards")
+    return _collect(projects, data, "awards_json", refresh, delay, fetch, _award_row)
+
+
+def _award_row(rec, pid):
+    supp = rec.get("suppinfo") or []
+    if isinstance(supp, dict):
+        supp = [supp]
+    supp = [s for s in supp if isinstance(s, dict)]
+    names = [s.get("name") for s in supp if s.get("name")]
+    countries = [c for c in (s.get("countryname") or s.get("countryshortname") for s in supp) if c]
+    amounts = []
+    for s in supp:
         try:
-            if os.path.exists(path) and not refresh:
-                records = json.load(open(path, encoding="utf-8"))
-            else:
-                records = []
-                offset = 0
-                while True:
-                    q = urllib.parse.urlencode({"format": "json", "rows": str(PAGE),
-                                                "os": str(offset), "projectid": pid})
-                    r = get(f"{AWARDS}?{q}", timeout=90)
-                    j = r.json()
-                    batch = j.get("contract") or []
-                    log.record("awards", AWARDS, q, len(batch), sha256_bytes(r.content))
-                    records.extend(batch)
-                    offset += PAGE
-                    if last_page(batch, records, j, offset):
-                        break
-                    time.sleep(delay)
-                records = [_without_personal(r) for r in records]
-                blob = json.dumps(records, ensure_ascii=False, sort_keys=True,
-                                  indent=0).encode()
-                store_keeping_old(path, blob)
-                time.sleep(delay)
-        except Exception as exc:                       # noqa: BLE001
-            failures.append((pid, str(exc)))
-            continue
-        for rec in records:
-            desc = _clean_space(rec.get("contr_desc") or "")
-            supp = rec.get("suppinfo") or []
-            if isinstance(supp, dict):
-                supp = [supp]
-            names = [s.get("name") for s in supp if isinstance(s, dict) and s.get("name")]
-            countries = [s.get("countryname") or s.get("countryshortname")
-                         for s in supp if isinstance(s, dict)]
-            countries = [c for c in countries if c]
-            amounts = []
-            for s in supp:
-                if not isinstance(s, dict):
-                    continue
-                try:
-                    amounts.append(float(s.get("supplier_contr_amount") or 0))
-                except (TypeError, ValueError):
-                    pass
-            rows.append({
-                "contract_id": str(rec.get("contr_id") or ""),
-                "project_id": rec.get("projectid") or pid,
-                "borrower_ref": (rec.get("contr_refnum") or "").strip(),
-                "description": desc,
-                "signed_date": _iso_date(rec.get("contr_sgn_date")),
-                "no_objection_date": _iso_date(rec.get("contr_no_obj_dat")),
-                "total_amount": _num(rec.get("total_contr_amnt")),
-                "currency": "USD",
-                "category_raw": rec.get("procurement_group") or "",
-                "method_raw": (rec.get("procu_meth_text") or "").strip(),
-                "review_type": (rec.get("rvw_type") or "").strip().lower(),
-                "supplier_name": "|".join(dict.fromkeys(n for n in names if n)),
-                "supplier_country": "|".join(dict.fromkeys(countries)),
-                "supplier_amount": "" if not amounts else f"{sum(amounts):.2f}",
-                "region": rec.get("regionname") or "",
-                "sector": _join_sector(rec.get("sector")),
-            })
-    return rows, failures
+            amounts.append(float(s.get("supplier_contr_amount") or 0))
+        except (TypeError, ValueError):
+            pass
+    return {
+        "contract_id": str(rec.get("contr_id") or ""),
+        "project_id": rec.get("projectid") or pid,
+        "borrower_ref": (rec.get("contr_refnum") or "").strip(),
+        "description": _clean_space(rec.get("contr_desc") or ""),
+        "signed_date": iso_date(rec.get("contr_sgn_date")),
+        "no_objection_date": iso_date(rec.get("contr_no_obj_dat")),
+        "total_amount": _num(rec.get("total_contr_amnt")),
+        "currency": "USD",
+        "category_raw": rec.get("procurement_group") or "",
+        "method_raw": (rec.get("procu_meth_text") or "").strip(),
+        "review_type": (rec.get("rvw_type") or "").strip().lower(),
+        "supplier_name": "|".join(dict.fromkeys(n for n in names if n)),
+        "supplier_country": "|".join(dict.fromkeys(countries)),
+        "supplier_amount": "" if not amounts else f"{sum(amounts):.2f}",
+        "region": rec.get("regionname") or "",
+        "sector": _join_sector(rec.get("sector")),
+    }
 
 
 def _clean_space(s):
@@ -1067,12 +831,6 @@ def _join_sector(v):
     if isinstance(v, list):
         return "|".join(str(x) for x in v)
     return str(v or "")
-
-
-def _iso_date(v):
-    """The interfaces mix ISO timestamps and '14-Sep-2026'; anything else
-    is stored blank (dates.iso_date), never as printed."""
-    return iso_date(v)
 
 
 # -------------------------------------------------------------------- the diff
@@ -1111,13 +869,16 @@ def main():
     plan_rows, listing_fail, no_plan, plan_fail, free_chars = [], [], [], [], []
     bundle_docs, empty_docs = [], []
     if not args.skip_plans:
+        previous = {}
+        for r in read_csv(os.path.join(proc_dir, "packages_raw.csv")):
+            previous.setdefault(r["plan_doc_id"], (r["content_sha256"], r["fetched_at"]))
         (plan_rows, listing_fail, no_plan, plan_fail, free_chars, bundle_docs,
          empty_docs) = collect_plans(projects, args.data, log, args.refresh,
-                                     args.delay, workers=args.workers)
+                                     args.delay, workers=args.workers, previous=previous)
 
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
-    prep, wrap_seams_total, planned_only = [], 0, 0
+    prep, wrap_seams_total = [], 0
     section_columns = Counter()
     no_estimated_column = 0
     for r in plan_rows:
@@ -1138,9 +899,7 @@ def main():
     awards, award_fail = collect_awards(projects, args.data, log, refresh_records,
                                         args.delay)
 
-    # A run over some projects replaces only the rows it fully re-read: a
-    # project outside the run, or one whose listing or any download failed,
-    # keeps what an earlier run wrote, so a partial or failed run never
+    # Only the rows of projects fully re-read are replaced: a partial or failed run never
     # shrinks a table.
     asked = {p["project_id"] for p in projects}
     plans_ok = set() if args.skip_plans else asked - (
@@ -1148,21 +907,20 @@ def main():
     notices_ok = asked - {p for p, _ in notice_fail}
     awards_ok = asked - {p for p, _ in award_fail}
     for name, cols, rows, order, ok in (
-            ("packages_raw.csv", PACKAGE_COLS, prep,
+            ("packages_raw.csv", RAW_PACKAGE_COLS, prep,
              ("project_id", "plan_version", "record_index"), plans_ok),
-            ("notices_raw.csv", NOTICE_COLS, notices, ("project_id", "notice_id"), notices_ok),
-            ("awards_raw.csv", AWARD_COLS, awards, ("project_id", "contract_id"), awards_ok)):
+            ("notices_raw.csv", RAW_NOTICE_COLS, notices, ("project_id", "notice_id"),
+             notices_ok),
+            ("awards_raw.csv", RAW_AWARD_COLS, awards, ("project_id", "contract_id"), awards_ok)):
         path = os.path.join(proc_dir, name)
-        rows = [r for r in rows if r["project_id"] in ok]
-        if os.path.exists(path):
-            with open(path, newline="", encoding="utf-8") as fh:
-                rows = rows + [r for r in csv.DictReader(fh) if r["project_id"] not in ok]
+        rows = [r for r in rows if r["project_id"] in ok] + \
+            [r for r in read_csv(path) if r["project_id"] not in ok]
         rows.sort(key=lambda r: tuple(str(r.get(k, "")).zfill(8) if k == "record_index"
                                       else str(r.get(k, "")) for k in order))
         write_csv(path, cols, rows)
     log.write()
-    # With --skip-plans the plan rows are kept as they were, which is not a
-    # failed fetch: the status covers only what this run asked for.
+    # With --skip-plans the plan rows are kept as they were, which is not a failed fetch:
+    # the status covers only what this run asked for.
     done = (asked if args.skip_plans else plans_ok) & notices_ok & awards_ok
     write_fetch_status(args.data, "procurement", sorted(done), sorted(asked - done))
 
@@ -1185,13 +943,7 @@ def main():
         fh.write(f"notices rows: {len(notices):,}\n")
         fh.write(f"awards rows: {len(awards):,}\n")
 
-        # Which columns each of the five STEP sections actually printed, and in
-        # how many rows. They do not carry the same set - the consulting
-        # sections have a Contract Type where goods and works have a
-        # Prequalification - and one difference changes a value rather than the
-        # layout: a table with no Estimated Amount column prints the ACTUAL as
-        # its only figure. This table is how that is checked from a run's
-        # output rather than by reading the parser.
+        # Which columns each STEP section printed, and in how many rows.
         fh.write("\ncolumns found per STEP section (rows read with that set)\n")
         for section in ("WORKS", "GOODS", "NON CONSULTING SERVICES",
                         "CONSULTING FIRMS", "INDIVIDUAL CONSULTANTS"):
@@ -1202,11 +954,7 @@ def main():
             for cols, n in sorted(variants, key=lambda v: -v[1])[:4]:
                 shown = cols.replace("|", ", ") or "(none read)"
                 fh.write(f"      {n:>7,}  {shown}\n")
-        # Counted from the parser's own decision, not inferred from the column
-        # list above: that list is what could be ORDERED out of the heading
-        # band, and a band truncated by an immediate first data row yields less
-        # than the band contains. The Estimated Amount heading has no
-        # confusable sibling, so its presence is asked directly.
+        # Counted from the parser's own decision, not the column list above.
         fh.write(f"  rows from a table printing NO Estimated Amount column: "
                  f"{no_estimated_column:,} "
                  f"({100 * no_estimated_column / max(1, len(prep)):.1f}%) - "
@@ -1228,8 +976,8 @@ def main():
                            - parsed_pids - set(no_plan))
         fh.write(f"projects whose parse yielded no package row ({len(zero_rows)}): "
                  f"{', '.join(zero_rows)}\n")
-        # The per-DOCUMENT view, which the project-level line above hides: a
-        # project with one readable plan and four unreadable ones looks fine.
+        # The per-DOCUMENT view, which the project-level line above hides: a project with
+        # one readable plan and four unreadable ones looks fine.
         failed = [(d, p) for d, p, looks in empty_docs if looks]
         fh.write(f"renditions that parsed to zero package rows ({len(empty_docs)}): "
                  f"{len(empty_docs) - len(failed)} carry no reference-shaped token "

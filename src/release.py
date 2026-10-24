@@ -127,8 +127,7 @@ def manifest(data):
                            for p in sorted(glob.glob(os.path.join(d, "*.csv")))},
               "libraries": _library()}
     code = code_state()
-    runs = {"search": _runs(data, "search"), "classify": _runs(data, "classify"),
-            "measures": _runs(data, "measures"), "links": _runs(data, "links")}
+    runs = {"search": _runs(data, "search")}
     # The data's identity: the same tables from the same inputs are the same
     # release whatever commit is checked out now, and whatever library
     # version is installed now (that is recorded, not identifying); the commit
@@ -168,8 +167,7 @@ def cut(data, log=print):
                     **{k: t.get(k, {}).get("rows", "") for k in
                        ("paragraphs", "packages", "notices", "awards")},
                     "sentences_embedded": t.get("sentence_index", {}).get("rows", ""),
-                    "search_runs": "|".join(m["runs"]["search"]),
-                    "classify_runs": "|".join(m["runs"]["classify"])})
+                    "search_runs": "|".join(m["runs"]["search"]), "classify_runs": ""})
     log(f"release {m['release_id']}: new ({m['created_at']}, commit "
         f"{m['code']['commit'][:12]}{', with uncommitted changes' if m['code']['dirty'] else ''})")
     return m["release_id"]
@@ -216,9 +214,7 @@ def status(data):
                                  f"out of date: {', '.join(stale)} - run ./wbg prepare"))
     for kind, f in m["fetched"].items():
         lines.append(f"fetched:  {kind:<12} {f['projects']} projects, latest {f['latest']}")
-    lines.append(f"runs:     search {', '.join(m['runs']['search']) or 'none'}; "
-                 f"classify {', '.join(m['runs']['classify']) or 'none'}; "
-                 f"measures {', '.join(m['runs'].get('measures', [])) or 'none'}")
+    lines.append(f"runs:     search {', '.join(m['runs']['search']) or 'none'}")
     return lines
 
 

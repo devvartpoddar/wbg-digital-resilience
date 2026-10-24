@@ -29,12 +29,3 @@ def test_a_yes_a_pattern_matches_does_not_hold_the_gate_down():
 def test_too_few_yes_or_none_exposed_leave_the_panel_gate():
     assert skip.fit([(0.5, False, 1.0)] * 5, S) is None
     assert skip.fit([(0.5, True, 1.0)] * 30, S) is None
-
-
-def test_a_gate_applies_only_to_its_question_and_search_run(tmp_path):
-    data = str(tmp_path)
-    skip.write(data, "cra", {"cra": {"gate": 0.41, "lost": 0.0, "positives": 30,
-                                     "question_sha256": "q1", "search_run": "cra-abc"}})
-    assert skip.read(data, "cra", {"cra": "q1"}, "/x/cra-abc") == {"cra": 0.41}
-    assert skip.read(data, "cra", {"cra": "q2"}, "/x/cra-abc") == {}
-    assert skip.read(data, "cra", {"cra": "q1"}, "/x/cra-new") == {}

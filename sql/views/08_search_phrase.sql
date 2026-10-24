@@ -6,7 +6,8 @@
 --
 --   SELECT * FROM wbg.search_phrase({{phrase}}, 50)
 --
--- {VECTOR} is replaced by the load with the sentence_vectors column type.
+-- {VECTOR} is replaced by the load with the sentence_vectors column type,
+-- {{embed_model}} with the pinned embedding model (src/embed.py).
 -- openrouter() is VOLATILE and called once per query, never per row.
 DROP FUNCTION IF EXISTS wbg.search(text, integer);
 DROP FUNCTION IF EXISTS wbg.search_phrase(text, integer);
@@ -16,7 +17,7 @@ RETURNS TABLE (unit_id text, unit_kind text, paragraph_id text, document_id text
 LANGUAGE sql VOLATILE AS $$
   WITH q AS (
     SELECT ((openrouter('embeddings', jsonb_build_object(
-                'model', 'openai/text-embedding-3-large',
+                'model', '{{embed_model}}',
                 'input', jsonb_build_array(phrase),
                 'provider', jsonb_build_object('order', jsonb_build_array('openai'),
                                                'allow_fallbacks', false)))

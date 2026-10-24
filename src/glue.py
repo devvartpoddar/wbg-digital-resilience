@@ -1,59 +1,38 @@
-"""Put back the spaces the procurement plan renditions lost.
+"""Put back the spaces the procurement plan renditions lost, and remove the ones
+they inserted.
 
-The text rendition of a STEP plan clips each table cell at the column edge, and
-the parser has to rejoin the fragments. Where the clip fell inside a word the
-halves belong together ('equipm' + 'ent'); where it fell on a space, the space
-is gone and two words run together ('Design and Build of' + 'Digital' ->
-'ofDigital'). The rendition does not say which, so the join cannot decide.
-
-This decides afterwards, from the words the corpus itself uses. A token is
-split in two only when all of these hold:
-
-  - the token is not itself a word the corpus uses on its own
-    ('database' stays 'database' however often 'data' and 'base' occur)
-  - both halves are words the corpus uses on their own
-  - each half is at least two letters, and a two-letter half must be a
-    function word ('of', 'de', 'la'), so 'ZoneI' is not cut into 'Zone I'
-  - outside a case boundary, the right half is not a common ending
-    ('Auditeur' is not 'Audit eur', 'parties' is not 'part ies')
-  - short all-capital tokens are acronyms and are left whole
-
-and where more than one cut qualifies, the one whose rarer half is most common
-wins. A lowercase-to-uppercase boundary ('andRadio') is tried first, because
-that is where the clip almost always lands. There the test is different: a
-mixed-case token the appraisal prose uses whole ('GovNet', 'WiFi') is a name
-and stays, and a clipped stub before a known word ('technologProcurement') is
-still separated from it, since a stub glued to the next field is worse than a
-stub on its own.
-
-The vocabulary is built from the descriptions themselves, plus the cleaned
-appraisal text when it is on disk: a word counts as known when it appears as a
-whole token at least MIN_SEEN times. Nothing is looked up in a dictionary
-that the corpus does not back, so French, Portuguese and Spanish descriptions
-are handled by the same rule as English ones.
-
-The opposite defect is repaired too (`rejoin`): a space put INSIDE a word,
-'S upply', 'Ca pacity', where a collapsed layout broke a cell mid-word.
-
-The original string is always kept beside the repaired one; this only ever
-inserts or removes a space, never changes a character.
+A cell clipped at the column edge runs two words together ('ofDigital'). A token
+is split only when it is not itself a corpus word and both halves are (a
+two-letter half only if a function word, never a common ending, never a short
+acronym); the cut with the most common rarer half wins. A case boundary is tried
+first, and a mixed-case name the appraisal prose uses whole stays. rejoin()
+repairs the opposite defect ('S upply'). The vocabulary is the descriptions plus
+the appraisal prose; only spaces are ever changed.
 """
 import re
 from collections import Counter
 
 MIN_SEEN = 3
-# Without English prose to arbitrate, frequency does: a joined or split form
-# wins only when it is this many times more common than the alternative.
+# Without English prose to arbitrate, frequency does: a joined or split form wins only when
+# it is this many times more common than the alternative.
 RATIO = 5
 MIN_HALF = 2
-# A two-letter half is only believed when it is a function word: the corpus
-# is full of 'es', 'er', 'us' as fragments of longer words.
+PROSE_MIN_COUNT = 2     # the prose (or its names) uses a word whole this often to count it
+ACRONYM_MAX_CHARS = 6   # an all-capitals token this short is an acronym, never split
+CAMEL_MIN_HALF = 4      # both halves this long let a known right half vouch for the left
+SPLIT_MIN_PART = 3      # a frequency split leaves at least this many letters each side
+SHORT_HALF_CHARS = 3    # a half this short makes a whole token more likely a foreign word...
+COMMON_SHORT_WORD = 50  # ...unless the prose uses that half at least this often
+FUSED_MIN_PART = 2      # a fused pair is cut with at least this many letters each side
+FUSED_RIGHT_MIN = 4     # a function word on the right of a fused pair is this long
+UNFUSE_MIN_CHARS = 5    # a shorter word is never unfused
+REJOIN_MAX_PARTS = 3    # rejoin glues up to this many neighbouring fragments
+# A two-letter half is only believed when it is a function word: the corpus is full of 'es',
+# 'er', 'us' as fragments of longer words.
 SHORT_WORDS = {"of", "to", "in", "on", "at", "an", "by", "or", "as", "is", "it",
                "de", "du", "la", "le", "et", "en", "au", "un", "da", "do", "em",
                "no", "na", "os", "el", "al", "se", "il", "ou", "ao", "e"}
-# Endings that are also short words somewhere. Cut off a longer word they
-# produce 'Audit eur', 'process us', 'part ies', 'dr one' - so a right half
-# that is one of these never justifies a cut without a case boundary.
+# Endings that are also short words somewhere.
 ENDINGS = {"es", "er", "ers", "eur", "eurs", "ies", "us", "one", "res", "ops",
            "ing", "ed", "ion", "ions", "ment", "ments", "ors", "ity", "al",
            "ly", "ive", "ure", "age", "ance", "ence", "able", "ible", "ist",
@@ -62,14 +41,13 @@ ENDINGS = {"es", "er", "ers", "eur", "eurs", "ies", "us", "one", "res", "ops",
            # Spanish and Portuguese plurals: 'formatos' is not 'format os'.
            "os", "as", "ões", "ción", "ação"}
 WORD = re.compile(r"[^\W\d_]+", re.UNICODE)
-# Words after which a capitalised token is a new word even when the corpus has
-# not seen it: 'andPemba', 'forZanzibar'.
+# Words after which a capitalised token is a new word even when the corpus has not seen it:
+# 'andPemba', 'forZanzibar'.
 FUNCTION_WORDS = {"and", "for", "the", "of", "with", "to", "in", "at", "on", "by",
                   "from", "de", "du", "des", "la", "le", "les", "et", "pour",
                   "dans", "au", "aux", "en", "do", "da", "dos", "das", "para",
                   "e", "y", "el", "los", "las", "del", "con"}
 # What a clipped cell runs onto the next word: 'unconsultant', 'laconstruction'.
-# "in" is left out: English uses it as a prefix ("ineligibility").
 FUSED_LEFT = (SHORT_WORDS | FUNCTION_WORDS | {"une", "sur", "par"}) - {"in"}
 EN_FUNCTION = {"and", "for", "the", "of", "with", "to", "in", "at", "on", "by", "from"}
 EN_SHORT = {"of", "to", "in", "on", "at", "an", "by", "or", "as", "is", "it", "we",
@@ -78,14 +56,7 @@ ROMAN = re.compile(r"^(?:I{1,3}|IV|V|VI{0,3}|IX|X)$")
 
 
 class Vocab(Counter):
-    """Word counts, with the appraisal prose kept apart as `prose`.
-
-    The descriptions cannot be the sole judge of what is a word: they carry
-    the very defects being repaired, so 'missioning' (from 'Com missioning')
-    and 'tvand' (from 'TVand') occur often enough there to look like words.
-    The appraisal text, read from PDFs, has neither, so where it has an opinion
-    it decides; the descriptions decide only for words it never uses, which is
-    most French, Portuguese and Spanish."""
+    """Word counts, with the appraisal prose kept apart as `prose`."""
     prose = None
 
 
@@ -95,13 +66,13 @@ def corpus_vocab(descriptions, data=None):
     that prose uses whole ('GovNet')."""
     import glob
     from paths import where
-    # Each distinct description counted once: a package is re-printed in every
-    # plan version, up to dozens of times, and counting every copy lets one
-    # repeated glue ('consultantindividuel', 1,035 copies) outvote real words.
+    # Each distinct description counted once: a package is re-printed in every plan version,
+    # up to dozens of times, and counting every copy lets one repeated glue
+    # ('consultantindividuel', 1,035 copies) outvote real words.
     vocab = Vocab(build_vocab(sorted(set(descriptions))))
-    # French, Portuguese and Spanish are judged against the descriptions alone:
-    # the appraisal prose is English and its counts would vouch for English
-    # fragments inside a foreign description.
+    # French, Portuguese and Spanish are judged against the descriptions alone: the
+    # appraisal prose is English and its counts would vouch for English fragments inside a
+    # foreign description.
     vocab.foreign = Vocab(vocab)
     names = None
     if data:
@@ -128,14 +99,14 @@ def _prose_word(word, vocab):
     if len(word) >= 2 and word.isupper():
         return True                         # an acronym: TV, ICT
     w = word.lower()
-    # The prose is English, so short words are judged as English: 'al', 'y'
-    # and 'e' are words in Spanish and Portuguese but fragments in 'Digit al',
-    # 'Cybersecurit y', 'pilot e'.
+    # The prose is English, so short words are judged as English: 'al', 'y' and 'e' are
+    # words in Spanish and Portuguese but fragments in 'Digit al', 'Cybersecurit y', 'pilot
+    # e'.
     if len(w) == 1:
         return w in ("a", "i")
     if len(w) == 2:
         return w in EN_SHORT
-    return prose.get(w, 0) >= 2
+    return prose.get(w, 0) >= PROSE_MIN_COUNT
 
 
 def build_vocab(texts):
@@ -155,17 +126,12 @@ def _known(word, vocab):
 
 
 def _best_cut(token, vocab, names=None):
-    """Where to put a space in this token, or None.
-
-    `names` is the vocabulary of the appraisal prose. A mixed-case token such
-    as 'GovNet', 'MInT' or 'WiFi' that the prose uses whole is a name and is
-    left alone; 'DataCenter' is not one the prose uses, so it is split even
-    though the plans repeat it often enough to look like a word."""
-    if token.isupper() and len(token) <= 6:
+    """Where to put a space in this token, or None."""
+    if token.isupper() and len(token) <= ACRONYM_MAX_CHARS:
         return None                         # an acronym: UNOPS, NIDC
     boundaries = [m.start() for m in re.finditer(r"(?<=[a-zà-ÿ])(?=[A-ZÀ-Þ])", token)]
     if boundaries:
-        if names is not None and names.get(token.lower(), 0) >= 2:
+        if names is not None and names.get(token.lower(), 0) >= PROSE_MIN_COUNT:
             return None
         if names is None and _known(token, vocab):
             return None
@@ -179,7 +145,8 @@ def _best_cut(token, vocab, names=None):
                 continue
             # 'aConsultancy': the article is the one single letter allowed.
             left_ok = _known(left, vocab) or left.lower() == "a" or \
-                (len(left) >= 4 and len(right) >= 4 and _known(right, vocab))
+                (len(left) >= CAMEL_MIN_HALF and len(right) >= CAMEL_MIN_HALF
+                 and _known(right, vocab))
             if left_ok and (_known(right, vocab) or right.isupper()):
                 return b
     if len(token) < 2 * MIN_HALF:
@@ -187,13 +154,13 @@ def _best_cut(token, vocab, names=None):
     if _prose_word(token, vocab):
         return None                         # the prose uses it whole
     if _prose_word(token, vocab) is None and _known(token, vocab):
-        # No prose: a repeated glue is still a glue when both halves are far
-        # more common than the glued form - 'informatiquepour'.
+        # No prose: a repeated glue is still a glue when both halves are far more common
+        # than the glued form - 'informatiquepour'.
         tc = vocab.get(token.lower(), 0)
         best, score = None, 0
-        for i in range(3, len(token) - 1):
+        for i in range(SPLIT_MIN_PART, len(token) - 1):
             left, right = token[:i], token[i:]
-            if len(right) < 3 and right.lower() not in SHORT_WORDS:
+            if len(right) < SPLIT_MIN_PART and right.lower() not in SHORT_WORDS:
                 continue
             if right.lower() in ENDINGS:
                 continue
@@ -201,9 +168,7 @@ def _best_cut(token, vocab, names=None):
             if min(lc, rc) >= RATIO * tc and min(lc, rc) > score:
                 best, score = i, min(lc, rc)
         return best
-    # The token is not a prose word. If the descriptions repeat it, it may be a
-    # foreign word - unless the prose knows it as two English words glued,
-    # which is the defect itself repeated ('designingand').
+    # The token is not a prose word.
     best, score = None, 0
     for i in range(MIN_HALF, len(token) - MIN_HALF + 1):
         left, right = token[:i], token[i:]
@@ -214,18 +179,18 @@ def _best_cut(token, vocab, names=None):
             ok = bool(pl) and bool(pr)
         else:
             ok = _known(left, vocab) and _known(right, vocab)
-        # A word the descriptions use whole, with a half of three letters or
-        # fewer, is far more likely a foreign word than a glue - 'formatos' is
-        # not 'format os', 'contable' not 'con table' - unless the short half
-        # is a word English prose uses all the time, as in 'Provisionof'.
-        short = left if len(left) <= 3 else right if len(right) <= 3 else None
+        # A word the descriptions use whole, with a half of three letters or fewer, is far
+        # more likely a foreign word than a glue - 'formatos' is not 'format os', 'contable'
+        # not 'con table' - unless the short half is a word English prose uses all the time,
+        # as in 'Provisionof'.
+        short = left if len(left) <= SHORT_HALF_CHARS else \
+            right if len(right) <= SHORT_HALF_CHARS else None
         if ok and short and _known(token, vocab):
             prose = getattr(vocab, "prose", None) or {}
-            if prose.get(short.lower(), 0) < 50:
+            if prose.get(short.lower(), 0) < COMMON_SHORT_WORD:
                 continue
-        # A token that also occurs whole is split only when both halves are
-        # far more common than it: 'designingand' yes, 'scanner' (scan + a
-        # stray 'ner') no.
+        # A token that also occurs whole is split only when both halves are far more common
+        # than it: 'designingand' yes, 'scanner' (scan + a stray 'ner') no.
         tc = vocab.get(token.lower(), 0)
         if ok and tc and min(vocab.get(left.lower(), 0),
                              vocab.get(right.lower(), 0)) < RATIO * tc:
@@ -239,24 +204,15 @@ def _best_cut(token, vocab, names=None):
 
 def _fused_cut(word, vocab):
     """Where to split a word that is two common words run together - 'uncadre'
-    (un + cadre), 'unconsultant', 'laconstruction' - or None.
-
-    A clipped cell repeats the same fusion in many descriptions, so the fused
-    form can be frequent enough to pass as a word; it is still the defect when
-    both halves are far more common than it. The first half may be a short
-    function word ('un', 'la', 'du'); the second is a word of three letters or
-    more. One half must be a function word - the left one ('un', 'de', 'for'),
-    or a right one of four letters or more ('dans', 'pour') - since that is
-    what a clipped cell runs together; two content words ('Lit tre', 'UNI
-    DOS') are left alone. The cut where the rarer half is most common wins."""
+    (un + cadre), 'unconsultant', 'laconstruction' - or None."""
     w = word.lower()
     wc = vocab.get(w, 0)
     best, score = None, 0
-    for i in range(2, len(w) - 2):
+    for i in range(FUSED_MIN_PART, len(w) - FUSED_MIN_PART):
         left, right = w[:i], w[i:]
         if right in ENDINGS:
             continue
-        if not (left in FUSED_LEFT or (right in FUNCTION_WORDS and len(right) >= 4)):
+        if not (left in FUSED_LEFT or (right in FUNCTION_WORDS and len(right) >= FUSED_RIGHT_MIN)):
             continue
         s = min(vocab.get(left, 0), vocab.get(right, 0))
         if s >= max(RATIO * wc, MIN_SEEN) and s > score:
@@ -276,7 +232,7 @@ def unfuse(text, vocab, prose_vocab=None):
     def fix(m):
         nonlocal n
         tok = m.group(0)
-        if len(tok) < 5 or _prose_word(tok, prose_vocab):
+        if len(tok) < UNFUSE_MIN_CHARS or _prose_word(tok, prose_vocab):
             return tok
         cut = _fused_cut(tok, vocab)
         if cut is None:
@@ -288,25 +244,23 @@ def unfuse(text, vocab, prose_vocab=None):
 
 
 def rejoin(text, vocab):
-    """The opposite defect: a space inserted INSIDE a word by a layout that
-    broke the cell mid-word - 'S upply', 'Com missioning', 'Especi alist as'.
-    Two or three neighbouring fragments are joined when the joined form is a
-    word the corpus uses and they are not all words in their own right. 'in
-    formation' stays as written, since both halves are words."""
+    """The opposite defect, a space inside a word ('S upply'): up to
+    REJOIN_MAX_PARTS fragments are joined when the whole is a corpus word and
+    they are not all words in their own right ('in formation' stays)."""
     toks = text.split(" ")
     out, n, i = [], 0, 0
     while i < len(toks):
         joined = False
-        # Every join that passes is a candidate; the one making the more
-        # common word wins: 'prior itaires ayant' is 'prioritaires ayant'
-        # (54 uses), not 'prioritairesayant' (3).
+        # Every join that passes is a candidate; the one making the more common word wins:
+        # 'prior itaires ayant' is 'prioritaires ayant' (54 uses), not 'prioritairesayant'
+        # (3).
         candidates = []
-        for k in (3, 2):
+        for k in range(REJOIN_MAX_PARTS, 1, -1):
             if i + k > len(toks):
                 continue
             parts = toks[i:i + k]
-            # Letters only at the seams: the first part may carry punctuation
-            # before its word, the last part after it, nothing in between.
+            # Letters only at the seams: the first part may carry punctuation before its
+            # word, the last part after it, nothing in between.
             if not all(re.fullmatch(r"[^\W\d_]+", p) for p in parts[1:-1]):
                 continue
             ma = re.search(r"([^\W\d_]+)$", parts[0])
@@ -314,15 +268,14 @@ def rejoin(text, vocab):
             if not (ma and mb):
                 continue
             # An elided article belongs to the NEXT word: "d'un", "l'appui".
-            # A possessive does not: "Gover nor's" is one word.
             if parts[-1][mb.end():mb.end() + 1] in ("'", "\u2019") and \
                     mb.group(1).lower() in ("d", "l", "qu", "j", "n", "s", "c", "m", "t"):
                 continue
             # A code ends in its own letters: 'ID4D Project' stays two.
             if ma.start() > 0 and parts[0][ma.start() - 1].isalnum():
                 continue
-            # The first piece of a hyphenated word stays its own: 'for
-            # e-commerce' is not 'fore-commerce'.
+            # The first piece of a hyphenated word stays its own: 'for e-commerce' is not
+            # 'fore-commerce'.
             if parts[-1][mb.end():mb.end() + 1] == "-":
                 continue
             words = [ma.group(1)] + parts[1:-1] + [mb.group(1)]
@@ -331,15 +284,15 @@ def rejoin(text, vocab):
                 continue
             whole = "".join(words)
             verdicts = [_prose_word(w, vocab) for w in words]
-            # An acronym before a lower-case word is two words: 'I T equipment'
-            # is 'IT equipment', never 'ITequipment'.
+            # An acronym before a lower-case word is two words: 'I T equipment' is 'IT
+            # equipment', never 'ITequipment'.
             head = "".join(words[:-1])
             if head.isupper() and len(head) >= 2 and words[-1].islower() \
                     and len(words[-1]) >= 3 and verdicts[-1]:
                 continue
             if all(v is None for v in verdicts):
-                # No prose: a fragment is a single letter that is not a word,
-                # or a part far rarer than the whole it would make.
+                # No prose: a fragment is a single letter that is not a word, or a part far
+                # rarer than the whole it would make.
                 wc = vocab.get(whole.lower(), 0)
                 all_words = all(
                     (len(w) > 1 or w.lower() in ("a", "y", "e", "o", "à"))
@@ -347,18 +300,16 @@ def rejoin(text, vocab):
                     for w in words)
             else:
                 all_words = all(bool(v) for v in verdicts)
-            # A function word at either end stays its own word: 'Pr ovision
-            # of' becomes 'Provision of', not 'Provisionof'.
-            # Only when the rest already stands as a word: 'Commissi on' is
-            # one broken word, and 'an d' is 'and'.
+            # A function word at either end stays its own word: 'Pr ovision of' becomes
+            # 'Provision of', not 'Provisionof'.
             fw = EN_FUNCTION if getattr(vocab, "prose", None) is not None else FUNCTION_WORDS
             if words[-1].lower() in fw and _stands("".join(words[:-1]), vocab):
                 continue
             if len(words[0]) > 1 and words[0].lower() in fw and \
                     _stands("".join(words[1:]), vocab):
                 continue
-            # Three letters is enough for a function word ('a nd') or for a
-            # word made only of one- and two-letter shards ('E-G ov').
+            # Three letters is enough for a function word ('a nd') or for a word made only
+            # of one- and two-letter shards ('E-G ov').
             short_ok = whole.lower() in fw or (
                 len(whole) == 3 and all(len(w) <= 2 for w in words)
                 and not any(verdicts))
@@ -408,11 +359,7 @@ def _moved_space(a, b, vocab):
 
 
 def repair(text, vocab, names=None, lang="en"):
-    """(repaired text, number of spaces inserted or removed).
-
-    The appraisal prose is English, so it only arbitrates English text; for a
-    French, Portuguese or Spanish description its silence on a word means
-    nothing, and the descriptions' own vocabulary decides alone."""
+    """(repaired text, number of spaces inserted or removed)."""
     if not text:
         return text, 0
     full = vocab
@@ -430,15 +377,15 @@ def repair(text, vocab, names=None, lang="en"):
         return tok[:cut] + " " + tok[cut:]
 
     out = WORD.sub(fix, text)
-    # A closing bracket or a comma run straight into the next word:
-    # '(TPC)Buildings', 'Equipment,Servers'.
+    # A closing bracket or a comma run straight into the next word: '(TPC)Buildings',
+    # 'Equipment,Servers'.
     out, k = re.subn(r"(?<=[)\],;])(?=[^\W\d_])", " ", out)
     out, j = re.subn(r"(?<=[^\W\d_]{2})\((?=[^\W\d_])", " (", out)
-    # A split can leave a fragment that only now has a neighbour to join
-    # ('Consult ancyServices' -> 'Consult ancy Services'), or a space one
-    # letter out ('forthe' -> 'fort he'), so the join pass runs once more.
+    # A split can leave a fragment that only now has a neighbour to join ('Consult
+    # ancyServices' -> 'Consult ancy Services'), or a space one letter out ('forthe' ->
+    # 'fort he'), so the join pass runs once more.
     out, m = rejoin(out, vocab)
-    # Last, two common words a clipped cell ran together, which the passes
-    # above can leave whole because the fused form recurs ('unconsultant').
+    # Last, two common words a clipped cell ran together, which the passes above can leave
+    # whole because the fused form recurs ('unconsultant').
     out, f = unfuse(out, vocab, full)
     return out, n + k + j + m + f

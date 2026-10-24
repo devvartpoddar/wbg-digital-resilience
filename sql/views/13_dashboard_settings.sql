@@ -15,11 +15,9 @@ SELECT
   -- sentences of its paragraph do (their scores summed, each weighted by
   -- control panel asset.decay per sentence back). 'none' widens.
   {{panel:dashboard.commitment_link_levels}} AS commitment_link_levels,
-  -- Only Investment Project Financing operations (Dev, 2026-10-20).
+  -- Only Investment Project Financing operations.
   {{panel:dashboard.ipf_only}} AS ipf_only,
-  -- A package is linked to a commitment at this probability or more. On Dev's
-  -- graded sheet (2026-10-21, 70 pairs) links from 0.5 to 0.7 were 3 yes, 7
-  -- no, 5 unsure; from 0.7 up, 25 yes of 26.
+  -- A package is linked to a commitment at this probability or more.
   {{panel:dashboard.package_link_min_probability}}::numeric AS package_link_min_probability,
   -- Another project prints a sentence near-identically when its committed
   -- sentences hold at least this share of the sentence's six-word runs.
@@ -53,3 +51,15 @@ DROP FUNCTION IF EXISTS wbg.https(text) CASCADE;
 CREATE FUNCTION wbg.https(url text) RETURNS text
 LANGUAGE sql IMMUTABLE AS $$ SELECT regexp_replace(url, '^http://', 'https://') $$;
 COMMENT ON FUNCTION wbg.https(text) IS 'A link with http:// made https://.';
+
+-- Two component names are the same component when their keys are equal or
+-- one is a prefix of the other and both are at least 12 characters (a
+-- restructuring paper shortens a heading; a short key would match too much).
+DROP FUNCTION IF EXISTS wbg.same_component(text, text) CASCADE;
+CREATE FUNCTION wbg.same_component(a text, b text) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$
+  SELECT coalesce(a, '') <> '' AND (a = b OR (least(length(a), length(b)) >= 12
+         AND (a LIKE b || '%' OR b LIKE a || '%')))
+$$;
+COMMENT ON FUNCTION wbg.same_component(text, text) IS
+  'Whether two component name keys name the same component: equal, or one a prefix of the other with both at least 12 characters.';

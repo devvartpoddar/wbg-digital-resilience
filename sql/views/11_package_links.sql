@@ -8,7 +8,7 @@ SELECT pa.package_id, pa.project_id, pr.cohort_set, pr.project_name, pr.country_
        pa.label_id AS asset_id, l.label_name AS asset_name, pa.cosine, pa.cosine_rank, pa.probability, pa.posterior_probability,
        p.description_clean, p.category, p.method_code, p.status, p.planned_date,
        p.estimated_amount_usd, p.in_latest_plan, p.component_number, p.component_name,
-       (p.status IN ('Pending', 'Pending Implementation', 'Under Review', 'Planned')) AS is_upcoming
+       wbg.is_upcoming(p.status) AS is_upcoming
 FROM wbg.package_assets pa
 JOIN wbg.packages p USING (package_id)
 LEFT JOIN wbg.projects pr ON pr.project_id = pa.project_id
@@ -25,7 +25,7 @@ SELECT cp.label_set, cp.label_id, f.measure_name, cp.project_id, f.cohort_set, f
        cp.package_id, p.description_clean AS package_description, p.category, p.method_code,
        p.status, p.planned_date, p.estimated_amount_usd, p.in_latest_plan,
        p.component_number AS package_component_number, p.component_name AS package_component_name,
-       (p.status IN ('Pending', 'Pending Implementation', 'Under Review', 'Planned')) AS is_upcoming,
+       wbg.is_upcoming(p.status) AS is_upcoming,
        cp.shared_asset_ids, cp.probability, cp.posterior_probability AS link_posterior_probability
 FROM wbg.commitment_packages cp
 JOIN wbg.measure_findings_in_context f ON f.label_set = cp.label_set AND f.label_id = cp.label_id
@@ -39,7 +39,7 @@ CREATE VIEW wbg.packages_with_commitments AS
 SELECT p.package_id, p.project_id, pr.cohort_set, pr.project_name, pr.country_name, pr.region,
        p.description_clean, p.category, p.method_code, p.status, p.planned_date,
        p.estimated_amount_usd, p.in_latest_plan,
-       (p.status IN ('Pending', 'Pending Implementation', 'Under Review', 'Planned')) AS is_upcoming,
+       wbg.is_upcoming(p.status) AS is_upcoming,
        (SELECT array_agg(DISTINCT pa.label_id ORDER BY pa.label_id) FROM wbg.package_assets pa
          WHERE pa.package_id = p.package_id AND pa.posterior_probability >= {{panel:link.asset_yes}}) AS asset_ids,
        (SELECT array_agg(DISTINCT cp.label_set ORDER BY cp.label_set) FROM wbg.commitment_packages cp

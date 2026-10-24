@@ -1,33 +1,17 @@
 #!/usr/bin/env python3
 """Clean the procurement tables: packages from the plans, notices and awards.
 
-Reads  data/procurement/{packages_raw,notices_raw,awards_raw}.csv
-       data/appraisal/components.csv   to name each package's component
-       data/appraisal/text/            the appraisal prose, as a vocabulary for
-                                       word repair (src/glue.py)
-Writes data/procurement/{packages,notices,awards,superseded_packages}.csv
+Reads  data/procurement/{packages_raw,notices_raw,awards_raw}.csv,
+       data/appraisal/components.csv, data/appraisal/text/ (vocabulary for src/glue.py)
+Writes data/procurement/{packages,notices,awards,superseded_packages}.csv,
        data/reports/clean_procurement.txt
 
-The rules here are deliberately the opposite of the appraisal side:
-
-    |               | appraisal prose            | procurement metadata        |
-    | case          | preserved                  | folded in a matching copy   |
-    | short units   | dropped                    | kept - the unit IS the row  |
-    | digits/codes  | stripped as footnote marks | kept - lot 2 is not lot 1   |
-    | boilerplate   | dropped                    | flagged, never dropped      |
-
-Appraisal text is long prose recovered from page layout; this is short metadata
-typed into a form by a person. The failure modes are opposite, so a rule that
-helps one damages the other. Nothing here is dropped for being short.
-
-Characters are folded with the same rules as the appraisal side
-(text_rules.fold_chars): the Bank's renderers put the same Symbol and Wingdings
-glyphs in both corpora.
-
-Every output is rebuilt from the raw tables in one pass, so a re-run on
-unchanged input is byte-identical.
+Unlike appraisal prose, short rows are kept, codes and digits are kept, case is
+folded only in a matching copy and boilerplate is flagged, never dropped.
+Characters are folded as on the appraisal side (text_rules.fold_chars). Every
+output is rebuilt from the raw tables in one pass.
 """
-import argparse, csv, hashlib, os, re, sys
+import argparse, os, re, sys
 import unicodedata
 from collections import Counter, defaultdict
 
@@ -44,25 +28,17 @@ import links                                             # noqa: E402
 
 CLEAN_VERSION = "proc-clean-11"
 
-# Another package's borrower reference inside a description: the parser missed
-# a record boundary and stitched the next record on. Used to cut it off here and
-# to count what is left in audit_procurement.
+# Another package's borrower reference inside a description: the parser missed a record
+# boundary and stitched the next record on.
 REF_INLINE = re.compile(r"[A-Z]{2,}-[A-Z0-9]{1,12}-[0-9]{2,10}-(?:CW|GD|GO|CS|NC)-\w{2,5}"
                         r"|\b(?=[A-Z0-9-]*[0-9])[A-Z][A-Z0-9]*(?:-[A-Z0-9]+){1,5}\s*/\s")
-
 
 
 WS_RE = re.compile(r"\s+")
 
 
 def collapse(text):
-    """The display string: characters folded, whitespace collapsed.
-
-    U+FFFD is removed. It is not a character the Bank typed: the notices and
-    awards interfaces return it where their own encoder lost a byte, exactly as
-    the document renditions do. clean.py drops the same defect with
-    errors="ignore" rather than emitting a replacement character, and the count
-    is reported - see replacement_chars_removed in the clean report."""
+    """The display string: characters folded, whitespace collapsed."""
     return WS_RE.sub(" ", fold_chars(text or "").replace("\ufffd", "")).strip()
 
 
@@ -70,58 +46,17 @@ def count_replacement_chars(text):
     return (text or "").count("\ufffd")
 
 
-def casefold_key(text):
-    """A matching copy. Case folding is for matching only; the published
-    string is kept verbatim in `description` for display."""
-    return collapse(text).casefold()
-
-
 def match_key(text):
-    """The matching copy with ALL whitespace removed as well as case.
-
-    This is what asset terms will be matched against, and it exists because of
-    one specific defect. Procurement plans are published only as documents, and
-    the text rendition clips each table cell at the column edge. Rejoining the
-    fragments is unavoidable, and where the clip landed exactly on a space that
-    space is gone: the corpus carries "DataCenter" for "Data Center",
-    "forZanzibar" for "for Zanzibar". Nothing in the rendition distinguishes
-    that case from an ordinary mid-word clip, so the parser does not guess -
-    see _join_wrapped in fetch_procurement.py.
-
-    It does not need to, because the damage is one-directional. Gluing only ever
-    DELETES a space. It never alters a character, inserts one, or reorders
-    anything. So removing every space from both sides puts them back in step:
-
-        "DataCenter"  -> "datacenter"
-        "Data Center" -> "datacenter"
-
-    and the term matches. Without this, "data center" misses a package whose
-    whole purpose is data centre infrastructure, which is the kind of silent
-    false negative that never shows up as an error.
-
-    It works the same for a package awarded years ago and one still only
-    planned, which matters: the alternative - taking the description from the
-    linked award, where the reference joins - is clean but only available for
-    packages that have already been awarded, and the forward-looking ones are
-    the point of the analysis.
-
-    The trade, stated rather than hidden: despacing can collide two genuinely
-    different phrases. For multi-word technical terms that is rare, and
-    audit_procurement.py counts the collisions so it stays a measured number.
-    """
+    """The matching copy with ALL whitespace removed as well as case."""
     return WS_RE.sub("", collapse(text).casefold())
 
 
-
-# The published description sometimes carries the borrower reference in front of
-# the words ("AA-AGENCY-123-CS-CQS - Supply of ..."). It has its own column, so it
-# is removed from the text - but only when it is followed by real words.
+# The published description sometimes carries the borrower reference in front of the words
+# ("AA-AGENCY-123-CS-CQS - Supply of ...").
 REF_IN_TEXT = re.compile(
     r"^\s*([A-Z]{2}-[A-Z0-9]{1,12}-\d{2,10}-[A-Z]{2}-[A-Z0-9]{2,6})\s*[-:/\u2013]?\s*")
 
-# 'Lot 2', 'Lots 1-3', 'Phase II', 'Lote 3', 'Tranche 2'. The value must look
-# like a lot or phase number - digits, a Roman numeral or a single capital - so
-# that 'Phase of the project' or a clipped 'Phase s' is not read as one.
+# 'Lot 2', 'Lots 1-3', 'Phase II', 'Lote 3', 'Tranche 2'.
 _MARK_NO = r"(?:\d{1,3}|[IVX]{1,4}|[A-H])"
 _MARK_RUN = (rf"{_MARK_NO}(?:\s*(?:-|\u2013|&|,|to|and|et|e|y|\u00e0|a)\s*{_MARK_NO})*"
              r"(?![\w-])")
@@ -132,18 +67,7 @@ REBID_RE = re.compile(r"[\(\[]?\s*\b(RE-?BID(?:DING)?|RE-?TENDER|RELANCE)\b\s*[\
 
 
 def split_markers(description):
-    """Steps 3 and 4: reference out, lot / phase / rebid into their own columns.
-
-    'FIBER OPTIC CABLE SUPPLY - LOT 2 (REBID)' must yield a description, a lot
-    and a rebid flag rather than one string - linking a plan package to its award
-    depends on it, because
-    lot 2 and lot 1 of the same package are not the same package.
-
-    The markers are removed only from the matching copy; `description` keeps the
-    published string. Digits inside the description are never touched: in this
-    corpus 'LOT 2' distinguishes a package, where in an appraisal paragraph a
-    digit is usually a footnote marker.
-    """
+    """Steps 3 and 4: reference out, lot / phase / rebid into their own columns."""
     raw = collapse(description)
     text = raw
     ref = ""
@@ -160,8 +84,8 @@ def split_markers(description):
     rebid = bool(REBID_RE.search(text))
     if rebid:
         text = REBID_RE.sub(" ", text)
-    # Taken out of the text only where it opens or closes it, so what is left
-    # still reads: 'Phase 1 and Phase 2 works' keeps its words.
+    # Taken out of the text only where it opens or closes it, so what is left still reads:
+    # 'Phase 1 and Phase 2 works' keeps its words.
     edge = re.compile(r"^\s*\(?(?:" + LOT_PHASE_RE.pattern + r")\)?\s*[-\u2013:.]\s*"
                       r"|\s*(?:[-\u2013:,]\s*|\()(?:" + LOT_PHASE_RE.pattern + r")\s*\)?\s*$")
     for _ in range(2):
@@ -173,10 +97,9 @@ def split_markers(description):
 
 # ------------------------------------------------------------ other cells
 
-# A plan row's other cells can end up inside the description: the Loan /
-# Credit number between two wrapped lines ('Rur IDA / 12345 al radio'), and on
-# some layouts the component, review type, method and market approach after
-# it. They are cut out here and the component is kept, in its own column.
+# A plan row's other cells can end up inside the description: the Loan / Credit number
+# between two wrapped lines ('Rur IDA / 12345 al radio'), and on some layouts the component,
+# review type, method and market approach after it.
 LOAN_IN_TEXT = re.compile(r"\s*" + plan_table.LOAN_INLINE.pattern + r"\s*")
 _METHOD_WORDS = (r"(?:Request for (?:Bids|Quota|Propos)|Direct Selection|Quality And Cost|"
                  r"Quality Based Selection|Consultant Qualification|Least Cost Selection|"
@@ -185,10 +108,8 @@ _METHOD_WORDS = (r"(?:Request for (?:Bids|Quota|Propos)|Direct Selection|Quality
                  r"Consultant individuel)")
 _APPROACH_WORDS = r"(?:(?:Open|Limited|Direct)\s*-\s*(?:National|Internationa)|Single Stage)"
 _REVIEW_WORDS = r"(?:Post|Prior|A posteriori|A priori|Posterior|Previa|Pr[eé]via)"
-# A review type ('Post', 'Prior') is cut only when a method or a market
-# approach follows it: on its own it is as likely a word of the description
-# ('Mbeya Post', 'Prior Lake'). A market approach or 'Single Stage' is never
-# prose and is cut wherever it ends the text.
+# A review type ('Post', 'Prior') is cut only when a method or a market approach follows it:
+# on its own it is as likely a word of the description ('Mbeya Post', 'Prior Lake').
 CELL_TAIL = re.compile(
     rf"\s(?:{_REVIEW_WORDS}\s+(?=.*?(?:{_METHOD_WORDS}|{_APPROACH_WORDS}))"
     rf"|{_METHOD_WORDS}(?=.*?{_APPROACH_WORDS})|{_APPROACH_WORDS}"
@@ -233,12 +154,7 @@ def _flat(text):
 
 class Components:
     """The components of each project, from the appraisal side
-    (components.csv), to name the component a procurement package belongs to.
-
-    A restructuring can renumber components, so each name takes its number
-    from the most recent document that lists it, and a match says which
-    document that was: (number, name, source, doc_id), so a package joins
-    components.csv on (doc_id, number). A number-only match has no document."""
+    (components.csv), to name the component a procurement package belongs to."""
 
     def __init__(self, rows=()):
         self.by_project = defaultdict(list)
@@ -278,9 +194,7 @@ class Components:
         return num, name, doc
 
     def strip_tail(self, pid, desc):
-        """A component at the end of a description: (description, component).
-
-        The component is (number, name, source, doc_id) or None."""
+        """A component at the end of a description: (description, component)."""
         starts = [m.start() for m in re.finditer(r"(?:(?<=\s)|^)\S", desc)]
         for p in starts[2:]:
             seg = desc[p:]
@@ -305,10 +219,7 @@ class Components:
         m = COMP_NAMED.search(cells) or COMP_NUMBER.match(cells)
         if not m:
             return None
-        # The plan's own number. When the words after it open the name the
-        # appraisal side gives that same number, it is that component; the
-        # name itself is usually clipped and interleaved with other cells,
-        # so it is not repeated from the plan.
+        # The plan's own number.
         head = _flat(cells[m.end():])[:12]
         for num, name, f, doc in self.by_project.get(pid, ()):
             if num == m.group(1) and len(head) >= 8 and f.startswith(head[:min(len(head), len(f))]):
@@ -318,57 +229,27 @@ class Components:
 
 def read_components(data):
     path = where(data, "appraisal", "components.csv")
-    if not os.path.exists(path):
-        return Components()
-    with open(path, newline="", encoding="utf-8") as fh:
-        return Components(list(csv.DictReader(fh)))
-
+    return Components(common.read_csv(path)) if os.path.exists(path) else Components()
 
 
 SEPARATORS = re.compile(r"[^A-Z0-9]+")
 
 
 def norm_ref(ref):
-    """Case, whitespace and separators, and nothing else.
-
-    Uppercase, every run of non-alphanumerics collapsed to a single hyphen, ends
-    trimmed. That recovers 'tz mcit 254784 cw rfb' and 'TZ/MCIT/254784/CW/RFB'
-    as the same key while keeping the fields distinguishable - dropping the
-    separators entirely would fuse a lot number into a contract number.
-    """
+    """Case, whitespace and separators, and nothing else."""
     if not ref:
         return ""
     return SEPARATORS.sub("-", collapse(ref).upper()).strip("-")
 
 
-
 # Function words that separate the four languages this corpus actually carries.
-# A description is five to fifteen words, so a handful of markers is a strong
-# signal and a word list would not be: nothing here translates anything.
-LANG_MARKERS = {
-    "en": {"the", "of", "and", "for", "supply", "services", "installation",
-           "construction", "provision", "with", "to", "a", "study", "support"},
-    "fr": {"de", "des", "du", "et", "pour", "la", "le", "les", "d",
-           "fourniture", "travaux", "recrutement", "prestation", "acquisition",
-           "construction", "l", "au", "aux", "dans"},
-    "es": {"de", "del", "y", "para", "la", "el", "los", "las", "suministro",
-           "obras", "servicios", "consultoría", "adquisición", "con", "en",
-           "construcción"},
-    "pt": {"de", "do", "da", "e", "para", "a", "o", "os", "as",
-           "fornecimento", "obras", "serviços", "aquisição", "com", "em",
-           "construção", "contratação"},
-}
+LANG_MARKERS = {lang: set(words) for lang, words in plan_table.VOCAB["lang_markers"].items()}
 
 WORD_RE = re.compile(r"[a-záàâãéêíóôõúüçñ]+", re.I)
 
 
 def detect_lang(text, default="en"):
-    """Record the language of the description; never translate it.
-
-    Scored, not guessed: the language with the most marker hits wins, and a tie
-    or no hit at all falls back to the corpus default `en`. Only the four
-    languages the interface publishes in are candidates.
-    """
+    """Record the language of the description; never translate it."""
     if not text:
         return default
     toks = [t.lower() for t in WORD_RE.findall(text)]
@@ -385,14 +266,8 @@ def detect_lang(text, default="en"):
     return best[0][0]
 
 
-
-PLACEHOLDER_EXACT = {"tbd", "tba", "n/a", "na", "none", "nil", "unknown", "-",
-                     "not applicable", "to be determined", "to be defined",
-                     "tbc", "aucun", "aucune", "por definir", "a definir",
-                     "à définir", "nao", "não"}
-PLACEHOLDER_CATEGORY = {"goods", "works", "services", "consultancy", "consulting",
-                        "non consulting services", "supply", "furniture",
-                        "consultant services", "civil works", "general"}
+PLACEHOLDER_EXACT = set(plan_table.VOCAB["placeholder_exact"])
+PLACEHOLDER_CATEGORY = set(plan_table.VOCAB["placeholder_category"])
 REF_ONLY_RE = re.compile(r"^[A-Z]{2}-[A-Z0-9]{1,12}-\d{2,10}-[A-Z]{2}-[A-Z0-9]{2,6}$")
 
 
@@ -402,13 +277,7 @@ CELL_WORDS_ONLY = re.compile(
 
 
 def is_placeholder(description):
-    """Flag, never drop.
-
-    A placeholder is worth flagging because a package whose description is 'TBD'
-    cannot be matched to an asset by any method, and the count of those is a
-    finding. It is not worth dropping, because the row still evidences that a
-    package exists and moves through the plan.
-    """
+    """Flag, never drop."""
     s = collapse(description)
     if not s:
         return True
@@ -417,125 +286,28 @@ def is_placeholder(description):
         return True
     if REF_ONLY_RE.match(s.upper().replace(" ", "")):
         return True
-    # The parser took the wrong cells: the 'description' is the review type,
-    # method and market approach - 'Posterior Individual Open - National'.
+    # The parser took the wrong cells: the 'description' is the review type, method and
+    # market approach - 'Posterior Individual Open - National'.
     if CELL_WORDS_ONLY.match(s):
         return True
     words = [w for w in re.findall(r"[A-Za-zÀ-ÿ]{2,}", s)]
     return len(words) < 2
 
 
-
-# The status as STEP prints it, in STEP's own English words. The plans are
-# published in four languages; each foreign word is mapped to the English label
-# STEP prints for the same state, so the column has one vocabulary. Nothing is
-# merged: 'Pending' and 'Pending Implementation' are different STEP values and
-# stay different, and 'Completed' is not folded into 'Signed'. Every key below
-# was mined from the corpus, not translated at a desk; `collapse` and enum_key
-# fold accents first, so the keys are ASCII ('Achevé' arrives as 'acheve').
-STATUS_LABELS = ("Pending", "Pending Implementation", "Under Implementation",
-                 "Under Review", "Signed", "Completed", "Canceled", "Terminated",
-                 "Planned")
-STATUS_MAP = {
-    "pending": "Pending",
-    "pendiente": "Pending",
-    "pending implementation": "Pending Implementation",
-    "en attente d'execution": "Pending Implementation",
-    "ejecucion pendiente": "Pending Implementation",
-    "implementacao pendente": "Pending Implementation",
-    "under implementation": "Under Implementation",
-    "en cours d'execution": "Under Implementation",
-    "en ejecucion": "Under Implementation",
-    "em fase de implementacao": "Under Implementation",
-    "em execucao": "Under Implementation",
-    "under review": "Under Review",
-    "en cours d'examen": "Under Review",
-    "em analise": "Under Review",
-    "signed": "Signed",
-    "signe": "Signed",
-    "assinado": "Signed",
-    "firmado": "Signed",
-    "completed": "Completed",
-    "acheve": "Completed",
-    "concluido": "Completed",
-    "finalizado": "Completed",
-    "canceled": "Canceled",
-    "cancelled": "Canceled",
-    "annule": "Canceled",
-    "cancelado": "Canceled",
-    "anulado": "Canceled",
-    # Signed, then ended early: its own STEP value, neither signed nor canceled.
-    "terminated": "Terminated",
-    "resilie": "Terminated",
-    "rescindido": "Terminated",
-    "planned": "Planned",
-    "planifie": "Planned",
-}
-# A status that says the contract exists. An award in the contracts data is not
-# allowed to overwrite one of these with a bare 'Signed'.
+# The status as STEP prints it, in STEP's own English words.
+STATUS_MAP = plan_table.VOCAB["status_map"]
+# A status that says the contract exists.
 CONTRACT_EXISTS = {"Signed", "Completed", "Terminated"}
 
-# The Bank's own procurement method codes, as STEP writes them in the borrower
-# reference ('...-GO-RFB', '...-CS-QCBS'), with the name the Procurement
-# Regulations give each. The plan's Method cell is mapped to the same code, so
-# `method` has one vocabulary whichever of the two supplied it.
-METHOD_NAMES = {
-    "RFB": "Request for Bids",
-    "RFQ": "Request for Quotations",
-    "RFP": "Request for Proposals",
-    "DIR": "Direct Selection",
-    "CDS": "Direct Selection (consulting services)",
-    "QCBS": "Quality and Cost-Based Selection",
-    "QBS": "Quality-Based Selection",
-    "FBS": "Fixed Budget Selection",
-    "LCS": "Least Cost Selection",
-    "CQS": "Consultant's Qualification-Based Selection",
-    "INDV": "Individual Consultant Selection",
-    "UN": "Procurement from United Nations agencies",
-    "FA": "Framework Agreement",
-}
-# The Method cell's words, in the four languages the plans use. 'Direct
-# Selection' is DIR for goods, works and non-consulting services and CDS for
-# consulting services; that is how STEP itself numbers them, and the corpus
-# bears it out (4,516 consulting references end in CDS, 103 in DIR).
-METHOD_TEXT = {
-    "request for bids": "RFB", "appel d'offres": "RFB",
-    "request for quotations": "RFQ", "demande de prix": "RFQ",
-    "request for proposals": "RFP",
-    "direct selection": "DIR", "direct contracting": "DIR",
-    "entente directe": "DIR", "passation de marche de gre a gre": "DIR",
-    "un agencies (direct)": "UN",
-    "quality and cost-based selection": "QCBS",
-    "quality and cost based selection": "QCBS",
-    "selection fondee sur la qualite et le cout": "QCBS",
-    "quality based selection": "QBS",
-    "fixed budget selection": "FBS",
-    "least cost selection": "LCS", "selection au moindre cout": "LCS",
-    "consultant qualification selection": "CQS",
-    "consultant qualification  selection": "CQS",
-    "selection fondee sur les qualifications des consultants": "CQS",
-    "individual consultant selection": "INDV", "consultant individuel": "INDV",
-    "individuel": "INDV",
-    "framework agreement": "FA",
-    # Portuguese
-    "selecao baseada na qualidade e custo": "QCBS",
-    "selecao baseada nas qualificacoes dos consultores": "CQS",
-    "solicitacao de cotacoes": "RFQ", "solicitacao de ofertas": "RFB",
-    "solicitacao de propostas": "RFP", "selecao direta": "DIR",
-    "consultor individual": "INDV", "consultoria individual": "INDV",
-    # Spanish
-    "seleccion basada en calidad y costo": "QCBS",
-    "seleccion basada en las calificaciones de los consultores": "CQS",
-    "seleccion basada en el menor costo": "LCS",
-    "solicitud de cotizaciones": "RFQ", "solicitud de ofertas": "RFB",
-    "solicitud de propuestas": "RFP", "seleccion directa": "DIR",
-}
-# The code at the end of a borrower reference, including the older and
-# French spellings the corpus carries. 'RF' is a clipped RFB, RFQ or RFP and
-# is left unread rather than guessed.
+# The Bank's own procurement method codes, as STEP writes them in the borrower reference
+# ('...-GO-RFB', '...-CS-QCBS'), with the name the Procurement Regulations give each.
+METHOD_NAMES = plan_table.VOCAB["method_names"]
+# The Method cell's words, in the four languages the plans use.
+METHOD_TEXT = plan_table.VOCAB["method_text"]
+# The code at the end of a borrower reference, including the older and French spellings the
+# corpus carries.
 REF_METHOD = {code: code for code in METHOD_NAMES}
-REF_METHOD.update({"CI": "INDV", "IC": "INDV", "IND": "INDV", "QCB": "QCBS",
-                   "SFQC": "QCBS", "SQC": "CQS", "ED": "DIR"})
+REF_METHOD.update(plan_table.VOCAB["ref_method_aliases"])
 REF_METHOD_RE = re.compile(r"(?:^|-)(?:CW|GO|CS|NC)-?([A-Z]+)")
 
 
@@ -553,19 +325,7 @@ def ref_method(ref):
     return next((REF_METHOD[k] for k in sorted(REF_METHOD, key=lambda c: (-len(c), c))
                  if token == k or (len(k) > 2 and token.startswith(k))), "")
 
-CATEGORY_MAP = {
-    "goods": "goods", "go": "goods", "g": "goods",
-    "works": "works", "cw": "works", "w": "works",
-    "consulting services": "consultant_services", "consultant services":
-        "consultant_services", "cs": "consultant_services",
-    "consultancy": "consultant_services",
-    "consulting firms": "consultant_services",
-    "individual consultants": "consultant_services",
-    "non consulting services": "non_consulting_services",
-    "non-consulting services": "non_consulting_services",
-    "non consulting service": "non_consulting_services",
-    "nc": "non_consulting_services",
-}
+CATEGORY_MAP = plan_table.VOCAB["category_map"]
 
 
 def norm_category(value):
@@ -582,36 +342,27 @@ def norm_category(value):
 
 
 def enum_key(value):
-    """The lookup key for a closed value set: collapsed, unaccented, casefolded.
-
-    Separate from `collapse` on purpose. `collapse` produces the string that is
-    stored and read by a person, and stripping the accents off a French package
-    description to store it would be vandalism. Here the string is never stored
-    - it exists only to find a row in STATUS_MAP or METHOD_TEXT - so folding
-    'Achevé' to 'acheve' costs nothing and lets those maps stay ASCII.
-    """
+    """The lookup key for a closed value set: collapsed, unaccented, casefolded."""
     stripped = unicodedata.normalize("NFKD", collapse(value))
     stripped = "".join(c for c in stripped if not unicodedata.combining(c))
     return stripped.replace("\u2019", "'").casefold().strip(" .:;")
 
 
 def norm_status(value):
-    """packages.status: the STEP label, or `unknown`, counted.
-
-    `status_raw` keeps the borrower's own word either way."""
+    """packages.status: the STEP label, or `unknown`, counted."""
     key = enum_key(value)
     if not key:
         return "unknown"
     if key in STATUS_MAP:
         return STATUS_MAP[key]
-    # The clipped cell can INSERT a space mid-word - 'Under Implement ation',
-    # "En cours d'exécut ion" - so compare with every space removed.
+    # The clipped cell can INSERT a space mid-word - 'Under Implement ation', "En cours
+    # d'exécut ion" - so compare with every space removed.
     flat = key.replace(" ", "")
     flat_map = {k.replace(" ", ""): v for k, v in STATUS_MAP.items()}
     if flat in flat_map:
         return flat_map[flat]
-    # A cell clipped at the column edge: "En attente d'" or 'Pending Impleme'
-    # is the start of exactly one status.
+    # A cell clipped at the column edge: "En attente d'" or 'Pending Impleme' is the start
+    # of exactly one status.
     if len(flat) >= 6:
         hits = {v for k, v in flat_map.items() if k.startswith(flat)}
         if len(hits) == 1:
@@ -620,10 +371,8 @@ def norm_status(value):
 
 
 def norm_method(method_raw, category=""):
-    """method: the Bank's code (RFB, RFQ, QCBS, INDV ...) or
-    `unknown`. Reads the Method cell's words, or a borrower reference's code
-    when given one. Never 'other': a method the map does not know is unknown,
-    and counted, so the map can be extended from what was actually printed."""
+    """The Bank's method code (RFB, RFQ, QCBS, INDV ...) from the Method cell's
+    words or a reference's code, or 'unknown' (counted, so the map can grow)."""
     code = ref_method(method_raw)
     if code:
         return code
@@ -640,14 +389,12 @@ def norm_method(method_raw, category=""):
 
 def cut_stitched(desc, own_ref, counters):
     """Drop a stitched-on record: everything from the first borrower reference
-    that is not this package's own. The text before it is this package's
-    description; the stitched record is another package, with its own row in
-    another plan version, and does not belong here."""
+    that is not this package's own (that package has its own row)."""
     for m in REF_INLINE.finditer(desc):
         if norm_ref(m.group(0).split("/")[0].strip()) == norm_ref(own_ref):
             continue
-        # A borrower reference has at least three parts; 'COVID-19 / ' has two
-        # and is ordinary text.
+        # A borrower reference has at least three parts; 'COVID-19 / ' has two and is
+        # ordinary text.
         if len(re.split(r"[-–]", m.group(0).split("/")[0].strip())) < 3:
             continue
         # The glued-on reference may be preceded by a stray word fragment
@@ -664,9 +411,8 @@ def cut_stitched(desc, own_ref, counters):
     return desc
 
 
-# The Method cell clipped at its column edge, as it appears among a row's
-# other cells: 'Request for Propo', 'Consultant Qualifi cation'. Compared with
-# every space and hyphen removed, earliest in the row wins.
+# The Method cell clipped at its column edge, as it appears among a row's other cells:
+# 'Request for Propo', 'Consultant Qualifi cation'.
 METHOD_PREFIX = (
     ("requestforpropo", "RFP"), ("requestforquota", "RFQ"), ("requestforbid", "RFB"),
     ("individualconsult", "INDV"), ("consultantqualifi", "CQS"),
@@ -699,13 +445,7 @@ def method_in_cells(cells, category=""):
 
 
 def resolve_method(r):
-    """(method code, where it came from).
-
-    The plan's Method cell first, because it is what the plan says now; then
-    the same cell clipped at its column edge and found among the row's other
-    cells ('Request for Propo'); then the code in the borrower reference, which STEP writes when the activity is
-    created and which is on almost every package. Both are the Bank's own
-    vocabulary, so nothing is inferred from the market approach."""
+    """(method code, where it came from)."""
     code = norm_method(r.get("method_raw") or "", r.get("category") or "")
     if code != "unknown":
         return code, "method_cell"
@@ -726,11 +466,10 @@ def norm_approach(value):
     return re.sub(r"\s*[-/]\s*", " - ", v).strip()
 
 
-
 DATELINE_RE = re.compile(r"\b(\d{4}-\d{2}-\d{2}|\d{1,2}[-/]\d{1,2}[-/]\d{2,4}|"
                          r"\d{1,2}[- ][A-Za-z]{3}[- ]\d{4})\b")
-# A figure with a currency mark on either side, and the scale word a plan
-# sometimes writes after it ('US$ 1.5 million', 'USD 2 M', '3 milliards FCFA').
+# A figure with a currency mark on either side, and the scale word a plan sometimes writes
+# after it ('US$ 1.5 million', 'USD 2 M', '3 milliards FCFA').
 _SCALE = r"(?:millions?|mn|m|millones|milh[oõ]es|milliards?|billions?|bn|b)"
 MONEY_RE = re.compile(
     rf"(?:US\$|USD|\$|EUR|€|GBP|£)\s?([\d.,]+)(?:\s?({_SCALE})\b)?"
@@ -762,12 +501,6 @@ def money_value(figure, scale=""):
     return value
 
 
-def desc_sha256(text):
-    """SHA-256 of the cleaned description: the key a label is stored under
-    (AGENTS.md rule 9), so a label follows the words, not the row."""
-    return hashlib.sha256((text or "").encode("utf-8")).hexdigest()
-
-
 def extract_amount_and_date(text):
     """Amounts and dates sometimes sit inside the description string. Pull them
     out so they are not matched as text later."""
@@ -777,7 +510,6 @@ def extract_amount_and_date(text):
         value = money_value(m.group(1) or m.group(3), m.group(2) or m.group(4))
         amount = "" if value is None else f"{value:.2f}"
     # Stored as ISO or not at all: the summaries compare dates as strings.
-    # A numeric date that reads both ways ('03/06/2024') is left blank.
     date = ""
     m = DATELINE_RE.search(text or "")
     if m:
@@ -833,9 +565,7 @@ write_csv = common.write_csv
 def clean_description(text, vocab, names, lang, own_ref, counters, comps=None, pid=""):
     """The order matters: other cells out, words repaired, then the lot or
     phase read - a marker read before the repair takes a broken word's last
-    letters for a lot number ('Phase s').
-
-    Returns (clean text, repairs, markers, cells text, component or None)."""
+    letters for a lot number ('Phase s')."""
     text, cells = split_cells(collapse(text))
     if cells:
         counters["descriptions_with_other_cells_cut"] += 1
@@ -888,7 +618,7 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
             "description": raw_desc,
             "description_clean": clean,
             "description_match": match_key(clean),
-            "description_sha256": desc_sha256(clean),
+            "description_sha256": common.sha_text(clean),
             "description_lang": lang,
             "lot_or_phase": marks["lot_or_phase"],
             "component_number": number,
@@ -904,8 +634,8 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
             "method_source": method_source,
             "method_raw": r.get("method_raw") or "",
             "market_approach": norm_approach(r.get("market_approach") or ""),
-            # Re-mapped here from the borrower's own word, so a change to
-            # STATUS_MAP needs a re-clean, not a re-fetch.
+            # Re-mapped here from the borrower's own word, so a change to STATUS_MAP needs a
+            # re-clean, not a re-fetch.
             "status": norm_status(r.get("status_raw") or ""),
             "status_raw": r.get("status_raw") or "",
             "planned_date": planned,
@@ -923,40 +653,15 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
 
 
 def dedupe_packages(rows, counters):
-    """One row per package: the newest plan version's row, whole.
-
-    Nothing is carried from an older version, neither status nor amount. A
-    value is a statement a plan made on its date; filling a field the newest
-    plan left blank with an older plan's figure would put a statement on today
-    that no current plan makes. Every version stays in packages_raw.csv and
-    the older ones in superseded_packages.csv, so the history is not lost.
-
-    Grouped on (project_id, normalised reference), not on the reference alone. The borrower
-    reference is only unique within a project, and generic ones recur across
-    projects - 'CS-INDV', 'GO-RFB' and 'CS-QCBS' each appear under three of the
-    70, and 8 references in total are shared by two or more projects. Keyed on
-    the reference alone the later project's package is folded into the earlier
-    project's row and leaves no trace: one project's package vanishes, the
-    other's description is overwritten by a stranger's. 10 packages were being
-    lost that way.
-
-    The superseded rows are written whole to superseded_packages.csv, each
-    pointing at the version that replaced it, and counted - a supersession that
-    leaves no trace is how a revised amount becomes invisible.
-    """
-    # The key is the normalised reference ('EDGE- G13' and 'EDGE-G13' are one
-    # package). A generic reference that one plan uses for several packages
-    # ('CS-INDV' for every individual consultant) also takes the description's
-    # matching copy, so those packages are not folded into one another.
+    """One row per package: the newest plan version's row, whole."""
+    # The key is the normalised reference ('EDGE- G13' and 'EDGE-G13' are one package).
     per_version = Counter((r["project_id"], r["plan_version"], r["borrower_ref_norm"])
                           for r in rows)
     shared = {(p, ref) for (p, _v, ref), n in per_version.items() if n > 1}
-    # A plan that prints the same reference AND description twice with
-    # different figures, status or dates lists two packages (EDGE-G1A at 13.0m
-    # and at 13.06m): the second and later in a version are told apart by
-    # their order in it, so neither is lost behind the other. A row repeated
-    # identically in the same version is one package printed twice and is
-    # dropped, so its value is not counted twice.
+    # A plan that prints the same reference AND description twice with different figures,
+    # status or dates lists two packages (EDGE-G1A at 13.0m and at 13.06m): the second and
+    # later in a version are told apart by their order in it, so neither is lost behind the
+    # other.
     occurrence = Counter()
     printed = set()
     groups = defaultdict(list)
@@ -975,7 +680,7 @@ def dedupe_packages(rows, counters):
         suffix = ""
         if key in shared:
             key += (r["description_match"],)
-            suffix = ":" + hashlib.sha256(key[2].encode()).hexdigest()[:8]
+            suffix = ":" + common.sha_text(key[2])[:8]
         occurrence[(r["plan_version"],) + key] += 1
         n = occurrence[(r["plan_version"],) + key]
         if n > 1:
@@ -984,10 +689,8 @@ def dedupe_packages(rows, counters):
             counters["packages_repeated_within_a_version"] += 1
         r["package_id"] = ":".join(key[:2]) + suffix
         groups[key].append(r)
-    # The project's latest plan: every plan version disclosed on its most
-    # recent disclosure date. A package not in it was dropped from the plan,
-    # or the latest plan was published in parts; in_latest_plan says which
-    # packages the latest plan still lists, and nothing is decided on it here.
+    # The project's latest plan: every plan version disclosed on its most recent disclosure
+    # date.
     latest_date = {}
     for r in rows:
         d = r["_plan_disclosure_date"]
@@ -1024,17 +727,7 @@ def dedupe_packages(rows, counters):
 
 def resolve_status(kept, awards, counters):
     """Give every package the best-evidenced status there is, and say where it
-    came from and as of when.
-
-    Two sources, the more recent dated evidence winning:
-
-      plan   the newest plan version's own status, as of its disclosure
-      award  a signed contract in the awards data linked to the package
-             (links.py), as of signing
-
-    An older plan version's status is never used: it is a fact about that
-    plan's date, not about now. With neither source the status stays unknown.
-    """
+    came from and as of when."""
     signed = {}
     for a in awards:
         d = a.get("signed_date") or ""
@@ -1042,8 +735,8 @@ def resolve_status(kept, awards, counters):
             signed[a["package_id"]] = d
     for r in kept:
         cands = []
-        # (date, precedence, ...): on the same date a signed contract is the
-        # firmer fact, so it wins rather than the alphabet deciding.
+        # (date, precedence, ...): on the same date a signed contract is the firmer fact, so
+        # it wins rather than the alphabet deciding.
         if r["status"] != "unknown":
             cands.append((r.get("_disclosed", ""), 0, r["status"], "plan"))
         d = signed.get(r["package_id"])
@@ -1081,7 +774,7 @@ def clean_notices(rows, counters, vocab=None, names=None):
             "borrower_ref_norm": norm_ref(plan_table.chain_ref(r.get("borrower_ref"))),
             "description": raw, "description_clean": clean,
             "description_match": match_key(clean),
-            "description_sha256": desc_sha256(clean),
+            "description_sha256": common.sha_text(clean),
             "description_lang": lang,
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "glue_repairs": repairs,
@@ -1113,7 +806,7 @@ def clean_awards(rows, counters, vocab=None, names=None):
             "borrower_ref_norm": norm_ref(plan_table.chain_ref(r["borrower_ref"])),
             "description": raw, "description_clean": clean,
             "description_match": match_key(clean),
-            "description_sha256": desc_sha256(clean),
+            "description_sha256": common.sha_text(clean),
             "description_lang": lang,
             "is_placeholder": str(is_placeholder(clean)).lower(),
             "glue_repairs": repairs,

@@ -1,31 +1,14 @@
-"""Read an appraisal document from its PDF, using layout rather than guesswork.
+"""Read an appraisal document from its PDF by layout: font size, position, weight
+and raised characters, measured against the document's own body size and pitch.
 
-A text rendition of a PDF throws away everything that says what a line IS: its
-font size, its position on the page, whether it is bold, whether a character
-is raised. The PDF still has that information, so this reads it directly:
+Drops rotated stamps, running headers and footers, page numbers and template
+codes; removes footnote markers; reads footnote bodies, headings, ruled tables
+(one unit per row) and paragraphs (a gap beyond the line pitch, or a numbered
+paragraph or bullet opening a line).
 
-  rotated text              the "Public Disclosure Authorized" stamp down the
-                            margin, dropped by its angle (the text matrix)
-  running header / footer   lines repeating at the same height on many pages,
-                            page-number lines, classification banners, dated
-                            footers and hidden template codes
-  footnote marker           a raised digit set smaller than the line it sits on,
-                            or a number run onto a word that the page's own
-                            footnotes define
-  footnote body             the run of small-type lines at the foot of a page
-  heading                   a short line set in bold, italic or larger type
-  table                     a region pdfplumber finds ruled as a table; each row
-                            becomes one unit, "Caption - Header: value · ...",
-                            or cells joined by " | " when no header is found
-  paragraph                 a vertical gap larger than the line pitch, or a
-                            numbered paragraph or bullet opening a new line
-
-Everything is decided from measurements the document gives, relative to its
-own body font size and line pitch, so no threshold depends on one template.
-
-Output: the cleaned text, one span per unit (start, end, section path, section
-title, block, first page, last page, meta), and - when asked - the PDF's text
-exactly as read, which every span points into through meta["src"].
+extract() returns the cleaned text, one span per unit (start, end, section path,
+section title, block, first page, last page, meta) and, when asked, the PDF's text
+as read, which each span points into through meta["src"].
 """
 import re
 import statistics
@@ -42,11 +25,33 @@ FOOTNOTE_GAP = 2.0           # footnotes set in the text's own type start after 
 FOOTNOTE_MAX_UNNUMBERED = 8   # a carried footnote with no number of its own runs at most this many lines
 FOOTNOTE_NUMBER = re.compile(r"^\d{1,3}(?!\d)(?![.,]\d)\s*\S")
 HEADER_REPEAT = 0.30          # a line at the same height on this share of pages is furniture
+FURNITURE_MIN_PAGES = 3       # ...and on at least this many pages
+FURNITURE_BAND = 4            # points: line tops are compared in bands this tall
+MARKER_RAISE = 0.1            # a footnote marker's bottom sits this share of the line size above the baseline
+LEVEL_SHEAR = 0.1             # a text matrix with shear terms below this is level text
+STYLE_SHARE = 0.6             # a line is bold (italic) when this share of its characters is
+PAGE_FRAME_SHARE = 0.8        # a "table" covering this share of the page is a frame, not a table
+TABLE_EDGE_SLACK = 1          # points a line's middle may sit outside a table's ruling
+HEADER_SCAN_ROWS = 12         # a table's header row is looked for among its first rows
+SUBHEADER_MAX_CHARS = 3       # a row of cells this short under the header is a sub-header
+CARRIED_HEADER_MAX_LINE = 2   # a table carries the last header when it starts by this line of a page
+TITLE_MAX_WORDS = 30          # a component, figure or table title line has at most this many words
+BODY_SIZE_TOLERANCE = 0.3     # points: a line within this of the body size is body type
+MEASURE_MIN_LINES = 5         # a page's full-line width needs this many body lines
+HEADING_SIZE_STEP = 0.5       # points above the body size that make a line a heading
+HEADING_MAX_WORDS = 14        # a heading line has at most this many words
+HEADING_MAX_MEASURE = 0.8     # ...and is narrower than this share of the page's full line
+CAPTION_RESET_WORDS = 6       # body text longer than this after a title makes it a section heading
+PITCH_MAX_GAP = 3             # gaps beyond this many body sizes are not line pitch
+DEFAULT_PITCH = 1.2           # line pitch, in body sizes, when a document gives none
+ROMAN_HEADING_MAX_CHARS = 90  # a body line opening with a roman numeral is a heading below this length
+ANNEX_HEADING_MAX_CHARS = 110 # an annex heading is shorter than this
+SECTION_TITLE_MAX_CHARS = 120 # a section title is stored cut to this length
 TOC_LINE = re.compile(r"(\.{3,}|\s\.\s\.\s)\s*\d{1,4}\s*$")
 PAGE_NUM = re.compile(r"^\s*(?:Page\s+)?\d{1,4}(?:\s+of\s+\d{1,4})?\s*$", re.I)
-# Page furniture recognisable by its words alone, wherever on the page it sits:
-# the classification banner some restructuring papers repeat, and the hidden
-# template markers the Bank's authoring system leaves in the PDF text layer.
+# Page furniture recognisable by its words alone, wherever on the page it sits: the
+# classification banner some restructuring papers repeat, and the hidden template markers
+# the Bank's authoring system leaves in the PDF text layer.
 FURNITURE_TEXT = re.compile(
     r"^(?:for\s+)?official\s+use\s+only(?:\s+page\s+\d+(?:\s+of\s+\d+)?|\s+[ivxlc]{1,6})?$"
     r"|@#&OPS"
@@ -54,13 +59,10 @@ FURNITURE_TEXT = re.compile(
     r"|^[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}$"
     # A dated footer: 'Oct 12, 2023 Page 27 of 29'.
     r"|^[A-Z][a-z]{2,8}\.? \d{1,2}, \d{4}\s+Page \d+ of \d+$", re.I)
-# A footnote reference that was not set raised: digits run onto the end of a
-# word or a closing bracket, 'hoped44', 'process104.'. Only removed when the
-# page's own footnotes define that number.
+# A footnote reference that was not set raised: digits run onto the end of a word or a
+# closing bracket, 'hoped44', 'process104.'.
 INLINE_MARK = re.compile(r"(?<=[a-z\)\]\"'])(\d{1,3})(?=[\s,.;:)]|$)")
-# The word a candidate marker is glued to. A number after a capital letter
-# (IDA19) never matches; one after a word that carries a capital past its
-# first letter (IPv6, Wi-Fi6, GovNet2) is a version, not a footnote.
+# The word a candidate marker is glued to.
 _MARK_WORD = re.compile(r"([A-Za-z][\w-]*)$")
 
 
@@ -82,8 +84,7 @@ def strip_inline_marks(text, defined, stats):
         return m.group(0)
     return INLINE_MARK.sub(repl, text)
 # A web address, including the pieces a line break left after a space
-# ('https://www.example.org/en/ country/report.pdf'). Replaced by "[link]": it
-# costs the model many tokens and says nothing about assets or measures.
+# ('https://www.example.org/en/ country/report.pdf').
 URL = re.compile(r"(?:https?://|www\.)\S+(?:\s(?=[\w.\-]*[/=])[\w./?=&%#~:+\-]+)*", re.I)
 TITLE_LINE = re.compile(r"^(?:Sub-?component|Component|Figure|Table|Box|Map|Chart)\s*[\dA-Z]")
 BULLET_OPEN = re.compile(r"^\s*(?:[•●▪■◦\-–]|\(?[ivxlc]{1,5}[\).]|\(?[a-z][\).]|\d{1,2}\))\s+\S")
@@ -92,12 +93,11 @@ BULLET_OPEN = re.compile(r"^\s*(?:[•●▪■◦\-–]|\(?[ivxlc]{1,5}[\).]|\(
 TEMPLATE_CODE = re.compile(r"\s*\b[A-Z][A-Z0-9]*(?:_[A-Z0-9]+){2,}\b|\s*\b[A-Z]{2,} Table SPACE\b")
 
 
-
-# How far below the last body line the next one may sit and still continue
-# its paragraph, in multiples of the document's median line pitch: at the
-# normal pitch (LINE_GAP), or further for a paragraph set with looser spacing
-# that had not finished its sentence (LOOSE_GAP). src/sensitivity.py varies
-# them to measure how much the paragraph boundaries depend on them.
+# How far below the last body line the next one may sit and still continue its paragraph, in
+# multiples of the document's median line pitch: at the normal pitch (LINE_GAP), or further
+# for a paragraph set with looser spacing that had not finished its sentence (LOOSE_GAP).
+# src/sensitivity.py varies them to measure how much the paragraph boundaries depend on
+# them.
 LINE_GAP = 1.45
 LOOSE_GAP = 3
 
@@ -106,17 +106,12 @@ def _norm(text):
 
 
 def _line_text(line, chars, line_size):
-    """A line's text as pdfplumber spaced it, minus raised small digits.
-
-    pdfplumber's own word spacing is kept - rebuilding it from character gaps
-    runs justified text together. Its line text is the line's characters in
-    order with spaces inserted, so the two are walked in step and only the
-    characters flagged as footnote markers are left out."""
+    """A line's text as pdfplumber spaced it, minus raised small digits."""
     full = [c["bottom"] for c in chars if c["size"] >= SUPERSCRIPT_RATIO * line_size]
     baseline = statistics.median(full) if full else None
     drop = set()
-    # The number a footnote body opens with is its own, not a marker: keep the
-    # whole leading run of digits, not just the first one ('43', not '4').
+    # The number a footnote body opens with is its own, not a marker: keep the whole leading
+    # run of digits, not just the first one ('43', not '4').
     lead = 0
     while lead < len(chars) and (chars[lead]["text"].isdigit() or chars[lead]["text"].isspace()):
         lead += 1
@@ -124,17 +119,15 @@ def _line_text(line, chars, line_size):
         t = ch["text"]
         if k < lead:
             continue
-        # A footnote marker is small AND raised: its bottom sits well above the
-        # line's baseline. Small alone is not enough - the 2 in CO2 is small too,
-        # but lowered, and must survive.
+        # A footnote marker is small AND raised: its bottom sits well above the line's
+        # baseline.
         if (k and baseline is not None and ch["size"] < SUPERSCRIPT_RATIO * line_size
                 and (t.isdigit() or t in ",*")
-                and ch["bottom"] < baseline - 0.1 * line_size):
+                and ch["bottom"] < baseline - MARKER_RAISE * line_size):
             drop.add(k)
-    # A list bullet drawn from a symbol font arrives as whatever letter sits at
-    # that code point in the font's own table - Wingdings 'y', Courier 'o',
-    # Symbol 'r' - and reads as a stray word. At the head of a line, in such a
-    # font, it is a bullet.
+    # A list bullet drawn from a symbol font arrives as whatever letter sits at that code
+    # point in the font's own table - Wingdings 'y', Courier 'o', Symbol 'r' - and reads as
+    # a stray word.
     first = next((k for k, ch in enumerate(chars) if not ch["text"].isspace()), None)
     bullet_at = None
     if first is not None:
@@ -168,7 +161,7 @@ def _not_rotated(obj):
     if obj.get("object_type") != "char":
         return True
     m = obj.get("matrix") or (1, 0, 0, 1)
-    return abs(m[1]) < 0.1 and abs(m[2]) < 0.1
+    return abs(m[1]) < LEVEL_SHEAR and abs(m[2]) < LEVEL_SHEAR
 
 
 def _on_page(bbox):
@@ -200,9 +193,10 @@ def _page_lines(page):
         if not sizes:
             continue
         size = Counter(sizes).most_common(1)[0][0]
-        bold = sum("Bold" in c["fontname"] or "Black" in c["fontname"] for c in chars) > 0.6 * len(chars)
+        bold = sum("Bold" in c["fontname"] or "Black" in c["fontname"]
+                   for c in chars) > STYLE_SHARE * len(chars)
         italic = sum("Italic" in c["fontname"] or "Oblique" in c["fontname"]
-                     for c in chars) > 0.6 * len(chars)
+                     for c in chars) > STYLE_SHARE * len(chars)
         text = _norm(_line_text(ln, chars, size))
         if text:
             lines.append({"top": ln["top"], "bottom": ln["bottom"], "x0": ln["x0"],
@@ -218,7 +212,7 @@ def _tables(page):
     for tb in page.find_tables():
         x0, top, x1, bottom = tb.bbox
         rows = tb.extract()
-        if (x1 - x0) * (bottom - top) > 0.8 * area:
+        if (x1 - x0) * (bottom - top) > PAGE_FRAME_SHARE * area:
             continue
         if len(rows) < 2 or max(len(r) for r in rows) < 2:
             continue
@@ -234,23 +228,7 @@ def _is_numeric(cell):
 
 
 def _clean_table(rows, vocab):
-    """A pdfplumber table -> (header or None, data rows, caption or None).
-
-    - a cell that wraps keeps its line breaks in pdfplumber's output; they are
-      joined, with a word broken at a hyphen mended as in prose
-    - hidden template text in a cell ('@#&OPS...', 'RESULT_FRAME_TBL_PDO') goes
-    - columns empty in every row go: merged cells leave many of them
-    - the header is the first row of two or more labels that some later row
-      answers with a figure; single-cell rows above it are titles, and the last
-      of them is the table's caption ('Project Development Objective
-      Indicators')
-    - a row of small numbers under the header is a sub-header: 'Intermediate
-      Targets' over '1  2' becomes 'Intermediate Targets 1', '... 2'
-    - a table ruled only around its edge yields one row per printed line, so a
-      label wrapping over three lines with its figures on the middle one is
-      three rows. They are regrouped: label fragments and figures gather into
-      one row until a new label opens with a capital after figures were seen
-    """
+    """A pdfplumber table -> (header or None, data rows, caption or None)."""
     def cell(c):
         if not c:
             return ""
@@ -279,7 +257,7 @@ def _clean_table(rows, vocab):
         return [j for j, v in enumerate(r) if v and not _is_numeric(v)]
 
     h = None
-    for i, r in enumerate(grid[:12]):
+    for i, r in enumerate(grid[:HEADER_SCAN_ROWS]):
         if len(text_cells(r)) >= 2 and not numeric_cells(r) and \
                 any(numeric_cells(x) for x in grid[i + 1:]):
             h = i
@@ -306,7 +284,7 @@ def _clean_table(rows, vocab):
     body = grid[h + 1:]
 
     def is_subheader(r):
-        return bool(r) and all(len(v) <= 3 for v in r if v) and not text_cells(r) \
+        return bool(r) and all(len(v) <= SUBHEADER_MAX_CHARS for v in r if v) and not text_cells(r) \
             and len([v for v in r if v]) >= 2
 
     if body and is_subheader(body[0]):
@@ -317,10 +295,8 @@ def _clean_table(rows, vocab):
                 parent = next((top[k] for k in range(j, -1, -1) if top[k]), "")
                 header[j] = f"{parent} {v}".strip()
 
-    # A frame can hold several tables with the same columns, each reprinting the
-    # header under its own title ('Intermediate Results Indicators by
-    # Components'). Split there; the single-cell rows just above a repeated
-    # header are the next table's title, not part of the last indicator.
+    # A frame can hold several tables with the same columns, each reprinting the header
+    # under its own title ('Intermediate Results Indicators by Components').
     segments, seg, cap = [], [], caption
     for r in body:
         if r == header_row:
@@ -344,8 +320,8 @@ def _clean_table(rows, vocab):
             labels = text_cells(r)
             cur = groups[-1] if groups else None
             first = r[labels[0]] if labels else ""
-            # An objective heading inside the framework, '1. to increase access
-            # ...', stands on its own row and closes the indicator before it.
+            # An objective heading inside the framework, '1. to increase access ...', stands
+            # on its own row and closes the indicator before it.
             if re.match(r"^\d{1,2}\.\s+\S", first) and not has_num:
                 groups.append({"cells": list(r), "has_num": False, "closed": True})
                 continue
@@ -387,12 +363,10 @@ def _row_text(cells, header, caption):
 def _in_box(line, box):
     """Whether a line belongs to a table: its middle is within the table's
     height and most of its width within the table's. A bullet glyph hung in
-    the margin left of the ruling ('•' at x 23, the table from x 36) leaves
-    the line in the table; requiring the whole line inside split every
-    bulleted cell, its first line read as body text and the rest as table."""
+    the margin left of the ruling leaves the line in the table."""
     x0, top, x1, bottom = box
     mid = (line["top"] + line["bottom"]) / 2
-    if not top - 1 <= mid <= bottom + 1:
+    if not top - TABLE_EDGE_SLACK <= mid <= bottom + TABLE_EDGE_SLACK:
         return False
     width = max(line["x1"] - line["x0"], 1e-6)
     overlap = min(line["x1"], x1) - max(line["x0"], x0)
@@ -403,9 +377,9 @@ def _furniture(pages):
     """Fingerprints of lines repeating at the same height across the document."""
     seen = Counter()
     for lines in pages:
-        for fp in {(round(l["top"] / 4), C.fingerprint(l["text"])) for l in lines}:
+        for fp in {(round(l["top"] / FURNITURE_BAND), C.fingerprint(l["text"])) for l in lines}:
             seen[fp] += 1
-    need = max(3, int(HEADER_REPEAT * len(pages)))
+    need = max(FURNITURE_MIN_PAGES, int(HEADER_REPEAT * len(pages)))
     return {fp for fp, n in seen.items() if n >= need and fp[1]}
 
 
@@ -424,15 +398,7 @@ def _dehyphenate(left, right, vocab):
 
 
 def _footnote_start(lines, body):
-    """Index of the first footnote line on a page (len(lines) if none).
-
-    Footnotes are the unbroken run of small-type lines at the foot of the
-    page, set no larger than the smallest of their numbered lines: an annex
-    set a point smaller than the body, with footnotes smaller still, keeps
-    its own text. A
-    run with no numbered line is a footnote carried from the previous page
-    only while it is short and leaves body text above it; otherwise it is
-    body text set small (a page, or the end of one, in annex type)."""
+    """Index of the first footnote line on a page (len(lines) if none)."""
     small = len(lines)
     while small and lines[small - 1]["size"] < SMALL_RATIO * body:
         small -= 1
@@ -443,8 +409,8 @@ def _footnote_start(lines, body):
     if not numbered:
         # A carried footnote: short, with body text above it.
         return small if small and len(run) <= FOOTNOTE_MAX_UNNUMBERED else len(lines)
-    # The footnotes' own type is the smallest their numbered lines are set
-    # in; larger small type above them is the page's text.
+    # The footnotes' own type is the smallest their numbered lines are set in; larger small
+    # type above them is the page's text.
     foot = min(numbered)
     start = len(lines)
     for i in range(len(lines) - 1, small - 1, -1):
@@ -452,9 +418,8 @@ def _footnote_start(lines, body):
             start = i
         else:
             break
-    # Text set in the footnotes' own type (an annex table in small type)
-    # gives a run reaching up the page. There the footnotes start after the
-    # last wide gap that a numbered line follows.
+    # Text set in the footnotes' own type (an annex table in small type) gives a run
+    # reaching up the page.
     top, bottom = lines[0]["top"], lines[-1]["top"]
     if start < len(lines) - 1 and lines[start]["top"] < (top + bottom) / 2:
         gaps = [lines[i]["top"] - lines[i - 1]["top"] for i in range(start + 1, len(lines))]
@@ -469,8 +434,7 @@ def _footnote_start(lines, body):
 def _contents_entry(text):
     """A contents line without dot leaders: a section or annex heading that
     ends in a bare page number, 'V. KEY RISKS 25'. A body heading does not end
-    in a number, and taking a contents entry for a real heading files the whole
-    document under the wrong section - one Togo PAD went entirely to annex."""
+    in a number; taken for a heading, it files the document under the wrong section."""
     if not re.search(r"\s\d{1,3}$", text):
         return False
     return bool(C.ROMAN.match(text) or C.ANNEX.match(text) or C.LETTER.match(text))
@@ -498,11 +462,11 @@ def _next_markers(marker):
     return out
 
 
-# A footnote as printed: its number, a space, then a capital, a quote or a
-# bracket ('13 Data from the monthly report ...').
+# A footnote as printed: its number, a space, then a capital, a quote or a bracket ('13 Data
+# from the monthly report ...').
 BARE_NOTE = re.compile(r"^(\d{1,3})\s+(?=[A-Z\"(“‘'])")
-# Where one footnote can end and the next begin on the same line: after a
-# sentence end or a closing bracket or quote, a year, or a web address.
+# Where one footnote can end and the next begin on the same line: after a sentence end or a
+# closing bracket or quote, a year, or a web address.
 NOTE_END = re.compile(r"(?:[.!?;)\]\"”’]|\b(?:19|20)\d\d|(?:https?://|www\.)\S*)$")
 
 
@@ -591,7 +555,7 @@ def _title_line(text):
     """A component, figure or table title standing as its own line: read as
     a heading, so never the lead-in of a list or an item of one."""
     text = GLYPH_BULLET.sub("", text, count=1).strip()
-    return bool(TITLE_LINE.match(text)) and len(text.split()) <= 30 \
+    return bool(TITLE_LINE.match(text)) and len(text.split()) <= TITLE_MAX_WORDS \
         and not re.search(r"[.;]$", text) and "\n" not in text
 
 
@@ -612,18 +576,7 @@ def _opens_block(line, before):
 
 
 def extract(pdf, raw_out=None):
-    """An open pdfplumber PDF -> (clean_text, spans, stats).
-
-    raw_out, a list, receives the PDF's text exactly as read - every line of
-    every page, a form feed between pages - and each span's meta carries `src`,
-    the (start, end) of the lines it was built from in that text. So the review
-    sheet shows a paragraph's source without searching for it.
-
-    spans: (start, end, section_path, section_title, block, page_from, page_to,
-            meta) - meta holds, where they apply: list_item, and for a table row
-            its table number, row, cells, header and caption. A list set out
-            line by line sits in the paragraph above it, one item per line
-    """
+    """An open pdfplumber PDF -> (clean_text, spans, stats)."""
     stats = Counter()
     pages, tables = [], []
     raw_parts, cursor = [], 0
@@ -649,12 +602,11 @@ def extract(pdf, raw_out=None):
         return "", [], stats
     body = body_sizes.most_common(1)[0][0]
     furniture = _furniture(pages)
-    # The width of a full body line, per page: landscape annex pages run wider
-    # than portrait ones. A heading is short; a line running the full measure
-    # is prose, even when it is set in bold for emphasis.
+    # The width of a full body line, per page: landscape annex pages run wider than portrait
+    # ones.
     def _measure(lines):
-        w = sorted(l["x1"] - l["x0"] for l in lines if abs(l["size"] - body) < 0.3)
-        return w[len(w) // 2] if len(w) >= 5 else None
+        w = sorted(l["x1"] - l["x0"] for l in lines if abs(l["size"] - body) < BODY_SIZE_TOLERANCE)
+        return w[len(w) // 2] if len(w) >= MEASURE_MIN_LINES else None
     page_measure = [_measure(lines) for lines in pages]
     known = sorted(m for m in page_measure if m)
     doc_measure = known[len(known) // 2] if known else 0
@@ -669,13 +621,13 @@ def extract(pdf, raw_out=None):
     # 1. Label every line: furniture, footnote, table, heading or body.
     items = []          # (kind, page_no, line or table-row text, line dict)
     pitches = []
-    # Pass 1, per page: drop furniture, find where the footnotes start, and
-    # note which footnote numbers the page defines.
+    # Pass 1, per page: drop furniture, find where the footnotes start, and note which
+    # footnote numbers the page defines.
     kept_pages, fn_starts, defined_by_page = [], [], []
     for lines in pages:
         keep = []
         for l in lines:
-            if (round(l["top"] / 4), C.fingerprint(l["text"])) in furniture:
+            if (round(l["top"] / FURNITURE_BAND), C.fingerprint(l["text"])) in furniture:
                 stats["furniture_lines"] += 1
                 continue
             if PAGE_NUM.match(l["text"]):
@@ -696,8 +648,8 @@ def extract(pdf, raw_out=None):
     last_caption = ["", 0]       # the latest heading or short title line, and its page
     for pno, (keep, tabs) in enumerate(zip(kept_pages, tables), 1):
         fn_from = fn_starts[pno - 1]
-        # Footnote numbers for markers that were not set raised: this page's,
-        # and the next page's, where a footnote that did not fit is carried.
+        # Footnote numbers for markers that were not set raised: this page's, and the next
+        # page's, where a footnote that did not fit is carried.
         defined = defined_by_page[pno - 1] | (
             defined_by_page[pno] if pno < len(defined_by_page) else set())
 
@@ -714,11 +666,11 @@ def extract(pdf, raw_out=None):
                     table_no[0] += 1
                     header, data, own_caption = _clean_table(box[1], vocab)
                     width = len(data[0][0]) if data else 0
-                    # A table running on from the previous page reprints no
-                    # header: borrow the last one when the column count agrees
-                    # and the table starts the page's content.
+                    # A table running on from the previous page reprints no header: borrow
+                    # the last one when the column count agrees and the table starts the
+                    # page's content.
                     if header is None and last_header[0] and \
-                            len(last_header[0]) == width and i <= 2:
+                            len(last_header[0]) == width and i <= CARRIED_HEADER_MAX_LINE:
                         header = last_header[0]
                         caption = last_header[1]
                         stats["table_headers_carried"] += 1
@@ -749,24 +701,24 @@ def extract(pdf, raw_out=None):
             if TOC_LINE.search(l["text"]) or _contents_entry(l["text"]):
                 stats["contents_lines"] += 1
                 continue
-            heading = (l["bold"] or l["italic"] or l["size"] > body + 0.5) \
-                and len(l["text"].split()) <= 14 and not re.search(r"[.;,:]$", l["text"]) \
-                and (l["x1"] - l["x0"]) < 0.8 * page_measure[pno - 1]
+            heading = (l["bold"] or l["italic"] or l["size"] > body + HEADING_SIZE_STEP) \
+                and len(l["text"].split()) <= HEADING_MAX_WORDS \
+                and not re.search(r"[.;,:]$", l["text"]) \
+                and (l["x1"] - l["x0"]) < HEADING_MAX_MEASURE * page_measure[pno - 1]
             text = unmark(l["text"])
             if heading or TITLE_LINE.match(text):
                 last_caption[0], last_caption[1] = text, pno
                 last_header[0] = None   # a new title ends the previous table
-            elif len(text.split()) > 6:
-                # Body prose after a title makes it a section heading, not a
-                # caption: the data sheet after "G. Key Risks" and its text is
-                # not a key-risks table. A short note ("(US$ million)") keeps it.
+            elif len(text.split()) > CAPTION_RESET_WORDS:
+                # Body prose after a title makes it a section heading, not a caption: the
+                # data sheet after "G. Key Risks" and its text is not a key-risks table.
                 last_caption[0] = ""
             items.append(("heading" if heading else "body", pno, text, l))
             if i:
                 gap = l["top"] - keep[i - 1]["top"]
-                if 0 < gap < 3 * body:
+                if 0 < gap < PITCH_MAX_GAP * body:
                     pitches.append(round(gap, 1))
-    pitch = statistics.median(pitches) if pitches else 1.2 * body
+    pitch = statistics.median(pitches) if pitches else DEFAULT_PITCH * body
 
     # 2. Group lines into units.
     units = []          # [kind, text, page_from, page_to]
@@ -791,10 +743,10 @@ def extract(pdf, raw_out=None):
             prev = kind
             continue
         if kind == "heading":
-            # A figure caption, a table or a sub-heading can interrupt a
-            # paragraph that carries on below it. last_body is kept so that a
-            # lowercase continuation can still find its paragraph; prev is
-            # cleared so an ordinary next line does not join across it.
+            # A figure caption, a table or a sub-heading can interrupt a paragraph that
+            # carries on below it. last_body is kept so that a lowercase continuation can
+            # still find its paragraph; prev is cleared so an ordinary next line does not
+            # join across it.
             start(kind, text, pno, line=l)
             prev = kind
             continue
@@ -812,18 +764,14 @@ def extract(pdf, raw_out=None):
                 # The footnote's own number goes; a year opening the text stays.
                 start("footnote", re.sub(r"^\d{1,3}(?!\d)\s*", "", pieces[0][0]), pno,
                       {"fn": pieces[0][1]}, line=l)
-            # Two footnotes printed on one line ('... 2023 14 A joint study
-            # ...'): each later one is a footnote of its own.
+            # Two footnotes printed on one line ('... 2023 14 A joint study ...'): each
+            # later one is a footnote of its own.
             for piece, n in pieces[1:]:
                 start("footnote", re.sub(r"^\d{1,3}\s*", "", piece), pno, {"fn": n}, line=l)
                 stats["footnotes_split_inline"] += 1
             prev = "footnote"
             continue
-        # Body. A paragraph continues when the next line follows at the normal
-        # line pitch on the same page, or - across a page turn - when the
-        # paragraph had not finished a sentence. Footnotes and the running
-        # header between the two halves are already out of the body stream, so
-        # the continuation joins the last BODY unit, whatever came between.
+        # Body.
         joined = False
         if last_body is not None and last_body_line is not None:
             ppno, pl = last_body_line
@@ -833,22 +781,16 @@ def extract(pdf, raw_out=None):
                 l["top"] - pl["top"] <= LINE_GAP * pitch
             unfinished = not re.search(r"[.!?:]\"?$", units[last_body][1])
             page_turn = pno == ppno + 1 and unfinished and prev != "heading"
-            # Past an interruption (figure, table, caption) only a line that
-            # plainly continues a sentence - it opens in lower case - rejoins.
+            # Past an interruption (figure, table, caption) only a line that plainly
+            # continues a sentence - it opens in lower case - rejoins.
             resumed = prev in ("table", "heading", "footnote") and unfinished \
                 and pno - ppno <= 1 and re.match(r"[a-z]", text)
-            # A wider gap than usual between two lines of one sentence: the
-            # document set this paragraph at looser spacing. The sentence was
-            # not finished and the line opens in lower case, so it continues.
+            # A wider gap than usual between two lines of one sentence: the document set
+            # this paragraph at looser spacing.
             loose = pno == ppno and prev == "body" and unfinished \
                 and re.match(r"[a-z]", text) and l["top"] - pl["top"] <= LOOSE_GAP * pitch
-            # A list item belongs to the paragraph above it: '(b) Active
-            # infrastructure...' means nothing without 'Sub-component 1.1 will
-            # finance:'. It joins that paragraph on a line of its own, across a
-            # page turn and its footnotes, but not past a heading, a caption or
-            # a table, which start a new context. A component's title line is
-            # a heading, not a lead-in: the items under it are one paragraph,
-            # and a title set as a bullet is never an item.
+            # A list item belongs to the paragraph above it: '(b) Active infrastructure...'
+            # means nothing without 'Sub-component 1.1 will finance:'.
             item = GLYPH_BULLET.sub("", text, count=1).strip()
             listed = bool(LIST_ITEM.match(text)) \
                 and (opens_block or _continues_inline_list(text, units[last_body][1])) \
@@ -880,9 +822,9 @@ def extract(pdf, raw_out=None):
     for kind, text, p0, p1, meta in units:
         text = text.strip()
         meta = dict(meta)
-        # A bullet glyph is layout, not text: strip it and record that the
-        # unit opens with a list item - one with no paragraph above it to
-        # join (a list straight after a heading or a table).
+        # A bullet glyph is layout, not text: strip it and record that the unit opens with a
+        # list item - one with no paragraph above it to join (a list straight after a
+        # heading or a table).
         if GLYPH_BULLET.match(text):
             text = GLYPH_BULLET.sub("", text, count=1).strip()
             if kind == "body":
@@ -901,12 +843,12 @@ def extract(pdf, raw_out=None):
         if kind == "heading" or kind == "body":
             m_roman, m_annex = C.ROMAN.match(text), C.annex_match(text)
             m_letter = C.LETTER.match(text)
-            if m_roman and (kind == "heading" or (len(text) < 90 and
+            if m_roman and (kind == "heading" or (len(text) < ROMAN_HEADING_MAX_CHARS and
                                                   m_roman.group(2).isupper())):
                 block = "heading"
                 roman_seen = True
                 sec_path, sec_title = m_roman.group(1), m_roman.group(2).strip(" .:-")
-            elif m_annex and roman_seen and len(text) < 110:
+            elif m_annex and roman_seen and len(text) < ANNEX_HEADING_MAX_CHARS:
                 annex_seen = True
                 sec_path = f"{m_annex.group(1).upper()} {m_annex.group(2)}"
                 sec_title = m_annex.group(3).strip(" .:-")
@@ -919,15 +861,15 @@ def extract(pdf, raw_out=None):
         if block == "body":
             block = ("frontmatter" if not roman_seen else
                      "annex" if annex_seen else "narrative")
-            # Before the first section, a table is front matter like any
-            # other table there (below).
+            # Before the first section, a table is front matter like any other table there
+            # (below).
             if roman_seen and C.looks_tabular(text):
                 block = "table"
         elif block == "table" and not roman_seen:
             block = "frontmatter"
         clean_parts.append(text + "\n\n")
-        spans.append((cursor, cursor + len(text), sec_path, sec_title[:120], block, p0, p1,
-                      meta))
+        spans.append((cursor, cursor + len(text), sec_path, sec_title[:SECTION_TITLE_MAX_CHARS],
+                      block, p0, p1, meta))
         cursor += len(text) + 2
     stats["units"] = len(spans)
     return "".join(clean_parts), spans, stats

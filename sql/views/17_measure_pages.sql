@@ -3,12 +3,8 @@
 -- them field by field. Every count is of commitments (16_commitments.sql)
 -- or of the projects holding them.
 
--- measure_quality is loaded from data/labels/measure_quality.csv once a sheet
--- has been evaluated; until then an empty table keeps the summary working.
-CREATE TABLE IF NOT EXISTS wbg.measure_quality (label_set text, version text, question_sha256 text,
-  run_id text, sheet text, graded_units integer, precision numeric, recall numeric,
-  evaluated_at timestamptz, report_path text);
-
+-- measure_quality is written by the evaluation (src/grading.py); the load
+-- creates it empty until then.
 DROP VIEW IF EXISTS wbg.measure_summary CASCADE;
 CREATE VIEW wbg.measure_summary AS
 WITH m AS (
@@ -25,15 +21,14 @@ c AS (
 q AS (
   -- an evaluation sheet (a random draw) before a training sheet, then the latest
   SELECT DISTINCT ON (label_set) label_set, version AS graded_version, sheet AS graded_sheet,
-         graded_units, precision, recall,
-         run_id AS graded_run_id, question_sha256 AS graded_question_sha256, evaluated_at
+         graded_units, precision, recall, question_sha256 AS graded_question_sha256, evaluated_at
   FROM wbg.measure_quality
   ORDER BY label_set, (sheet = 'evaluation') DESC, evaluated_at DESC
 )
 SELECT m.label_set, m.measure_name, m.definition, m.version,
        coalesce(c.commitments, 0) AS commitments, coalesce(c.projects, 0) AS projects,
        coalesce(c.countries, 0) AS countries, coalesce(c.types, 0) AS types,
-       q.graded_sheet, q.graded_units, q.precision, q.recall, q.graded_version, q.graded_run_id,
+       q.graded_sheet, q.graded_units, q.precision, q.recall, q.graded_version,
        q.graded_question_sha256,
        q.evaluated_at AS graded_at
 FROM m

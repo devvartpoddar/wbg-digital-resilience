@@ -29,25 +29,10 @@ def test_a_request_is_checked_before_anything_runs():
 def test_the_files_have_the_shape_analysis_labels_keeps(tmp_path):
     R.write_files(GOOD, str(tmp_path))
     names = sorted(os.listdir(tmp_path))
-    assert names == ["solar_backup.csv", "solar_backup_patterns.csv",
-                     "solar_backup_queries.csv", "solar_backup_scale.csv"]
+    assert names == ["solar_backup.csv", "solar_backup_patterns.csv", "solar_backup_queries.csv"]
     q = list(csv.DictReader(open(tmp_path / "solar_backup_queries.csv")))
     assert [r["query"] for r in q] == GOOD["phrases"].splitlines()
-    # a requested measure takes the common grade scale every measure uses
-    assert open(tmp_path / "solar_backup_scale.csv").read() == \
-        open(R.SCALE_TEMPLATE).read()
 
-
-def test_the_spend_cap_stops_before_asking(monkeypatch, tmp_path):
-    import answers
-    import classify
-    monkeypatch.setenv("WBG_SPEND_CAP_USD", "0.000001")
-    monkeypatch.setattr(answers, "_spent_here", [0.0])
-    q = {"q": {"type": "noul", "instructions": "Is it about towers?",
-               "criteria": {"true": "yes", "false": "no"}}}
-    monkeypatch.setattr(classify, "decide", lambda *a, **k: pytest.fail("asked over the cap"))
-    with pytest.raises(answers.CapReached):
-        answers.ask("m", [({"passage": "x" * 2000}, q)], str(tmp_path), api_key="k")
 
 
 @pytest.mark.skipif(not os.environ.get("WBG_PG_TEST"), reason="set WBG_PG_TEST to a scratch database")
@@ -79,15 +64,3 @@ def test_a_queued_request_runs_its_stages_once(monkeypatch, tmp_path):
         got = conn.execute(f"SELECT label_set, status, committed_found FROM {R.TABLE} "
                            f"ORDER BY request_id").fetchall()
         assert got == [("solar_backup", "done", 7), ("Bad Name", "failed", None)]
-
-
-def test_a_run_wide_cap_counts_what_the_ledger_records_since_the_run_began(monkeypatch, tmp_path):
-    import answers
-    (tmp_path / "reports").mkdir()
-    (tmp_path / "reports" / "spend.csv").write_text(
-        "at,stage,label_set,model,calls,cost_usd,seconds,run\n"
-        "2026-10-20T10:00:00Z,classify,assets,m,1,5.0000,1,a\n"
-        "2026-10-20T12:00:00Z,measure,cra,m,1,0.3000,1,b\n")
-    monkeypatch.setenv("WBG_SPEND_CAP_USD", "1.0")
-    monkeypatch.setenv("WBG_SPEND_SINCE", "2026-10-20T11:00:00Z")
-    assert abs(answers.spend_cap(str(tmp_path)) - 0.7) < 1e-9

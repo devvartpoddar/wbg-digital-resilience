@@ -13,4 +13,4 @@
 # run from a board card's worktree. Override with WBG_DATA, the database with WBG_PG.
 set -euo pipefail
 cd "$(dirname "$0")"
-exec ./wbg pipeline "$@"
+exec ./wbg run "$@"

@@ -1,7 +1,7 @@
 """The control panel: every threshold a person tunes, in one file.
 
 inputs/config/control_panel.csv holds one row per setting (setting, value,
-stage, what_it_does, how_to_tune). It is kept by people and only read here
+stage, what_it_does). It is kept by people and only read here
 (AGENTS.md rule 3); every stage asks this module for its numbers instead of
 holding its own. A setting's value is part of the run key of every stage
 that reads it, so a changed number gives a new run, rebuilt from the stored
@@ -61,6 +61,14 @@ def get(key, default=None):
     """A setting's value, or default when the panel does not write it."""
     v = settings().get(key)
     return default if v is None else v
+
+
+def require(key):
+    """A setting's value; a line the panel lacks is an error, never a default."""
+    v = settings().get(key)
+    if v is None:
+        raise SystemExit(f"panel: {key} is not set in {path()}")
+    return v
 
 
 def floor(measure):

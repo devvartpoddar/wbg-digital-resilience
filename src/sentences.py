@@ -1,35 +1,10 @@
 """Split a cleaned paragraph into sentences, deterministically, with no model.
 
-The paragraph stays the unit for deciding what a passage is ABOUT: an asset is
-often named in one sentence and qualified in the next, and a paragraph keeps
-them together. The sentence is the unit for deciding what a passage COMMITS
-TO: "will finance fiber" and "sites are expected to avoid flood zones" are two
-claims with two degrees of firmness, and a paragraph-level judgement blurs
-them. So both are kept, and a sentence is addressed by offsets inside its
-paragraph rather than stored as a copy.
-
-Appraisal documents are full of periods that do not end a sentence, and each
-rule below exists because one of them did:
-
-  abbreviations         e.g. i.e. etc. No. para. U.S. Rs. approx. vs.
-  initials              "J. Smith", "P. 2"
-  numbering             "38. Component 3 seeks ..." - the paragraph number
-  decimals              "US$3.2 million" - no whitespace after the period
-  enumerations          "Training on: (a) ...; b) ...; c. ..." - each item is
-                        its own sentence, so a search finds the item that
-                        names an asset; so is each item of a list separated
-                        by commas when its markers run in sequence ("(a)
-                        ..., (b) ..., and (c) ..."); a list set out line by
-                        line (a newline in the paragraph, see pdf_layout)
-                        likewise
-  fragments             "ITU. 2021. Global ..." - under three words is not a
-                        sentence, so no boundary is placed after one
-
-A form answer standing alone - "N/A", "None", "Not applicable" - is not a
-sentence: it says nothing a search should find, so it is left out.
-
-A boundary is a ., ! or ? followed by whitespace and then something that can
-open a sentence: an uppercase letter, a digit, an opening quote or bracket.
+A boundary is '.', '!' or '?' followed by whitespace and something that can open
+a sentence. Abbreviations, initials, paragraph numbers and decimals are not
+boundaries; each item of an enumerated list ('(a) ...; (b) ...') is its own
+sentence; a scrap under MIN_WORDS words is not a sentence; a lone form answer
+('N/A') is left out. Sentences are addressed by offsets in their paragraph.
 """
 import re
 
@@ -45,13 +20,12 @@ ABBREV = {
 # src/sensitivity.py varies it, and the abbreviation list.
 MIN_WORDS = 3
 BOUNDARY = re.compile(r"[.!?][\"')\]]*\s+(?=[\"'(\[]?[A-Z0-9])")
-# A list marker, in every form the documents print: '(a)', '(iv)', '(1)', and
-# without the opening bracket or with a full stop: 'a)', 'iv)', '1)', 'a.',
-# 'ii.'. A letter is one lowercase letter; a numeral is a roman numeral from i
-# to xx. A number and a full stop ('38.') is a paragraph number (PARA_NUMBER),
-# never a marker. A marker is followed by whitespace, so 'U.S.', 'e.g.' and
-# '3.2' are not markers, and a capital is never one ('J. Smith'). The bare
-# forms count only where a list can open: the start of a line or sentence,
+# A list marker, in every form the documents print: '(a)', '(iv)', '(1)', and without the
+# opening bracket or with a full stop: 'a)', 'iv)', '1)', 'a.', 'ii.'. A letter is one
+# lowercase letter; a numeral is a roman numeral from i to xx. A number and a full stop
+# ('38.') is a paragraph number (PARA_NUMBER), never a marker. A marker is followed by
+# whitespace, so 'U.S.', 'e.g.' and '3.2' are not markers, and a capital is never one ('J.
+# Smith'). The bare forms count only where a list can open: the start of a line or sentence,
 # or after ':' or ';'.
 ROMAN = r"(?:xx|x?(?:ix|iv|v?i{1,3}|v)|x)"
 MARK = rf"(?:[a-z]|{ROMAN}|\d{{1,2}})"
@@ -59,21 +33,19 @@ PAREN_MARKER = rf"\((?:{MARK})\)"             # (a) (iv) (1)
 CLOSE_MARKER = rf"(?:{MARK})\)"               # a) iv) 1)
 DOT_MARKER = rf"(?:[a-z]|{ROMAN})\."          # a. ii.   (never '1.')
 MARKER = rf"(?:{PAREN_MARKER}|{CLOSE_MARKER}|{DOT_MARKER})"
-# A sentence or line opening with a marker is a list item: the one
-# definition, used here and by units.lead_ins.
+# A sentence or line opening with a marker is a list item: the one definition, used here and
+# by units.lead_ins.
 ITEM_MARKER = re.compile(rf"^\s*{MARKER}\s")
-# An inline list: '... on: (a) civil registration; b) national ID; and c) ...'.
-# Each item is its own sentence, so a search finds the item that names an
-# asset or a measure. The boundary is a colon or semicolon (with a trailing
-# 'and' or 'or', kept with the item before) followed by a list marker.
+# An inline list: '... on: (a) civil registration; b) national ID; and c) ...'. Each item is
+# its own sentence, so a search finds the item that names an asset or a measure. The
+# boundary is a colon or semicolon (with a trailing 'and' or 'or', kept with the item
+# before) followed by a list marker.
 LIST_BOUNDARY = re.compile(rf"[:;](?:\s+(?:and|or))?\s+(?={MARKER}\s)")
-# A list whose items are separated by commas only: '(a) setting tariffs, (b)
-# running toll stations, and (c) collecting revenue'. Such a boundary counts
-# only when its marker is the next in sequence after the last marker of a
-# list the line has already begun with its first marker (_list_boundaries).
+# A list whose items are separated by commas only: '(a) setting tariffs, (b) running toll
+# stations, and (c) collecting revenue'.
 SEQ_BOUNDARY = re.compile(rf"[,.](?:\s+(?:and|or))?\s+(?=(?:{PAREN_MARKER}|{CLOSE_MARKER})\s)")
-# A list can also begin mid-sentence with a bracketed first marker: 'The
-# project will (a) build towers, (b) ...'.
+# A list can also begin mid-sentence with a bracketed first marker: 'The project will (a)
+# build towers, (b) ...'.
 OPEN_MARKER = re.compile(rf"(?<!\S){PAREN_MARKER}\s")
 MARKER_VALUE = re.compile(rf"\(?({MARK})[.)]")
 FIRST_MARKERS = {"a", "i", "1"}
@@ -158,10 +130,7 @@ def _split_line(text, first):
         if end <= floor or b.start() < start:
             continue
         before = text[start:b.start()]
-        # Too short to be a sentence: 'ITU.', '2021.' in a reference, 'Annex
-        # 2.' as a label. Fewer than three words do not stand alone - except a
-        # list item, which needs only one word besides its marker: '(a)
-        # towers;' is what a search should find.
+        # Too short to be a sentence: 'ITU.', '2021.' in a reference, 'Annex 2.' as a label.
         seg = text[max(start, floor):b.start()]
         item = ITEM_MARKER.match(seg)
         if item:
