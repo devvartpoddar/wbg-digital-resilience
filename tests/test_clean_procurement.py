@@ -1,19 +1,7 @@
-"""Unit tests for the procurement cleaning rules, then gates on the real tables.
-
-The fixtures are invented. No document text is ever committed, so no
-description below is taken from a World Bank plan. What they reproduce is the SHAPE of the real thing:
-the wrap artefacts the plan rendition produces, the lot/phase/rebid markers, the
-four languages, and the placeholder forms.
-
-The second half imports src/audit_procurement.py and asserts a maximum rate per
-check against the prepared tables, in the shape of tests/test_corpus_quality.py.
-Those tests skip cleanly when data/ is absent, because data/ is gitignored by
-design and a checkout without the corpus must still pass.
-
-Thresholds are set just above the rates measured on the corpus when they were
-written, so a real regression fails and ordinary variation as plans are
-re-published does not. If one trips, read the examples the audit prints before
-relaxing the number.
+"""The procurement cleaning rules on invented fixtures (shaped like the plans'
+wrap artefacts, markers, four languages and placeholders), then the procurement
+audit's rates gated against the prepared tables (skipped when data/ is absent).
+Gates sit just above the measured rates; read the audit's examples before moving one.
 """
 import csv
 import os
@@ -28,7 +16,7 @@ from paths import data_root  # noqa: E402
 DATA = data_root()
 
 import clean_procurement as P  # noqa: E402
-import audit_procurement as AP  # noqa: E402
+import audit as AP  # noqa: E402
 import fetch_procurement as FP  # noqa: E402
 
 
@@ -54,7 +42,6 @@ def test_step1_does_not_nfkc_normalise():
 
 def test_step2_folds_a_matching_copy_and_keeps_the_original():
     marks = P.split_markers("Supply of ICT Equipment")
-    assert P.casefold_key(marks["description"]) == "supply of ict equipment"
     assert marks["description"] == "Supply of ICT Equipment"
 
 
@@ -268,8 +255,8 @@ def test_clean_packages_prefers_the_parsed_amount_over_one_found_in_the_text():
 def test_step10_hashes_raw_and_cleaned_separately():
     raw = "Supply of cable - LOT 2"
     clean = P.split_markers(raw)["description"]
-    assert P.desc_sha256(raw) != P.desc_sha256(clean)
-    assert P.desc_sha256(raw) == P.desc_sha256("Supply of cable - LOT 2")
+    assert P.common.sha_text(raw) != P.common.sha_text(clean)
+    assert P.common.sha_text(raw) == P.common.sha_text("Supply of cable - LOT 2")
 
 
 # ---------------------------------------------------------------- step 8
@@ -318,20 +305,6 @@ def _load(table):
 
 
 # check name -> maximum share of its scope, as a percentage.
-#
-# Every number here was measured on the full 70-project run before it was set,
-# and each one sits just above the measurement, not at a round number chosen in
-# advance. The measured rate is in the comment. If one trips after a re-fetch,
-# read the examples the audit prints before moving it.
-#
-# Measured on the 70-project corpus after the October 2026 consistency pass. Each gate
-# sits just above the measured rate, so a regression fails and ordinary
-# variation as plans are re-published does not.
-#
-# Checks marked "source" describe the published data, not the cleaning: a plan
-# that prints a planned date after its revised date, an award whose supplier
-# amount exceeds the contract, a notice published with no description. They are
-# reported, and gated against getting worse, but cleaning cannot fix them.
 MAX_RATE = {
     "private use area character": 0.0,           # 0.00%
     "unicode replacement character": 0.0,        # 0.00%
@@ -362,8 +335,8 @@ def test_audit_check_is_within_its_gate(name):
     tables = {t: _load(t) for t in ("packages", "notices", "awards")}
     if not AP.VOCAB:
         AP.load_vocab(DATA)
-    spec = [c for c in AP.CHECKS if c[0] == name]
-    assert spec, f"{name} is not a check in audit_procurement.py"
+    spec = [c for c in AP.CHECKS["procurement"] if c[0] == name]
+    assert spec, f"{name} is not a procurement check in audit.py"
     _n, wanted, _sev, fn = spec[0]
     hits = total = 0
     for t in wanted:
@@ -377,7 +350,7 @@ def test_audit_check_is_within_its_gate(name):
 
 def test_every_check_has_a_gate():
     """A check with no threshold is a check nobody is held to."""
-    missing = [c[0] for c in AP.CHECKS
+    missing = [c[0] for c in AP.CHECKS["procurement"]
                if c[0] not in MAX_RATE and c[2] in ("defect", "source")]
     assert missing == [], f"defect checks without a gate: {missing}"
 
@@ -397,7 +370,7 @@ class TestMatchKey:
     def test_glued_term_is_found_after_despacing(self):
         """'Data Center' lost its space when the cell was clipped at the column
         edge. Despacing both sides puts them back in step."""
-        assert "data center" not in P.casefold_key(self.GLUED), \
+        assert "data center" not in P.collapse(self.GLUED).casefold(), \
             "fixture is wrong - it should carry the glue"
         assert P.match_key("data center") in P.match_key(self.GLUED)
 
@@ -414,7 +387,7 @@ class TestMatchKey:
         share their letters, and the reasoning would not hold."""
         for text in (self.GLUED, "Réhabilitation du réseau", "LOT 2 (REBID)"):
             assert P.match_key(text) == "".join(
-                c for c in P.casefold_key(text) if not c.isspace())
+                c for c in P.collapse(text).casefold() if not c.isspace())
 
     def test_published_text_is_untouched(self):
         """match_key is for matching. The published string keeps its spaces,
@@ -429,7 +402,7 @@ def _pkg_row(project, ref, version, date, description, status="planned"):
     return {"package_id": ref, "project_id": project, "borrower_ref": ref,
             "borrower_ref_norm": P.norm_ref(ref), "description": description,
             "description_clean": description, "description_match": P.match_key(description),
-            "description_sha256": P.desc_sha256(description), "description_lang": "en",
+            "description_sha256": P.common.sha_text(description), "description_lang": "en",
             "lot": "", "phase": "", "is_rebid": "false", "is_placeholder": "false",
             "superseded_by": "", "clean_version": P.CLEAN_VERSION, "category": "goods",
             "method": "open_national", "status": status, "status_raw": status,
@@ -465,11 +438,8 @@ def test_step8_still_folds_two_versions_of_one_project_package():
 
 # ------------------------------------------- the reference that wrapped in two
 
-# A minimal but complete STEP table: the section heading, the column heading
-# band that tells it from the same word in a sentence, and one row whose
-# reference wrapped. Records are only read from inside such a table, so the
-# heading band is not decoration here - without it there is no table and the
-# rendition correctly parses to nothing.
+# A minimal but complete STEP table: the section heading, the column heading band that tells
+# it from the same word in a sentence, and one row whose reference wrapped.
 WRAPPED = ("Project information\n"
            "WORKS\n"
            "Activity Reference No. /   Loan / Credit N   Market Approac   Estimated Am\n"
@@ -503,7 +473,7 @@ def test_a_line_with_the_shape_but_no_number_is_left_alone():
 def test_parse_plan_text_recovers_a_wrapped_reference_end_to_end():
     """Without the merge REF_RE matches nothing in this rendition, every line is
     preamble and the document parses to zero package rows - which no counter in
-    the report used to distinguish from a plan with an empty package table."""
+    the report could distinguish from a plan with an empty package table."""
     meta = {"project_id": "P1", "doc_id": "d1", "disclosure_date": "2024-01-01",
             "content_sha256": "x", "fetched_at": "t"}
     lines = WRAPPED.split("\n")
@@ -764,3 +734,74 @@ def test_paging_stops_at_the_interfaces_total():
     assert not F.last_page([1] * 100, [1] * 100, {"total": "250"}, 100)        # capped page
     assert F.last_page([], [1] * 100, {"total": "250"}, 200)                   # nothing more
     assert F.last_page([1] * 3, [1] * 3, {}, F.PAGE)                           # no total: short page
+
+
+def test_a_paged_listing_is_read_to_its_total_or_refused(monkeypatch):
+    import json as _json
+    import urllib.parse as up
+    import fetch_procurement as F
+
+    class R:
+        def __init__(self, obj):
+            self.content = _json.dumps(obj).encode()
+
+        def json(self):
+            return _json.loads(self.content)
+
+    def serve(total, served):
+        def get(url, timeout):
+            q = dict(up.parse_qsl(url.split("?", 1)[1]))
+            start, rows = int(q["os"]), int(q["rows"])
+            return R({"total": str(total),
+                      "procnotices": [{"id": i} for i in range(start, min(start + rows, served))]})
+        monkeypatch.setattr(F, "get", get)
+        monkeypatch.setattr(F.time, "sleep", lambda s: None)
+
+    serve(5, 5)
+    recs, total = F.fetch_pages(F.NOTICES, {"project_id": "P1"}, lambda j: j["procnotices"],
+                                what="notices P1", expected=("id",), page=2)
+    assert [r["id"] for r in recs] == [0, 1, 2, 3, 4] and total == 5
+    serve(5, 3)                                     # the interface stops short of its total
+    with pytest.raises(RuntimeError, match="3 of 5"):
+        F.fetch_pages(F.NOTICES, {"project_id": "P1"}, lambda j: j["procnotices"],
+                      what="notices P1", page=2)
+
+
+# ------------------------------------------- glue rules on an invented vocabulary
+
+def _rule_vocab(counts, prose=None):
+    v = glue.Vocab(counts)
+    v.prose = glue.Vocab(prose or {})
+    v.foreign = glue.Vocab(counts)
+    return v
+
+
+def test_a_word_two_common_words_were_fused_into_is_split():
+    # 'unconsultant' recurs (a clipped cell repeats it) but both halves are far
+    # more common.
+    v = _rule_vocab({"un": 5000, "consultant": 2500, "unconsultant": 150})
+    assert glue.unfuse("Recrutement d'unconsultant", v)[0] == "Recrutement d'un consultant"
+
+
+def test_a_word_the_prose_uses_whole_is_not_unfused():
+    v = _rule_vocab({"an": 5000, "other": 900, "another": 60}, prose={"another": 40})
+    assert glue.unfuse("another phase", v)[0] == "another phase"
+
+
+def test_two_content_words_are_not_unfused():
+    # Neither half is a function word: 'unidos' stays.
+    v = _rule_vocab({"uni": 900, "dos": 900, "unidos": 10})
+    assert glue.unfuse("Estados Unidos", v)[0] == "Estados Unidos"
+
+
+def test_an_english_prefix_is_not_taken_for_a_fused_word():
+    v = _rule_vocab({"in": 9000, "eligibility": 300, "ineligibility": 20})
+    assert glue.unfuse("ineligibility of firms", v)[0] == "ineligibility of firms"
+
+
+def test_of_two_possible_joins_the_more_common_word_wins():
+    # 'prior itaires ayant': 'prioritaires' (54) beats 'prioritairesayant' (3).
+    v = _rule_vocab({"prioritaires": 54, "prioritairesayant": 3, "ayant": 13, "prior": 1,
+                "itaires": 0})
+    assert glue.rejoin("filières prior itaires ayant un", v)[0] == \
+        "filières prioritaires ayant un"

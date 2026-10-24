@@ -1,35 +1,23 @@
 #!/usr/bin/env python3
 """Build the projects table: one row per cohort project.
 
-Reads  data/raw/projects/{project_id}.json   (src/fetch_projects.py)
-       data/raw/documents.csv               (owner_unit, from src/fetch.py)
-       inputs/config/cohort.csv
-Writes data/projects/projects.csv
-       data/reports/projects.txt
+Reads  data/raw/projects/{project_id}.json (src/fetch_projects.py),
+       data/raw/documents.csv (owner_unit), inputs/config/cohort.csv
+Writes data/projects/projects.csv, data/reports/projects.txt
 
-Two sources, each named in the columns it fills:
-
-  projects interface   name, status, approval and closing dates, region,
-                       country, lending instrument, commitment, the Global
-                       Practice(s) and the top sectors
-  appraisal documents  managing_unit: the owner the documents interface
-                       records for the project's most recent appraisal
-                       document that records one, with that document and its
-                       date. It is usually a practice unit ("Digital Dev -
-                       AFR EAST/SOUTH (IDD04)"), sometimes a country office
-                       or a regional vice presidency's office; it is printed
-                       as recorded, never interpreted.
-
-Neither source publishes the vice presidency as a field, so there is no such
-column. A project the interface has no record of keeps its cohort row with
-in_projects_interface=false.
+The projects interface gives name, status, dates, region, country, instrument,
+commitment, Global Practices and sectors; managing_unit is the owner the
+documents interface records for the newest appraisal document that has one,
+printed as recorded. A project the interface does not know keeps its cohort
+row with in_projects_interface=false.
 """
-import argparse, csv, json, os, re, sys
+import argparse, json, os, re, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from paths import data_root, where  # noqa: E402
 from fetch import ROOT, read_cohort  # noqa: E402
 from dates import iso_date  # noqa: E402
+from common import read_csv, write_csv  # noqa: E402
 
 COLS = ["project_id", "cohort_set", "in_projects_interface", "project_name", "status",
         "approval_date", "approval_fy", "closing_date", "region", "country_code",
@@ -40,17 +28,11 @@ COLS = ["project_id", "cohort_set", "in_projects_interface", "project_name", "st
 
 _GP_CODE = re.compile(r"<GP_PRACTICE_CODE>([^<]*)</GP_PRACTICE_CODE>")
 _GP_NAME = re.compile(r"<GP_PRACTICE_NAME><!\[CDATA\[(.*?)\]\]")
-# A unit code in brackets ("... (IDD04)"), or a bare code opening the text
-# ("IDD02 - Digital Dev ...", "LCC3C"). Three-letter region names are not codes.
+# A unit code in brackets ("... (IDD04)"), or a bare code opening the text ("IDD02 - Digital
+# Dev ...", "LCC3C").
 _UNIT_IN_BRACKETS = re.compile(r"\(([A-Z][A-Z0-9]{3,5})\)")
 _UNIT_LEADING = re.compile(r"^([A-Z][A-Z0-9]{3,5})\b")
 _NOT_A_UNIT = {"", "N/A", "NA"}
-
-
-def _iso(value):
-    """'2023-03-31T00:00:00Z' or '10/31/2028 12:00:00 AM' -> '2023-03-31'. The
-    projects interface writes month first."""
-    return iso_date(value, "mdy")
 
 
 def _unique(seq):
@@ -94,7 +76,7 @@ def managing_unit(docs):
 def fiscal_year(approval):
     """The World Bank fiscal year (1 July to 30 June, named by the year it
     ends) of an approval date, for a record that gives no approvalfy."""
-    iso = _iso(approval)
+    iso = iso_date(approval, "mdy")
     if not iso:
         return ""
     year, month = int(iso[:4]), int(iso[5:7])
@@ -110,16 +92,16 @@ def project_row(pid, rec, docs, cohort_set=""):
     return {
         "project_id": pid,
         "cohort_set": cohort_set,
-        # true, false (the interface has no record), or blank (not fetched)
-        # A record holding nothing but its own id is no record: the
-        # interface lists the id of a dropped project and nothing else.
+        # true, false (the interface has no record), or blank (not fetched) A record holding
+        # nothing but its own id is no record: the interface lists the id of a dropped
+        # project and nothing else.
         "in_projects_interface": str(bool(set(rec or {}) - {"id"})).lower()
         if fetched else "",
         "project_name": " ".join((rec.get("project_name") or "").split()),
         "status": rec.get("status") or "",
-        "approval_date": _iso(rec.get("boardapprovaldate")),
+        "approval_date": iso_date(rec.get("boardapprovaldate"), "mdy"),
         "approval_fy": rec.get("approvalfy") or fiscal_year(rec.get("boardapprovaldate")),
-        "closing_date": _iso(rec.get("closingdate")),
+        "closing_date": iso_date(rec.get("closingdate"), "mdy"),
         "region": rec.get("regionname") or "",
         "country_code": "|".join(country) if isinstance(country, list) else country,
         "country_name": rec.get("countryshortname") or "",
@@ -142,12 +124,9 @@ def build(project_ids, data, sets=None):
     """sets: {project_id: cohort_set} from the cohort file."""
     sets = sets or {}
     docs = {}
-    path = where(data, "documents")
-    if os.path.exists(path):
-        with open(path, newline="", encoding="utf-8") as fh:
-            for d in csv.DictReader(fh):
-                for p in d["project_ids"].split("|"):
-                    docs.setdefault(p, []).append(d)
+    for d in read_csv(where(data, "documents")):
+        for p in d["project_ids"].split("|"):
+            docs.setdefault(p, []).append(d)
     rows = []
     for pid in sorted(project_ids):
         try:
@@ -169,12 +148,7 @@ def main():
     rows = build([r["project_id"] for r in cohort_rows], args.data,
                  {r["project_id"]: r.get("cohort_set", "") for r in cohort_rows})
     out = where(args.data, "projects")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out + ".part", "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=COLS, lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
-    os.replace(out + ".part", out)
+    write_csv(out, COLS, rows)
 
     def count(col, value=None):
         return sum(1 for r in rows if (r[col] == value if value else r[col]))

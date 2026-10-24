@@ -1,85 +1,50 @@
 #!/usr/bin/env python3
-"""Embed every search unit once, and cache the vectors so it stays once.
+"""Embed every search unit (src/units.py) once and cache the vectors.
 
-Sentences are where we search, paragraphs where we work (src/units.py), so
-the default unit is the sentence: every sentence of the narrative and annex
-paragraphs given to the model, and each such footnote whole. --unit paragraphs
-embeds the paragraphs instead.
+Reads  data/appraisal/{sentences,paragraphs,components}.csv and text/
+Writes data/embeddings/cache/{model}.{dim}/{aa}/{sha256}.f32 (one vector per text),
+       data/embeddings/sentence_emb.npy, sentence_index.csv,
+       sentence_embedding_manifest.json, data/reports/embed_sentences.txt
+       (--unit paragraphs: paragraph_emb.npy, emb_index.csv, embedding_manifest.json)
 
-Reads  data/appraisal/{sentences,paragraphs,components}.csv,
-       data/appraisal/text/{doc_id}.txt
-Writes data/embeddings/cache/{model}.{dim}/{aa}/{sha256}.f32  one vector per text
-       data/embeddings/sentence_emb.npy        (rows, dim) float32
-       data/embeddings/sentence_index.csv      row -> unit, with its paragraph,
-                                               document, projects and component
-       data/embeddings/sentence_embedding_manifest.json   the provenance record
-       data/reports/embed_sentences.txt
-       (--unit paragraphs: paragraph_emb.npy, emb_index.csv,
-        embedding_manifest.json, reports/embed.txt)
+The cache is keyed on the SHA-256 of the exact text embedded, so a re-run costs
+nothing and an interrupted one resumes.
 
-The cache is content-addressed on the SHA-256 of the exact text embedded, under
-a directory named for the model and dimension count. So a re-run costs nothing,
-an interrupted run resumes, and a later cohort pays only for the paragraphs it
-adds. Nothing here is ever re-embedded because a downstream script wanted it.
-
-  python3 src/embed.py --dry-run          # counts and spend, no network call
-  python3 src/embed.py --limit 5          # smoke test, artifacts under data/embeddings/smoke_*
-  python3 src/embed.py                    # the corpus, by sentence
-  python3 src/embed.py --unit paragraphs  # the corpus, by paragraph
+  python3 src/embed.py [--dry-run] [--limit 5] [--unit paragraphs]
 """
-import argparse, csv, hashlib, json, os, socket, stat, sys, time
+import argparse, csv, hashlib, json, os, socket, sys, time
 
 import numpy
-import requests
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from paths import data_root, main_checkout, where  # noqa: E402
+import api  # noqa: E402
+from paths import data_root, where  # noqa: E402
 import units  # noqa: E402
 
 DEFAULT_MODEL = "openai/text-embedding-3-large"
 DEFAULT_DIM = 3072
 DEFAULT_BASE = "https://openrouter.ai/api/v1"
-# The project's own key, so it is not mistaken for, or reused as, a general
-# OpenRouter key. Read from $WBG_OPENROUTER_KEY, else from KEY_FILE in the main
-# checkout: a 0600 file owned by the account that runs the pipeline (on the box
-# svc-hermes, so Hephaestus can run it and nothing else can read it).
-KEY_VAR = "WBG_OPENROUTER_KEY"
-KEY_FILE = os.path.join(".secrets", "wbg-openrouter-key")
 
-# For the report only. The provider's invoice is the real number; this exists so
-# a dry run can say roughly what a full run will cost before it costs it.
+# For the report only.
 PRICE_PER_MTOK = 0.13
 
-# A request carries an ARRAY of texts, so the corpus is a few hundred requests
-# rather than tens of thousands of calls. Both caps earn their place: the item
-# count keeps one failed request cheap to retry, and the character budget stops
-# a chunk of long paragraphs from crossing the endpoint's per-request ceiling.
+# A request carries an ARRAY of texts, so the corpus is a few hundred requests rather than
+# tens of thousands of calls.
 CHUNK_ITEMS = 96
 CHUNK_CHARS = 200_000
 
-# text-embedding-3 accepts 8,191 tokens for a single input. The longest
-# paragraph measured in the corpus is 11,310 characters, roughly 2,800 tokens,
-# so nothing is near this. It aborts rather than truncating: a shortened text
-# would put a vector in the cache that does not describe the text it is keyed
-# on, and every later run would trust it.
+# text-embedding-3 accepts 8,191 tokens for a single input.
 MAX_TEXT_CHARS = 28_000
 
 INDEX_COLS = ["row", "paragraph_id", "text_sha256"]
-# A searched unit is never left out or a copy; 'copies' lists the units that
-# print the same text in other documents (units.copies), pipe-separated.
+# A searched unit is never left out or a copy; 'copies' lists the units that print the same
+# text in other documents (units.copies), pipe-separated.
 SENTENCE_INDEX_COLS = ["row"] + [c for c in units.UNIT_COLS
                                  if c not in ("char_start", "char_end", "n_tokens",
                                               "left_out", "copy_of")] + ["copies",
                                                                          "embedded_sha256"]
-# What is put in front of a unit's text before embedding (--context). "none":
-# the list lead-in alone (units.lead_ins). "section": also the section title
-# and the component heading the unit sits under, as a fixed prefix ("Section:
-# ... Component: ...") so a sentence that says "the facility" or "these
-# sites" embeds with what it is about. No model writes the prefix: it is the
-# paragraph's own context, so it is deterministic and costs nothing but the
-# one re-embedding. The embedded text's hash is in the index (embedded_sha256),
-# so a changed design is a new index and every run keyed on it is new.
+# What is put in front of a unit's text before embedding (--context).
 CONTEXTS = ("none", "section")
 
 # What each unit writes: (matrix, index, manifest, report).
@@ -103,58 +68,27 @@ class TransportError(RuntimeError):
 
 def embed_texts(texts, *, model, api_key, base_url=DEFAULT_BASE, dimensions=None,
                 timeout=180, tries=5):
-    """Return (vectors, meta) for texts, in input order. THE transport seam.
-
-    This is the only function in the file that knows a network exists.
-    Deduplication, caching, the checks that decide what is allowed to be
-    stored, assembly and the manifest all sit outside it. So adding the
-    asynchronous batch endpoint for a much larger cohort means writing a second
-    function with this signature and a flag to choose between them - and
-    nothing that decides WHAT gets embedded or WHERE IT LANDS moves at all.
-
-    meta carries {"tokens", "model", "rate_limit"}. A batch implementation
-    fills the same three keys.
-    """
+    """Return (vectors, meta) for texts, in input order. THE transport seam."""
     url = base_url.rstrip("/") + "/embeddings"
     payload = {
         "model": model,
         "input": list(texts),
-        # Unpinned routing can serve identical text from a different provider
-        # and return a different vector for it. That is exactly the
-        # inconsistency the content-addressed cache exists to rule out, so the
-        # provider is pinned and fallbacks refused.
+        # Unpinned routing can serve identical text from a different provider and return a
+        # different vector for it.
         "provider": {"order": ["openai"], "allow_fallbacks": False},
     }
     if dimensions:
         payload["dimensions"] = dimensions
-    headers = {
-        "Authorization": f"Bearer {api_key}",
-        "Content-Type": "application/json",
-        "HTTP-Referer": "https://github.com/devvartpoddar/wbg-digital-resilience",
-        "X-Title": "wbg-digital-resilience",
-    }
-
-    last = None
-    for attempt in range(tries):
-        try:
-            r = requests.post(url, json=payload, headers=headers, timeout=timeout)
-            if r.status_code in (408, 409, 429, 500, 502, 503, 504, 520, 522, 524, 529):
-                # Throttling or a provider hiccup. The same request succeeds later.
-                raise TransportError(f"HTTP {r.status_code}: {r.text[:200]}")
-            if 400 <= r.status_code < 500:
-                # Bad key, bad model, bad payload. Retrying changes nothing and
-                # burning four more attempts only delays a clear message.
-                raise SystemExit(f"embed: HTTP {r.status_code} from {url}\n"
-                                 f"  {r.text[:500]}")
-            r.raise_for_status()
-            return _parse(r, len(texts), model)
-        except TransportError as exc:
-            last = exc
-        except requests.RequestException as exc:
-            last = TransportError(f"{type(exc).__name__}: {str(exc)[:300]}")
-        if attempt < tries - 1:
-            time.sleep(2 ** attempt)
-    raise last
+    try:
+        r = api.request("POST", url, json=payload, timeout=timeout, tries=tries,
+                        headers={"Authorization": f"Bearer {api_key}",
+                                 "Content-Type": "application/json"})
+    except api.Refused as exc:
+        # Bad key, bad model, bad payload: retrying changes nothing.
+        raise SystemExit(f"embed: {exc}") from None
+    except (api.Transport, OSError) as exc:
+        raise TransportError(str(exc)[:500]) from None
+    return _parse(r, len(texts), model)
 
 
 def _model_tail(name):
@@ -175,8 +109,7 @@ def _parse(response, n_expected, model):
     if len(items) != n_expected:
         raise TransportError(f"asked for {n_expected} vectors, got {len(items)}")
 
-    # The response carries an explicit index per item. Input order is only
-    # convention; the index is the contract, so honour it rather than assume.
+    # The response carries an explicit index per item.
     ordered = [None] * n_expected
     for item in items:
         i = item.get("index")
@@ -190,9 +123,8 @@ def _parse(response, n_expected, model):
         ordered[i] = vec
 
     served = data.get("model") or ""
-    # A mismatch means the provider pin did not hold, and vectors from a
-    # different model are not comparable with the ones already cached. Abort on
-    # the first chunk rather than discover it in a similarity matrix later.
+    # A mismatch means the provider pin did not hold, and vectors from a different model are
+    # not comparable with the ones already cached.
     if served and _model_tail(served) != _model_tail(model):
         raise SystemExit(f"embed: asked for {model!r}, served {served!r}. "
                          f"The provider pin did not hold; stopping before the "
@@ -202,44 +134,10 @@ def _parse(response, n_expected, model):
     return ordered, {
         "tokens": int(usage.get("total_tokens") or usage.get("prompt_tokens") or 0),
         "model": served or model,
-        # Captured because provider rate limits, not price, are what decide
-        # whether a synchronous run survives a cohort ten to twenty times this
-        # size. Recorded in the manifest so that decision rests on a number.
+        # Provider rate limits, not price, decide whether a synchronous run scales.
         "rate_limit": {k.lower(): v for k, v in response.headers.items()
                        if k.lower().startswith("x-ratelimit")},
     }
-
-
-def read_key(key_file):
-    """The credential, from the environment or from a file named on the command
-    line. Never from an argument: an argument is visible in `ps` to every
-    account on the box and lands in whatever log records the command.
-
-    A key file is checked for its mode before it is read. The project folder
-    on the box is readable by every local account and through raven's
-    read-only file mount, so a credential dropped there casually would be
-    readable by both. Refusing a loose file up front is cheaper than
-    discovering that afterwards.
-    """
-    if not key_file:
-        key = os.environ.get(KEY_VAR, "").strip()
-        default = os.path.join(main_checkout(), KEY_FILE)
-        if key or not os.path.exists(default):
-            return key
-        key_file = default
-    try:
-        mode = stat.S_IMODE(os.stat(key_file).st_mode)
-    except OSError as exc:
-        raise SystemExit(f"embed: cannot read {key_file}: {exc.strerror}")
-    if mode & 0o077:
-        raise SystemExit(
-            f"embed: {key_file} is mode {mode:04o}, readable beyond its owner. "
-            f"A credential file must be 0600 - chmod it and re-run.")
-    with open(key_file, encoding="utf-8") as fh:
-        key = fh.read().strip()
-    if not key:
-        raise SystemExit(f"embed: {key_file} is empty")
-    return key
 
 
 # -------------------------------------------------------------------- the cache
@@ -250,18 +148,12 @@ def cache_root(data_dir, model, dim):
 
 
 def cache_path(root, sha):
-    # Sharded on the first byte: 256 directories, so a cohort twenty times this
-    # one still holds a few thousand files per directory rather than 676,000
-    # in one.
+    # Sharded on the first byte: 256 directories, a few thousand files each.
     return os.path.join(root, sha[:2], sha + ".f32")
 
 
 def read_cached(root, sha, dim):
-    """The stored vector as bytes, or None if it is not there.
-
-    A file of the wrong length is a torn write from an interrupted run. Treat
-    it as absent and pay to fetch it again; do not treat it as data.
-    """
+    """The stored vector as bytes, or None if it is not there."""
     path = cache_path(root, sha)
     try:
         if os.path.getsize(path) != dim * 4:
@@ -283,22 +175,13 @@ def write_cached(root, sha, blob):
 
 def pack(vec, dim):
     """float32 bytes for one vector, after the checks that decide whether it is
-    allowed into the cache at all.
-
-    Nothing that fails here is stored, and nothing is ever stored as zeros: a
-    silently zeroed row would sit in the matrix looking like a vector and
-    poison every similarity computed against it.
-    """
+    allowed into the cache at all."""
     if len(vec) != dim:
         raise TransportError(f"expected {dim} dimensions, got {len(vec)}")
     arr = numpy.asarray(vec, dtype="<f4")
     norm = float(numpy.linalg.norm(arr))
-    # text-embedding-3 returns unit vectors, so this one comparison carries the
-    # whole check: a norm far from 1 means something other than an embedding
-    # came back or it arrived truncated, a zero vector norms to 0, and a NaN or
-    # an infinity anywhere in the vector makes the norm itself NaN or infinite
-    # and fails the same test. An explicit isfinite() pass alongside it was
-    # tested and caught nothing this does not.
+    # The model returns unit vectors: a norm far from 1 (a truncated or foreign body, a zero
+    # vector, a NaN or an infinity) fails this one test.
     if not 0.9 <= norm <= 1.1:
         raise TransportError(f"vector norm {norm:.4f} is not ~1")
     return arr.tobytes()
@@ -321,19 +204,7 @@ def context_prefix(row, paras):
 
 def resolve(data_dir, rows, id_field="paragraph_id", context="none", paras=None):
     """Paragraph text pulled back out of the clean files by offset, with the
-    hash recorded at cleaning time re-checked against it.
-
-    The hash is not decoration. paragraphs.csv stores offsets, not text, so if
-    a clean file is regenerated by a changed cleaner the offsets still parse
-    and still yield SOMETHING - just not what was measured, audited and costed.
-    Re-checking turns that into an abort instead of a corpus of confidently
-    wrong vectors.
-
-    Returns (order, unique, empty) where order is [(paragraph_id, sha)] in file
-    order, unique is {sha: text}, and empty lists paragraphs that resolved to
-    nothing. For a list item the text, and so the sha, is its lead-in and
-    the item together (units.lead_ins).
-    """
+    hash recorded at cleaning time re-checked against it."""
     cache, order, unique, empty = {}, [], {}, []
     for row in rows:
         did = row["doc_id"]
@@ -353,7 +224,6 @@ def resolve(data_dir, rows, id_field="paragraph_id", context="none", paras=None)
             continue
         # A list item is embedded with the sentence that introduces its list
         # (units.lead_ins), so '(b) towers;' carries what the towers are for.
-        # The cache is keyed on the text actually embedded.
         if row.get("lead_in_start"):
             lead = cache[did][int(row["lead_in_start"]):int(row["lead_in_end"])]
             body = lead + "\n" + body
@@ -386,7 +256,7 @@ def chunked(shas, unique):
         yield batch
 
 
-EMBED_WORKERS = 4   # requests in flight at once: the first corpus took 57 minutes one at a time
+EMBED_WORKERS = 4   # requests in flight at once
 
 
 def _embed_batch(n, total, batch, unique, root, dim, *, model, api_key, base_url, log):
@@ -404,11 +274,7 @@ def _embed_batch(n, total, batch, unique, root, dim, *, model, api_key, base_url
             write_cached(root, sha, pack(vec, dim))
             stored += 1
     except TransportError as exc:
-        # One pathological input must not cost the other ninety-five their
-        # vectors, so the chunk is retried a text at a time and only what
-        # actually fails is recorded as failed. A chunk can fail partway:
-        # vectors ahead of the bad one were validated and cached before it
-        # was reached, so the retry covers only what is actually missing.
+        # One bad input must not cost the rest of the chunk: retry a text at a time.
         log(f"  chunk {n}/{total} failed ({exc}); retrying singly")
         singly += 1
         for sha in batch:
@@ -491,11 +357,8 @@ def fmt_range(lo, hi, unit=""):
 
 
 def token_range(words, chars):
-    """The two rules of thumb, reported as a range because on this corpus they
-    disagree by about a third: it runs 6.8 characters per word against roughly
-    5.3 for general English, so words break into more subword pieces than the
-    per-word rule assumes. Only a real run settles it, and it does - the
-    manifest records the tokens the API actually reported."""
+    """(low, high) token estimates from the per-word and per-character rules of
+    thumb, which disagree on this corpus; the manifest records the tokens billed."""
     return int(words * 1.3), int(chars / 4)
 
 
@@ -507,9 +370,6 @@ def main():
     ap.add_argument("--base-url", default=DEFAULT_BASE)
     ap.add_argument("--dry-run", action="store_true",
                     help="counts and estimated spend; makes no network call")
-    ap.add_argument("--key-file", default="",
-                    help="read the credential from this file (mode 0600) rather "
-                         "than from $" + KEY_VAR)
     ap.add_argument("--limit", type=int, default=0,
                     help="first N units; artifacts go to data/embeddings/smoke_*")
     ap.add_argument("--unit", choices=sorted(OUTPUTS), default="sentences",
@@ -533,9 +393,8 @@ def main():
     else:
         with open(where(args.data, "appraisal", "paragraphs.csv"), newline="",
                   encoding="utf-8") as fh:
-            # Only what clean.py marks for the model: body prose and footnotes,
-            # not front matter, tables or headings. A table written before
-            # for_model existed has no such column and is taken whole.
+            # Only what clean.py marks for the model: body prose and footnotes, not front
+            # matter, tables or headings.
             rows = [r for r in csv.DictReader(fh) if r.get("for_model", "true") == "true"]
         id_field = "paragraph_id"
     if args.limit:
@@ -569,12 +428,7 @@ def main():
         log("\n--dry-run: no request made, nothing written")
         return 0
 
-    api_key = read_key(args.key_file)
-    if not api_key and todo:
-        raise SystemExit(
-            f"embed: no credential. ${KEY_VAR} is not set, there is no "
-            f"{KEY_FILE} in the main checkout and no --key-file was given. Never "
-            f"pass a key as an argument.")
+    api_key = api.key(required=bool(todo))
 
     stats, failures = ({"requests": 0, "tokens": 0, "stored": 0,
                         "retried_singly": 0, "rate_limit": {}, "served_model": ""}, [])
@@ -586,8 +440,8 @@ def main():
                                         base_url=args.base_url, log=log)
     elapsed = time.time() - started
 
-    # Rebuilt from disk rather than from what the run believes it stored, so a
-    # vector that failed to land is absent from the index rather than trusted.
+    # Rebuilt from disk rather than from what the run believes it stored, so a vector that
+    # failed to land is absent from the index rather than trusted.
     have = {sha for sha in unique if read_cached(root, sha, args.dim) is not None}
     index = [(pid, sha) for pid, sha in order if sha in have]
     dropped = [pid for pid, sha in order if sha not in have]
@@ -604,8 +458,8 @@ def main():
     with open(idx_path + ".part", "w", newline="", encoding="utf-8") as fh:
         w = csv.writer(fh, lineterminator="\n")
         if args.unit == "sentences":
-            # Every unit's context rides with its row, so a search result names
-            # its paragraph, document, projects and component directly.
+            # Every unit's context rides with its row, so a search result names its
+            # paragraph, document, projects and component directly.
             by_id = {r["unit_id"]: r for r in rows}
             w.writerow(SENTENCE_INDEX_COLS)
             for i, (uid, sha) in enumerate(index):
@@ -615,9 +469,9 @@ def main():
             w.writerow(INDEX_COLS)
             for i, (pid, sha) in enumerate(index):
                 w.writerow([i, pid, sha])
-    # The matrix is rows of the cache in index order, so when the index is
-    # the one on disk and nothing was fetched, the matrix on disk is current
-    # and is not written again (it is large; a run with nothing new is cheap).
+    # The matrix is rows of the cache in index order, so when the index is the one on disk
+    # and nothing was fetched, the matrix on disk is current and is not written again (it is
+    # large; a run with nothing new is cheap).
     if stats["stored"] == 0 and _same_file(idx_path + ".part", idx_path) \
             and _matrix_shape(npy_path) == (len(index), args.dim):
         os.remove(idx_path + ".part")
@@ -628,7 +482,6 @@ def main():
 
     spend = stats["tokens"] / 1e6 * PRICE_PER_MTOK
     if stats["requests"]:
-        import api
         import db
         with db.connect() as conn:
             db.ensure(conn)
@@ -657,9 +510,8 @@ def main():
         "host": socket.gethostname(),
     }
     man_path = where(args.data, "embeddings", f"{prefix}{man_name}")
-    # A run that embedded nothing keeps the manifest of the run that did:
-    # the provenance of the vectors is what was paid for and served, not the
-    # cache hit that read them back.
+    # A run that embedded nothing keeps the manifest of the run that did: the provenance of
+    # the vectors is what was paid for and served, not the cache hit that read them back.
     if stats["requests"] or not os.path.exists(man_path):
         with open(man_path, "w", encoding="utf-8") as fh:
             json.dump(manifest, fh, indent=2, sort_keys=True)

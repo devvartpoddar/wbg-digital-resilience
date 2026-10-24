@@ -154,7 +154,8 @@ def test_a_new_phrase_is_a_new_version_embedding_only_that_phrase(store):
 
 def test_the_manifest_says_what_was_run(store):
     out = _score(store)
-    m = json.load(open(os.path.join(out, "manifest.json")))
+    with open(os.path.join(out, "manifest.json")) as fh:
+        m = json.load(fh)
     assert (m["labels"], m["queries"], m["units"]) == (2, 4, len(UNITS))
 
 

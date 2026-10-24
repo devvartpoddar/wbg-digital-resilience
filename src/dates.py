@@ -1,14 +1,8 @@
-"""One date reader for every interface and every text the pipeline stores.
+"""One date reader for every interface: an ISO date (YYYY-MM-DD) or blank, never a
+date passed through as printed.
 
-Every date column in the tables is ISO (YYYY-MM-DD) or blank. Nothing else
-is stored: a date the reader cannot place is blank, never passed through as
-printed, because the summaries and the audits compare dates as strings.
-
-  iso_date("2023-03-31T00:00:00Z")          -> "2023-03-31"
-  iso_date("14-Sep-2026")                   -> "2026-09-14"
-  iso_date("10/31/2028 12:00:00 AM", "mdy") -> "2028-10-31"   the projects interface
-  iso_date("30/06/2024")                    -> "2024-06-30"   only one reading fits
-  iso_date("03/06/2024")                    -> ""             ambiguous without an order
+  iso_date("14-Sep-2026") -> "2026-09-14";  iso_date("10/31/2028", "mdy") -> "2028-10-31"
+  iso_date("30/06/2024")  -> "2024-06-30";  iso_date("03/06/2024") -> "" (ambiguous)
 """
 import datetime
 import re

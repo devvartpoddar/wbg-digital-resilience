@@ -1,28 +1,21 @@
 #!/usr/bin/env python3
-"""List the World Bank operations a cohort could hold, from the projects
-interface, by approval fiscal year and lending instrument, so a person can
-decide the cohort (inputs/config/cohort.csv is hand-kept and never written
-here: this writes a candidate list next to the reports).
+"""List the operations a cohort could hold, from the projects interface, by
+approval fiscal year and lending instrument, for a person to choose from.
 
-  python3 src/cohort_build.py --from-fy 2020                       # IPF, FY2020 to now
-  python3 src/cohort_build.py --from-fy 2020 --to-fy 2026 --instrument all
-  python3 src/cohort_build.py --from-fy 2020 --count                # totals only, no file
+  python3 src/cohort_build.py --from-fy 2020 [--to-fy 2026] [--instrument all] [--count]
 
-Writes data/reports/cohort_candidates_fy<from>-<to>.csv in cohort.csv's
-columns (project_id, country_code, region, approval_fy, practice, included,
-exclusion_reason, cohort_version) plus project_name, lending_instrument,
-status and commitment_usd_millions for choosing. Every row is included=true;
-a person edits and copies the rows they want into inputs/config/cohort.csv.
-Only board-approved operations are listed (a pipeline project has no
-appraisal document), and the interface's own counts are reported so a page
-that failed is visible.
+Writes data/reports/cohort_candidates_fy<from>-<to>.csv in cohort.csv's columns
+plus project_name, lending_instrument, status and commitment_usd_millions; it
+never writes inputs/config/cohort.csv. Only board-approved operations are listed,
+and a listing shorter than the interface's own count stops the run.
 """
-import argparse, csv, datetime, os, sys, time, urllib.parse
+import argparse, datetime, os, sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from fetch import get  # noqa: E402
+from fetch_procurement import fetch_pages  # noqa: E402
 from fetch_projects import PROJECTS  # noqa: E402
 from paths import data_root, where  # noqa: E402
+from common import write_csv  # noqa: E402
 
 ROWS = 200
 FIELDS = ("id", "project_name", "approvalfy", "boardapprovaldate", "status", "regionname",
@@ -33,33 +26,28 @@ INSTRUMENTS = {"ipf": ("Investment Project Financing",),
                "all": ()}
 
 
-def page(fy, offset, instrument=None):
-    q = {"format": "json", "approvalfy": str(fy), "rows": ROWS, "os": offset,
-         "fl": ",".join(FIELDS)}
-    if instrument:
-        q["lendinginstr"] = instrument
-    d = get(f"{PROJECTS}?{urllib.parse.urlencode(q)}", timeout=90).json()
-    return int(d.get("total") or 0), list((d.get("projects") or {}).values())
-
-
 def listing(from_fy, to_fy, instruments, delay=0.3, log=print):
-    """[(record)] for every operation approved in the years, by instrument."""
+    """([record], {(fy, instrument): (total, listed)}) for every operation
+    approved in the years, by instrument. A listing that comes back shorter
+    than the interface's own total stops the run (fetch_pages)."""
     out, totals = {}, {}
     for fy in range(from_fy, to_fy + 1):
         for inst in (instruments or (None,)):
-            offset, got = 0, 0
-            while True:
-                total, recs = page(fy, offset, inst)
-                for r in recs:
-                    if r.get("boardapprovaldate"):
-                        out.setdefault(r["id"], r)
-                got += len(recs)
-                offset += ROWS
-                if not recs or got >= total:
-                    break
-                time.sleep(delay)
-            totals[(fy, inst or "all")] = (total, got)
-            log(f"  FY{fy} {inst or 'all instruments'}: {got} of {total} listed")
+            params = {"approvalfy": str(fy), "fl": ",".join(FIELDS)}
+            if inst:
+                params["lendinginstr"] = inst
+            what = f"FY{fy} {inst or 'all instruments'}"
+            try:
+                recs, total = fetch_pages(PROJECTS, params,
+                                          lambda d: list((d.get("projects") or {}).values()),
+                                          what=what, expected=("id",), page=ROWS, delay=delay)
+            except RuntimeError as exc:
+                raise SystemExit(f"cohort_build: {exc}") from None
+            for r in recs:
+                if r.get("boardapprovaldate"):
+                    out.setdefault(r["id"], r)
+            totals[(fy, inst or "all")] = (total or 0, len(recs))
+            log(f"  {what}: {len(recs)} of {total or 0} listed")
     return list(out.values()), totals
 
 
@@ -100,11 +88,7 @@ def main():
         return 0
     rows = rows_for(recs, datetime.date.today().isoformat())
     out = where(args.data, "reports", f"cohort_candidates_fy{args.from_fy}-{args.to_fy}.csv")
-    os.makedirs(os.path.dirname(out), exist_ok=True)
-    with open(out, "w", newline="", encoding="utf-8") as fh:
-        w = csv.DictWriter(fh, fieldnames=COLS, lineterminator="\n")
-        w.writeheader()
-        w.writerows(rows)
+    write_csv(out, COLS, rows)
     print(f"wrote {out}; copy the rows you want into inputs/config/cohort.csv")
     return 0
 

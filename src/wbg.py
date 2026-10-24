@@ -171,7 +171,7 @@ STAGES = [
      [("appraisal", "components.csv")]),
     ("clean_procurement", "clean_procurement.py",
      ["clean_procurement.py", "glue.py", "text_rules.py", "plan_table.py", "links.py",
-      "keys.py"],
+      "keys.py", "procurement_vocab.json"],
      [("procurement", "packages_raw.csv"), ("procurement", "notices_raw.csv"),
       ("procurement", "awards_raw.csv"), ("appraisal", "components.csv"),
       ("appraisal", "paragraphs.csv")],
@@ -371,7 +371,6 @@ def _record_due(pid, fetched_on, today, data, _status={}):
 def prepare(sel=None, update=False, data=None, fetch=True, refresh_projects=False):
     """Bring the store up to date for a selection.
 
-    1. The data folder is put in its layout (src/paths.py).
     2. Fetching: each selected project not fetched before - or every selected
        project with update=True - is fetched (appraisal documents, then
        procurement plans, notices and awards).

@@ -21,20 +21,16 @@ from fetch_procurement import store_keeping_old  # noqa: E402
 
 PROJECTS = "https://search.worldbank.org/api/v2/projects"
 
-# What a project is, where, when, how large, and which Global Practice leads
-# it (project_gp_info). No team or contact fields.
+# What a project is, where, when, how large, and which Global Practice leads it
+# (project_gp_info).
 FIELDS = ("id", "project_name", "status", "boardapprovaldate", "approvalfy",
           "closingdate", "regionname", "countrycode", "countryshortname",
           "lendinginstr", "curr_total_commitment", "project_gp_info", "sector1",
           "sector2", "sector3")
 
 
-# The interface's v3 form holds records v2 does not (81 of 251 cohort
-# projects had none in v2 on 2026-10-20, most of them P5xxxxx operations)
-# and is the more current of the two: it carries the revised closing date
-# after an extension (P171305: v2 30 May 2026, v3 31 August 2027) and the
-# commitment after cancellations. It lacks the fiscal year, the lending
-# instrument, the Global Practice and the sectors, which v2 gives.
+# The interface's v3 form holds records v2 lacks and is the more current: it carries a
+# closing date revised by an extension and the commitment after cancellations.
 PROJECTS_V3 = "https://search.worldbank.org/api/v3/projects"
 V3_FIRST = ("project_name", "status", "boardapprovaldate", "closingdate", "regionname",
             "countrycode", "countryshortname")
@@ -55,11 +51,8 @@ def merge(v2, v3):
     for k in V3_FIRST:
         if v3.get(k):
             rec[k] = v3[k]
-    # Both forms' figures are kept: they disagree on 30 of 131 projects
-    # (2026-10-21), v3 higher after additional financing and lower after a
-    # cancellation, but not always right (P171305: v3 US$50m, the amount
-    # cancelled, where the April 2026 restructuring paper says US$150m
-    # remains; v2 still US$200m).
+    # Both forms' figures are kept: they disagree after additional financing or a
+    # cancellation, and neither is always right.
     if v2.get("curr_total_commitment"):
         rec["commitment_v2"] = str(v2["curr_total_commitment"]).replace(",", "")
     try:
@@ -93,8 +86,8 @@ def fetch(project_ids, data, delay=0.3):
         except Exception as exc:
             failed.append((pid, str(exc)))
             continue
-        # An empty record is stored too: "the interface has no such project"
-        # is an answer, and projects.py reports it.
+        # An empty record is stored too: "the interface has no such project" is an answer,
+        # and projects.py reports it.
         blob = (json.dumps(rec, sort_keys=True, indent=1, ensure_ascii=False) + "\n").encode()
         store_keeping_old(where(data, "projects_json", f"{pid}.json"), blob)
         (found if rec else missing).append(pid)
@@ -131,8 +124,8 @@ def main():
             fh.write(f"  {p}\t{err}\n")
     print(f"projects: {len(found)} found, {len(missing)} with no record, "
           f"{len(failed)} failed", flush=True)
-    # Failures are reported and retried on the next run, never fatal: one
-    # project's failed request must not stop the others' stages.
+    # Failures are reported and retried on the next run, never fatal: one project's failed
+    # request must not stop the others' stages.
     return 0
 
 

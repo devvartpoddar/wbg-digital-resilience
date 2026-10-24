@@ -1,12 +1,19 @@
-"""The few helpers every stage needs, defined once: reading and writing a
-CSV table, the checksum of a file, and a small content-addressed JSON
-store (one file per SHA-256, written aside and renamed, so a reader never
-sees a torn write)."""
+"""Helpers every stage needs: CSV tables, checksums of text and files, and a small
+content-addressed JSON store written aside and renamed.
+"""
 import csv
+import hashlib
 import json
 import os
 
 from paths import file_sha256  # noqa: F401  (re-exported: one checksum for every stage)
+
+
+def sha_text(s):
+    """The SHA-256 hex digest of a string (as UTF-8) or of bytes; None is ''."""
+    if not isinstance(s, (bytes, bytearray)):
+        s = (s or "").encode("utf-8")
+    return hashlib.sha256(s).hexdigest()
 
 
 def read_csv(path):
