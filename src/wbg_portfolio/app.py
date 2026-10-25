@@ -28,6 +28,16 @@ NO_ASSET = "(no asset)"
 NO_TYPE = "(no type)"
 
 
+def _numbers(df):
+    """Postgres numeric arrives as Decimal; the app does arithmetic and plots,
+    so a column of Decimals becomes float (None becomes NaN)."""
+    from decimal import Decimal
+    for col in df.columns:
+        if df[col].dtype == object and df[col].map(lambda v: isinstance(v, Decimal)).any():
+            df[col] = pd.to_numeric(df[col].map(lambda v: float(v) if isinstance(v, Decimal) else v), errors="coerce")
+    return df
+
+
 def _sql(text):
     """The views live in schema wbg; a test store names its own (db.SCHEMA)."""
     return text.replace("wbg.", db.SCHEMA + ".") if db.SCHEMA != "wbg" else text
@@ -41,7 +51,7 @@ def commitments(q, cohort=None):
     """One row per commitment (project x asset x measure x type) with its
     place, the project's approval year and its procurement stage. cohort:
     None for every project, else a cohort_set ('digital', 'digital_contributor')."""
-    df = q(_sql("""
+    df = _numbers(q(_sql("""
         SELECT c.commitment_id, c.project_id, c.project_name, c.cohort_set, c.country_name,
                c.country_code, c.region, c.is_regional, c.label_set, c.measure_name,
                c.asset_id, c.asset_name, c.type_id, c.type_name, c.status, c.next_date,
@@ -49,7 +59,7 @@ def commitments(q, cohort=None):
         FROM wbg.commitments c
         LEFT JOIN wbg.project_header h USING (project_id)
         WHERE %(cohort)s::text IS NULL OR c.cohort_set = %(cohort)s
-        ORDER BY c.project_name, c.measure_name, c.asset_name, c.type_name"""), {"cohort": cohort})
+        ORDER BY c.project_name, c.measure_name, c.asset_name, c.type_name"""), {"cohort": cohort}))
     if df.empty:
         return df.assign(stage=pd.Series(dtype=str), place=pd.Series(dtype=str))
     df["asset_name"] = df["asset_name"].fillna(NO_ASSET)
@@ -67,39 +77,39 @@ def evidence(q, commitment_ids):
     if not ids:
         return pd.DataFrame(columns=["commitment_id", "text", "page_number", "pdf_url",
                                      "posterior_probability", "document_kind"])
-    return q(_sql("""
+    return _numbers(q(_sql("""
         SELECT DISTINCT ON (commitment_id) commitment_id, text, page_number, pdf_url,
                posterior_probability, document_kind
         FROM wbg.commitment_sentences
         WHERE commitment_id = ANY(%(ids)s)
-        ORDER BY commitment_id, posterior_probability DESC, length(text), unit_id"""), {"ids": ids})
+        ORDER BY commitment_id, posterior_probability DESC, length(text), unit_id"""), {"ids": ids}))
 
 
 def measures(q):
     """One row per measure: its definition, counts and the graded sheet's
     precision (graded_sheet says whether it is an evaluation or a training
     draw; a training draw's figure is provisional)."""
-    return q(_sql("""
+    return _numbers(q(_sql("""
         SELECT label_set, measure_name, definition, commitments, projects, countries, types,
                graded_sheet, graded_units, precision
-        FROM wbg.measure_summary ORDER BY commitments DESC NULLS LAST, measure_name"""), None)
+        FROM wbg.measure_summary ORDER BY commitments DESC NULLS LAST, measure_name"""), None))
 
 
 def measure_types(q, label_set=None):
     """Each approved type of each measure (or of one), with its definition."""
-    return q(_sql("""
+    return _numbers(q(_sql("""
         SELECT DISTINCT label_set, type_id, type_name, definition
         FROM wbg.measure_types
         WHERE %(set)s::text IS NULL OR label_set = %(set)s
-        ORDER BY label_set, type_name"""), {"set": label_set})
+        ORDER BY label_set, type_name"""), {"set": label_set}))
 
 
 def assets(q):
     """The digital assets (inputs/taxonomy/assets.csv as loaded): id, name, definition."""
-    return q(_sql("""
+    return _numbers(q(_sql("""
         SELECT label_id AS asset_id, label_name AS asset_name, definition
         FROM wbg.labels WHERE label_set = 'assets' AND is_active
-        ORDER BY label_name"""), None)
+        ORDER BY label_name"""), None))
 
 
 def project(q, project_id):
@@ -108,15 +118,15 @@ def project(q, project_id):
     documents read, and its linked packages with their stage."""
     p = {"pid": project_id}
     return {
-        "header": q(_sql("SELECT * FROM wbg.project_header WHERE project_id = %(pid)s"), p),
-        "assets": q(_sql("""
+        "header": _numbers(q(_sql("SELECT * FROM wbg.project_header WHERE project_id = %(pid)s"), p)),
+        "assets": _numbers(q(_sql("""
             SELECT asset_id, asset_name, sentences_naming_it, sentences_from_paragraph, best_probability
             FROM wbg.project_assets WHERE project_id = %(pid)s
-            ORDER BY sentences_naming_it DESC NULLS LAST, asset_name"""), p),
-        "components": q(_sql("""
+            ORDER BY sentences_naming_it DESC NULLS LAST, asset_name"""), p)),
+        "components": _numbers(q(_sql("""
             SELECT component_level, component_number, component_name, cost_usd_millions, cost_covers
             FROM wbg.project_components WHERE project_id = %(pid)s
-            ORDER BY component_number"""), p),
+            ORDER BY component_number"""), p)),
         "documents": q(_sql("""
             SELECT document_id, document_kind, document_date, title, pdf_url
             FROM wbg.project_documents WHERE project_id = %(pid)s ORDER BY document_date"""), p),
@@ -127,11 +137,11 @@ def project(q, project_id):
 def packages(q, project_id):
     """The packages linked to a project's commitments, once each, with the
     date that matters (next date while still to come, else the due date)."""
-    df = q(_sql("""
+    df = _numbers(q(_sql("""
         SELECT DISTINCT ON (package_id) package_id, description_clean AS description, category,
                method_code, estimated_amount_usd, package_status, next_date, due_date, signed_date
         FROM wbg.commitment_package_status WHERE project_id = %(pid)s
-        ORDER BY package_id, link_probability DESC"""), {"pid": project_id})
+        ORDER BY package_id, link_probability DESC"""), {"pid": project_id}))
     if df.empty:
         return df.assign(stage=pd.Series(dtype=str), date=pd.Series(dtype="datetime64[ns]"))
     df["stage"] = df["package_status"].map(stage)
