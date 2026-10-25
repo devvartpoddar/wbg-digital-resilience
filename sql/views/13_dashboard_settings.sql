@@ -2,7 +2,7 @@
 -- control-panel setting (inputs/config/control_panel.csv, dashboard.*),
 -- filled in at publish: a change is one edit there and a publish. Upstream,
 -- only dashboard.commitment_link_levels is also read (by the package links,
--- src/link_packages.py, keyed on it); the model's answers depend on none.
+-- src/wbg_portfolio/link_packages.py, keyed on it); the model's answers depend on none.
 DROP VIEW IF EXISTS wbg.dashboard_settings CASCADE;
 CREATE VIEW wbg.dashboard_settings AS
 SELECT
@@ -23,7 +23,7 @@ SELECT
   -- sentences hold at least this share of the sentence's six-word runs.
   {{panel:dashboard.near_copy_share}}::numeric AS near_copy_share,
   -- A unit two measures both commit leaves a measure the pair check says it
-  -- is not (only the other measure, or neither; src/commit_checks.py).
+  -- is not (only the other measure, or neither; src/wbg_portfolio/commit_checks.py).
   {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks,
   -- when its side's posterior (p_keep_a or p_keep_b: the measure's graded
   -- question again, the other beside it) falls short of this (floor.pair_check).
@@ -33,7 +33,7 @@ COMMENT ON VIEW wbg.dashboard_settings IS
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the
--- Democratic Republic of Congo its old code ZR. Metabase's world map needs
+-- Democratic Republic of Congo its old code ZR. A world map needs
 -- ISO 3166 alpha-2, so a region code becomes NULL (is_regional) and ZR is CD.
 DROP FUNCTION IF EXISTS wbg.iso_country_code(text) CASCADE;
 CREATE FUNCTION wbg.iso_country_code(code text) RETURNS text
@@ -46,7 +46,7 @@ COMMENT ON FUNCTION wbg.iso_country_code(text) IS
   'The ISO 3166 alpha-2 code for a projects-interface country code: NULL for a regional code (a digit first, such as 3E), CD for the old ZR.';
 
 -- Document links as https: 115 of 317 stored addresses are http, which
--- browsers may refuse inside Metabase.
+-- browsers may refuse inside a page served over https.
 DROP FUNCTION IF EXISTS wbg.https(text) CASCADE;
 CREATE FUNCTION wbg.https(url text) RETURNS text
 LANGUAGE sql IMMUTABLE AS $$ SELECT regexp_replace(url, '^http://', 'https://') $$;

@@ -6,11 +6,11 @@
 #   ./run.sh                 everything
 #   ./run.sh --update        fetch every project again first
 #
-# For a selection (a project, country, region or approval year) use ./wbg:
-#   ./wbg prepare --project P171528        ./wbg summary --country KE
+# For a selection (a project, country, region or approval year) use ./wbg_portfolio:
+#   ./wbg_portfolio prepare --project P171528        ./wbg_portfolio summary --country KE
 #
-# Data lands in the MAIN checkout's data/ (see src/paths.py), even when this is
+# Data lands in the MAIN checkout's data/ (see src/wbg_portfolio/paths.py), even when this is
 # run from a board card's worktree. Override with WBG_DATA, the database with WBG_PG.
 set -euo pipefail
 cd "$(dirname "$0")"
-exec ./wbg run "$@"
+exec ./wbg_portfolio run "$@"

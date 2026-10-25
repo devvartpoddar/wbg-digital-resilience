@@ -4,14 +4,14 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 
 ## 2. Appraisal documents
 
-### 2.1 Fetch (`src/fetch.py`)
+### 2.1 Fetch (`src/wbg_portfolio/fetch.py`)
 
 1. For each included project, list its Project Appraisal Documents (PADs) and Project Papers.
 2. Label `kind` from type and title: `pad`; `additional_financing` (a Project Paper whose title says so); `restructuring`; otherwise `project_paper_other`.
 3. Download the PDF (section 1 gives the checks). A document with no PDF, or no whole PDF, is noted in the report and left out.
 4. `data/raw/documents.csv` has one row per document: id, all projects it serves (joined with "|"), type, kind, title, disclosure date, language, `fetched_at`, PDF address, size, SHA-256. A project not listed on this run keeps its earlier rows, so a partial run never shrinks the corpus.
 
-### 2.2 Read the PDF (`src/pdf_layout.py`)
+### 2.2 Read the PDF (`src/wbg_portfolio/pdf_layout.py`)
 
 Each PDF is read by layout with pdfplumber. Every threshold is relative to the document's own body type size and line spacing, so no rule depends on one template; the thresholds are named constants in `pdf_layout.py` and `text_rules.py`.
 
@@ -65,7 +65,7 @@ The result is cached (`data/appraisal/cache/`) against the PDF's SHA-256 and the
 
 Tables are kept for reading; they are not given to the model or quality-reviewed.
 
-### 2.4 Character folding (`src/text_rules.py`), both corpora
+### 2.4 Character folding (`src/wbg_portfolio/text_rules.py`), both corpora
 
 - Non-breaking, thin and zero-width spaces become a space or nothing; soft hyphens and other invisible format characters are removed.
 - Curly quotes become straight; en dashes, minus signs and Unicode hyphens become "-".
@@ -73,7 +73,7 @@ Tables are kept for reading; they are not given to the model or quality-reviewed
 - Bullet glyphs, including Symbol and Wingdings private-use bullets, become "•"; Symbol's private-use brackets, space and full stop become "[", "]", " ", ".".
 - Check marks stay (in a safeguards table they are data). Full Unicode compatibility folding (NFKC) is not applied: it changes the meaning of some symbols.
 
-### 2.5 Paragraphs and sentences (`src/clean.py`)
+### 2.5 Paragraphs and sentences (`src/wbg_portfolio/clean.py`)
 
 1. A document is cleaned only if its PDF read and holds at least 2,000 characters (`PDF_MIN_CHARS`); a scan without a text layer or an unreadable PDF is listed and not cleaned. A failed read (unreadable file, memory exhausted) is not cached and is retried.
 2. **Project of each part.** The documents interface files a combined document under every operation it appraises. Such a document (a regional programme, then one annex per country each opening with that country's data sheet, then programme-wide annexes) is split into parts (`data/appraisal/document_parts.csv`): before the first country annex, the operation the first data sheet names; each annex holding a later data sheet, the operation that sheet names (by Operation ID), up to the next annex heading with a different number; after the last such annex, and between country annexes with no data sheet, every listed project (`programme_wide`). A paragraph takes the project(s) of the part it starts in, and components are read part by part. A document under one project, or whose data sheets name none of its listed projects (a parent and its additional financing), is one part.
@@ -87,7 +87,7 @@ Tables are kept for reading; they are not given to the model or quality-reviewed
    - Known limit: figure or box text beside a narrow column of prose at the same height is read into the prose line; cutting at wide gaps would also cut unruled tables.
 7. **Re-parse check.** Each paragraph is compared with the previous run's. Changed text under an unchanged parser version means the read is not reproducible: the run stops and writes nothing (cleaned text, raw text and tables are written only after every check passes, so they always belong to one read). A change under a new parser version is expected and counted in the report. A paragraph id repeated across documents also stops the run.
 
-### 2.6 Components (`src/components.py`)
+### 2.6 Components (`src/wbg_portfolio/components.py`)
 
 **Collected per project into `data/appraisal/components.csv`**
 

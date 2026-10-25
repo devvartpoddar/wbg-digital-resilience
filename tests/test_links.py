@@ -1,4 +1,4 @@
-"""Linking notices and awards to plan packages (src/links.py). Invented
+"""Linking notices and awards to plan packages (src/wbg_portfolio/links.py). Invented
 references and descriptions throughout."""
 import os
 import sys
@@ -8,7 +8,7 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import links  # noqa: E402
+from wbg_portfolio import links  # noqa: E402
 
 PACKAGES = [
     {"package_id": "P1:ab-g-1", "project_id": "P1", "borrower_ref_norm": "ab-g-1",
@@ -54,7 +54,7 @@ def test_link_all_writes_the_columns_and_counts_them():
     ("", ""),
 ])
 def test_a_notice_reference_chain_gives_the_plan_reference(printed, ref):
-    import plan_table
+    from wbg_portfolio import plan_table
     assert plan_table.chain_ref(printed) == ref
 
 

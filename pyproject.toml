@@ -1,0 +1,35 @@
+[project]
+name = "wbg_portfolio"
+version = "0.1.0"
+description = "Which digital assets World Bank projects finance, which climate resilience measures their appraisal documents commit to, and the procurement linked to them."
+readme = "README.md"
+requires-python = ">=3.12"
+# What the Shiny app imports (wbg_portfolio.app): the database and data frames.
+dependencies = [
+  "psycopg[binary]>=3.2",
+  "pandas>=2.2",
+]
+
+[project.optional-dependencies]
+# What the pipeline itself needs; the same pins as requirements.txt, which is
+# what the box's worker Python carries.
+pipeline = [
+  "requests==2.34.2",
+  "numpy==2.5.3",
+  "openpyxl==3.1.5",
+  "pdfplumber==0.11.10",
+  "psycopg[binary]==3.3.6",
+]
+
+[dependency-groups]
+dev = ["pytest==9.1.1"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/wbg_portfolio"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

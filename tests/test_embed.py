@@ -1,5 +1,5 @@
 """The embedding run on a synthetic, invented corpus with no network: an autouse
-fixture replaces requests inside src/api.py with an object that fails on any use,
+fixture replaces requests inside src/wbg_portfolio/api.py with an object that fails on any use,
 so everything outside embed_texts() runs against a stub and the transport seam is
 what the suite proves.
 """
@@ -14,8 +14,8 @@ import numpy
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-import api  # noqa: E402
-import embed as E  # noqa: E402
+from wbg_portfolio import api  # noqa: E402
+from wbg_portfolio import embed as E  # noqa: E402
 
 DIM = 8
 MODEL = "openai/text-embedding-3-large"
@@ -65,7 +65,7 @@ def vector_for(text, dim=DIM):
 
 
 def build_corpus(root, docs=DOCS):
-    """Write clean files and paragraphs.csv exactly as src/clean.py would."""
+    """Write clean files and paragraphs.csv exactly as src/wbg_portfolio/clean.py would."""
     data = os.path.join(root, "data")
     os.makedirs(os.path.join(data, "appraisal", "text"), exist_ok=True)
     rows = []

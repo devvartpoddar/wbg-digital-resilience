@@ -44,7 +44,7 @@ COMMENT ON FUNCTION wbg.due_date(date, date) IS
   'The date a package falls due: its revised date where the plan prints one, else its planned date.';
 
 -- Where each package stands. The plan's own status first; where the plan
--- still says pending, a linked notice or signed contract (src/links.py, by
+-- still says pending, a linked notice or signed contract (src/wbg_portfolio/links.py, by
 -- borrower reference) shows it has moved on:
 --   Contract completed    the plan says Completed
 --   Contract signed       the plan says Signed, or it says pending and a

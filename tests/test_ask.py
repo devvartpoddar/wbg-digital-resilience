@@ -1,4 +1,4 @@
-"""One asker for every question (src/ask.py): what is stored is read back,
+"""One asker for every question (src/wbg_portfolio/ask.py): what is stored is read back,
 what is not is asked in batches and stored under the exact text and
 question sent."""
 import json
@@ -6,9 +6,9 @@ import os
 
 import pytest
 
-import ask
-import db
-import questions as Q
+from wbg_portfolio import ask
+from wbg_portfolio import db
+from wbg_portfolio import questions as Q
 
 LAB = {"id": "cra", "name": "Hazard assessment", "definition": "an assessment of hazards"}
 SCALE = ["Not {name}.", "{name} as background.", "{name} planned.", "{name} committed."]
@@ -82,7 +82,7 @@ def test_an_answer_in_the_old_file_store_is_read_once_and_copied(pg, fake_model,
 
 
 def test_a_refusal_stops_and_records_the_spend_so_far(pg, monkeypatch):
-    import api
+    from wbg_portfolio import api
     n = [0]
 
     def post(path, b, key, **kw):
@@ -99,7 +99,7 @@ def test_a_refusal_stops_and_records_the_spend_so_far(pg, monkeypatch):
 
 
 def test_the_spend_cap_stops_before_a_step_that_would_pass_it(pg, fake_model, monkeypatch):
-    import api
+    from wbg_portfolio import api
     monkeypatch.setenv("WBG_SPEND_CAP_USD", "0.0000001")
     monkeypatch.setenv("WBG_SPEND_SINCE", "1970-01-01")
     with pytest.raises(api.CapReached):
@@ -108,7 +108,7 @@ def test_the_spend_cap_stops_before_a_step_that_would_pass_it(pg, fake_model, mo
 
 
 def test_an_incomplete_answer_is_a_failure_and_is_not_stored(pg, monkeypatch):
-    import api
+    from wbg_portfolio import api
     monkeypatch.setattr(api, "post", lambda *a, **k: {"model": "m", "answers": {}})
     got, st = ask.ask(pg, "m", items(1), stage="t", api_key="k", batch=0, log=lambda *_: None)
     assert got == {} and len(st["failures"]) == 1
@@ -123,7 +123,7 @@ def test_a_sentence_state_carries_section_component_and_optionally_the_paragraph
     assert s["sentence"].startswith("The project will finance a hazard assessment")
     assert s["section"] == "Project Components" and s["component"] == "1 Connectivity"
     assert "paragraph" not in s
-    import panel
+    from wbg_portfolio import panel
     monkeypatch.setenv("WBG_PANEL", os.environ["WBG_PANEL"])
     monkeypatch.setattr(panel, "get", lambda k, d=None: "paragraph" if k == "ask.context" else d)
     c2 = Q.Corpus(corpus)

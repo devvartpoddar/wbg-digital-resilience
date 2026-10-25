@@ -1,11 +1,11 @@
-"""The skip rule (src/skip.py): the highest gate that loses at most 1 per
+"""The skip rule (src/wbg_portfolio/skip.py): the highest gate that loses at most 1 per
 cent of the graded yes. Invented numbers."""
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import skip  # noqa: E402
+from wbg_portfolio import skip  # noqa: E402
 
 S = {"max_loss": 0.01, "min_positives": 10}
 

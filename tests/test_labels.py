@@ -3,7 +3,7 @@ import os, sys
 import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "src"))
-import labels  # noqa: E402
+from wbg_portfolio import labels  # noqa: E402
 
 
 def _set(folder, name, rows):
@@ -89,7 +89,7 @@ def test_a_merge_into_an_unknown_or_merged_type_is_refused(tmp_path):
 
 
 def test_definition_rows_copy_every_phrase_pattern_and_grade():
-    import load_pg
+    from wbg_portfolio import load_pg
     queries, patterns, scale = load_pg.definition_rows()
     sets = set(labels.label_sets())
     assert {r["label_set"] for r in scale} == sets
@@ -101,7 +101,7 @@ def test_definition_rows_copy_every_phrase_pattern_and_grade():
 
 
 def test_a_pattern_row_may_ask_for_case(tmp_path):
-    import labels
+    from wbg_portfolio import labels
     d = tmp_path / "labels"
     d.mkdir()
     (d / "m.csv").write_text("measure_id,measure_name,definition,active\nm,M,a measure,true\n")

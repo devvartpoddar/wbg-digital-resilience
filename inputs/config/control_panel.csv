@@ -47,5 +47,3 @@ dashboard.package_link_min_probability,0.7,dashboards,A package is linked to a c
 dashboard.near_copy_share,0.5,dashboards,Another project prints a sentence near-identically when its committed sentences hold this share of its word runs.
 text.shingle_words,6,units and dashboards (src/units.py; sql/views/16_commitments.sql),Words per run when comparing wording (template_share and the dashboards' near-copy test).
 dashboard.apply_measure_pair_checks,true,dashboards,Drop a sentence from a measure its pair check says it is not.
-requests.cap_per_request_usd,1.0,measures requested from the dashboard (src/measure_requests.py),Most one dashboard-requested measure may spend.
-requests.cap_per_day_usd,3.0,measures requested from the dashboard,Most all requested measures may spend in a UTC day.

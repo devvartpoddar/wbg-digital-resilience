@@ -1,12 +1,12 @@
-"""Search units (src/units.py) on an invented store."""
+"""Search units (src/wbg_portfolio/units.py) on an invented store."""
 import csv
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import units  # noqa: E402
-from clean import PARA_COLS, SENT_COLS  # noqa: E402
+from wbg_portfolio import units  # noqa: E402
+from wbg_portfolio.clean import PARA_COLS, SENT_COLS  # noqa: E402
 
 
 def _write(path, cols, rows):

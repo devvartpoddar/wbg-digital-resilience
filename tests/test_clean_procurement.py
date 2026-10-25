@@ -12,12 +12,12 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-from paths import data_root  # noqa: E402
+from wbg_portfolio.paths import data_root  # noqa: E402
 DATA = data_root()
 
-import clean_procurement as P  # noqa: E402
-import audit as AP  # noqa: E402
-import fetch_procurement as FP  # noqa: E402
+from wbg_portfolio import clean_procurement as P  # noqa: E402
+from wbg_portfolio import audit as AP  # noqa: E402
+from wbg_portfolio import fetch_procurement as FP  # noqa: E402
 
 
 # ------------------------------------------------------- step 1: characters
@@ -552,7 +552,7 @@ class TestNewestVersion:
 
 # --- glued words and status sources (invented descriptions) -------------------
 
-import glue  # noqa: E402
+from wbg_portfolio import glue  # noqa: E402
 
 
 def _vocab():
@@ -729,7 +729,7 @@ def test_a_lone_review_word_at_the_end_is_part_of_the_description():
 
 
 def test_paging_stops_at_the_interfaces_total():
-    import fetch_procurement as F
+    from wbg_portfolio import fetch_procurement as F
     assert F.last_page([1] * 100, [1] * 100, {"total": "100"}, 500)            # all read
     assert not F.last_page([1] * 100, [1] * 100, {"total": "250"}, 100)        # capped page
     assert F.last_page([], [1] * 100, {"total": "250"}, 200)                   # nothing more
@@ -739,7 +739,7 @@ def test_paging_stops_at_the_interfaces_total():
 def test_a_paged_listing_is_read_to_its_total_or_refused(monkeypatch):
     import json as _json
     import urllib.parse as up
-    import fetch_procurement as F
+    from wbg_portfolio import fetch_procurement as F
 
     class R:
         def __init__(self, obj):

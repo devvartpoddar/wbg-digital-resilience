@@ -1,5 +1,5 @@
 -- The k search units nearest a given unit, by cosine distance between their
--- stored embeddings. No new embedding is made, so no outside call: in Metabase,
+-- stored embeddings. No new embedding is made, so no outside call:
 -- SELECT * FROM wbg.similar_units({{unit_id}}, 20).
 DROP FUNCTION IF EXISTS wbg.similar(text, integer);
 DROP FUNCTION IF EXISTS wbg.similar_units(text, integer);

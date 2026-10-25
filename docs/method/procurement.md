@@ -4,9 +4,9 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 
 ## 3. Procurement
 
-The word lists the readers match against (status map, method names and method text, category map, language markers, placeholders, and the column catalogue of the Bank's procurement system, STEP) live in `src/procurement_vocab.json`, one file for the fetch parser and the cleaner.
+The word lists the readers match against (status map, method names and method text, category map, language markers, placeholders, and the column catalogue of the Bank's procurement system, STEP) live in `src/wbg_portfolio/procurement_vocab.json`, one file for the fetch parser and the cleaner.
 
-### 3.1 Fetch (`src/fetch_procurement.py`)
+### 3.1 Fetch (`src/wbg_portfolio/fetch_procurement.py`)
 
 1. List each project's plans (paged fetch, section 1) and download each text rendition.
 2. **Bundles.** A rendition with more than one plan preamble concatenates the plans of several operations; it is cut to the segment naming this project. When none does, it is kept on disk, counted, and not parsed.
@@ -16,18 +16,18 @@ The word lists the readers match against (status map, method names and method te
 6. **Records, collapsed.** The record is read as a stream of text, figure and date pieces. The description runs from the reference to the first cell that is a review type, method, market approach or "Single Stage". A loan number between wrapped description lines is skipped when the text after it opens in lower case, and otherwise ends the description. The remainder is `cells_raw`. When the column headings are reprinted inside a record, or the columns are scattered, the record keeps its reference and description and gives up its figures, status and dates.
 7. **Reference chain.** "BJ-UCP / PADA-43641-GO-RFQ / Fourniture ..." gives the last reference-shaped piece that carries a number as the borrower reference, and the rest as description.
 8. **Cells.** Method, market approach and status are found among the cells by matching STEP's vocabularies in English, French, Portuguese and Spanish, ignoring accents, case and curly apostrophes, and ignoring spaces for a word wrapped mid-cell. A status wrapped and interleaved with other cells is matched from its head when the head opens exactly one status (at least 10 characters in the parser, 6 in the cleaner). Words are kept as printed.
-9. **Dates.** The first date in the record is the planned date; the last is `revised_date`, the last milestone column as printed, which in a STEP row is usually the latest actual date, not a revised plan. Every date column is ISO (`YYYY-MM-DD`) or blank (`src/dates.py`); a date the reader cannot place is blank, never stored as printed.
+9. **Dates.** The first date in the record is the planned date; the last is `revised_date`, the last milestone column as printed, which in a STEP row is usually the latest actual date, not a revised plan. Every date column is ISO (`YYYY-MM-DD`) or blank (`src/wbg_portfolio/dates.py`); a date the reader cannot place is blank, never stored as printed.
 10. **Figures.** Any whitespace separates figures. With an Estimated Amount column, the first figure is the estimate and the second the actual. Without one (older plans), the only figure is the actual and the estimate is blank.
 11. **Notices and awards** keep the interface's fields (reference, description, dates, procurement group, method, country; for awards also amount, review type, supplier, region, sector). An individual-consultant contract's supplier is a person's name; it is kept as published, and showing it more widely is a judgement for a person.
 12. **Output.** `data/procurement/{packages_raw,notices_raw,awards_raw}.csv`, one package row per plan version per package, as printed; nothing is derived. A fetch of selected projects (`--projects`) rewrites only the rows it fully re-read; every other project, and a project whose plan listing, plan download, notices or awards request failed (each table separately), keeps its earlier rows.
 
-### 3.2 Clean (`src/clean_procurement.py`)
+### 3.2 Clean (`src/wbg_portfolio/clean_procurement.py`)
 
 **For every description (packages, notices, awards), in order:**
 
 1. Fold characters (2.4), remove the replacement character "�", collapse whitespace.
 2. **Other cells cut out.** A loan number ("IDA / 12345") between wrapped lines is removed when the text after it opens in lower case; otherwise it and everything after it are cut. Then the review type, method, market approach and "Single Stage" tail is cut. A review type ("Post", "Prior") is cut only when a method or market approach follows (alone it may be a word of the description, "Mbeya Post"); a market approach or "Single Stage" is never prose and is cut wherever it ends the text.
-3. **Words repaired** (`src/glue.py`, 3.3).
+3. **Words repaired** (`src/wbg_portfolio/glue.py`, 3.3).
 4. **Markers read.** A borrower reference opening the description is removed (it has its own column). "Lot 2", "Lots 1-3", "Lote 3", "Phase II", "Tranche 2" go to `lot_or_phase`, taken out of the text only where they open or close it. "(Rebid)", "Re-tender", "Relance" set `is_rebid` and are removed.
 5. **Stitched records.** If another package's borrower reference appears inside the description (a missed record boundary), the text from it onwards is cut.
 6. **Component name at the end.** A component name spilled from the plan's component column onto the end is cut off and used as the package's component.
@@ -50,12 +50,12 @@ The word lists the readers match against (status map, method names and method te
 17. Older versions go to `superseded_packages.csv` (package, project, plan version, reference, description, status, estimated amount), each pointing at its replacement.
 18. **Status with its evidence.** The more recent dated evidence wins, labelled in `status_source` and `status_as_of`: `plan` (the newest version's status, as of its disclosure date); `award` (a signed contract linked to the package by step 19, as of signing; a contract with no signing date is not evidence; it never turns Completed or Terminated back into Signed); `none` (status stays `unknown`). On the same date a signed contract wins over the plan.
 
-**Links (`src/links.py`):**
+**Links (`src/wbg_portfolio/links.py`):**
 
 19. Every notice and award is linked to its plan package by project and normalised borrower reference; a reference chain is first reduced as in 3.1 step 7. `package_link` says how: `reference` (one package has it); `reference_and_description` (several share a generic reference and the description's match key picks one); `ambiguous` (several share it and the description does not pick; left unlinked); `not_in_plan` (no package has it: a plan not disclosed, or a reference printed differently); `no_reference`. Nothing is linked on a guess.
 20. Every award also lists in `notice_ids` the notices of the same project and normalised reference, so a contract meets its tender even when no disclosed plan holds the package. Where both are linked to a package it must be the same one; an unlinked award does not take a notice whose reference was ambiguous.
 
-### 3.3 Word repair (`src/glue.py`)
+### 3.3 Word repair (`src/wbg_portfolio/glue.py`)
 
 Plan cells are clipped at the column edge, so words come apart ("S upply") or run together ("ofDigital"). No dictionary is used; every decision comes from counts in this corpus. Only package, notice and award descriptions are repaired.
 

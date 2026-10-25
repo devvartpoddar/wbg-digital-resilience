@@ -58,7 +58,7 @@ def write_csv(path, cols, rows):
 def pg(monkeypatch):
     """A connection with its own schema pair (t_<hex>, t_<hex>_store), dropped
     afterwards. Skips when no Postgres answers at $WBG_PG."""
-    import db
+    from wbg_portfolio import db
     try:
         conn = db.connect()
     except Exception as exc:                                    # noqa: BLE001
@@ -175,7 +175,7 @@ def corpus(tmp_path, monkeypatch):
                "clean_version", "signed_date", "no_objection_date", "total_amount", "currency", "category",
                "method", "method_name", "review_type", "supplier_name", "supplier_country", "supplier_amount",
                "region", "sector", "package_id", "package_link", "notice_ids"], [])
-    import units
+    from wbg_portfolio import units
     us = [u for u in units.search_units(str(data)) if not u["left_out"] and not u["copy_of"]]
     index_cols = ["row"] + [c for c in units.UNIT_COLS
                             if c not in ("char_start", "char_end", "n_tokens", "left_out",
@@ -214,15 +214,15 @@ def corpus(tmp_path, monkeypatch):
     write_csv(str(lab / "assets_queries.csv"), ["asset_id", "query_id", "query", "active"],
               [{"asset_id": "towers", "query_id": "t1", "query": "towers", "active": "true"},
                {"asset_id": "fiber", "query_id": "f1", "query": "fibre", "active": "true"}])
-    import labels
+    from wbg_portfolio import labels
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
-    import questions
+    from wbg_portfolio import questions
     monkeypatch.setattr(questions, "ROOT", str(tmp_path))
     os.makedirs(tmp_path / "analysis" / "labels")
     os.replace(str(lab / "scale.csv"), str(tmp_path / "analysis" / "labels" / "scale.csv"))
     # scored search runs: cosine 0.9 for the sentences each label is about
-    import embed
-    import search
+    from wbg_portfolio import embed
+    from wbg_portfolio import search
     monkeypatch.setattr(embed, "DEFAULT_DIM", 4)
     for name, hits in (("cra", {0: 0.9}), ("assets", {0: 0.9, 1: 0.9})):
         queries = search.load_queries(name)
@@ -237,7 +237,7 @@ def corpus(tmp_path, monkeypatch):
         numpy.save(os.path.join(folder, "scores.npy"), scores)
         with open(os.path.join(folder, "manifest.json"), "w") as fh:
             json.dump({"index_sha256": search._sha_file(str(emb / "sentence_index.csv"))}, fh)
-    import embed
+    from wbg_portfolio import embed
     root = embed.cache_root(str(data), embed.DEFAULT_MODEL, 4)
     vec = lambda i: numpy.eye(4, dtype="float32")[i].tobytes()
     for name, hits in (("cra", {"q1": 0}), ("assets", {"t1": 0, "f1": 1})):
@@ -253,7 +253,7 @@ def fake_model(monkeypatch):
     """A decision model that says yes (grade 3, or Yes) to any item whose text
     holds 'hazard assessment' or 'tower' for a towers question, 'fibre' for a
     fibre one; no otherwise. Records every request body."""
-    import api
+    from wbg_portfolio import api
     calls = []
 
     def post(path, b, api_key, **kw):
