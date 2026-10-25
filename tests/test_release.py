@@ -1,11 +1,11 @@
-"""Data releases (src/release.py) on an invented store."""
+"""Data releases (src/wbg_portfolio/release.py) on an invented store."""
 import csv
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import release  # noqa: E402
+from wbg_portfolio import release  # noqa: E402
 
 
 def _store(tmp_path):
@@ -62,7 +62,7 @@ def test_the_latest_fetch_date_ignores_the_old_stamp(tmp_path):
     """A project stamped "before stages.json" must not hide the latest date
     (as text it sorts after every ISO date and loaded as NULL)."""
     import json
-    import release
+    from wbg_portfolio import release
     (tmp_path / "reports").mkdir()
     (tmp_path / "reports" / "stages.json").write_text(json.dumps({"fetched": {
         "procurement": {"P1": "before stages.json", "P2": "2026-10-19", "P3": "2026-10-13"}}}))

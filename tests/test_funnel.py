@@ -1,8 +1,8 @@
-"""The funnel (src/funnel.py): gate, patterns, stored answers and feedback
+"""The funnel (src/wbg_portfolio/funnel.py): gate, patterns, stored answers and feedback
 rounds, the same for the asset map and a measure; scores written once."""
-import db
-import funnel
-import questions as Q
+from wbg_portfolio import db
+from wbg_portfolio import funnel
+from wbg_portfolio import questions as Q
 
 
 def scores(pg, name):
@@ -48,7 +48,7 @@ def test_a_changed_gate_runs_again_but_rounds_wait_for_something_new(pg, corpus,
     funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None)
     before = scores(pg, "cra")
     n = len(fake_model)
-    import panel
+    from wbg_portfolio import panel
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "measure.gate_cosine": 0.95})
     out = funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None)
@@ -59,12 +59,12 @@ def test_a_changed_gate_runs_again_but_rounds_wait_for_something_new(pg, corpus,
 
 
 def test_a_sentence_once_answered_stays_scored_whatever_the_gate(pg, corpus, fake_model, monkeypatch):
-    import ask
+    from wbg_portfolio import ask
     c = Q.Corpus(corpus)
     qs, _ = Q.graded_questions("cra")
     u3 = c.index[3]["unit_id"]
     ask.ask(pg, Q.MODEL, [(u3, c.state(u3), qs)], stage="t", api_key="k", log=lambda *_: None)
-    import feedback
+    from wbg_portfolio import feedback
     monkeypatch.setattr(feedback, "settings", lambda prefix="": {"batch": 500, "min_yield": 10,
                                                                  "max_rounds": 0, "negative_weight": 0.5})
     funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None)
@@ -78,7 +78,7 @@ def test_a_dry_run_asks_nothing_and_writes_nothing(pg, corpus, fake_model):
 
 
 def test_a_failed_request_writes_nothing(pg, corpus, monkeypatch):
-    import api
+    from wbg_portfolio import api
     monkeypatch.setattr(api, "post", lambda *a, **k: {"model": "m", "answers": {}})
     assert funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None) is None
     assert not scores(pg, "cra")

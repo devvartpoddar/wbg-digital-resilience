@@ -1,11 +1,11 @@
-"""The checks (src/checks.py) and the one decision (src/decide.py), end to
+"""The checks (src/wbg_portfolio/checks.py) and the one decision (src/wbg_portfolio/decide.py), end to
 end on the invented corpus: funnel, types, pairs, links, publish, views."""
-import db
-import checks
-import decide
-import funnel
-import load_pg
-import questions as Q
+from wbg_portfolio import db
+from wbg_portfolio import checks
+from wbg_portfolio import decide
+from wbg_portfolio import funnel
+from wbg_portfolio import load_pg
+from wbg_portfolio import questions as Q
 
 
 def run_all(pg, corpus, log=lambda *_: None):
@@ -62,7 +62,7 @@ def test_publish_writes_the_decision_tables_and_the_views_build(pg, corpus, fake
 def test_a_moved_floor_is_a_publish_not_a_run(pg, corpus, fake_model, monkeypatch):
     c = run_all(pg, corpus)
     n = len(fake_model)
-    import panel
+    from wbg_portfolio import panel
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "floor.default": 0.99})
     with load_pg.transaction(pg):

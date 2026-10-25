@@ -30,7 +30,7 @@ Two stores of record, everything else derived from them:
 - **Files under `data/`** hold what was fetched and parsed (documents, paragraphs, sentences, components, procurement tables) and the sentence vectors. These are slow to make and never deleted.
 - **Postgres schema `wbg_store`** holds every model answer (keyed on the exact text and question sent), every grade a person or an agent gave (keyed on the item's text and the label), every fitted layer and gate, and every payment. It is never dropped.
 
-From those two, every run derives the same things: a `scores` table (the model's answer to each question about each item), the decision tables the dashboards read (schema `wbg`, rebuilt by `./wbg publish`), and the views over them. A moved threshold is a publish, not a run; a changed question re-asks only the items whose question changed; a new document asks only its own sentences. There are no run folders and no run keys.
+From those two, every run derives the same things: a `scores` table (the model's answer to each question about each item), the decision tables the dashboards read (schema `wbg`, rebuilt by `./wbg_portfolio publish`), and the views over them. A moved threshold is a publish, not a run; a changed question re-asks only the items whose question changed; a new document asks only its own sentences. There are no run folders and no run keys.
 
 ## Where the work stands
 
@@ -46,7 +46,7 @@ From those two, every run derives the same things: a `scores` table (the model's
 | Grading as self-contained tasks a person or an agent fills; one evaluation for every decision kind (5g) | Built 2026-10-24; the file-based grades import once |
 | Release v1.0 (provisional, 2026-10-23): decisions on the raw score, the layer off, floors read off the seed-7 grades | Settings unchanged; figures are upper estimates until an evaluation draw is graded |
 
-**Next on the box:** `./wbg check import` (the grades of the file sheets into the store), then a run from `classify` (every stored answer is reused; the types and pair checks are re-asked because their state now carries the section and component), then `./wbg check evaluate`. `docs/method/running.md` has the order and the costs.
+**Next on the box:** `./wbg_portfolio check import` (the grades of the file sheets into the store), then a run from `classify` (every stored answer is reused; the types and pair checks are re-asked because their state now carries the section and component), then `./wbg_portfolio check evaluate`. `docs/method/running.md` has the order and the costs.
 
 ## Where each part is described
 
@@ -54,7 +54,7 @@ The method is split by stage so a change reads only its part. **When you change 
 
 | Section | File | Covers (code) |
 |---|---|---|
-| 0 | `docs/method/running.md` | `./wbg run`, its stages, what each costs, the clean run, adding a measure, a scratch measure (`./wbg try`), the status brief, what Metabase sees (`wbg.py`, `scratch.py`, `status.py`) |
+| 0 | `docs/method/running.md` | `./wbg_portfolio run`, its stages, what each costs, the clean run, adding a measure, a scratch measure (`./wbg_portfolio try`), the status brief, what the app sees (`cli.py`, `scratch.py`, `status.py`) |
 | 1 | `docs/method/fetch.md` | what is pulled, the projects table (`fetch.py`, `fetch_projects.py`, `projects.py`) |
 | 2 | `docs/method/appraisal.md` | PDF reading, folding, paragraphs, sentences, components (`pdf_layout.py`, `text_rules.py`, `clean.py`, `sentences.py`, `components.py`, `keys.py`) |
 | 3 | `docs/method/procurement.md` | plans, notices, awards, word repair, links (`fetch_procurement.py`, `clean_procurement.py`, `plan_table.py`, `glue.py`, `links.py`, `procurement_vocab.json`) |
@@ -63,7 +63,7 @@ The method is split by stage so a change reads only its part. **When you change 
 | 5b | `docs/method/asset-map.md` | the asset map and how a sentence gets its asset |
 | 5c, 5d | `docs/method/measures.md` | a measure through the funnel, types, pair checks (`checks.py`) |
 | 5e | `docs/method/links.md` | packages to assets and to commitments |
-| 5f | `docs/method/dashboards.md` | the dashboards' views, package status, requested measures, the Explore views (`sql/views/13-20`, `measure_requests.py`) |
+| 5f | `docs/method/dashboards.md` | the views the app reads, package status, the app's pages and what they compute (`sql/views/13-18`, `app.py`) |
 | 5g | `docs/method/decisions.md` | one decision system: the asker, the funnel, the floors, the probability layer, the skip rule, grading and evaluation, the control panel (`api.py`, `ask.py`, `questions.py`, `funnel.py`, `decide.py`, `grading.py`, `posterior.py`, `skip.py`, `fits.py`, `panel.py`) |
 | 6 | `docs/method/storage.md` | `data/` layout, joins, the cohort (`paths.py`, `cohort_build.py`) |
 | 7 | `docs/method/limits.md` | known limits |

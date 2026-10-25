@@ -1,10 +1,10 @@
-"""Join keys shared by several stages (src/keys.py). Invented text and ids."""
+"""Join keys shared by several stages (src/wbg_portfolio/keys.py). Invented text and ids."""
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import keys  # noqa: E402
+from wbg_portfolio import keys  # noqa: E402
 
 COMBINED = (
     "DATASHEET\nOperation ID P000003\nRegional body text.\n"
@@ -64,7 +64,7 @@ def test_an_annex_title_repeated_on_table_rows_does_not_end_the_annex():
 
 
 def test_a_stretch_between_country_annexes_with_no_data_sheet_is_programme_wide():
-    from keys import project_parts
+    from wbg_portfolio.keys import project_parts
     text = ("DATASHEET Operation ID P000001 regional\n"
             "ANNEX 1 country one DATASHEET Operation ID P000002 text\n"
             "ANNEX 2 something shared, no data sheet\n"

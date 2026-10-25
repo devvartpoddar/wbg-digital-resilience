@@ -1,5 +1,5 @@
 -- The semantic layer between the appraisal document and the procurement
--- plan (src/link_packages.py): which asset a package buys, and which
+-- plan (src/wbg_portfolio/link_packages.py): which asset a package buys, and which
 -- commitments a package would carry out. Nothing is cut in the tables; the
 -- views carry the probabilities so a question chooses its threshold.
 DROP VIEW IF EXISTS wbg.package_assets_in_context;

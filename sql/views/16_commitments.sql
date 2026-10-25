@@ -44,7 +44,7 @@ WITH f AS (
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
   JOIN wbg.project_info i ON i.project_id = pp.project_id
   CROSS JOIN wbg.dashboard_settings s
-  -- committed: the posterior at the measure's floor (src/measure.py is_committed)
+  -- committed: the posterior at the measure's floor (src/wbg_portfolio/measure.py is_committed)
   WHERE f.was_sent_to_model AND f.is_committed
     AND f.posterior_probability >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
@@ -86,7 +86,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. A unit two measures commit is dropped from a measure its pair check says it is not (src/commit_checks.py).';
+  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. A unit two measures commit is dropped from a measure its pair check says it is not (src/wbg_portfolio/commit_checks.py).';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$
@@ -199,7 +199,7 @@ COMMENT ON VIEW wbg.unit_dropped_by_restructuring IS
   'For each committed unit: true when a later restructuring paper marks its component "Marked for Deletion", false when its component is known and no later paper does, NULL when the unit sits under no known component.';
 
 -- One row per commitment: the grain every dashboard page reads. Materialised
--- with commitment_units: built once per load, indexed, so a Metabase card
+-- with commitment_units: built once per load, indexed, so a read from the app
 -- returns in milliseconds (a read of the plain view ran for over ten minutes
 -- and held the views' locks while it did).
 DO $do$

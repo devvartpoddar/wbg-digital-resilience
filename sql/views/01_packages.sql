@@ -1,5 +1,5 @@
--- Packages with their project. Metabase models and dashboards sit on these
--- views, not on the tables; the names follow src/schema.py.
+-- Packages with their project. Readers (the app, analysis/sql/) sit on these
+-- views, not on the tables; the names follow src/wbg_portfolio/schema.py.
 DROP VIEW IF EXISTS wbg.packages_with_project CASCADE;
 CREATE VIEW wbg.packages_with_project AS
 SELECT p.*, pr.project_name, pr.country_name, pr.region, pr.practice, pr.managing_unit,

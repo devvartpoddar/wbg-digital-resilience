@@ -9,9 +9,9 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-import pdf_layout as PL  # noqa: E402
-import text_rules as T  # noqa: E402
-import sentences as S  # noqa: E402
+from wbg_portfolio import pdf_layout as PL  # noqa: E402
+from wbg_portfolio import text_rules as T  # noqa: E402
+from wbg_portfolio import sentences as S  # noqa: E402
 
 
 def _chars(spec, font="Calibri"):
@@ -180,7 +180,7 @@ def test_a_title_set_as_a_bullet_is_still_a_title():
 
 def test_a_glued_footnote_number_goes_but_a_version_number_stays():
     from collections import Counter
-    import pdf_layout as P
+    from wbg_portfolio import pdf_layout as P
     stats = Counter()
     defined = {6, 44}
     assert P.strip_inline_marks("as hoped44 for", defined, stats) == "as hoped for"
@@ -324,7 +324,7 @@ def test_footnotes_read_as_body_text_are_one_unit_each():
 
 
 def test_the_parser_version_follows_the_reading_constants(monkeypatch):
-    import clean
+    from wbg_portfolio import clean
     v = clean.parser_version()
     assert v == clean.parser_version() and v.startswith(clean.PARSER + "-")
     assert "/pdfplumber-" in v and "/pdfminer-" in v
@@ -332,7 +332,7 @@ def test_the_parser_version_follows_the_reading_constants(monkeypatch):
     assert clean.parser_version() != v
 
 
-# ------------------------------------------------- text rules (src/text_rules.py)
+# ------------------------------------------------- text rules (src/wbg_portfolio/text_rules.py)
 
 def test_unicode_hyphens_fold_to_ascii():
     """U+2010 looks like a hyphen but tokenises as something else."""

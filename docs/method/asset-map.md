@@ -2,7 +2,7 @@
 
 Part of the method (`docs/methodology.md` is the index). Measured results and trials: `docs/method/history.md`.
 
-## 5b. The asset map (`./wbg run --only classify`)
+## 5b. The asset map (`./wbg_portfolio run --only classify`)
 
 The asset set is `inputs/taxonomy/assets.csv` with its phrases (`assets_queries.csv`) and word patterns (`assets_patterns.csv`); it changes rarely and deliberately, because a changed definition is a new question and every grade given under the old wording is a grade of another question. Every sentence the search reads is asked, for each active asset, the graded question of section 5g on the shared scale, through the same funnel as a measure: the gate (the fitted gate, else `asset.gate_cosine`), the patterns, every sentence already answered, then the rounds counted at `asset.ask_floor` with `asset_feedback.max_rounds` (0 turns them off; the other round settings are the measures'). One read of the embedding matrix serves every asset in a round. The scores are rows of `wbg.scores` with kind `asset`.
 

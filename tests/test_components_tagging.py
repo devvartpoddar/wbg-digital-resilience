@@ -6,8 +6,8 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-import clean as C        # noqa: E402
-import components as K   # noqa: E402
+from wbg_portfolio import clean as C        # noqa: E402
+from wbg_portfolio import components as K   # noqa: E402
 
 DOC = [  # (text, block, section_path) - invented
     ("Project Development Objective", "heading", "II.A"),
@@ -145,7 +145,7 @@ def test_mentions_read_whole_numbers_only(text, found):
 
 
 def test_a_bare_decimal_heading_opens_nothing_without_its_component():
-    import components
+    from wbg_portfolio import components
     t = components.Tagger()
     assert t.see("1.2 Sectoral and Institutional Context", "heading", "I") == ("", "")
     t.see("Component 1: Connectivity", "heading", "II.B")
@@ -153,7 +153,7 @@ def test_a_bare_decimal_heading_opens_nothing_without_its_component():
 
 
 def test_read_headings_takes_a_bare_decimal_heading_only_under_its_component():
-    import components
+    from wbg_portfolio import components
     text = "1.2 Sectoral Context\nComponent 1: Connectivity\n1.2 Last-mile access\n"
     rows, pos = [], 0
     for line in text.splitlines(keepends=True):
@@ -170,8 +170,8 @@ def test_a_table_without_numbers_takes_them_from_the_names():
     """A restructuring table that prints no numbers and lists component 2
     first is numbered by name from the headings, not by row order (invented
     names)."""
-    import components as C
-    from keys import name_key
+    from wbg_portfolio import components as C
+    from wbg_portfolio.keys import name_key
 
     def row(source, number, name, printed=None, doc="D2"):
         r = {"doc_id": doc, "project_ids": "P1", "source": source, "level": "component",

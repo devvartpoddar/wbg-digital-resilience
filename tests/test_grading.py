@@ -1,12 +1,12 @@
-"""Grading (src/grading.py): self-contained tasks, a strict fill reader,
+"""Grading (src/wbg_portfolio/grading.py): self-contained tasks, a strict fill reader,
 grades keyed on text and label, the evaluation that fits and reports."""
 import json
 
 import pytest
 
-import db
-import grading
-import questions as Q
+from wbg_portfolio import db
+from wbg_portfolio import grading
+from wbg_portfolio import questions as Q
 from test_decide import run_all
 
 
@@ -87,7 +87,7 @@ def test_evaluate_reports_and_writes_fits_from_training_grades_only(pg, corpus, 
                     ("3" if t.get("unit_id") == u0 and t["label_id"] in ("cra", "towers") else "0")
                     if t["kind"] in ("measure", "asset") else ("yes" if t.get("unit_id") == u0 else "no"))
     grading.fill(pg, corpus, 7, write_fills(tmp_path / "f.jsonl", rows), log=lambda *_: None)
-    import posterior
+    from wbg_portfolio import posterior
     monkeypatch.setattr(posterior, "settings", lambda: dict(sharpness=20, centroid=True, ridge=1.0, min_graded=2,
                                                             min_each=1, near_copy=2.0, pool=True, folds=2,
                                                             fit_weight_power=0.0))

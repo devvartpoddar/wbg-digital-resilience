@@ -1,4 +1,4 @@
-"""The projects table (src/projects.py). Invented records shaped like the
+"""The projects table (src/wbg_portfolio/projects.py). Invented records shaped like the
 projects interface's."""
 import os
 import sys
@@ -7,8 +7,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import dates  # noqa: E402
-import projects  # noqa: E402
+from wbg_portfolio import dates  # noqa: E402
+from wbg_portfolio import projects  # noqa: E402
 
 RECORD = {
     "id": "P000001", "project_name": "Rural  Radio Project", "status": "Active",
@@ -69,7 +69,7 @@ def test_a_record_holding_only_its_id_is_no_record():
 
 
 def test_the_v3_record_is_preferred_and_fills_what_v2_lacks():
-    import fetch_projects as F
+    from wbg_portfolio import fetch_projects as F
     v2 = {"id": "P1", "closingdate": "5/30/2026 12:00:00 AM", "curr_total_commitment": "200",
           "approvalfy": "2021", "lendinginstr": "Investment Project Financing"}
     v3 = {"id": "P1", "closingdate": "2027-08-31", "curr_total_commitment": "50000000",
@@ -98,7 +98,7 @@ class _Resp:
 
 
 def _serve(monkeypatch, answers):
-    import api
+    from wbg_portfolio import api
     seen = []
 
     def fake(method, url, **kw):
@@ -110,7 +110,7 @@ def _serve(monkeypatch, answers):
 
 
 def test_a_redirect_to_http_is_upgraded_and_throttling_is_asked_again(monkeypatch):
-    import fetch
+    from wbg_portfolio import fetch
     seen = _serve(monkeypatch, [_Resp(302, headers={"location": "http://d.example/x.pdf"}),
                                 _Resp(403), _Resp(200, b"%PDF-1.7 ... %%EOF\n")])
     assert fetch.get("https://a.example/x").status_code == 200
@@ -118,8 +118,8 @@ def test_a_redirect_to_http_is_upgraded_and_throttling_is_asked_again(monkeypatc
 
 
 def test_a_missing_document_is_not_asked_again(monkeypatch):
-    import api
-    import fetch
+    from wbg_portfolio import api
+    from wbg_portfolio import fetch
     seen = _serve(monkeypatch, [_Resp(404), _Resp(200)])
     with pytest.raises(api.Refused):
         fetch.get("https://a.example/gone")
@@ -127,7 +127,7 @@ def test_a_missing_document_is_not_asked_again(monkeypatch):
 
 
 def test_only_a_whole_pdf_counts_as_fetched(tmp_path, monkeypatch):
-    import fetch
+    from wbg_portfolio import fetch
     assert fetch.complete_pdf(b"%PDF-1.4\n" + b"x" * 5000 + b"\n%%EOF\n")
     assert not fetch.complete_pdf(b"%PDF-1.4\n" + b"x" * 5000)          # cut short
     assert not fetch.complete_pdf(b"<html>%%EOF</html>")

@@ -2,7 +2,7 @@
 
 Part of the method (`docs/methodology.md` is the index). Measured results and trials: `docs/method/history.md`.
 
-## 5e. Packages to assets and to commitments (`./wbg run --only link`)
+## 5e. Packages to assets and to commitments (`./wbg_portfolio run --only link`)
 
 The plan's component column joins a package to the appraisal document only where the plan printed one and the parser matched it, and a package description does not sit near the committed sentences by cosine. So the link is made through what both texts name, the asset, and each step is a stored decision-model answer (`checks.links`):
 
@@ -12,6 +12,6 @@ The plan's component column joins a package to the appraisal document only where
 
 A link counts at `dashboard.package_link_min_probability` (read at publish and in the views). On the seed-7 grades the link question ranked barely above chance (issue #76): read the links as low confidence.
 
-**Checking.** The combined draw takes package assets and links by band of their probability; `./wbg check fill` stores them (kinds `package_asset` and `link`), and the evaluation reports each kind's precision and recall among the pairs asked.
+**Checking.** The combined draw takes package assets and links by band of their probability; `./wbg_portfolio check fill` stores them (kinds `package_asset` and `link`), and the evaluation reports each kind's precision and recall among the pairs asked.
 
 **Output.** `wbg.scores` kinds `package_asset` and `link`; at publish `wbg.package_assets` and `wbg.commitment_packages`, read through `package_assets_in_context`, `commitment_packages_in_context` and `packages_with_commitments`.

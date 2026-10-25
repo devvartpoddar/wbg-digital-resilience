@@ -10,8 +10,8 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-import fetch_procurement as F  # noqa: E402
-import clean_procurement as C  # noqa: E402
+from wbg_portfolio import fetch_procurement as F  # noqa: E402
+from wbg_portfolio import clean_procurement as C  # noqa: E402
 
 
 class TestOrphanedReference:
@@ -139,7 +139,7 @@ class TestNormalisationOfForeignValues:
         assert "é" not in C.enum_key(french)
 
 
-import plan_table as PT  # noqa: E402
+from wbg_portfolio import plan_table as PT  # noqa: E402
 
 
 def _doc(*blocks):
@@ -443,14 +443,14 @@ def test_a_stored_response_keeps_no_personal_field():
 
 
 def test_the_planned_actual_band_is_not_a_status(monkeypatch):
-    import fetch_procurement as F
+    from wbg_portfolio import fetch_procurement as F
     assert F.HEADER_LINE_RE.match("  Planned   Actual   Planned   Actual")
     assert F.HEADER_LINE_RE.match("Planned")
     assert not F.HEADER_LINE_RE.match("Planned maintenance of the data centre")
 
 
 def test_figures_one_space_apart_are_both_read():
-    import fetch_procurement as F
+    from wbg_portfolio import fetch_procurement as F
     rec = {"col0": ["Supply of servers"], "ref": "X-1", "body": ["Post  Request for Bids  Open - National 100,000.00 0.00  Signed  2024-01-01  2024-06-01"]}
     meta = {"project_id": "P1", "doc_id": "D1", "disclosure_date": "2024-01-01",
             "content_sha256": "x", "fetched_at": "t"}
@@ -460,7 +460,7 @@ def test_figures_one_space_apart_are_both_read():
 
 
 def test_an_html_page_or_empty_body_is_never_stored_as_a_plan(tmp_path, monkeypatch):
-    import fetch_procurement as F
+    from wbg_portfolio import fetch_procurement as F
 
     class R:
         def __init__(self, content):
@@ -478,7 +478,7 @@ def test_an_html_page_or_empty_body_is_never_stored_as_a_plan(tmp_path, monkeypa
 
 
 def test_a_renamed_response_key_stops_the_run():
-    import fetch_procurement as F
+    from wbg_portfolio import fetch_procurement as F
     F.check_keys([], F.NOTICE_KEYS, "notices")                     # an empty page says nothing
     F.check_keys([{"id": 1, "notice_type": "x", "noticedate": "d"}, {"id": 2}],
                  F.NOTICE_KEYS, "notices")                         # present somewhere: fine

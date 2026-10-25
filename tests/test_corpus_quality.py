@@ -1,4 +1,4 @@
-"""Corpus-level quality gates: src/audit.py's defect rates asserted (skipped when
+"""Corpus-level quality gates: src/wbg_portfolio/audit.py's defect rates asserted (skipped when
 data/ is absent), and the audit's checks on invented text. Gates sit a little above
 the measured rates; read the audit's examples before relaxing one.
 """
@@ -10,10 +10,10 @@ import pytest
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
-from paths import data_root  # noqa: E402
+from wbg_portfolio.paths import data_root  # noqa: E402
 DATA = data_root()
 
-import audit as A  # noqa: E402
+from wbg_portfolio import audit as A  # noqa: E402
 
 PROSE = A.PROSE_BLOCKS
 
@@ -41,7 +41,7 @@ MIN_CLEAN_PROSE_PCT = 99.8                           # 99.9%
 def _load():
     path = os.path.join(DATA, "appraisal", "paragraphs.csv")
     if not os.path.exists(path):
-        pytest.skip("no corpus on disk; run src/fetch.py and src/clean.py first")
+        pytest.skip("no corpus on disk; run src/wbg_portfolio/fetch.py and src/wbg_portfolio/clean.py first")
     with open(path, newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
     if not rows:
@@ -146,7 +146,7 @@ def test_every_block_value_is_known(scanned):
 
 # ---------------------------------------------------------------- embeddings
 #
-# These skip until src/embed.py has run. Once it has, they are what stops the
+# These skip until src/wbg_portfolio/embed.py has run. Once it has, they are what stops the
 # matrix and the index drifting apart. emb_index.csv is the ONLY record of
 # which row holds which paragraph: if the two disagree, every downstream
 # lookup returns a real vector for the wrong text, which looks like nothing
@@ -161,7 +161,7 @@ def _embeddings():
     idx = os.path.join(DATA, "embeddings", "emb_index.csv")
     npy = os.path.join(DATA, "embeddings", "paragraph_emb.npy")
     if not (os.path.exists(idx) and os.path.exists(npy)):
-        pytest.skip("no embeddings on disk; run src/embed.py first")
+        pytest.skip("no embeddings on disk; run src/wbg_portfolio/embed.py first")
     numpy = pytest.importorskip("numpy")
     with open(idx, newline="", encoding="utf-8") as fh:
         rows = list(csv.DictReader(fh))
@@ -196,7 +196,7 @@ def test_no_paragraph_is_indexed_twice():
 
 def test_no_row_is_a_zero_vector():
     """A zeroed row would sit in the matrix looking like a vector and quietly
-    corrupt every similarity computed against it. src/embed.py omits a failed
+    corrupt every similarity computed against it. src/wbg_portfolio/embed.py omits a failed
     paragraph rather than filling it; this asserts that it did."""
     index, arr, numpy = _embeddings()
     if arr.shape[0] == 0:

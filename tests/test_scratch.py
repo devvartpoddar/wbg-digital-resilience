@@ -1,15 +1,15 @@
-"""A scratch measure (src/scratch.py): files under data/scratch/, never
-listed as a set, run through the measures' funnel as kind scratch, read by the
-Explore views and by nothing the commitments read."""
+"""A scratch measure (src/wbg_portfolio/scratch.py): files under data/scratch/, never
+listed as a set, run through the measures' funnel as kind scratch, and read by nothing the
+commitments read."""
 import json
 
-import db
-import decide
-import funnel
-import labels
-import questions as Q
-import scratch
-import search
+from wbg_portfolio import db
+from wbg_portfolio import decide
+from wbg_portfolio import funnel
+from wbg_portfolio import labels
+from wbg_portfolio import questions as Q
+from wbg_portfolio import scratch
+from wbg_portfolio import search
 
 
 def _scratch(corpus, monkeypatch, slug="e_waste", phrases=("assess hazards",), patterns=()):
@@ -27,11 +27,11 @@ def test_a_scratch_set_is_found_by_name_but_never_listed(corpus, monkeypatch):
     assert funnel.kind_of(slug) == "scratch" and funnel.kind_of("cra") == "measure"
 
 
-def test_a_scratch_run_scores_as_kind_scratch_and_the_explore_views_read_it(pg, corpus, fake_model, monkeypatch):
+def test_a_scratch_run_scores_as_kind_scratch_and_the_publish_leaves_it_out(pg, corpus, fake_model, monkeypatch):
     slug = _scratch(corpus, monkeypatch, patterns=(r"\bhazard assessment\b",))
     log = lambda *_: None                                                      # noqa: E731
     import numpy
-    import embed
+    from wbg_portfolio import embed
     # the definition is not in the fixture's cache: a fake embedder gives it a vector near nothing
     monkeypatch.setattr(embed, "embed_texts", lambda texts, **kw: (
         [numpy.eye(4, dtype="float32")[3] for _ in texts], {"model": embed.DEFAULT_MODEL, "tokens": 0, "cost": 0.0, "rate_limit": {}}))
@@ -43,8 +43,8 @@ def test_a_scratch_run_scores_as_kind_scratch_and_the_explore_views_read_it(pg, 
     assert rows and {r[0] for r in rows} == {"scratch"}
     assert max(float(r[2]) for r in rows) > 0.85                               # the hazard sentence
     scratch.record(pg, slug, "E-waste", "Collection and recycling.", ["assess hazards"], [r"\bhazard assessment\b"], "test")
-    # the publish neither reads the scratch set nor fails on the Explore views
-    import load_pg
+    # the publish does not read the scratch set
+    from wbg_portfolio import load_pg
     funnel.run(pg, corpus, "assets", corpus=c, api_key="k", log=log)
     funnel.run(pg, corpus, "cra", corpus=c, api_key="k", log=log)
     with load_pg.transaction(pg):
@@ -52,18 +52,13 @@ def test_a_scratch_run_scores_as_kind_scratch_and_the_explore_views_read_it(pg, 
     decide.publish(pg, corpus, corpus=c, log=log)
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.measure_findings WHERE label_set = %s", (slug,))[0] == 0
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.labels WHERE label_set = %s", (slug,))[0] == 0
-    found = db.rows(pg, f"SELECT project_id, is_committed, text FROM {db.SCHEMA}.scratch_findings WHERE label_set = %s", (slug,))
-    assert found and any(f[1] for f in found) and all(f[0] == "P1" for f in found)
-    summ = db.one(pg, f"SELECT sentences_asked, sentences_committed, projects FROM {db.SCHEMA}.scratch_summary "
-                      f"WHERE label_set = %s", (slug,))
-    assert summ[0] >= summ[1] >= 1 and summ[2] == 1
     lines = scratch.summary(pg, c, slug, 0.5)
     assert lines[0].startswith(f"{slug}:") and "P1" in lines[1]
     assert any(r[0] == slug for r in scratch.listing(pg))
 
 
 def test_expand_parses_the_generative_answer_and_drops_a_bad_pattern(pg, monkeypatch):
-    import checks
+    from wbg_portfolio import checks
     answer = {"name": "E-waste management", "definition": "Collection, recycling or safe disposal of ICT equipment.",
               "phrases": ["The project will finance e-waste collection.", "  Recycling of obsolete ICT equipment  "],
               "patterns": [r"\be-?waste\b", "(unbalanced"]}

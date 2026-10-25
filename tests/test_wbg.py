@@ -1,4 +1,4 @@
-"""The packaging module (src/wbg.py): selecting, preparing, summarising.
+"""The packaging module (src/wbg_portfolio/cli.py): selecting, preparing, summarising.
 Invented cohort and tables throughout."""
 import csv
 import os
@@ -9,7 +9,7 @@ import pytest
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, os.path.join(ROOT, "src"))
 
-import wbg  # noqa: E402
+from wbg_portfolio import cli as wbg  # noqa: E402
 
 COHORT = [
     {"project_id": "P000001", "country_code": "AA", "region": "Western and Central Africa",

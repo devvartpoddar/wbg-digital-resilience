@@ -1,4 +1,4 @@
-"""The probability layer (src/posterior.py): the model's score combined with
+"""The probability layer (src/wbg_portfolio/posterior.py): the model's score combined with
 how similar a sentence is to the sentences a person graded for the label.
 Invented vectors and grades; no document text."""
 import json
@@ -9,7 +9,7 @@ import numpy
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import posterior  # noqa: E402
+from wbg_portfolio import posterior  # noqa: E402
 
 S = {"sharpness": 20.0, "centroid": True, "ridge": 1.0, "min_graded": 20, "min_each": 5,
      "near_copy": 1.01, "folds": 5}

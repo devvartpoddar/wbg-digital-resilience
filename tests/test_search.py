@@ -1,4 +1,4 @@
-"""Searching sentences for a label set (src/search.py), on invented vectors."""
+"""Searching sentences for a label set (src/wbg_portfolio/search.py), on invented vectors."""
 import csv
 import json
 import os
@@ -10,8 +10,8 @@ import pytest
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import embed  # noqa: E402
-import search  # noqa: E402
+from wbg_portfolio import embed  # noqa: E402
+from wbg_portfolio import search  # noqa: E402
 
 DIM, MODEL = 4, "test/model"
 UNITS = [  # unit, paragraph, project, vector
@@ -197,7 +197,7 @@ def test_a_label_set_with_no_active_label_is_refused(tmp_path):
 
 
 def test_types_with_no_phrase_written_for_them_are_listed(tmp_path):
-    import search
+    from wbg_portfolio import search
     d = tmp_path / "labels"
     d.mkdir()
     (d / "m.csv").write_text("measure_id,measure_name,definition,active\nm,M,a measure,true\n")

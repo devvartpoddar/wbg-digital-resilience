@@ -4,26 +4,26 @@
 
 The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement records, finds which digital assets a project finances and which climate resilience measures it commits to for them, and links that to upcoming procurement, so an advisor knows which Task Team Leaders (TTLs) to talk to, and when. Anything outside the four questions at the top of `docs/methodology.md` does not belong here.
 
-`src/` is the pipeline (`./wbg run`: fetch > prepare > embed > search > classify > measure > link > publish); it takes any label set by name and holds no measure's definition. `inputs/taxonomy/` holds the assets, `analysis/labels/` the measures, `analysis/sql/` questions over Postgres, `sql/views/` the views the dashboards read. Keep analysis assumptions out of `src/` and pipeline mechanics out of `analysis/`.
+`src/wbg_portfolio/` is the pipeline, a Python package (`pyproject.toml`; `./wbg_portfolio run`: fetch > prepare > embed > search > classify > measure > link > publish), and `app.py` in it is what the Shiny app (repository `devvartpoddar/shiny`, `apps/wbg`) reads the results through; it takes any label set by name and holds no measure's definition. `inputs/taxonomy/` holds the assets, `analysis/labels/` the measures, `analysis/sql/` questions over Postgres, `sql/views/` the views the dashboards read. Keep analysis assumptions out of `src/` and pipeline mechanics out of `analysis/`.
 
 ## Read little, spend little
 
 Reading and model calls are what a task costs. So:
 
-- Start with `./wbg status`: one screen saying what the store holds, what was spent and what is waiting. `.agents/skills/wbg/SKILL.md` is the session-start skill for any agent working here, Claude or Hephaestus; read it once.
+- Start with `./wbg_portfolio status`: one screen saying what the store holds, what was spent and what is waiting. `.agents/skills/wbg/SKILL.md` is the session-start skill for any agent working here, Claude or Hephaestus; read it once.
 - Read `docs/methodology.md` (a short index), then **only** the `docs/method/` file for the code you change. `docs/method/history.md` is evidence, not instructions: open it only when a choice needs its numbers.
 - Find code with a search, then read the lines around it. Do not read a whole source file over 300 lines, a whole method file you are not changing, or anything under `data/` beyond the rows you need.
-- Every threshold is one line of `inputs/config/control_panel.csv` (read by `src/panel.py`; a missing line fails loudly); never put a number a person tunes back into code.
-- A measure is files, not code: adding or revising one needs no reading of `src/` (`docs/method/running.md`, "Adding a measure"). A question with no measure yet ("what is there on e-waste?") is a scratch measure: `./wbg try <slug> --expand "..." --max-spend 0.50` (`docs/method/running.md`, "Exploring"); it never touches the label files or the commitments.
+- Every threshold is one line of `inputs/config/control_panel.csv` (read by `src/wbg_portfolio/panel.py`; a missing line fails loudly); never put a number a person tunes back into code.
+- A measure is files, not code: adding or revising one needs no reading of `src/` (`docs/method/running.md`, "Adding a measure"). A question with no measure yet ("what is there on e-waste?") is a scratch measure: `./wbg_portfolio try <slug> --expand "..." --max-spend 0.50` (`docs/method/running.md`, "Exploring"); it never touches the label files or the commitments.
 - What a change costs and why a stage asks again: `docs/method/running.md`, "What a change costs". An answer is stored under the model, the exact state and the exact question; a stage asks only what the store lacks. Do not re-derive this from `src/`.
 - Run any stage that calls a model with `--max-spend <US$>`, set to what you expect it to cost (a run rebuilt from stored answers: a few cents). The run reads the ledger before each step and stops before any request that would pass the cap; `--dry-run` prints the estimates without running. Report the spend afterwards. If the cap stops a run, report what it would ask; stop and ask if it would re-ask what is already stored (a whole measure or the whole asset map). Never run the whole cohort to check a change: use `--project <id>`.
 - Report in a few lines: what changed, what was run, the spend (`wbg_store.spend` in Postgres).
 
 ## Where it runs
 
-Everything lives in `/ygg/projects/wbg-digital-resilience/`; do not read or write elsewhere on the box. **Code is edited in the card's worktree, `.worktrees/<task-id>`, never in the main checkout; data is always the main checkout's `data/`**, whichever checkout runs (`src/paths.py` resolves it; `WBG_DATA` overrides it for tests). `STREAM.md` in the main checkout is untracked on purpose: it is never a reason to call a checkout dirty. Python: `/opt/yggdrasil/venvs/work/bin/python`; do not pip-install, say what is missing. It has psycopg 3 (`import psycopg`, not psycopg2), pdfplumber, pypdfium2, pikepdf, pgvector, numpy, pandas, openpyxl, xlsxwriter, matplotlib, python-docx and requests; it has no pytest. Postgres: schema `wbg` (the copy the dashboards read, rebuilt on publish) and `wbg_store` (the record: answers, grades, fits, spend; never dropped) in `postgresql:///work` (`WBG_PG` overrides it). Hardware: four slow cores, 15 GB, no graphics card; stream large files.
+Everything lives in `/ygg/projects/wbg-digital-resilience/`; do not read or write elsewhere on the box. **Code is edited in the card's worktree, `.worktrees/<task-id>`, never in the main checkout; data is always the main checkout's `data/`**, whichever checkout runs (`src/wbg_portfolio/paths.py` resolves it; `WBG_DATA` overrides it for tests). `STREAM.md` in the main checkout is untracked on purpose: it is never a reason to call a checkout dirty. Python: `/opt/yggdrasil/venvs/work/bin/python`; do not pip-install, say what is missing. It has psycopg 3 (`import psycopg`, not psycopg2), pdfplumber, pypdfium2, pikepdf, pgvector, numpy, pandas, openpyxl, xlsxwriter, matplotlib, python-docx and requests; it has no pytest. Postgres: schema `wbg` (the copy the dashboards read, rebuilt on publish) and `wbg_store` (the record: answers, grades, fits, spend; never dropped) in `postgresql:///work` (`WBG_PG` overrides it). Hardware: four slow cores, 15 GB, no graphics card; stream large files.
 
-A smoke run is `./wbg run --to prepare --project <id>` then `./wbg summary --project <id>`. Every stage skips what is up to date.
+A smoke run is `./wbg_portfolio run --to prepare --project <id>` then `./wbg_portfolio summary --project <id>`. Every stage skips what is up to date.
 
 ## The principle
 
@@ -38,7 +38,7 @@ Every decision is **repeatable** (same text, same answer), **scored** (a probabi
 5. Identifiers are deterministic: a re-run on unchanged input gives byte-identical ids and outputs.
 6. Stages are resumable and skip unchanged work, keyed on content checksums.
 7. The parse must be reproducible: pin tool versions and check `text_sha256` on re-parse.
-8. Reports go to the notes vault, never the repository: run `src/run_report.py`, copy its note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` and add a line to the "Report index" table in `Projects/WBG Digital Resilience/README.md` (there is no README inside `Reports/`).
+8. Reports go to the notes vault, never the repository: run `PYTHONPATH=src python -m wbg_portfolio.run_report`, copy its note from `data/reports/` to `Projects/WBG Digital Resilience/Reports/` and add a line to the "Report index" table in `Projects/WBG Digital Resilience/README.md` (there is no README inside `Reports/`).
 9. Grades are keyed by the SHA-256 of the item's text plus the label set and label, never by position; the question's hash is kept as provenance. Only the evaluation reads them.
 
 ## Language in anything a person reads

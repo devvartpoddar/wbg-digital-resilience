@@ -9,11 +9,11 @@ import time
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-from paths import file_sha256  # noqa: E402
+from wbg_portfolio.paths import file_sha256  # noqa: E402
 
 
 def test_a_checksum_is_remembered_and_forgotten_when_the_file_changes(tmp_path, monkeypatch):
-    import paths
+    from wbg_portfolio import paths
     monkeypatch.setattr(paths, "REMEMBER_MIN_BYTES", 0)
     f = tmp_path / "big.bin"
     f.write_bytes(b"a" * 1000)
@@ -43,12 +43,12 @@ def test_a_small_file_gets_no_sidecar(tmp_path):
 
 
 def test_the_unit_index_is_computed_once_per_state_of_its_inputs(tmp_path, monkeypatch):
-    import units
+    from wbg_portfolio import units
     data = tmp_path / "data"
     (data / "appraisal" / "text").mkdir(parents=True)
     text = "The project will finance ten towers. A hazard assessment will be made."
     (data / "appraisal" / "text" / "D.txt").write_text(text)
-    from clean import PARA_COLS
+    from wbg_portfolio.clean import PARA_COLS
     with open(data / "appraisal" / "paragraphs.csv", "w", newline="") as fh:
         w = csv.DictWriter(fh, fieldnames=PARA_COLS)
         w.writeheader()

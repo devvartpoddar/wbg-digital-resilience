@@ -1,12 +1,12 @@
-"""The sensitivity report's fast checks (src/sensitivity.py) on an invented store."""
+"""The sensitivity report's fast checks (src/wbg_portfolio/sensitivity.py) on an invented store."""
 import csv
 import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                                 "src"))
-import sensitivity  # noqa: E402
-from clean import PARA_COLS  # noqa: E402
+from wbg_portfolio import sensitivity  # noqa: E402
+from wbg_portfolio.clean import PARA_COLS  # noqa: E402
 
 TEXT = ("Component 1: Rural radio masts\n"
         "The masts will be raised on high ground in five districts. They will carry radios.\n"
