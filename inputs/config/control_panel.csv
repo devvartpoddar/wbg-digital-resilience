@@ -30,6 +30,7 @@ posterior.near_copy,off,every graded question,Leave graded near-copies above thi
 posterior.folds,5,evaluation report,Folds (whole projects) for the out-of-fold check.
 posterior.fit_weight_power,0,evaluation (src/grading.py),"Fits weight each graded row by its design weight to this power: 0 = every row once; 1 = the reporting weights (which span 2 to 9,000)."
 floor.default,0.8,commitment,A sentence counts for a measure at this posterior or above (read at publish). floor.<set> overrides it for one measure.
+floor.cyber_security,0.9,commitment,"Cybersecurity's own floor: at 0.8 to 0.9 about a third of a read sample was cyber (the rest citizen ID authentication, data protection reviews, generic secure services); 0.9 keeps 94 of 108 projects (2026-10-27, no graded set yet)."
 floor.ask,0.73,commitment,"What a measure's rounds count as a yes, and which sentences the types, pair checks and links ask about (in what is asked). Keep at or below every decision floor."
 floor.target_precision,0.85,evaluation report,The evaluation suggests the floor with the most recall at this precision.
 floor.types,0.7,types (src/checks.py),A type counts at this P(yes) or above.
