@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+ewaste,search_ewaste,\be-?waste\b|\b(?:electronic|electrical) waste\b|\bWEEE\b,IGNORECASE,,true
+ewaste,search_end_of_life,"\bend[- ]of[- ]life\b[^.;]{0,60}\b(?:equipment|devices?|computers?|batter(?:y|ies)|panels?)\b",IGNORECASE,,true

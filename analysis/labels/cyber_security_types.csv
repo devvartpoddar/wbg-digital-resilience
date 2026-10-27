@@ -1,0 +1,7 @@
+measure_id,type_id,type_name,definition,active,version
+cyber_security,incident_response,Security operations and incident response,"Establishes or strengthens a CERT, CSIRT, security operations centre, security monitoring or cyber incident handling. A general statement that incidents will be managed is insufficient.",true,v1.0
+cyber_security,security_controls,Technical security controls,"Deploys security technology on systems or networks: firewalls, intrusion detection or prevention, endpoint protection, encryption, public key infrastructure, secure configuration or hardening.",true,v1.0
+cyber_security,identity_access,Identity and access management,"Controls who can reach systems and data: authentication, multi-factor authentication, privileged access management and role-based access. Citizen digital ID systems qualify only for their own access security.",true,v1.0
+cyber_security,testing_audit,Security testing and audit,"Assesses security: vulnerability assessments, penetration tests, security audits, risk assessments or certification against a security standard such as ISO 27001.",true,v1.0
+cyber_security,policy_regulation,"Cybersecurity policy, law and standards","Prepares or adopts a cybersecurity strategy, law, regulation, framework or mandatory standard, or creates or strengthens a cybersecurity authority.",true,v1.0
+cyber_security,skills,Cybersecurity skills and awareness,"Trains staff, operators or users in cybersecurity, or runs security awareness programmes. General digital skills training is insufficient.",true,v1.0

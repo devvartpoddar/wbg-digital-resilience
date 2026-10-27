@@ -1,0 +1,10 @@
+measure_id,query_id,query,type_id,active
+cyber_security,search_incident_response,The project will establish a national computer emergency response team and a security operations centre to monitor and respond to cyber incidents.,incident_response,true
+cyber_security,search_controls,"Firewalls, intrusion detection and endpoint protection will be installed to secure the government network.",security_controls,true
+cyber_security,search_encryption,"Data will be encrypted in transit and at rest, and a public key infrastructure will be deployed.",security_controls,true
+cyber_security,search_identity_access,Multi-factor authentication and privileged access management will control access to the platform.,identity_access,true
+cyber_security,search_testing,Independent penetration testing and vulnerability assessments will be carried out before the system goes live.,testing_audit,true
+cyber_security,search_audit,The agency will undergo a security audit and obtain ISO 27001 certification.,testing_audit,true
+cyber_security,search_policy,The project will support drafting of the national cybersecurity strategy and cybercrime law.,policy_regulation,true
+cyber_security,search_skills,Government IT staff will be trained in cybersecurity and users will receive security awareness training.,skills,true
+cyber_security,search_parent,The project will strengthen the cybersecurity of digital public systems against cyber attacks.,,true
