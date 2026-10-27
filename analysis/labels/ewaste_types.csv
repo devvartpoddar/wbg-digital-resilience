@@ -1,0 +1,5 @@
+measure_id,type_id,type_name,definition,active,version
+ewaste,disposal_recycling,"Collection, recycling and safe disposal","Collects, dismantles, recycles or safely disposes of discarded equipment, including decommissioning replaced equipment through licensed recyclers or take-back schemes.",true,v1.0
+ewaste,reuse_refurbishment,"Reuse, repair and refurbishment","Extends the life of equipment through reuse, repair or refurbishment, including refurbishment centres.",true,v1.0
+ewaste,management_plan,Project e-waste management plan,"Requires a plan, protocol or procedure for handling, storing and disposing of the e-waste the project's own equipment generates, for example in its environmental and social instruments.",true,v1.0
+ewaste,policy_regulation,E-waste policy and regulation,"Prepares or adopts an e-waste strategy, law, regulation, standard or extended producer responsibility scheme, or builds the capacity of the bodies that enforce it.",true,v1.0

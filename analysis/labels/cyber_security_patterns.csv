@@ -1,0 +1,5 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+cyber_security,search_cyber,\bcyber[- ]?(?:security|attacks?|threats?|incidents?|resilience|crime)\b,IGNORECASE,,true
+cyber_security,search_incident_response,\b(?:CERTs?|CSIRTs?|CIRTs?|SOCs?)\b|\bsecurity operations? cent(?:re|er)s?\b,,incident_response,true
+cyber_security,search_testing,\bpenetration test\w*\b|\bvulnerability assessments?\b|\bISO[/ ]?(?:IEC )?27001\b,IGNORECASE,testing_audit,true
+cyber_security,search_controls,\bintrusion (?:detection|prevention)\b|\bfirewalls?\b,IGNORECASE,security_controls,true
