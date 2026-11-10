@@ -34,6 +34,10 @@ def project_parts(text, listed, kind=None):
     document's kind ('pad', ...), when the caller knows it."""
     projects = [p for p in (listed or "").split("|") if p]
     whole = [(0, len(text or ""), "|".join(projects), "listed")]
+    if kind == "pad" and text:
+        shared = _country_annexes(text, projects)
+        if shared:
+            return shared
     if kind == "pad" and len(projects) == 1 and text:
         # The documents interface can file one operation's appraisal document under
         # another (40114862, Mozambique's P516379, is listed under Madagascar's P507944).
@@ -153,6 +157,45 @@ def _country_sections(text, part, titles, annexes):
         cursor, owner, label = at, new_owner, new_how
     out.append((cursor, end, owner, label))
     return out
+
+
+# A programme's appraisal document lists its operations in one table, a line each:
+# "Operation ID: P511651 · Country: Guinea · Instrument: IPF · ...".
+_OPERATION_COUNTRY = re.compile(r"Operation ID:\s*(P\d{6})\s*·\s*Country:\s*([^·\n]+?)\s*·")
+
+
+def _country_annexes(text, projects):
+    """The parts of one appraisal document for several countries' operations
+    that prints a table of them (operation id and country) and then an annex
+    per country titled with the country alone ("ANNEX 1: GUINEA"), with no
+    data sheet in the annex: each such annex belongs to its country's
+    operation, whatever the interface lists the document under (40106868, the
+    SIRA programme, is listed under Cote d'Ivoire's P509925 only and opens
+    with Guinea's data sheet). Everything else is the programme's, shared by
+    every operation in the table and every listed project. None when the
+    document has no such table or no annex titled with one of its countries."""
+    table = {}
+    for m in _OPERATION_COUNTRY.finditer(text):
+        table.setdefault(_norm(m.group(2)), m.group(1))
+    if len(set(table.values())) < 2:
+        return None
+    heads = [(m.start(), m.group(1), _norm(m.group(2))) for m in
+             re.finditer(r"^ANNEX\s+(\d+)\s*[:.\-–]?\s*([^\n]*)$", text, re.M)]
+    everyone = "|".join(sorted(set(projects) | set(table.values())))
+    parts, cursor = [], 0
+    for i, (start, number, title) in enumerate(heads):
+        if title not in table or start < cursor:
+            continue
+        end = min([a for a, n, _ in heads[i + 1:] if n != number] or [len(text)])
+        if start > cursor:
+            parts.append((cursor, start, everyone, "programme_wide"))
+        parts.append((start, end, table[title], "country_annex"))
+        cursor = end
+    if not parts:
+        return None
+    if cursor < len(text):
+        parts.append((cursor, len(text), everyone, "programme_wide"))
+    return parts
 
 
 def project_at(parts, pos):

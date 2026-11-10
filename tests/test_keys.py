@@ -119,3 +119,24 @@ def test_an_appraisal_document_filed_under_another_operation_goes_to_the_one_it_
     # Only a Project Appraisal Document: a paper filed under its parent stays there.
     assert keys.project_parts(text, "P000001", "additional_financing")[0][2:] == ("P000001", "listed")
     assert keys.project_parts(text, "P000001")[0][2:] == ("P000001", "listed")
+
+
+def test_a_programme_document_with_a_table_of_operations_is_split_at_its_country_annexes():
+    text = ("PROJECT APPRAISAL DOCUMENT\nDATASHEET\nOperation ID P000001 Financing\nProgramme text.\n"
+            "Operation ID: P000001 · Country: Aland · Instrument: IPF · IDA: 100\n"
+            "Operation ID: P000002 · Country: Bergia · Instrument: PforR · IDA: 15\n"
+            "Operation ID: P000003 · Country: Côte d'Or · Instrument: PforR · IDA: 222\n"
+            "ANNEX 1: ALAND\nAland's annex.\nANNEX 1: ALAND — a table row\nMore Aland.\n"
+            "ANNEX 2: BERGIA\nBergia's annex.\n"
+            "ANNEX 3: CÔTE D'OR\nThe third annex.\n")
+    # Listed under the third operation only, and opening with the first one's data sheet.
+    everyone = "P000001|P000002|P000003"
+    assert _owner(text, "P000003", "Programme text") == "P000003"            # not a PAD: listing stands
+    parts = keys.project_parts(text, "P000003", "pad")
+    at = lambda phrase: keys.project_at(parts, text.index(phrase))            # noqa: E731
+    assert at("Programme text") == everyone
+    assert at("Aland's annex") == "P000001" and at("More Aland") == "P000001"
+    assert at("Bergia's annex") == "P000002"
+    assert at("The third annex") == "P000003"
+    assert parts[0][0] == 0 and parts[-1][1] == len(text)
+    assert all(a[1] == b[0] for a, b in zip(parts, parts[1:]))
