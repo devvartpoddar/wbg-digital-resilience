@@ -68,7 +68,75 @@ def project_parts(text, listed):
         tail_owner = first_op if len(sheets) == 1 else "|".join(projects)
         parts.append((cursor, len(text), tail_owner,
                       "datasheet_operation_id" if len(sheets) == 1 else "programme_wide"))
-    return parts
+    # The title of each country annex ("ANNEX 5: Republic of Malawi") names its operation.
+    titles = {}
+    for start, end, owners, how in parts:
+        if how == "datasheet_operation_id" and owners != first_op:
+            heading = _ANNEX_LINE.match(text, start)
+            if heading:
+                titles[owners] = heading.group(2)
+    out = []
+    for part in parts:
+        out.extend(_country_sections(text, part, titles, annexes)
+                   if part[3] == "programme_wide" else [part])
+    return out
+
+
+_ANNEX_LINE = re.compile(r"ANNEX\s+(\d+)\s*[:.\-–]?\s*([^\n]*)")
+# A heading line inside a programme-wide annex that names one country ("Malawi"); longer
+# lines are prose or table rows, not headings.
+_HEADING_MAX_CHARS = 60
+
+
+def _norm(s):
+    return " ".join(re.sub(r"[^\w\s]", " ", s.casefold()).split())
+
+
+def _names_country(line, title):
+    """Whether a line is the country of an annex title: the title itself, or its last
+    words ("Malawi" for "Republic of Malawi")."""
+    line, title = _norm(line), _norm(title)
+    return len(line) >= 4 and (line == title or title.endswith(" " + line))
+
+
+def _country_sections(text, part, titles, annexes):
+    """A programme-wide stretch split at heading lines that name one country annex's
+    country (an annex on climate action with a section per country): each section belongs
+    to that country's operation, up to the next such heading or the next annex; the rest
+    stays programme-wide."""
+    start, end, owners, how = part
+    if not titles:
+        return [part]
+    cuts = []                              # (position, owner, how)
+    section_annex = None                   # the annex number a country section sits in
+    pos = start
+    for line in text[start:end].split("\n"):
+        stripped = line.strip()
+        annex = _ANNEX.match(stripped)
+        if annex:
+            # A new annex ends a country section; a table row repeating the same annex's
+            # title does not.
+            if section_annex is not None and annex.group(1) != section_annex:
+                cuts.append((pos, owners, how))
+                section_annex = None
+        elif stripped and len(stripped) <= _HEADING_MAX_CHARS:
+            hit = [op for op, title in titles.items() if _names_country(stripped, title)]
+            if len(hit) == 1:
+                cuts.append((pos, hit[0], "country_heading"))
+                before = [n for a, n in annexes if a <= pos]
+                section_annex = before[-1] if before else ""
+        pos += len(line) + 1
+    if not cuts:
+        return [part]
+    out, cursor, owner, label = [], start, owners, how
+    for at, new_owner, new_how in cuts:
+        if (new_owner, new_how) == (owner, label):
+            continue
+        if at > cursor:
+            out.append((cursor, at, owner, label))
+        cursor, owner, label = at, new_owner, new_how
+    out.append((cursor, end, owner, label))
+    return out
 
 
 def project_at(parts, pos):
