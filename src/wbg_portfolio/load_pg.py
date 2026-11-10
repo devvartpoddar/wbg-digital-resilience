@@ -235,7 +235,36 @@ def load_corpus_table(conn, data, table, rel):
             rows, cols = _text_rows(data, reader), cols + ["text"]
         elif table == "components":
             rows, cols = _component_rows(reader), ["component_id"] + cols
-        return load_rows(conn, table, cols, rows, file_sha256(path))
+        elif table == "documents":
+            # A document belongs to the operations its parts belong to (the same
+            # reading as cli.tables): its listing, unless its data sheet names another.
+            parts = where(data, "appraisal", "document_parts.csv")
+            if os.path.exists(parts):
+                rows = _document_rows(parts, reader)
+        return load_rows(conn, table, cols, rows, corpus_sha(data, table, path))
+
+
+def corpus_sha(data, table, path):
+    """What a corpus table was loaded from: its file, and for documents the
+    parts that say which operations each belongs to."""
+    sha = file_sha256(path)
+    parts = where(data, "appraisal", "document_parts.csv")
+    if table == "documents" and os.path.exists(parts):
+        sha += ":" + file_sha256(parts)
+    return sha
+
+
+def _document_rows(parts_path, reader):
+    owners = {}
+    with open(parts_path, newline="", encoding="utf-8") as fh:
+        for r in csv.DictReader(fh):
+            for p in (r.get("project_ids") or "").split("|"):
+                if p and p not in owners.setdefault(r["doc_id"], []):
+                    owners[r["doc_id"]].append(p)
+    for r in reader:
+        if owners.get(r["doc_id"]):
+            r = dict(r, project_ids="|".join(sorted(owners[r["doc_id"]])))
+        yield r
 
 
 def paragraph_projects(data):
@@ -476,7 +505,7 @@ def load(conn, data, *, force=False, log=print):
             path = os.path.join(data, rel)
             if not os.path.exists(path):
                 log(f"  {table:<20} skipped: {rel} not found")
-            elif not force and last_sha(conn, table) == file_sha256(path):
+            elif not force and last_sha(conn, table) == corpus_sha(data, table, path):
                 log(f"  {table:<20} unchanged")
             else:
                 t0 = time.time()

@@ -232,7 +232,7 @@ def main():
 
         # Which project each stretch of the document belongs to: a combined appraisal
         # document is split at its data sheets (keys.py).
-        parts = project_parts(clean, doc["project_ids"])
+        parts = project_parts(clean, doc["project_ids"], doc.get("doc_kind"))
         for k, (start, end, owners, how) in enumerate(parts, 1):
             doc_parts.append({"doc_id": did, "part": k, "char_start": start,
                               "char_end": end, "project_ids": owners, "assigned_by": how,
@@ -331,6 +331,11 @@ def main():
         fh.write(f"documents not cleaned: {len(not_cleaned)}\n")
         for d, why in not_cleaned:
             fh.write(f"  {d}  {why}\n")
+        moved = [r for r in doc_parts if r["assigned_by"] == "datasheet_other_operation"]
+        fh.write(f"documents given to the operation their data sheet names: {len(moved)}\n")
+        for r in moved:
+            fh.write(f"  {r['doc_id']}  listed under {r['listed_project_ids']}, "
+                     f"data sheet names {r['project_ids']}\n")
         fh.write(f"paragraphs kept:   {len(paras)}\n")
         fh.write(f"  given to the model (for_model): "
                  f"{sum(p['for_model'] == 'true' for p in paras)}\n")
