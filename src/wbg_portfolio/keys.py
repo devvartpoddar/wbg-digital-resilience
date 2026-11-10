@@ -28,11 +28,27 @@ _ANNEX = re.compile(r"^ANNEX\s+(\d+)\b", re.M)
 _DATASHEET_SPAN = 3000
 
 
-def project_parts(text, listed):
+def project_parts(text, listed, kind=None):
     """Which project each stretch of a document belongs to, as a list of
-    (start, end, project_ids, how) covering the whole text."""
+    (start, end, project_ids, how) covering the whole text. kind is the
+    document's kind ('pad', ...), when the caller knows it."""
     projects = [p for p in (listed or "").split("|") if p]
     whole = [(0, len(text or ""), "|".join(projects), "listed")]
+    if kind == "pad" and len(projects) == 1 and text:
+        # The documents interface can file one operation's appraisal document under
+        # another (40114862, Mozambique's P516379, is listed under Madagascar's P507944).
+        # An appraisal document's first data sheet names its own operation: when that is
+        # not the one project it is listed under, the document is the named operation's.
+        # Only a Project Appraisal Document: an additional-financing paper filed under
+        # its parent names its own id and stays with the parent.
+        sheet = _DATASHEET.search(text)
+        while sheet:
+            op = _OPERATION_ID.search(text, sheet.start(), sheet.start() + _DATASHEET_SPAN)
+            if op:
+                if op.group(1) != projects[0]:
+                    return [(0, len(text), op.group(1), "datasheet_other_operation")]
+                break
+            sheet = _DATASHEET.search(text, sheet.end())
     if len(projects) < 2 or not text:
         return whole
     sheets = []

@@ -566,7 +566,7 @@ def main():
                 "disclosure_date": doc["disclosure_date"]}
         # A combined appraisal document is split at its data sheets, each part belonging to
         # its own operation (keys.project_parts); a document of one project is one part.
-        parts = project_parts(text, doc["project_ids"])
+        parts = project_parts(text, doc["project_ids"], doc.get("doc_kind"))
 
         # Pages holding a component table, found in the cleaned text so the PDF is opened
         # only at those pages.

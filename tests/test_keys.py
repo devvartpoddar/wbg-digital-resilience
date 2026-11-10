@@ -107,3 +107,15 @@ def test_a_country_named_inside_a_sentence_is_not_a_heading():
     text = CLIMATE_ANNEX.replace("Aland\nAland's", "Work in Aland and Bergia goes on.\nAland's")
     listed = "P000001|P000002|P000003"
     assert _owner(text, listed, "Aland's climate profile") == listed
+
+
+def test_an_appraisal_document_filed_under_another_operation_goes_to_the_one_it_names():
+    text = "Front matter.\nDATASHEET\nOperation ID | Instrument\nP000009 Investment\nBody."
+    assert keys.project_parts(text, "P000001", "pad") == \
+        [(0, len(text), "P000009", "datasheet_other_operation")]
+    # Its own operation, a contents line with no id before the data sheet: unchanged.
+    own = "DATASHEET ..... i\nDATASHEET\nOperation ID P000001\nBody."
+    assert keys.project_parts(own, "P000001", "pad")[0][2:] == ("P000001", "listed")
+    # Only a Project Appraisal Document: a paper filed under its parent stays there.
+    assert keys.project_parts(text, "P000001", "additional_financing")[0][2:] == ("P000001", "listed")
+    assert keys.project_parts(text, "P000001")[0][2:] == ("P000001", "listed")

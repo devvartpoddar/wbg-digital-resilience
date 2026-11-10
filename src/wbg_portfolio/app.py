@@ -70,6 +70,42 @@ def commitments(q, cohort=None):
     return df
 
 
+def projects(q, cohort=None):
+    """One row per project the commitments can come from: a project with at
+    least one document read, of the instruments the dashboards count
+    (dashboard.ipf_only), whether or not it has a commitment. The base a
+    share of projects is taken of. cohort as in commitments()."""
+    df = _numbers(q(_sql("""
+        SELECT h.project_id, h.project_name, h.cohort_set, h.country_name, h.country_code,
+               h.region, h.is_regional, h.approval_fiscal_year
+        FROM wbg.project_header h
+        JOIN wbg.project_info i USING (project_id)
+        CROSS JOIN wbg.dashboard_settings s
+        WHERE h.documents_read > 0 AND (i.is_ipf OR NOT s.ipf_only)
+          AND (%(cohort)s::text IS NULL OR h.cohort_set = %(cohort)s)
+        ORDER BY h.project_name"""), {"cohort": cohort}))
+    if df.empty:
+        return df.assign(place=pd.Series(dtype=str))
+    df["place"] = df["country_name"].where(~df["is_regional"].fillna(False).astype(bool), df["region"])
+    return df
+
+
+def sentences(q, commitment_ids):
+    """Every distinct sentence of each commitment asked for, strongest first:
+    its text, page, PDF link, probability, firmness and document kind."""
+    ids = list(dict.fromkeys(commitment_ids))
+    cols = ["commitment_id", "unit_id", "text", "page_number", "pdf_url", "posterior_probability",
+            "firmness", "document_kind"]
+    if not ids:
+        return pd.DataFrame(columns=cols)
+    return _numbers(q(_sql("""
+        SELECT commitment_id, unit_id, text, page_number, pdf_url, posterior_probability,
+               firmness, document_kind
+        FROM wbg.commitment_sentences
+        WHERE commitment_id = ANY(%(ids)s)
+        ORDER BY commitment_id, posterior_probability DESC, length(text), unit_id"""), {"ids": ids}))
+
+
 def evidence(q, commitment_ids):
     """The strongest sentence of each commitment asked for: its text, page,
     PDF link, probability and document kind."""
@@ -168,6 +204,45 @@ def count(df, *by):
     return (df.groupby(list(by), dropna=False).size().rename("commitments").reset_index()
               .sort_values(["commitments", *by], ascending=[False, *[True] * len(by)])
               .reset_index(drop=True))
+
+
+UNITS = ("commitments", "projects")
+# Columns that say something about a project, not about one commitment: a
+# share of projects grouped by one of these is taken of the projects with
+# the same value.
+PROJECT_COLUMNS = ("place", "region", "country_code", "country_name", "approval_fiscal_year",
+                   "cohort_set")
+
+
+def tally(df, *by, unit="commitments", base=None):
+    """Commitments, or projects, per value of the columns given, largest
+    first: columns *by, n, of, share.
+
+    unit 'commitments' counts rows; 'projects' counts each project once per
+    group however many commitments it has there, so the groups do not add
+    up to the number of projects. base is a frame of projects (projects(),
+    or part of it): with it, `of` is how many base projects the group could
+    have held (those sharing the group's project columns, e.g. its region;
+    every base project when the group is by measure, asset, type or stage)
+    and share is n / of. Without a base, or when counting commitments, of
+    and share are empty."""
+    cols = [*by, "n", "of", "share"]
+    if df.empty:
+        return pd.DataFrame(columns=cols)
+    g = df.groupby(list(by), dropna=False)
+    out = (g["project_id"].nunique() if unit == "projects" else g.size()).rename("n").reset_index()
+    out["of"], out["share"] = float("nan"), float("nan")
+    if unit == "projects" and base is not None and len(base):
+        keys = [c for c in by if c in PROJECT_COLUMNS and c in base.columns]
+        if keys:
+            size = (base.groupby(keys, dropna=False)["project_id"].nunique().rename("_of").reset_index())
+            out = out.merge(size, on=keys, how="left")
+            out["of"] = out.pop("_of")
+        else:
+            out["of"] = base["project_id"].nunique()
+        out["share"] = out["n"] / out["of"]
+    return (out.sort_values(["n", *by], ascending=[False, *[True] * len(by)])
+               .reset_index(drop=True)[cols])
 
 
 def board(df):

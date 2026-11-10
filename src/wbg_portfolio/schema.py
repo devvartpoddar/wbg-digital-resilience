@@ -179,10 +179,10 @@ TABLES = {
     "documents": dict(
         key=("document_id",), foreign=[],
         comment="One appraisal document (Project Appraisal Document or Project Paper) fetched "
-                "as PDF; project_ids lists every operation the interface files it under.",
+                "as PDF; project_ids lists every operation it belongs to.",
         columns={
             "document_id": "The documents interface's id.",
-            "project_ids": "Every operation the document is filed under (a regional document serves several).",
+            "project_ids": "Every operation the document belongs to (a regional document serves several): the interface's listing, or the operation its data sheet names when the interface files it under another.",
             "document_type": "The interface's document type.",
             "document_kind": "pad, additional_financing, restructuring or project_paper_other, from the type and title.",
             "disclosure_date": "When the document was disclosed.",

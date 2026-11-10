@@ -45,7 +45,7 @@ The Shiny app (`apps.amduat.dev/wbg`, repository `devvartpoddar/shiny`, `apps/wb
 
 ## The app
 
-`src/wbg_portfolio/app.py` holds every query the app runs and what it computes beyond the views; the app (`apps/wbg/app.py` in the shiny repository) only lays them out. It is read only: no write, no model call, no embedding. It reads one frame of commitments (`app.commitments`, a few thousand rows) and filters it in memory, so every chart, board and drill on a page counts the same rows; the sentences are read only for the rows a drill shows (`app.evidence`).
+`src/wbg_portfolio/app.py` holds every query the app runs and what it computes beyond the views; the app (`apps/wbg/app.py` in the shiny repository) only lays them out. It is read only: no write, no model call, no embedding. It reads one frame of commitments (`app.commitments`, a few thousand rows) and filters it in memory, so every chart, board and drill on a page counts the same rows; the sentences are read only for the rows a drill shows (`app.sentences`, every sentence of a commitment; `app.evidence`, its strongest). A switch counts every chart in commitments or in projects (`app.tally`), and the projects a share is taken of come from `app.projects`.
 
 | View | What it answers |
 |---|---|
@@ -55,12 +55,13 @@ The Shiny app (`apps.amduat.dev/wbg`, repository `devvartpoddar/shiny`, `apps/wb
 | Explore, one asset | Its definition, the measures committed for it, measure by region, where each project stands, a world map |
 | Explore, one measure | Its definition and accuracy, its types (definition, commitments, projects), where each project stands, a world map, type by region and type by asset |
 
-Every bar, cell, country and card opens the commitments behind it in a side panel, grouped by project, each with its type, asset, stage and strongest sentence with its page.
+Every bar, cell, country and card opens what is behind it in a side panel: the projects, each opening to its sentences. A sentence behind several commitments of a project (two assets, two types) is shown once, with every measure, type and asset it carries, its stage and its page.
 
 **Computed in `app.py`, not in the views:**
 
 - **Stage** (`app.STAGES`, `app.stage`): a commitment's `status` grouped into Completed (Contract completed), Under way (Under implementation, Contract signed), Coming up (Overdue, Planned, Tendered), Dropped (Not in latest plan, Cancelled) and No package linked. Package links are found for about a third of commitments, so No package linked is the common case and says nothing about the project.
 - **Place**: the country, or the region for a regional project.
+- **Counting projects** (`app.tally` with unit `projects`): a project counts once in each group it has a commitment in, however many, so the groups do not add up to the number of projects. Its share is of a base of projects (`app.projects`: the cohort's projects with a document read, of the instruments `dashboard.ipf_only` admits, with or without a commitment). Grouped by something about the project (country, region, approval year) the base is the projects sharing it; grouped by measure, asset, type or stage it is the whole base. Inside one measure or asset the app passes that measure's or asset's projects as the base, so a type's share is of the measure's projects; inside one country, the country's projects.
 - **Where each project stands** (`app.board`): one card per project and stage, with its commitments and types; a project with commitments at two stages has two cards.
 - **A package's date** (`app.packages`): the next date while it is still to come, else the signing date, else the due date.
 

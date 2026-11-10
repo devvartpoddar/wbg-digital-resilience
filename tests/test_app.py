@@ -40,6 +40,14 @@ def test_the_app_reads_commitments_with_stage_place_and_evidence(pg, corpus, fak
     b = app.board(df)
     assert b["project_id"].tolist() == ["P1"] and b["commitments"].tolist() == [1]
     assert app.count(df, "measure_name")["commitments"].tolist() == [1]
+    base = app.projects(q)
+    assert "P1" in base["project_id"].tolist() and base["place"].notna().all()
+    assert app.projects(q, cohort="no such set").empty
+    s = app.sentences(q, df["commitment_id"])
+    assert len(s) >= 1 and set(s["commitment_id"]) == set(df["commitment_id"])
+    assert app.sentences(q, []).empty
+    t = app.tally(df, "measure_name", unit="projects", base=base)
+    assert t["n"].tolist() == [1] and t["of"].tolist() == [len(base)]
 
 
 def test_the_app_reads_measures_types_assets_and_a_project(pg, corpus, fake_model):
@@ -60,3 +68,20 @@ def test_the_frame_helpers_take_an_empty_frame():
     assert app.headline(empty)["commitments"] == 0
     assert app.board(empty).empty and app.count(empty, "stage").empty
     assert db.SCHEMA                                                                # the store under test
+
+
+def test_tally_counts_a_project_once_and_takes_its_share_of_the_right_base():
+    df = pd.DataFrame({"project_id": ["A", "A", "A", "B"], "measure_name": ["m1", "m1", "m2", "m1"],
+                       "region": ["North", "North", "North", "South"]})
+    base = pd.DataFrame({"project_id": ["A", "B", "C", "D"], "region": ["North", "South", "South", "South"]})
+    c = app.tally(df, "measure_name")
+    assert c[["measure_name", "n"]].values.tolist() == [["m1", 3], ["m2", 1]] and c["share"].isna().all()
+    p = app.tally(df, "measure_name", unit="projects", base=base)
+    assert p[["measure_name", "n", "of"]].values.tolist() == [["m1", 2, 4], ["m2", 1, 4]]
+    assert p["share"].tolist() == [0.5, 0.25]
+    # Grouped by something about the project, the base is the projects sharing it.
+    r = app.tally(df, "region", unit="projects", base=base).set_index("region")
+    assert r.loc["North", ["n", "of"]].tolist() == [1, 1] and r.loc["South", ["n", "of"]].tolist() == [1, 3]
+    both = app.tally(df, "measure_name", "region", unit="projects", base=base)
+    assert both[both["region"] == "South"]["of"].tolist() == [3]
+    assert app.tally(df.iloc[0:0], "measure_name", unit="projects", base=base).empty
