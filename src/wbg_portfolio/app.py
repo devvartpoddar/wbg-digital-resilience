@@ -16,14 +16,21 @@ from wbg_portfolio import db
 # package (wbg.commitments.status, docs/method/dashboards.md "A commitment's
 # status"). Package links are found for about a third of commitments, so
 # "No package linked" is the common case, not a finding.
-STAGES = ("Completed", "Under way", "Coming up", "Dropped", "No package linked")
+DROPPED = "Package dropped"
+STAGES = ("Completed", "Under way", "Coming up", DROPPED, "No package linked")
 STAGE_OF_STATUS = {
     "Contract completed": "Completed",
     "Under implementation": "Under way", "Contract signed": "Under way",
     "Overdue": "Coming up", "Planned": "Coming up", "Tendered": "Coming up",
-    "Not in latest plan": "Dropped", "Cancelled": "Dropped",
+    "Not in latest plan": DROPPED, "Cancelled": DROPPED,
     "No package found": "No package linked",
 }
+# Which stage a sentence behind several commitments shows: the one that most
+# needs a reader's attention first, as wbg.package_status_order does for a
+# commitment with several packages (a package still to come before one signed).
+STAGE_URGENCY = ("Coming up", "Under way", "Completed", DROPPED, "No package linked")
+# What a package's status is called where it is listed (the coming-up list).
+COMING_UP_STATUSES = ("Overdue", "Planned", "Tendered")
 NO_ASSET = "(no asset)"
 NO_TYPE = "(no type)"
 
@@ -95,12 +102,12 @@ def sentences(q, commitment_ids):
     its text, page, PDF link, probability, firmness and document kind."""
     ids = list(dict.fromkeys(commitment_ids))
     cols = ["commitment_id", "unit_id", "text", "page_number", "pdf_url", "posterior_probability",
-            "firmness", "document_kind"]
+            "firmness", "document_kind", "document_date"]
     if not ids:
         return pd.DataFrame(columns=cols)
     return _numbers(q(_sql("""
         SELECT commitment_id, unit_id, text, page_number, pdf_url, posterior_probability,
-               firmness, document_kind
+               firmness, document_kind, document_date
         FROM wbg.commitment_sentences
         WHERE commitment_id = ANY(%(ids)s)
         ORDER BY commitment_id, posterior_probability DESC, length(text), unit_id"""), {"ids": ids}))
@@ -112,10 +119,10 @@ def evidence(q, commitment_ids):
     ids = list(dict.fromkeys(commitment_ids))
     if not ids:
         return pd.DataFrame(columns=["commitment_id", "text", "page_number", "pdf_url",
-                                     "posterior_probability", "document_kind"])
+                                     "posterior_probability", "document_kind", "document_date"])
     return _numbers(q(_sql("""
         SELECT DISTINCT ON (commitment_id) commitment_id, text, page_number, pdf_url,
-               posterior_probability, document_kind
+               posterior_probability, document_kind, document_date
         FROM wbg.commitment_sentences
         WHERE commitment_id = ANY(%(ids)s)
         ORDER BY commitment_id, posterior_probability DESC, length(text), unit_id"""), {"ids": ids}))
@@ -179,10 +186,44 @@ def packages(q, project_id):
         FROM wbg.commitment_package_status WHERE project_id = %(pid)s
         ORDER BY package_id, link_probability DESC"""), {"pid": project_id}))
     if df.empty:
-        return df.assign(stage=pd.Series(dtype=str), date=pd.Series(dtype="datetime64[ns]"))
+        return df.assign(stage=pd.Series(dtype=str), date=pd.Series(dtype="datetime64[ns]"),
+                         date_kind=pd.Series(dtype=str))
     df["stage"] = df["package_status"].map(stage)
     df["date"] = df["next_date"].fillna(df["signed_date"]).fillna(df["due_date"])
+    # Which date it is, so a chart that mixes them can say so.
+    df["date_kind"] = "planned"
+    df.loc[df["next_date"].isna() & df["signed_date"].notna(), "date_kind"] = "signed"
+    df.loc[df["next_date"].isna() & df["signed_date"].isna(), "date_kind"] = "was due"
+    df.loc[df["date"].isna(), "date_kind"] = None
     return df.sort_values(["date", "package_id"], na_position="last").reset_index(drop=True)
+
+
+def coming_up(q, cohort=None):
+    """The packages still to come that are linked to a commitment, soonest
+    first: one row per package, with its project, the measures of the
+    commitments it is linked to, its status (Overdue, Planned or Tendered),
+    the date to act on (a future due date or tender deadline; for an overdue
+    package the date it was due) and the plan's estimate. cohort as in
+    commitments()."""
+    cols = ["package_id", "project_id", "project_name", "country_name", "region", "is_regional",
+            "measures", "description", "package_status", "date", "estimated_amount_usd"]
+    df = _numbers(q(_sql("""
+        SELECT s.package_id, c.project_id, c.project_name, c.country_name, c.region, c.is_regional,
+               string_agg(DISTINCT c.measure_name, '; ' ORDER BY c.measure_name) AS measures,
+               s.description_clean AS description, s.package_status,
+               coalesce(s.next_date, s.due_date) AS date, s.estimated_amount_usd
+        FROM wbg.commitment_package_status s
+        JOIN wbg.commitments c USING (commitment_id)
+        WHERE s.package_status = ANY(%(statuses)s)
+          AND (%(cohort)s::text IS NULL OR c.cohort_set = %(cohort)s)
+        GROUP BY s.package_id, c.project_id, c.project_name, c.country_name, c.region, c.is_regional,
+                 s.description_clean, s.package_status, s.next_date, s.due_date, s.estimated_amount_usd
+        ORDER BY coalesce(s.next_date, s.due_date) NULLS LAST, c.project_name, s.package_id"""),
+        {"statuses": list(COMING_UP_STATUSES), "cohort": cohort}))
+    if df.empty:
+        return pd.DataFrame(columns=[*cols, "place"])
+    df["place"] = df["country_name"].where(~df["is_regional"].fillna(False).astype(bool), df["region"])
+    return df
 
 
 # ---------------------------------------------------------------- on the frame
@@ -257,3 +298,120 @@ def board(df):
     g["order"] = g["stage"].map({s: i for i, s in enumerate(STAGES)})
     return (g.sort_values(["order", "commitments", "project_name"], ascending=[True, False, True])
              .drop(columns="order").reset_index(drop=True))
+
+
+# ---------------------------------------------------------------- the About page
+
+# The documents the dashboards count: those of an operation the dashboards
+# count (project_info.is_ipf while dashboard.ipf_only) that has a document read.
+_SCOPE = """
+    scope AS (SELECT i.project_id FROM wbg.project_info i
+              JOIN wbg.project_header h USING (project_id)
+              CROSS JOIN wbg.dashboard_settings s
+              WHERE h.documents_read > 0 AND (i.is_ipf OR NOT s.ipf_only)),
+    docs AS (SELECT DISTINCT d.document_id FROM wbg.documents d
+             JOIN scope ON scope.project_id = ANY (d.project_ids)),
+    units AS (SELECT u.unit_id FROM wbg.search_units u JOIN docs USING (document_id))"""
+
+_ABOUT = {
+    "projects": """
+        SELECT count(*) AS cohort,
+               count(*) FILTER (WHERE h.documents_read > 0) AS with_document,
+               count(*) FILTER (WHERE h.documents_read > 0 AND (i.is_ipf OR NOT s.ipf_only)) AS in_scope,
+               count(*) FILTER (WHERE h.documents_read = 0 AND i.status = 'Pipeline') AS not_approved,
+               count(*) FILTER (WHERE h.documents_read = 0 AND i.status IS DISTINCT FROM 'Pipeline'
+                                AND i.lending_instrument IN ('Development Policy Lending',
+                                                             'Program-for-Results Financing')) AS other_instrument,
+               count(*) FILTER (WHERE h.documents_read > 0 AND NOT (i.is_ipf OR NOT s.ipf_only)) AS other_with_document
+        FROM wbg.project_info i JOIN wbg.project_header h USING (project_id)
+        CROSS JOIN wbg.dashboard_settings s""",
+    "text": "WITH" + _SCOPE + """
+        SELECT (SELECT count(*) FROM docs) AS documents, (SELECT count(*) FROM units) AS sentences""",
+    "measure_routes": "WITH" + _SCOPE + """,
+        sc AS (SELECT s.item_id, min(s.round) AS first_round,
+                      bool_or(s.route IN ('pattern', 'both')) AS pattern,
+                      bool_or(s.route IN ('embedding', 'both')) AS similarity
+               FROM wbg.scores s JOIN units ON units.unit_id = s.item_id
+               WHERE s.kind = 'measure' GROUP BY s.item_id)
+        SELECT count(*) AS graded, count(*) FILTER (WHERE first_round = 0) AS shortlisted,
+               count(*) FILTER (WHERE first_round > 0) AS feedback_added,
+               count(*) FILTER (WHERE similarity) AS by_similarity,
+               count(*) FILTER (WHERE pattern) AS by_pattern FROM sc""",
+    "asset_routes": "WITH" + _SCOPE + """,
+        sc AS (SELECT s.item_id, min(s.round) AS first_round,
+                      bool_or(s.route IN ('pattern', 'both')) AS pattern,
+                      bool_or(s.route IN ('embedding', 'both')) AS similarity
+               FROM wbg.scores s JOIN units ON units.unit_id = s.item_id
+               WHERE s.kind = 'asset' GROUP BY s.item_id)
+        SELECT count(*) AS graded, count(*) FILTER (WHERE first_round = 0) AS shortlisted,
+               count(*) FILTER (WHERE first_round > 0) AS feedback_added,
+               count(*) FILTER (WHERE similarity) AS by_similarity,
+               count(*) FILTER (WHERE pattern) AS by_pattern FROM sc""",
+    "measures": "WITH" + _SCOPE + """
+        SELECT (SELECT count(DISTINCT f.unit_id) FROM wbg.measure_findings f JOIN docs USING (document_id)
+                 WHERE f.was_sent_to_model AND f.is_committed) AS at_threshold,
+               (SELECT count(DISTINCT c.unit_id) FROM wbg.unit_pair_checks c JOIN units USING (unit_id)) AS overlap_tested,
+               (SELECT count(DISTINCT unit_id) FROM wbg.commitment_units) AS kept,
+               (SELECT count(DISTINCT unit_id) FROM wbg.commitment_units WHERE type_id <> '(no type)') AS with_type,
+               (SELECT count(*) FROM wbg.commitments) AS commitments,
+               (SELECT count(DISTINCT project_id) FROM wbg.commitments) AS commitment_projects""",
+    "assets": "WITH" + _SCOPE + """
+        SELECT count(DISTINCT a.unit_id) AS at_threshold
+        FROM wbg.unit_assets a JOIN units USING (unit_id) WHERE a.asset_level = 'unit'""",
+    "procurement": """
+        WITH scope AS (SELECT i.project_id FROM wbg.project_info i
+                       JOIN wbg.project_header h USING (project_id)
+                       CROSS JOIN wbg.dashboard_settings s
+                       WHERE h.documents_read > 0 AND (i.is_ipf OR NOT s.ipf_only))
+        SELECT (SELECT count(*) FROM wbg.packages p JOIN scope USING (project_id)) AS packages,
+               (SELECT count(DISTINCT p.project_id) FROM wbg.packages p JOIN scope USING (project_id)) AS package_projects,
+               (SELECT count(DISTINCT p.plan_document_id) FROM wbg.packages p JOIN scope USING (project_id)) AS plans,
+               (SELECT count(*) FROM wbg.notices n JOIN scope USING (project_id)) AS notices,
+               (SELECT count(*) FROM wbg.awards a JOIN scope USING (project_id)) AS contracts,
+               (SELECT count(DISTINCT a.package_id) FROM wbg.package_assets a JOIN scope USING (project_id)) AS tested,
+               (SELECT count(DISTINCT a.package_id) FROM wbg.package_assets a JOIN scope USING (project_id)
+                 WHERE coalesce(a.posterior_probability, a.probability) >= {{asset_yes}}) AS with_asset,
+               (SELECT count(DISTINCT package_id) FROM wbg.commitment_package_status) AS linked_packages,
+               (SELECT count(*) FROM wbg.commitments WHERE linked_packages > 0) AS linked_commitments""",
+    "labels": """
+        SELECT (SELECT count(DISTINCT label_set) FROM wbg.labels WHERE label_set <> 'assets' AND is_active) AS measures,
+               (SELECT count(*) FROM wbg.labels WHERE label_set = 'assets' AND is_active) AS assets,
+               (SELECT count(*) FROM wbg.measure_types WHERE type_name NOT LIKE 'OTH.%%') AS types_defined,
+               (SELECT count(*) FROM wbg.measure_types WHERE type_name LIKE 'OTH.%%') AS types_proposed""",
+    "as_of": "SELECT loaded_at::date AS loaded FROM wbg.data_as_of LIMIT 1",
+    "settings": """
+        SELECT s.package_link_min_probability AS link_floor, s.pair_check_floor
+        FROM wbg.dashboard_settings s""",
+}
+
+
+def about(q):
+    """The counts the About page prints on its pipeline figure, each group
+    read by its own statement: {group: {name: value}}. A group whose
+    statement fails (a table not yet loaded, a timeout) is an empty dict,
+    so the page still draws and leaves that count out. Every count is of the
+    operations the dashboards count (dashboard.ipf_only) and their documents.
+    The thresholds the page quotes come from the control panel."""
+    from wbg_portfolio import panel
+    out = {}
+    floors = {}
+    for key in ("floor.default", "floor.cyber_security", "floor.types", "asset.floor", "link.asset_yes"):
+        try:
+            floors[key] = float(panel.require(key))
+        except Exception:
+            floors[key] = None
+    out["floors"] = floors
+    for name, sql in _ABOUT.items():
+        try:
+            if "{{asset_yes}}" in sql:
+                sql = sql.replace("{{asset_yes}}", repr(float(floors["link.asset_yes"])))
+            df = q(_sql(sql), None)
+            out[name] = {} if df.empty else {k: (None if pd.isna(v) else v) for k, v in df.iloc[0].items()}
+        except Exception:
+            out[name] = {}
+    try:
+        g = q(f"SELECT count(*) AS graded_sentences FROM {db.STORE}.grades WHERE kind = 'measure'", None)
+        out["grades"] = {"graded_sentences": int(g.iloc[0, 0])}
+    except Exception:
+        out["grades"] = {}
+    return out

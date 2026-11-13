@@ -49,20 +49,23 @@ The Shiny app (`apps.amduat.dev/wbg`, repository `devvartpoddar/shiny`, `apps/wb
 
 | View | What it answers |
 |---|---|
-| Overview | How many commitments, where (a world map; regional projects listed apart), by measure, by asset, measure by asset, by approval year, and how far linked procurement has gone |
+| Overview | How many commitments, the linked packages still to come soonest first, where (a world map; regional projects listed apart), by measure, by asset, measure by asset, by approval year, and how far linked procurement has gone |
 | Explore, one country | Its projects, which project commits to what (measure by project), its assets, where each project stands |
 | Explore, one project | What it commits to, measure by measure, with the strongest sentence; the assets its sentences name; its components and their cost; its documents; its linked packages on a timeline |
 | Explore, one asset | Its definition, the measures committed for it, measure by region, where each project stands, a world map |
-| Explore, one measure | Its definition and accuracy, its types (definition, commitments, projects), where each project stands, a world map, type by region and type by asset |
+| Explore, one measure | Its definition and precision on the graded sample, its types (definition, commitments, projects), where each project stands, a world map, type by region and type by asset |
+| About | The definitions, which projects are counted, the pipeline as one figure with the count each step passes on (`app.about`), the models and the limitations |
 
 Every bar, cell, country and card opens what is behind it in a side panel: the projects, each opening to its sentences. A sentence behind several commitments of a project (two assets, two types) is shown once, with every measure, type and asset it carries, its stage and its page.
 
 **Computed in `app.py`, not in the views:**
 
-- **Stage** (`app.STAGES`, `app.stage`): a commitment's `status` grouped into Completed (Contract completed), Under way (Under implementation, Contract signed), Coming up (Overdue, Planned, Tendered), Dropped (Not in latest plan, Cancelled) and No package linked. Package links are found for about a third of commitments, so No package linked is the common case and says nothing about the project.
+- **Stage** (`app.STAGES`, `app.stage`): a commitment's `status` grouped into Completed (Contract completed), Under way (Under implementation, Contract signed), Coming up (Overdue, Planned, Tendered), Package dropped (Not in latest plan, Cancelled: the package, not the commitment) and No package linked. A sentence behind commitments at several stages shows the first in `app.STAGE_URGENCY` (Coming up before Under way before Completed), the order `wbg.package_status_order` gives a commitment with several packages. Package links are found for about a third of commitments, so No package linked is the common case and says nothing about the project.
 - **Place**: the country, or the region for a regional project.
 - **Counting projects** (`app.tally` with unit `projects`): a project counts once in each group it has a commitment in, however many, so the groups do not add up to the number of projects. Its share is of a base of projects (`app.projects`: the cohort's projects with a document read, of the instruments `dashboard.ipf_only` admits, with or without a commitment). Grouped by something about the project (country, region, approval year) the base is the projects sharing it; grouped by measure, asset, type or stage it is the whole base. Inside one measure or asset the app passes that measure's or asset's projects as the base, so a type's share is of the measure's projects; inside one country, the country's projects.
 - **Where each project stands** (`app.board`): one card per project and stage, with its commitments and types; a project with commitments at two stages has two cards.
-- **A package's date** (`app.packages`): the next date while it is still to come, else the signing date, else the due date.
+- **A package's date** (`app.packages`): the next date while it is still to come, else the signing date, else the due date; `date_kind` says which (planned, signed, was due).
+- **Coming up** (`app.coming_up`): one row per linked package whose status is Overdue, Planned or Tendered, with its project, the measures of the commitments it is linked to, its date (the next date, else the date it was due) and the plan's estimate, soonest first.
+- **The About page's counts** (`app.about`): one statement per group (projects, text, how sentences reached the model, measures, assets, procurement, definitions, grades), all for the operations the dashboards count and their documents; a group whose statement fails is left out and the page still draws. The thresholds it quotes are read from the control panel.
 
 Countries are mapped from `country_code` (ISO 3166 alpha-2); a regional project has none and is counted beside the map, not on it.
