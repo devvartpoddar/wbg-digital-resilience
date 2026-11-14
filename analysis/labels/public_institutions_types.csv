@@ -1,0 +1,8 @@
+measure_id,type_id,type_name,definition,active,version
+public_institutions,schools_universities,Schools and universities,"The institution is a school, college, university, training centre or other education facility.",true,v1.0
+public_institutions,health_facilities,Health facilities,"The institution is a hospital, health centre, health post, clinic, laboratory or other health facility.",true,v1.0
+public_institutions,central_government,Central government offices and agencies,"The institution is a ministry, department, national agency, court, police service or other central government office.",true,v1.0
+public_institutions,local_government,Local governments and municipalities,"The institution is a local government, municipality, district or county administration, or its offices and service centres.",true,v1.0
+public_institutions,emergency_agencies,"Emergency, disaster management and meteorological agencies","The institution is a disaster management authority, emergency operations centre, civil protection service, or meteorological or hydrological agency.",true,v1.0
+public_institutions,farmer_extension,"Farmer organisations, cooperatives and agricultural extension","The institution is a farmer organisation, producer group, cooperative, water user association or agricultural extension office.",true,v1.0
+public_institutions,electricity,Connected to electricity,"The project gives the institution an electricity supply: a grid connection, on-site solar or another power source. The institution must be named.",true,v1.0
