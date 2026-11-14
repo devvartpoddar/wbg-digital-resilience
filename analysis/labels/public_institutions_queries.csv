@@ -1,0 +1,11 @@
+measure_id,query_id,query,type_id,active
+public_institutions,search_schools_build,The project will finance the construction and rehabilitation of classrooms and schools and equip them.,schools_universities,true
+public_institutions,search_schools_connect,Schools and universities will be connected to broadband internet under the project.,schools_universities,true
+public_institutions,search_health_build,The project will rehabilitate and equip health centres and hospitals in the target districts.,health_facilities,true
+public_institutions,search_health_connect,Health facilities will be provided with internet connectivity and solar power.,health_facilities,true
+public_institutions,search_government,"Ministries, departments and agencies will be connected to the government network and their offices upgraded.",central_government,true
+public_institutions,search_local,The project will construct and equip municipal offices and local government service centres.,local_government,true
+public_institutions,search_emergency,The project will establish and equip emergency operations centres for the disaster management agency and upgrade the meteorological service.,emergency_agencies,true
+public_institutions,search_farmers,"Farmer organisations and cooperatives will receive equipment, training and matching grants through the project.",farmer_extension,true
+public_institutions,search_extension,Agricultural extension offices will be rehabilitated and equipped to deliver services to farmers.,farmer_extension,true
+public_institutions,search_electricity,Unelectrified schools and health facilities will be connected to the grid or equipped with solar systems.,electricity,true
