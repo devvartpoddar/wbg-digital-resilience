@@ -33,6 +33,7 @@ def test_the_app_reads_commitments_with_stage_place_and_evidence(pg, corpus, fak
     assert df["stage"].iloc[0] in app.STAGES and df["place"].iloc[0]
     assert app.commitments(q, cohort="no such set").empty
     assert "family" in df and "family" in app.measures(q)
+    assert app.coming_up(q, family="no such family").empty and app.coming_up(q) is not None
     pg.execute(f"ALTER MATERIALIZED VIEW {db.SCHEMA}.commitments RENAME COLUMN family TO was_family")
     assert app.commitments(q)["family"].isna().all()        # a store published before families
     pg.execute(f"ALTER MATERIALIZED VIEW {db.SCHEMA}.commitments RENAME COLUMN was_family TO family")
