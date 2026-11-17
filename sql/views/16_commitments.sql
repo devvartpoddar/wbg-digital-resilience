@@ -263,7 +263,7 @@ cc AS (
 SELECT c.commitment_id,
        i.project_id, i.project_name, i.cohort_set, i.country_name, i.country_code, i.region,
        i.is_regional,
-       c.label_set, l.label_name AS measure_name,
+       c.label_set, l.label_name AS measure_name, l.family,
        c.asset_id, coalesce(al.label_name, c.asset_id) AS asset_name,
        c.type_id, coalesce(t.type_name, c.type_id) AS type_name,
        c.asset_from, c.asset_from AS asset_link_level, c.components,
@@ -285,7 +285,7 @@ FROM c
 JOIN wbg.project_info i ON i.project_id = c.project_id
 LEFT JOIN p ON p.commitment_id = c.commitment_id
 LEFT JOIN cc ON cc.commitment_id = c.commitment_id
-LEFT JOIN (SELECT DISTINCT ON (label_set) label_set, label_name FROM wbg.labels
+LEFT JOIN (SELECT DISTINCT ON (label_set) label_set, label_name, family FROM wbg.labels
            WHERE label_set <> 'assets' ORDER BY label_set, label_id) l ON l.label_set = c.label_set
 LEFT JOIN wbg.labels al ON al.label_set = 'assets' AND al.label_id = c.asset_id
 LEFT JOIN (SELECT DISTINCT ON (label_set, type_id) label_set, type_id, type_name

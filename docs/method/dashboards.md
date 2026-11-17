@@ -24,7 +24,7 @@ The Shiny app (`apps.amduat.dev/wbg`, repository `devvartpoddar/shiny`, `apps/wb
 | `commitment_evidence` | commitment and paragraph, with the commitment's sentences wrapped in 【 】 by character offsets and a PDF link to the page | commitment_units, search_units, paragraphs |
 | `commitment_sentences` | commitment and distinct sentence: text, posterior, firmness, section, document, page link, `also_in_documents` | commitment_units |
 | `commitment_package_status` (materialised) | commitment and package linked at `dashboard.package_link_min_probability`, with the package's status | commitment_packages, package_status |
-| `measure_summary` | measure: definition, version, commitments, projects, countries, types, and the evaluation's figures (an evaluation draw when one is graded, else the latest training draw; `graded_sheet` says which) | commitments, measure_quality |
+| `measure_summary` | measure: family, definition, version, commitments, projects, countries, types, and the evaluation's figures (an evaluation draw when one is graded, else the latest training draw; `graded_sheet` says which) | commitments, measure_quality |
 | `measure_findings_in_context` | every unit a measure read, with its context | measure_findings |
 | `measure_overlap` | pair of measures: committed units both count (a report; nothing is deduplicated) | measure_findings |
 | `similar_projects(commitment_id, k)` | other project whose sentences are nearest the commitment's three strongest (stored embeddings, no model call) | sentence_vectors |

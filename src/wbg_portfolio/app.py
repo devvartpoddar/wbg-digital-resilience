@@ -60,7 +60,7 @@ def commitments(q, cohort=None):
     None for every project, else a cohort_set ('digital', 'digital_contributor')."""
     df = _numbers(q(_sql("""
         SELECT c.commitment_id, c.project_id, c.project_name, c.cohort_set, c.country_name,
-               c.country_code, c.region, c.is_regional, c.label_set, c.measure_name,
+               c.country_code, c.region, c.is_regional, c.family, c.label_set, c.measure_name,
                c.asset_id, c.asset_name, c.type_id, c.type_name, c.status, c.next_date,
                c.sentences, c.strongest_p, c.linked_packages, h.approval_fiscal_year
         FROM wbg.commitments c
@@ -133,7 +133,7 @@ def measures(q):
     precision (graded_sheet says whether it is an evaluation or a training
     draw; a training draw's figure is provisional)."""
     return _numbers(q(_sql("""
-        SELECT label_set, measure_name, definition, commitments, projects, countries, types,
+        SELECT label_set, measure_name, family, definition, commitments, projects, countries, types,
                graded_sheet, graded_units, precision
         FROM wbg.measure_summary ORDER BY commitments DESC NULLS LAST, measure_name"""), None))
 

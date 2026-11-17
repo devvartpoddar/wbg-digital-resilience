@@ -7,7 +7,7 @@
 DROP VIEW IF EXISTS wbg.measure_summary CASCADE;
 CREATE VIEW wbg.measure_summary AS
 WITH m AS (
-  SELECT DISTINCT ON (label_set) label_set, label_name AS measure_name, definition, version
+  SELECT DISTINCT ON (label_set) label_set, label_name AS measure_name, definition, version, family
   FROM wbg.labels WHERE label_set <> 'assets' AND is_active
   ORDER BY label_set, label_id
 ),
@@ -24,7 +24,7 @@ q AS (
   FROM wbg.measure_quality
   ORDER BY label_set, (sheet = 'evaluation') DESC, evaluated_at DESC
 )
-SELECT m.label_set, m.measure_name, m.definition, m.version,
+SELECT m.label_set, m.measure_name, m.family, m.definition, m.version,
        coalesce(c.commitments, 0) AS commitments, coalesce(c.projects, 0) AS projects,
        coalesce(c.countries, 0) AS countries, coalesce(c.types, 0) AS types,
        q.graded_sheet, q.graded_units, q.precision, q.recall, q.graded_version,

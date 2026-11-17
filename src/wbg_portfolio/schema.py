@@ -349,6 +349,8 @@ TABLES = {
             "definition": "The definition the search and the decision model were given.",
             "is_active": "Whether the label is searched and graded.",
             "version": "The hand-kept version of the row.",
+            "family": "The family the measure belongs to (climate, cloud_data): measures of different "
+                      "families are never pair-checked against each other and are shown apart. Empty for the assets.",
             "folder": "Where the set lives in git.",
         }),
     "search_paragraphs": dict(
