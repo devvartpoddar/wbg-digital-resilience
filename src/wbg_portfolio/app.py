@@ -202,13 +202,14 @@ def packages(q, project_id):
     return df.sort_values(["date", "package_id"], na_position="last").reset_index(drop=True)
 
 
-def coming_up(q, cohort=None):
+def coming_up(q, cohort=None, family=None):
     """The packages still to come that are linked to a commitment, soonest
     first: one row per package, with its project, the measures of the
     commitments it is linked to, its status (Overdue, Planned or Tendered),
     the date to act on (a future due date or tender deadline; for an overdue
     package the date it was due) and the plan's estimate. cohort as in
-    commitments()."""
+    commitments(); family: only the commitments of that family's measures
+    (None: every family)."""
     cols = ["package_id", "project_id", "project_name", "country_name", "region", "is_regional",
             "measures", "description", "package_status", "date", "estimated_amount_usd"]
     df = _numbers(q(_sql("""
@@ -220,10 +221,11 @@ def coming_up(q, cohort=None):
         JOIN wbg.commitments c USING (commitment_id)
         WHERE s.package_status = ANY(%(statuses)s)
           AND (%(cohort)s::text IS NULL OR c.cohort_set = %(cohort)s)
+          AND (%(family)s::text IS NULL OR to_jsonb(c)->>'family' = %(family)s)
         GROUP BY s.package_id, c.project_id, c.project_name, c.country_name, c.region, c.is_regional,
                  s.description_clean, s.package_status, s.next_date, s.due_date, s.estimated_amount_usd
         ORDER BY coalesce(s.next_date, s.due_date) NULLS LAST, c.project_name, s.package_id"""),
-        {"statuses": list(COMING_UP_STATUSES), "cohort": cohort}))
+        {"statuses": list(COMING_UP_STATUSES), "cohort": cohort, "family": family}))
     if df.empty:
         return pd.DataFrame(columns=[*cols, "place"])
     df["place"] = df["country_name"].where(~df["is_regional"].fillna(False).astype(bool), df["region"])

@@ -38,6 +38,9 @@ def test_coming_up_gives_a_place_and_an_empty_frame():
         return rows.copy()
     assert app.coming_up(q, "digital")["place"].tolist() == ["Invented Region"]
     assert seen["cohort"] == "digital" and "Overdue" in seen["statuses"]
+    assert seen["family"] is None
+    app.coming_up(q, "digital", "cloud_data")
+    assert seen["family"] == "cloud_data"
     assert list(app.coming_up(lambda sql, params: rows.iloc[0:0], None).columns)[-1] == "place"
 
 
