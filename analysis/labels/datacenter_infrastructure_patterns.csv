@@ -1,0 +1,5 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+datacenter_infrastructure,search_datacenter,\bdata ?cent(?:er|re)s?\b,IGNORECASE,,true
+datacenter_infrastructure,search_server_room,\bserver rooms?\b,IGNORECASE,,true
+datacenter_infrastructure,search_colocation,\bco-?location\b,IGNORECASE,colocation_hosting,true
+datacenter_infrastructure,search_dcim,\bDCIM\b,IGNORECASE,operations,true

@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+hosting_sovereignty,search_residency,\bdata (?:residency|locali[sz]ation|sovereignty)\b,IGNORECASE,,true
+hosting_sovereignty,search_sovereign_hosting,\bsovereign (?:cloud|hosting|data)\b|\bhosting polic(?:y|ies)\b,IGNORECASE,,true

@@ -122,7 +122,7 @@ def is_active(r):
 
 def load_set(name, dirs=None, taxonomy=None):
     """Every label of a set, active or not: [{id, name, definition, active,
-    version, folder}], in file order. `taxonomy` names the folder directly
+    version, family, folder}], in file order. `taxonomy` names the folder directly
     (tests)."""
     d = taxonomy or folder(name, dirs)
     path = os.path.join(d, f"{name}.csv")
@@ -137,10 +137,24 @@ def load_set(name, dirs=None, taxonomy=None):
         out.append({"id": r[id_col].strip(), "name": r[name_col].strip(),
                     "definition": " ".join(r["definition"].split()),
                     "active": str(is_active(r)).lower(), "version": r.get("version", ""),
+                    "family": (r.get("family") or "").strip(),
                     "folder": os.path.relpath(d, ROOT)})
     if not out:
         raise SystemExit(f"labels: {path} has no rows")
     return out
+
+
+def family(name, dirs=None):
+    """The family a measure belongs to: the `family` column of its file
+    (climate, cloud_data, ...), one per measure. Measures of different
+    families never meet: the pair checks test a sentence only between two
+    measures of one family, and the app shows one family at a time, so a
+    change to one family's measures asks nothing about another's. '' for a
+    set with no such column (the assets, a scratch measure)."""
+    found = {r["family"] for r in load_set(name, dirs)}
+    if len(found) > 1:
+        raise SystemExit(f"labels: {name}.csv names more than one family: {', '.join(sorted(found))}")
+    return found.pop()
 
 
 def _optional(name, suffix, dirs, taxonomy):

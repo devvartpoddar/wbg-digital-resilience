@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+cloud_procurement,search_procurement_framework,"A framework agreement will enable agencies to procure approved IaaS, PaaS and SaaS services.",procurement_framework,true
+cloud_procurement,search_contract_requirements,"Cloud contracts will define availability, support, audit rights and shared security responsibilities.",contract_requirements,true
+cloud_procurement,search_financial_management,"Tagging, budgets and FinOps controls will monitor and optimise cloud consumption.",financial_management,true
+cloud_procurement,search_provider_assurance,Providers will be accredited against government cloud assurance requirements.,provider_assurance,true
+cloud_procurement,search_portability_exit,"Contracts will require export in open formats, transition assistance and verified deletion.",portability_exit,true
+cloud_procurement,search_parent,"The project will put in place arrangements for government agencies to procure, pay for and manage cloud services.",,true

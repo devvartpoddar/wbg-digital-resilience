@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+hybrid_multicloud,hybrid_architecture,Hybrid cloud architecture,Integrates on-premises or private infrastructure with public cloud services under a coordinated architecture.,true,v1.0
+hybrid_multicloud,multicloud_architecture,Multicloud architecture,Uses and governs services from multiple public cloud providers for defined business or technical purposes.,true,v1.0
+hybrid_multicloud,interconnection,Cloud interconnection,"Provides secure, reliable connectivity and routing between datacenters, private cloud and public cloud environments.",true,v1.0
+hybrid_multicloud,unified_management,Unified management and security,"Applies common identity, policy, monitoring, configuration and security controls across environments.",true,v1.0
+hybrid_multicloud,portability,Workload and data portability,"Enables applications and data to move or operate across environments using containers, common platforms, replication or open interfaces.",true,v1.0

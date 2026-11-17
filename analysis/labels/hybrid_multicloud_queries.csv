@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+hybrid_multicloud,search_hybrid_architecture,The target architecture will integrate the government datacenter with public cloud services.,hybrid_architecture,true
+hybrid_multicloud,search_multicloud_architecture,Agencies will use services from two cloud providers under a common multicloud governance framework.,multicloud_architecture,true
+hybrid_multicloud,search_interconnection,Dedicated cloud connections will link government facilities to public cloud regions.,interconnection,true
+hybrid_multicloud,search_unified_management,"Identity, access policies, logging and monitoring will be unified across cloud and on-premises systems.",unified_management,true
+hybrid_multicloud,search_portability,Container orchestration and open interfaces will support workload portability across environments.,portability,true
+hybrid_multicloud,search_parent,A hybrid cloud will combine the government's own infrastructure with public cloud services from more than one provider.,,true

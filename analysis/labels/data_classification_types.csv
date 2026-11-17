@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+data_classification,framework,Classification framework,"Defines data categories, criteria, ownership, decision rights and procedures for assigning classifications.",true,v1.0
+data_classification,inventory_labelling,Data inventory and labelling,"Identifies information assets and assigns sensitivity, criticality or legal-status labels.",true,v1.0
+data_classification,handling_controls,Class-based handling controls,"Defines access, encryption, sharing, retention, hosting, transfer or disposal requirements by classification.",true,v1.0
+data_classification,implementation,Classification implementation,"Deploys labelling tools, workflows, procedures and training to operationalise the classification framework.",true,v1.0
+data_classification,compliance_monitoring,Compliance monitoring,Assesses whether data is correctly classified and handled according to applicable requirements.,true,v1.0

@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+datacenter_infrastructure,search_new_expanded,A modular government datacenter will be constructed and equipped to host shared digital services.,new_expanded,true
+datacenter_infrastructure,search_modernization_consolidation,Existing ministry server rooms will be consolidated into two energy-efficient facilities.,modernization_consolidation,true
+datacenter_infrastructure,search_facility_infrastructure,"The facility will receive redundant power, UPS, precision cooling and fire suppression.",facility_infrastructure,true
+datacenter_infrastructure,search_operations,"DCIM will monitor capacity, energy use, environmental conditions and incidents.",operations,true
+datacenter_infrastructure,search_colocation_hosting,Certified colocation services will host critical government platforms.,colocation_hosting,true
+datacenter_infrastructure,search_parent,"The project will finance the establishment, upgrading and operation of a data centre to host government systems.",,true

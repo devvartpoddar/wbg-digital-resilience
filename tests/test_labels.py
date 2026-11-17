@@ -116,3 +116,35 @@ def test_a_pattern_row_may_ask_for_case(tmp_path):
     import pytest
     with pytest.raises(SystemExit):
         labels.load_patterns("m", dirs=(str(d),))
+
+
+def test_every_repository_measure_names_one_family():
+    """A measure with no family would be pair-checked against nothing and
+    shown nowhere; the families in use are few and written the same way."""
+    families = {name: labels.family(name) for name in labels.label_sets(include_inactive=True)
+                if name != "assets"}
+    assert all(families.values()), [n for n, f in families.items() if not f]
+    assert families["cra"] == "climate" and families["cloud_strategy"] == "cloud_data"
+    assert set(families.values()) == {"climate", "cloud_data"}
+    assert labels.family("assets") == ""
+
+
+def test_pair_checks_stay_inside_a_family(monkeypatch):
+    """A sentence two measures of one family count is asked about; one that a
+    climate and a cloud measure both count is not, so neither family's
+    commitments depend on the other's definitions."""
+    from wbg_portfolio import checks
+    from wbg_portfolio import questions as Q
+    counted = {"backup_power": ["u1", "u2"], "energy_efficiency": ["u1"],
+               "datacenter_infrastructure": ["u1", "u2", "u3"], "cloud_strategy": ["u3"]}
+    monkeypatch.setattr(checks, "committed_at_ask", lambda conn, corpus, name: counted[name])
+    monkeypatch.setattr(Q, "pair_questions", lambda a, b: {"keep_a": a, "keep_b": b})
+    asked = []
+    monkeypatch.setattr(checks, "_ask", lambda conn, model, items, *a, **k: asked.extend(items))
+
+    class Corpus:
+        def state(self, u):
+            return {"unit": u}
+    checks.pairs(None, None, Corpus(), sorted(counted), log=lambda *_: None)
+    assert sorted(key for key, _, _ in asked) == [
+        ("u1", "backup_power", "energy_efficiency"), ("u3", "cloud_strategy", "datacenter_infrastructure")]

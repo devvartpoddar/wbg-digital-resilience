@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+data_classification,search_framework,"A national framework will define public, internal, confidential and restricted data categories.",framework,true
+data_classification,search_inventory_labelling,Government agencies will inventory datasets and assign sensitivity and criticality labels.,inventory_labelling,true
+data_classification,search_handling_controls,"Hosting, encryption and cross-border-transfer rules will vary according to classification.",handling_controls,true
+data_classification,search_implementation,Automated sensitivity labels and staff training will support implementation.,implementation,true
+data_classification,search_compliance_monitoring,Compliance reviews will verify that restricted data is stored and shared appropriately.,compliance_monitoring,true
+data_classification,search_parent,"Government data will be classified by sensitivity, with handling rules set for each class.",,true

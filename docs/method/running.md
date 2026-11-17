@@ -45,6 +45,7 @@ Answers are the only thing that costs money. An answer is stored under the model
 - **A definition, a phrase or a pattern edit**: only the sentences whose question changed, or that the new gate or pattern newly admits. `./wbg_portfolio run --from search --measures <set>`.
 - **An ask floor (`floor.ask`, `asset.ask_floor`), a gate, a round setting, `link.*`**: the sentences or pairs newly let in. The feedback rounds run only when round 0 asked something new of a set already scored, so a re-run after a refit does not move the admitted pool.
 - **`ask.context`**: every sentence-level question is a new state. A whole-cohort re-ask (about US$6 to 9 at the current corpus and gates). Test it first on the graded sentences.
+- **A measure of another family** (added, edited or switched off): nothing. A measure's own questions hold only its own definition, and the pair checks, the only questions that put two definitions side by side, pair measures of one family only. What every family shares, and so re-asks every family when changed: the grade scale, the asset map, `ask.context`, `floor.ask` and the model.
 - **A new document**: its own sentences only.
 - **The code of a corpus stage** (projects, clean, components, clean_procurement): that stage and what follows it run again, at no model cost; `clean` reads every PDF again (hours). Moving the code into the `wbg_portfolio` package (2026-10-25) changed every file's bytes, so the first `./wbg_portfolio run` after it rebuilds the corpus once; the parse check (`text_sha256`) then shows whether the text came out the same.
 - **The model snapshot (`questions.MODEL`)**: everything; a deliberate step followed by re-measurement.
@@ -64,12 +65,12 @@ Estimates (2026-10-22, 251 projects, about 150,000 searched sentences, starting 
 
 A measure is three small files and one command; the only part a person must write is the definition:
 
-- `analysis/labels/<id>.csv`: `measure_id`, `measure_name`, `definition` (three to six sentences: what counts, what does not; name the measure, never the digital asset, the asset map supplies that link), `boundary` (optional, read by the pair checks), `theme`, `active`, `version`;
+- `analysis/labels/<id>.csv`: `measure_id`, `measure_name`, `definition` (three to six sentences: what counts, what does not; name the measure, never the digital asset, the asset map supplies that link), `boundary` (optional, read by the pair checks), `theme`, `family` (the family it belongs to, one per measure: `climate`, `cloud_data`; see section 5c), `active`, `version`;
 - `<id>_queries.csv`: six to ten search phrases, each a sentence a document might write;
 - `<id>_patterns.csv` (optional): one or two whole-word patterns (`\bunderground\b`, not `ducts?`, which also matches "conducted");
 - `<id>_types.csv` (optional): the approved types; without one, the first run proposes a list into `data/types/<id>_types.csv` for a person to approve into the labels folder.
 
-The grade scale is shared (`analysis/labels/scale.csv`); a `<id>_scale.csv` beside the set overrides it. Then `./wbg_portfolio add <id>` (several: `./wbg_portfolio add a b c`). Stop and ask if the stage's estimate is above US$1 or the search finds under 20 candidates. Merging two types (`merge_into`) or renaming one (`display_name`) is a file edit and a publish; dropping a type or changing its definition re-asks that measure's types.
+The grade scale is shared (`analysis/labels/scale.csv`); a `<id>_scale.csv` beside the set overrides it. Then `./wbg_portfolio add <id>` (several: `./wbg_portfolio add a b c`). Stop and ask if the stage's estimate is above US$1. Merging two types (`merge_into`) or renaming one (`display_name`) is a file edit and a publish; dropping a type or changing its definition re-asks that measure's types.
 
 ## Exploring: a scratch measure
 

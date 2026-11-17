@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+private_government_cloud,private_cloud,Private cloud platform,"Creates a dedicated cloud environment for one organisation using pooled, automated and self-service infrastructure.",true,v1.0
+private_government_cloud,government_cloud,Government cloud,Creates a shared cloud platform serving multiple government institutions or public bodies.,true,v1.0
+private_government_cloud,platform_modernization,Cloud platform modernization,"Upgrades an existing private or government cloud for automation, scalability, resilience or new service capabilities.",true,v1.0
+private_government_cloud,container_platform_services,Container and platform services,"Provides shared container orchestration, databases, integration, development or other managed platform services.",true,v1.0
+private_government_cloud,platform_operations,Cloud platform operations,"Introduces service catalogues, provisioning, metering, tenant management, monitoring and operational processes.",true,v1.0

@@ -1,0 +1,4 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+cloud_strategy,search_cloud_first,\bcloud[- ](?:first|smart)\b,IGNORECASE,policy_strategy,true
+cloud_strategy,search_cloud_planning,\bcloud (?:computing )?(?:strateg(?:y|ies)|polic(?:y|ies)|readiness|roadmaps?|adoption|governance)\b,IGNORECASE,,true
+cloud_strategy,search_cloud_coe,\bcloud cent(?:er|re)s? of excellence\b,IGNORECASE,centre_of_excellence,true

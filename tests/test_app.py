@@ -32,6 +32,10 @@ def test_the_app_reads_commitments_with_stage_place_and_evidence(pg, corpus, fak
         [("P1", "cra", "towers", "site")]
     assert df["stage"].iloc[0] in app.STAGES and df["place"].iloc[0]
     assert app.commitments(q, cohort="no such set").empty
+    assert "family" in df and "family" in app.measures(q)
+    pg.execute(f"ALTER MATERIALIZED VIEW {db.SCHEMA}.commitments RENAME COLUMN family TO was_family")
+    assert app.commitments(q)["family"].isna().all()        # a store published before families
+    pg.execute(f"ALTER MATERIALIZED VIEW {db.SCHEMA}.commitments RENAME COLUMN was_family TO family")
     ev = app.evidence(q, df["commitment_id"])
     assert len(ev) == 1 and ev["text"].iloc[0] and ev["commitment_id"].iloc[0] == df["commitment_id"].iloc[0]
     assert app.evidence(q, []).empty

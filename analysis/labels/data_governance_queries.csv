@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+data_governance,search_framework_policy,"A national data governance framework will define decision rights, standards and accountability.",framework_policy,true
+data_governance,search_roles_institutions,Data owners and stewards will be appointed in each ministry under a government data council.,roles_institutions,true
+data_governance,search_quality_metadata,"A data catalogue, business glossary and quality rules will be implemented.",quality_metadata,true
+data_governance,search_master_reference_data,Authoritative registries will provide governed master data for persons and businesses.,master_reference_data,true
+data_governance,search_lifecycle_ethics_compliance,"Retention schedules, ethical-use reviews and compliance monitoring will govern the data lifecycle.",lifecycle_ethics_compliance,true
+data_governance,search_parent,"The project will establish policies, roles and standards that make institutions accountable for how data is managed.",,true

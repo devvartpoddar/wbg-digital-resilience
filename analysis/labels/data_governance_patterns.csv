@@ -1,0 +1,4 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+data_governance,search_data_governance,\bdata governance\b,IGNORECASE,,true
+data_governance,search_data_roles,\bdata stewards?(?:hip)?\b|\bchief data officers?\b|\bdata councils?\b,IGNORECASE,roles_institutions,true
+data_governance,search_catalogue_master,\b(?:meta)?data catalog(?:ue)?s?\b|\bmaster data\b,IGNORECASE,,true

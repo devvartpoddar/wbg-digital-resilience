@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+cloud_procurement,procurement_framework,Cloud procurement framework,"Creates framework agreements, provider panels, catalogues or standard procurement routes for cloud services.",true,v1.0
+cloud_procurement,contract_requirements,Contract and service requirements,"Defines service levels, availability, support, security, audit, data ownership and shared responsibilities.",true,v1.0
+cloud_procurement,financial_management,Cloud financial management,"Introduces budgeting, tagging, allocation, consumption monitoring, optimisation and FinOps practices.",true,v1.0
+cloud_procurement,provider_assurance,Provider assurance,"Accredits or assesses cloud providers against technical, security, residency and operational requirements.",true,v1.0
+cloud_procurement,portability_exit,Portability and exit,"Requires data export, application portability, transition support, verified deletion and exit procedures.",true,v1.0

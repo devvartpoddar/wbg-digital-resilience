@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+hosting_sovereignty,hosting_policy,Hosting policy and workload placement,"Defines approved hosting models and placement rules based on classification, criticality or risk.",true,v1.0
+hosting_sovereignty,residency_localisation,Data residency and localisation,"Requires specified data to be stored or processed within a country, region or approved jurisdiction.",true,v1.0
+hosting_sovereignty,sovereign_hosting,Sovereign and trusted hosting,"Establishes government-controlled, sovereign or accredited hosting with defined control and assurance conditions.",true,v1.0
+hosting_sovereignty,jurisdiction_key_control,Jurisdiction and key control,"Addresses foreign lawful access, corporate control, subcontractors, administrative access or encryption-key custody.",true,v1.0
+hosting_sovereignty,portability_exit,Portability and exit,"Requires reversibility, data export, verified deletion and transition support when changing providers.",true,v1.0

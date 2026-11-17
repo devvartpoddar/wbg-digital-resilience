@@ -58,7 +58,7 @@ PACKAGE_ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_
                       "p_calibrated", "model_served"]
 LINK_COLS = ["label_set", "label_id", "unit_id", "package_id", "project_id", "shared_asset_ids", "route",
              "measure_rank", "measure_cosine", "probability", "p_calibrated", "model_served"]
-LABEL_COLS = ["label_set", "label_id", "name", "definition", "active", "version", "folder"]
+LABEL_COLS = ["label_set", "label_id", "name", "definition", "active", "version", "family", "folder"]
 TYPE_COLS = ["label_set", "label_id", "type_id", "type_name", "definition", "merged_from"]
 QUERY_COLS = ["label_set", "label_id", "query_id", "query", "active", "version", "file_sha256"]
 PATTERN_COLS = ["label_set", "label_id", "pattern_id", "pattern", "active", "version", "file_sha256"]
@@ -328,7 +328,7 @@ def search_rollup(data):
 
 def label_rows():
     return [{"label_set": name, "label_id": r["id"], "name": r["name"], "definition": r["definition"],
-             "active": r["active"], "version": r["version"], "folder": r["folder"]}
+             "active": r["active"], "version": r["version"], "family": r["family"], "folder": r["folder"]}
             for name in labels.label_sets() for r in labels.load_set(name)]
 
 

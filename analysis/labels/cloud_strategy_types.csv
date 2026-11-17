@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+cloud_strategy,policy_strategy,Cloud policy and strategy,"Defines the objectives, principles, scope and preferred service or deployment models for cloud adoption.",true,v1.0
+cloud_strategy,readiness_assessment,Cloud readiness assessment,"Assesses applications, infrastructure, data, skills, costs, security and institutional readiness for cloud.",true,v1.0
+cloud_strategy,architecture_roadmap,Target architecture and roadmap,"Defines the target cloud architecture, workload disposition and sequenced adoption or migration roadmap.",true,v1.0
+cloud_strategy,operating_model,Cloud operating model,"Establishes governance, roles, skills, service management, financial management and provider management for cloud.",true,v1.0
+cloud_strategy,centre_of_excellence,Cloud centre of excellence,"Creates a cross-functional capability to define standards, support adoption and oversee cloud implementation.",true,v1.0

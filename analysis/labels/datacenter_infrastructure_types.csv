@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+datacenter_infrastructure,new_expanded,New or expanded datacenter,"Constructs, expands or equips a facility designed to host shared computing, storage or network services.",true,v1.0
+datacenter_infrastructure,modernization_consolidation,Modernization and consolidation,"Upgrades or consolidates existing datacenters or server rooms to improve capacity, reliability, efficiency or manageability.",true,v1.0
+datacenter_infrastructure,facility_infrastructure,Facility infrastructure,"Provides racks, structured cabling, power distribution, UPS, generators, cooling, fire suppression, monitoring or physical access controls.",true,v1.0
+datacenter_infrastructure,operations,Datacenter operations,"Introduces DCIM, operating procedures, staffing, maintenance, capacity planning, service management or energy monitoring.",true,v1.0
+datacenter_infrastructure,colocation_hosting,Colocation and managed hosting,Procures third-party datacenter space or managed hosting with defined facility and service requirements.,true,v1.0

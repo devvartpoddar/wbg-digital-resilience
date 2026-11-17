@@ -259,10 +259,13 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
 
 def pairs(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
           log=print):
-    """A unit two measures both commit at floor.ask is asked, for each side,
-    whether the measure applies with the other's boundary beside it. Writes
+    """A unit two measures of one family both commit at floor.ask is asked,
+    for each side, whether the measure applies with the other's boundary
+    beside it. Measures of different families are never paired, so a family's
+    commitments do not move when another family's measures change. Writes
     kind 'pair', label_set 'a|b', label_id keep_a / keep_b."""
     by_unit = defaultdict(set)
+    family = {name: labels.family(name) for name in names}
     for name in names:
         for u in committed_at_ask(conn, corpus, name):
             by_unit[u].add(name)
@@ -270,6 +273,8 @@ def pairs(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
     from itertools import combinations
     for u in sorted(by_unit):
         for a, b in combinations(sorted(by_unit[u]), 2):
+            if family[a] != family[b]:
+                continue
             qs.setdefault((a, b), Q.pair_questions(a, b))
             items.append(((u, a, b), corpus.state(u), qs[(a, b)]))
     log(f"pairs: {len(items):,} unit pair(s) two measures both commit")
