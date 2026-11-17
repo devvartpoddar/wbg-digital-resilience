@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+public_cloud_migration,discovery_planning,Migration discovery and planning,"Inventories workloads, maps dependencies, selects migration approaches and groups workloads into migration waves.",true,v1.0
+public_cloud_migration,landing_zone,Public cloud landing zone,"Establishes accounts, identity, networking, logging, security guardrails, policies and shared services for public cloud.",true,v1.0
+public_cloud_migration,workload_migration,Workload and data migration,"Moves applications, databases, files or infrastructure to public IaaS, PaaS or SaaS environments.",true,v1.0
+public_cloud_migration,application_modernization,Application modernization,"Refactors or replaces applications to use managed cloud services, containers, microservices or serverless services.",true,v1.0
+public_cloud_migration,cutover_optimisation,Cutover and optimisation,"Tests migrated services, performs cutover, decommissions legacy environments and optimises cost, performance and resilience.",true,v1.0

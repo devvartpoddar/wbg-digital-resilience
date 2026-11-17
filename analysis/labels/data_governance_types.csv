@@ -1,0 +1,6 @@
+measure_id,type_id,type_name,definition,active,version
+data_governance,framework_policy,Governance framework and policy,"Defines principles, policies, decision rights, standards and oversight mechanisms for data.",true,v1.0
+data_governance,roles_institutions,Roles and institutions,"Establishes data councils, chief data officers, owners, custodians or stewards with defined responsibilities.",true,v1.0
+data_governance,quality_metadata,Data quality and metadata,"Introduces data-quality rules, issue management, metadata standards, catalogues, business glossaries or lineage.",true,v1.0
+data_governance,master_reference_data,Master and reference data,"Creates authoritative sources and governance processes for shared entities such as persons, businesses or locations.",true,v1.0
+data_governance,lifecycle_ethics_compliance,"Lifecycle, ethics and compliance","Sets retention, archival, disposal, ethical-use, monitoring, audit or compliance arrangements for data.",true,v1.0

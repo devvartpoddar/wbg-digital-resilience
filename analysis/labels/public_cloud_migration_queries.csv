@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+public_cloud_migration,search_discovery_planning,Government applications will be inventoried and grouped into migration waves.,discovery_planning,true
+public_cloud_migration,search_landing_zone,"A secure public cloud landing zone will provide identity, networking, logging and policy guardrails.",landing_zone,true
+public_cloud_migration,search_workload_migration,Priority systems and databases will be migrated to public cloud IaaS and PaaS.,workload_migration,true
+public_cloud_migration,search_application_modernization,Selected applications will be refactored to use managed databases and container services.,application_modernization,true
+public_cloud_migration,search_cutover_optimisation,"Following cutover, legacy servers will be decommissioned and cloud costs optimised.",cutover_optimisation,true
+public_cloud_migration,search_parent,Government applications and data will be moved to public cloud services from commercial cloud providers.,,true

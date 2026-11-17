@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+cloud_procurement,search_cloud_contracting,\bcloud (?:services? )?(?:procurement|framework agreements?|contracts?|marketplaces?|providers?)\b,IGNORECASE,,true
+cloud_procurement,search_finops,\bFinOps\b,IGNORECASE,financial_management,true

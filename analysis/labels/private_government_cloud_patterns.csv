@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+private_government_cloud,search_named_cloud,\b(?:private|government|governmental|sovereign|national|community) cloud\b,IGNORECASE,,true
+private_government_cloud,search_g_cloud,\bG-?Cloud\b,IGNORECASE,government_cloud,true

@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+data_classification,search_data_classification,\bdata classification\b|\bclassif\w+ of (?:government |public |sensitive )?data\b,IGNORECASE,,true
+data_classification,search_sensitivity_levels,\b(?:sensitivity|confidentiality|criticality) (?:labels?|levels?|tiers?|classes)\b,IGNORECASE,,true

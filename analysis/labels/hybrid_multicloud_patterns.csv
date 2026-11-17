@@ -1,0 +1,3 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+hybrid_multicloud,search_hybrid_cloud,\bhybrid cloud\b,IGNORECASE,hybrid_architecture,true
+hybrid_multicloud,search_multicloud,\bmulti-?cloud\b,IGNORECASE,multicloud_architecture,true

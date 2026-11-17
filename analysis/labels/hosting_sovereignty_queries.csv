@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+hosting_sovereignty,search_hosting_policy,"A hosting policy will map data classifications to on-premises, sovereign and public cloud options.",hosting_policy,true
+hosting_sovereignty,search_residency_localisation,Restricted data must remain stored and processed within approved national facilities.,residency_localisation,true
+hosting_sovereignty,search_sovereign_hosting,Cloud providers will be accredited against sovereign-hosting requirements.,sovereign_hosting,true
+hosting_sovereignty,search_jurisdiction_key_control,Government will retain encryption-key control and assess provider jurisdiction.,jurisdiction_key_control,true
+hosting_sovereignty,search_portability_exit,"Contracts will require open-format export, verified deletion and transition assistance.",portability_exit,true
+hosting_sovereignty,search_parent,Rules will set where government data may be hosted and under whose jurisdiction and control.,,true

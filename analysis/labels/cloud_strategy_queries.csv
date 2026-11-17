@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+cloud_strategy,search_policy_strategy,"A cloud-smart policy will guide the use of public, private and hybrid cloud services.",policy_strategy,true
+cloud_strategy,search_readiness_assessment,Applications and infrastructure will be assessed for cloud readiness and migration suitability.,readiness_assessment,true
+cloud_strategy,search_architecture_roadmap,A target architecture and phased cloud adoption roadmap will be developed.,architecture_roadmap,true
+cloud_strategy,search_operating_model,"Cloud governance, service management, FinOps and provider-management roles will be established.",operating_model,true
+cloud_strategy,search_centre_of_excellence,A government cloud centre of excellence will support agencies through adoption.,centre_of_excellence,true
+cloud_strategy,search_parent,The project will support the government in preparing a cloud strategy and planning its adoption of cloud computing.,,true

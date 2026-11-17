@@ -1,0 +1,5 @@
+measure_id,pattern_id,pattern,flags,type_id,active
+public_cloud_migration,search_public_cloud,\bpublic cloud\b,IGNORECASE,,true
+public_cloud_migration,search_cloud_migration,"\bcloud migration\b|\bmigrat\w+\b[^.;]{0,60}\bcloud\b",IGNORECASE,,true
+public_cloud_migration,search_landing_zone,\blanding zones?\b,IGNORECASE,landing_zone,true
+public_cloud_migration,search_service_models,\b(?:IaaS|PaaS|SaaS)\b,IGNORECASE,,true

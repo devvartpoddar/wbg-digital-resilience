@@ -1,0 +1,7 @@
+measure_id,query_id,query,type_id,active
+private_government_cloud,search_private_cloud,"A private cloud will provide automated compute, storage and network services to the ministry.",private_cloud,true
+private_government_cloud,search_government_cloud,A shared government cloud will host digital services for participating agencies.,government_cloud,true
+private_government_cloud,search_platform_modernization,"The existing cloud platform will be modernised to improve automation, resilience and scalability.",platform_modernization,true
+private_government_cloud,search_container_platform_services,A managed container platform will support cloud-native government applications.,container_platform_services,true
+private_government_cloud,search_platform_operations,A service catalogue and self-service portal will automate provisioning and tenant management.,platform_operations,true
+private_government_cloud,search_parent,The project will establish a government cloud platform on infrastructure the government controls.,,true
