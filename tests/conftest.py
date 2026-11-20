@@ -21,12 +21,10 @@ os.environ.setdefault("WBG_ASK_BATCH", "0")
 STARTING = {"posterior.on": "true", "floor.default": "0.5", "floor.types": "0.5",
             "floor.pair_check": "0.5", "asset.floor": "0.3", "asset.decay": "0.4",
             "asset.multiple": "true", "link.asset_yes": "0.5", "floor.ask": "0.5",
-            "asset.ask_floor": "0.3",
-            # the tests written before the band rule, the digital rule and the link strengths
-            # keep their meaning; the new tests switch these on themselves
-            "band.on": "false", "digital.on": "false", "links.strengths": "false",
-            "dashboard.apply_measure_pair_checks": "true",
-            "dashboard.commitment_link_levels": "unit|none"}
+            "asset.ask_floor": "0.3"}
+# The shipped control_panel.csv holds the live behaviour with every new switch off, so the older
+# tests need no pin for them; the new tests switch the settings on (pipeline_on) or run with
+# inputs/config/control_panel_v2.csv itself.
 
 
 def _test_panel():
@@ -359,9 +357,18 @@ def fake_chat(monkeypatch, fake_model):
 
 @pytest.fixture
 def pipeline_on(monkeypatch):
-    """The band rule, the digital rule and the link strengths switched on, as on the live branch."""
+    """The band rule, the digital rule, the link strengths, the policy question and the activities
+    switched on, as in control_panel_v2.csv."""
     from wbg_portfolio import panel
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.on": True, "digital.on": True,
-                                                    "links.strengths": True, "floor.ask": 0.99,
+                                                    "links.strengths": True, "policy.on": True,
+                                                    "activities.on": True, "floor.ask": 0.99,
                                                     "dashboard.commitment_link_levels": "unit|second_look|none"})
+
+
+@pytest.fixture
+def v2_panel(monkeypatch):
+    """The real inputs/config/control_panel_v2.csv, named by a path from the repository root as
+    $WBG_PANEL is set on the box: what the run over the data copy reads."""
+    monkeypatch.setenv("WBG_PANEL", "inputs/config/control_panel_v2.csv")

@@ -164,8 +164,10 @@ def run(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WOR
     A part of one sentence is one activity and needs no call or row (rows()
     makes it). Writes kind activity (label_set the measure, label activity,
     item project|measure|sha). Returns the number of parts written, or None on
-    a dry run or a failed request."""
+    a dry run or a failed request. Nothing is asked while activities.on is false."""
     from wbg_portfolio import checks
+    if not decide.activities_on():
+        return 0
     kinds, cap = document_kinds(data), max_sentences()
     todo, one = [], 0
     for pid, name, units in groups(conn, corpus, names, projects):
@@ -207,6 +209,8 @@ def rows(conn, data, corpus, names, log=print):
     """The `activities` table's rows from the stored answers and the groups as
     they stand now: one row per sentence of each activity. A group with no
     stored answer yet is left out and counted in the log."""
+    if not decide.activities_on():
+        return []
     kinds, cap = document_kinds(data), max_sentences()
     stored, out, waiting = _stored(conn), [], 0
     for pid, name, units in groups(conn, corpus, names):

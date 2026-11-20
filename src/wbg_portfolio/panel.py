@@ -11,7 +11,8 @@ answers where no question changed.
   panel.floor("cra")                  floor.cra if written, else floor.default
   panel.grades()                      (2, 3): the grades a score adds up
 
-WBG_PANEL points at another file (tests).
+WBG_PANEL points at another file (a relative path is read from the repository root):
+inputs/config/control_panel_v2.csv is the panel with the new behaviour on; the tests use their own.
 """
 import csv, os
 
@@ -21,7 +22,10 @@ _cache = {}
 
 
 def path():
-    return os.environ.get("WBG_PANEL") or PATH
+    v = os.environ.get("WBG_PANEL")
+    if not v:
+        return PATH
+    return v if os.path.isabs(v) else os.path.join(ROOT, v)     # relative: from the repository root
 
 
 def _parse(v):

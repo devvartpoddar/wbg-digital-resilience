@@ -24,7 +24,7 @@ CHOICE = chat.question("Which?", "choice", ["investment", "policy"])
 def band_on(monkeypatch):
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.on": True, "digital.on": True,
-                                                    "floor.ask": 0.99})
+                                                    "policy.on": True, "floor.ask": 0.99})
 
 
 # ------------------------------------------------------------ the chat asker

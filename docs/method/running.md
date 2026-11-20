@@ -57,10 +57,33 @@ To try this code on the real corpus without touching `wbg` (the schema the dashb
 
    ```
    export WBG_SCHEMA=wbg_v2 WBG_STORE=wbg_store WBG_DATA=/ygg/projects/wbg-digital-resilience/data-v2
+   export WBG_PANEL=inputs/config/control_panel_v2.csv
    ```
 
-   `WBG_SCHEMA` is where scores, decision tables and views go; `WBG_STORE` is where answers are read from and added to (the record is additive: it only gains answers); `WBG_DATA` is the copy. `./wbg_portfolio status` now describes `wbg_v2`.
+   `inputs/config/control_panel.csv` keeps the live behaviour (every new switch off, every old setting at its old value), so a publish from it changes nothing the dashboards show. `control_panel_v2.csv` is the same file with the new behaviour on (`band.on`, `digital.on`, `links.strengths`, `policy.on`, `activities.on`, `floor.types` 0.6, `asset.multiple`, no pair checks, `second_look` links); a test keeps the two in step. A relative `WBG_PANEL` is read from the repository root. `WBG_SCHEMA` is where scores, decision tables and views go; `WBG_STORE` is where answers are read from and added to (the record is additive: it only gains answers); `WBG_DATA` is the copy. `./wbg_portfolio status` now describes `wbg_v2`.
 3. Bring the copy up to date with the code, which asks no model for answers (new search phrases are embedded; that is a few cents): `./wbg_portfolio run --to search`.
+
+   **Before any paid run, read what the new component rules changed.** A lettered component read in a document that has only numbered ones moves every later sentence to another component, and the component is part of every sentence's question, so those sentences are asked again. After the re-parse, list the documents whose `component_number` values differ from the live `wbg.paragraphs`; zero documents is the expected answer for those that have only numbered components. It reads the copy's `appraisal/paragraphs.csv` and the live table, writes nothing and asks no model (run it with the box's Python, from the repository root):
+
+   ```
+   PYTHONPATH=src WBG_DATA=/ygg/projects/wbg-digital-resilience/data-v2 python - <<'PY'
+   import csv, collections
+   from wbg_portfolio import db
+   from wbg_portfolio.paths import where, data_root
+   conn = db.connect()
+   live = {p: c or "" for p, c in conn.execute("SELECT paragraph_id, component_number FROM wbg.paragraphs")}
+   changed = collections.defaultdict(list)
+   with open(where(data_root(), "appraisal", "paragraphs.csv"), newline="", encoding="utf-8") as fh:
+       for r in csv.DictReader(fh):
+           if r["paragraph_id"] in live and live[r["paragraph_id"]] != (r["component_number"] or ""):
+               changed[r["doc_id"]].append((live[r["paragraph_id"]], r["component_number"]))
+   for doc, ch in sorted(changed.items(), key=lambda x: -len(x[1])):
+       print(doc, len(ch), "paragraph(s); first:", ch[0][0] or "-", "->", ch[0][1] or "-")
+   print(len(changed), "document(s) changed")
+   PY
+   ```
+
+   Read the first rows against the document before going on. (`sentence_index.csv` and `components.csv` in the two data folders hold the same numbers if a file diff is easier.)
 4. A single-project dry run, to see what each step would ask: `./wbg_portfolio run --from classify --dry-run --project <project id>`. It prints one estimate line per step. On a fresh `wbg_v2` the steps after the first show little, because they wait on the scores before them.
 5. The same project for real, with a small cap: `./wbg_portfolio run --from classify --project <project id> --max-spend 0.50`. A run over named projects is not published (`WBG_PUBLISH_SCOPED=1` publishes it into `wbg_v2` for a look: it is a scratch schema, so that is safe here). Read the output, then `./wbg_portfolio status`.
 6. The full dry run, to read the estimate: `./wbg_portfolio run --from classify --dry-run`. Stop and ask if it is more than expected (the second looks of about 25,000 pairs and the digital question for each committed sentence are the bulk, section above).

@@ -290,6 +290,16 @@ def unit_assets(corpus, amap, second=None):
     return out
 
 
+def policy_on():
+    """Whether the policy question is asked (policy.on)."""
+    return bool(panel.require("policy.on"))
+
+
+def activities_on():
+    """Whether the activities stage asks and publishes anything (activities.on)."""
+    return bool(panel.require("activities.on"))
+
+
 def links_strengths():
     """Whether the link strengths (strong, asset) replace the old link question."""
     return bool(panel.get("links.strengths", False))

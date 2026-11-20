@@ -123,7 +123,10 @@ def policy_question():
 def policy(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
            projects=None, **_):
     """Investment or policy for each committed sentence, by the chat model.
-    Writes kind policy (label_set and label policy; score 1 policy, 0 investment)."""
+    Writes kind policy (label_set and label policy; score 1 policy, 0 investment).
+    Nothing is asked while policy.on is false."""
+    if not decide.policy_on():
+        return 0
     units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects)
     q = policy_question()
     log(f"policy: {len(units):,} committed sentence(s)")

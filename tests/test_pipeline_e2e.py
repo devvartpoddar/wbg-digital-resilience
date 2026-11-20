@@ -60,7 +60,7 @@ def wide_corpus(corpus, fake_model, monkeypatch):
 
 
 @pytest.fixture
-def wide(corpus, fake_model, fake_chat, pipeline_on, monkeypatch):
+def wide(corpus, fake_model, fake_chat, v2_panel, monkeypatch):
     return wide_corpus(corpus, fake_model, monkeypatch)
 
 
@@ -227,3 +227,35 @@ def test_a_run_into_another_schema_over_the_live_store_leaves_the_live_schema_un
             conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
         conn.commit()
         conn.close()
+
+
+@pytest.fixture
+def wide_default(corpus, fake_model, fake_chat, monkeypatch):
+    """The same corpus under the shipped control_panel.csv: every new switch off."""
+    return wide_corpus(corpus, fake_model, monkeypatch)
+
+
+OLD_KINDS = {"measure", "asset", "type", "pair", "link", "package_asset"}
+
+
+def test_with_the_shipped_panel_a_full_run_behaves_as_before_the_second_looks(
+        v2, wide_default, fake_model, fake_chat, capsys):
+    """No chat call, no new kind of score, no activities row, and only the decision-model questions
+    the earlier stages asked (the first pass, types, pairs, links); a second run asks nothing."""
+    corpus = wide_default
+    assert panel.require("band.on") is False and panel.require("policy.on") is False
+    with load_pg.transaction(v2):
+        load_pg.load(v2, corpus, log=lambda *_: None)
+    assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
+    assert fake_chat.calls == []
+    kinds = {k for (k,) in rows(v2, "SELECT DISTINCT kind FROM {S}.scores")}
+    assert kinds <= OLD_KINDS and {"measure", "link"} <= kinds
+    assert rows(v2, "SELECT count(*) FROM {S}.activities")[0][0] == 0
+    # every question the decision model got is a first-pass, type, pair or link question: none is
+    # the context question, the digital flag or a package-measure question
+    asked = {q["instructions"] for b in fake_model for q in b["questions"].values()}
+    assert asked and not any("paragraph beside" in t or "digital sector" in t for t in asked)
+    v2.commit()
+    n = len(fake_model)
+    assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
+    assert len(fake_model) == n and fake_chat.calls == []
