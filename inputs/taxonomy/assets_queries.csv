@@ -1,54 +1,51 @@
 asset_id,query_id,query,active
-fiber,search_01,"Domestic fibre backbone, middle-mile and backhaul networks will be upgraded.",true
-fiber,search_02,"Dark fibre, OPGW and fibre-to-the-premises infrastructure will be deployed.",true
-fiber,search_03,"Ducts, conduits and trenching will support domestic fibre deployment.",true
-mobile_towers,search_01,"Mobile towers, base stations and radio access networks will be upgraded.",true
-mobile_towers,search_02,"Fixed wireless, microwave and terrestrial broadcast networks will be deployed.",true
-mobile_towers,search_03,Spectrum assignment and tower-sharing rules will support mobile broadband networks.,true
-mobile_towers,search_04,Solar power and protective shelters will be installed at cell sites.,true
-satellite,search_01,Satellite terminals and VSAT links will connect remote sites.,true
-satellite,search_02,"Satellite ground stations, teleports and purchased capacity will support backhaul.",true
-satellite,search_03,Satellite licensing and landing rights will enable communications services.,true
-submarine_cable,search_01,Submarine cables and landing stations will expand international connectivity.,true
-submarine_cable,search_02,Cross-border terrestrial fibre links and international gateways will be upgraded.,true
-submarine_cable,search_03,International bandwidth and submarine cable repair capacity will be procured.,true
-data_hosting,search_01,Government data centres and server rooms will receive resilient power and cooling.,true
-data_hosting,search_02,Cloud hosting and computing capacity will support government systems.,true
-data_hosting,search_03,Secondary computing environments and disaster recovery sites will restore services.,true
-data_hosting,search_04,An internet exchange point will allow internet service providers to exchange traffic locally.,true
-institutional_networks,search_01,Government WANs and VPNs will link ministries and shared services.,true
-institutional_networks,search_02,Research and education networks will connect universities and research institutions.,true
-institutional_networks,search_03,Government offices will be linked through a shared wide area network.,true
-institutional_networks,search_04,Network operations centres and shared voice and email will support the government network.,true
-cybersecurity,search_01,Security operations centres and incident response teams will protect digital services.,true
-cybersecurity,search_02,"Cybersecurity threat monitoring, security audits and penetration testing will be strengthened.",true
-cybersecurity,search_03,Cybersecurity standards and incident-response procedures will protect networks.,true
-dpi,search_01,Digital identity and civil registration systems will provide shared foundational services.,true
-dpi,search_02,"Interoperable payment rails, national switches and fast payment systems will be developed.",true
-dpi,search_03,Shared data exchange and interoperability layers will connect public systems.,true
-dpi,search_04,"Digital signatures, credentials and public key infrastructure will support shared digital trust.",true
-dpi,search_05,Data protection and consent rules will govern shared digital identity and data exchange.,true
-drm_ews,search_01,Hydrometeorological stations and forecasting systems will support hazard monitoring.,true
-drm_ews,search_02,Early warning platforms will send cell broadcast alerts and siren warnings.,true
-drm_ews,search_03,Emergency call-taking and dispatch platforms will support 112 and 911 services.,true
-drm_ews,search_04,Dedicated responder radio networks and digitally equipped emergency operations centres will be upgraded.,true
-access_connectivity,search_01,"Last-mile fibre, wireless and satellite links will connect schools and health facilities.",true
-access_connectivity,search_02,"Public Wi-Fi, community networks and public access points will provide internet access.",true
-access_connectivity,search_03,Devices and subscriptions will be provided to beneficiaries so they can get online.,true
-access_connectivity,search_04,Universal service programmes will subsidise connections to underserved communities.,true
-operational_tech,search_01,"SCADA equipment will monitor and control pumps, substations and utility operations.",true
-operational_tech,search_02,Smart meters and advanced metering infrastructure will monitor utility operations.,true
-operational_tech,search_03,"Intelligent transport systems will support traffic control, tolling and fleet tracking.",true
-operational_tech,search_04,Remote sensors and telemetry will monitor the condition and operation of utility infrastructure.,true
-geospatial,search_01,"Spatial data infrastructure, GIS platforms and geoportals will manage location data.",true
-geospatial,search_02,Satellite imagery and earth observation data will support a national geospatial platform.,true
-geospatial,search_03,Aerial photography and drone surveys will produce digital base maps.,true
-geospatial,search_04,"Geodetic networks, reference stations and base mapping will support national spatial data.",true
-digital_systems,search_01,"Named health, education and financial management information systems will be upgraded.",true
-digital_systems,search_02,Sector registries and land and cadastre systems will support public administration.,true
-digital_systems,search_03,"Government service portals, case-management platforms and sector applications will be developed.",true
-digital_systems,search_04,Mobile agricultural advisory applications and named sector systems will receive operating equipment.,true
-institutional_networks,search_lan,Local area networks will connect computers and shared services within government buildings.,true
-institutional_networks,search_health,A dedicated communications network will link hospitals and health facilities.,true
-data_hosting,search_hpc,A high-performance computing facility will provide shared computing capacity.,true
-geospatial,search_lidar,LiDAR surveys will capture terrain elevation data for a geospatial information system.,true
+connectivity,fiber_search_01,"Domestic fibre backbone, middle-mile and backhaul networks will be upgraded.",true
+connectivity,fiber_search_02,"Dark fibre, OPGW and fibre-to-the-premises infrastructure will be deployed.",true
+connectivity,fiber_search_03,"Ducts, conduits and trenching will support domestic fibre deployment.",true
+connectivity,mobile_towers_search_01,"Mobile towers, base stations and radio access networks will be upgraded.",true
+connectivity,mobile_towers_search_02,"Fixed wireless, microwave and terrestrial broadcast networks will be deployed.",true
+connectivity,mobile_towers_search_03,Spectrum assignment and tower-sharing rules will support mobile broadband networks.,true
+connectivity,mobile_towers_search_04,Solar power and protective shelters will be installed at cell sites.,true
+connectivity,satellite_search_01,Satellite terminals and VSAT links will connect remote sites.,true
+connectivity,satellite_search_02,"Satellite ground stations, teleports and purchased capacity will support backhaul.",true
+connectivity,satellite_search_03,Satellite licensing and landing rights will enable communications services.,true
+connectivity,submarine_cable_search_01,Submarine cables and landing stations will expand international connectivity.,true
+connectivity,submarine_cable_search_02,Cross-border terrestrial fibre links and international gateways will be upgraded.,true
+connectivity,submarine_cable_search_03,International bandwidth and submarine cable repair capacity will be procured.,true
+connectivity,institutional_networks_search_01,Government WANs and VPNs will link ministries and shared services.,true
+connectivity,institutional_networks_search_02,Research and education networks will connect universities and research institutions.,true
+connectivity,institutional_networks_search_03,Government offices will be linked through a shared wide area network.,true
+connectivity,institutional_networks_search_04,Network operations centres and shared voice and email will support the government network.,true
+connectivity,access_connectivity_search_01,"Last-mile fibre, wireless and satellite links will connect schools and health facilities.",true
+connectivity,access_connectivity_search_02,"Public Wi-Fi, community networks and public access points will provide internet access.",true
+connectivity,access_connectivity_search_03,Devices and subscriptions will be provided to beneficiaries so they can get online.,true
+connectivity,access_connectivity_search_04,Universal service programmes will subsidise connections to underserved communities.,true
+connectivity,institutional_networks_search_lan,Local area networks will connect computers and shared services within government buildings.,true
+connectivity,institutional_networks_search_health,A dedicated communications network will link hospitals and health facilities.,true
+hosting,data_hosting_search_01,Government data centres and server rooms will receive resilient power and cooling.,true
+hosting,data_hosting_search_02,Cloud hosting and computing capacity will support government systems.,true
+hosting,data_hosting_search_03,Secondary computing environments and disaster recovery sites will restore services.,true
+hosting,data_hosting_search_04,An internet exchange point will allow internet service providers to exchange traffic locally.,true
+hosting,data_hosting_search_hpc,A high-performance computing facility will provide shared computing capacity.,true
+platforms,dpi_search_01,Digital identity and civil registration systems will provide shared foundational services.,true
+platforms,dpi_search_02,"Interoperable payment rails, national switches and fast payment systems will be developed.",true
+platforms,dpi_search_03,Shared data exchange and interoperability layers will connect public systems.,true
+platforms,dpi_search_04,"Digital signatures, credentials and public key infrastructure will support shared digital trust.",true
+platforms,dpi_search_05,Data protection and consent rules will govern shared digital identity and data exchange.,true
+platforms,geospatial_search_01,"Spatial data infrastructure, GIS platforms and geoportals will manage location data.",true
+platforms,geospatial_search_02,Satellite imagery and earth observation data will support a national geospatial platform.,true
+platforms,geospatial_search_03,Aerial photography and drone surveys will produce digital base maps.,true
+platforms,geospatial_search_04,"Geodetic networks, reference stations and base mapping will support national spatial data.",true
+platforms,digital_systems_search_01,"Named health, education and financial management information systems will be upgraded.",true
+platforms,digital_systems_search_02,Sector registries and land and cadastre systems will support public administration.,true
+platforms,digital_systems_search_03,"Government service portals, case-management platforms and sector applications will be developed.",true
+platforms,digital_systems_search_04,Mobile agricultural advisory applications and named sector systems will receive operating equipment.,true
+platforms,geospatial_search_lidar,LiDAR surveys will capture terrain elevation data for a geospatial information system.,true
+monitoring_control,drm_ews_search_01,Hydrometeorological stations and forecasting systems will support hazard monitoring.,true
+monitoring_control,drm_ews_search_02,Early warning platforms will send cell broadcast alerts and siren warnings.,true
+monitoring_control,drm_ews_search_03,Emergency call-taking and dispatch platforms will support 112 and 911 services.,true
+monitoring_control,drm_ews_search_04,Dedicated responder radio networks and digitally equipped emergency operations centres will be upgraded.,true
+monitoring_control,operational_tech_search_01,"SCADA equipment will monitor and control pumps, substations and utility operations.",true
+monitoring_control,operational_tech_search_02,Smart meters and advanced metering infrastructure will monitor utility operations.,true
+monitoring_control,operational_tech_search_03,"Intelligent transport systems will support traffic control, tolling and fleet tracking.",true
+monitoring_control,operational_tech_search_04,Remote sensors and telemetry will monitor the condition and operation of utility infrastructure.,true
