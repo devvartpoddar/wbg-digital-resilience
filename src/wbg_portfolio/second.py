@@ -21,7 +21,6 @@ from wbg_portfolio import ask
 from wbg_portfolio import chat
 from wbg_portfolio import checks
 from wbg_portfolio import decide
-from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 
 
@@ -43,9 +42,10 @@ def _in_scope(corpus, units, projects, universe=None, partial=False):
     return units, {u for u in base if corpus.in_scope(u, projects)}
 
 
-def measure(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
+def measure_second(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
             log=print, projects=None):
-    """The band's second look for one measure. Writes kinds measure_ctx and
+    """The band's second look for one measure (one measure a call, unlike the steps below, which take
+    every measure's sentences: the band is a measure's own first-pass score). Writes kinds measure_ctx and
     measure_second (label_set the measure). Returns the pairs looked at, or
     None when a request failed or on a dry run. Does nothing while band.on is off."""
     b = decide.band()
@@ -61,18 +61,17 @@ def measure(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=Fals
     ctx = checks._ask(conn, model, [(u, corpus.context_state(u), {lab["id"]: cq}) for u in units],
                       f"second:{name}:context", name, api_key, dry_run, workers, log, data)
     second, ok = chat.asked(conn, [(u, corpus.chat_state(u), sq) for u in units], f"second:{name}:chat", name,
-                       api_key, dry_run, workers, log)
+                            api_key, dry_run, workers, log)
     if dry_run or ctx is None:
         return None
     checks.write_scoped(conn, "measure_ctx", name,
-           [checks._row("measure_ctx", name, lab["id"], u, corpus.context_state(u), cq, g[lab["id"]],
-                        score=Q.score(g[lab["id"]])) for u, g in ctx.items()], scope)
+                        [checks._row("measure_ctx", name, lab["id"], u, corpus.context_state(u), cq, g[lab["id"]],
+                                     score=Q.score(g[lab["id"]])) for u, g in ctx.items()], scope)
     checks.write_scoped(conn, "measure_second", name,
-           [checks._row("measure_second", name, lab["id"], u, corpus.chat_state(u), sq, a, score=a["grade"])
-            for u, a in second.items()], scope)
-    waiting = sum(1 for u in units if u not in second)
+                        [checks._row("measure_second", name, lab["id"], u, corpus.chat_state(u), sq, a,
+                                     score=a["grade"]) for u, a in second.items()], scope)
     log(f"  {len(ctx):,} context scores and {len(second):,} chat grades written; "
-        f"{waiting:,} pair(s) waiting for a second look (not committed)")
+        f"{len(units) - len(second):,} pair(s) waiting for a second look (not committed)")
     return len(units) if ok else None
 
 
@@ -92,8 +91,9 @@ def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=Fal
                       "digital", "digital", api_key, dry_run, workers, log, data)
     if got is None:
         return None
-    checks.write_scoped(conn, "digital", "digital", [checks._row("digital", "digital", "digital", u, corpus.context_state(u), q, g["digital"])
-                                         for u, g in got.items()], scope)
+    checks.write_scoped(conn, "digital", "digital",
+                        [checks._row("digital", "digital", "digital", u, corpus.context_state(u), q, g["digital"])
+                         for u, g in got.items()], scope)
     log(f"  {len(got):,} digital scores written")
     return len(got)
 
@@ -184,7 +184,7 @@ def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, worker
     checks.write_scoped(conn, "asset_second", Q.ASSETS, rows, scope)
     log(f"  {len(rows):,} asset second looks written, {sum(1 for r in rows if r['score']):,} with an asset"
         + (f"; discarded {lost_a} unknown or repeated asset id(s) and {lost_k} unknown kind(s)"
-           if lost_a or lost_k else ""))
+           if lost_a or lost_k else "") + f"; {len(units) - len(rows):,} sentence(s) waiting (not counted)")
     return len(rows) if ok else None
 
 
@@ -230,7 +230,7 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
         return 0
     if checks.cannot_estimate(conn, dry_run, log, "package asset second look", ("package_asset", "link")):
         return None
-    low, yes = float(panel.require("link.asset_band_low")), float(panel.require("link.asset_yes"))
+    low, yes = decide.package_band()
     packages = {p["package_id"]: p for p in checks.load_packages(data, projects)}
     assets = {a["id"]: a for a in Q.asset_catalogue()[0]}
     post = decide.package_asset_posteriors(conn)
@@ -248,6 +248,6 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
     rows = [checks._row("package_asset_second", Q.ASSETS, aid, pid, state(packages[pid]), qs[aid], a,
                         score=a["grade"]) for (pid, aid), a in got.items()]
     checks.write_scoped(conn, "package_asset_second", Q.ASSETS, rows, packages if projects else None)
-    waiting = len(pairs) - len(got)
-    log(f"  {len(rows):,} package asset second looks written; {waiting:,} pair(s) waiting (not counted)")
+    log(f"  {len(rows):,} package asset second looks written; {len(pairs) - len(rows):,} pair(s) waiting "
+        f"(not counted)")
     return len(rows) if ok else None

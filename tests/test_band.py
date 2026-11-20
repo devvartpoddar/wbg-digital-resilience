@@ -208,7 +208,7 @@ def test_a_pair_in_the_band_is_committed_only_when_both_looks_agree(pg, corpus, 
     c = first_pass(pg, corpus, 0.6)
     u0 = c.index[0]["unit_id"]
     assert committed(pg, c)[u0] == (False, "", True)          # no second look yet: waiting, not committed
-    assert second.measure(pg, corpus, c, "cra", api_key="k", **QUIET) == 1
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 1
     assert committed(pg, c)[u0] == (True, "second_look", False)
     row = decide.measure_units(pg, c, "cra")[u0]
     assert row["score_first"] == pytest.approx(0.6) and row["score_context"] >= 0.7 and row["second_grade"] == 3
@@ -219,14 +219,14 @@ def test_a_pair_in_the_band_is_committed_only_when_both_looks_agree(pg, corpus, 
 def test_the_chat_model_saying_no_keeps_the_pair_out(pg, corpus, fake_chat, band_on):
     c = first_pass(pg, corpus, 0.6)
     fake_chat.reply = lambda prompt: '{"grade": 1}'
-    second.measure(pg, corpus, c, "cra", api_key="k", **QUIET)
+    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
     assert committed(pg, c)[c.index[0]["unit_id"]] == (False, "", False)
 
 
 def test_an_unreadable_second_look_is_never_a_yes(pg, corpus, fake_chat, band_on):
     c = first_pass(pg, corpus, 0.6)
     fake_chat.reply = lambda prompt: "grade 3"
-    assert second.measure(pg, corpus, c, "cra", api_key="k", **QUIET) is not None
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) is not None
     assert committed(pg, c)[c.index[0]["unit_id"]] == (False, "", True)
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_second'")[0] == 0
 
@@ -234,17 +234,17 @@ def test_an_unreadable_second_look_is_never_a_yes(pg, corpus, fake_chat, band_on
 def test_a_score_at_the_keep_level_needs_no_second_look(pg, corpus, fake_chat, fake_model, band_on):
     c = first_pass(pg, corpus, 0.95)
     n = len(fake_model)
-    assert second.measure(pg, corpus, c, "cra", api_key="k", **QUIET) == 0
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0
     assert len(fake_model) == n and not fake_chat.calls
     assert committed(pg, c)[c.index[0]["unit_id"]] == (True, "score", False)
 
 
 def test_a_rerun_with_everything_stored_asks_nothing(pg, corpus, fake_chat, fake_model, band_on):
     c = first_pass(pg, corpus, 0.6, units=(0, 1))
-    second.measure(pg, corpus, c, "cra", api_key="k", **QUIET)
+    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
     n_model, n_chat = len(fake_model), len(fake_chat.calls)
     assert n_chat == 2
-    second.measure(pg, corpus, c, "cra", api_key="k", **QUIET)
+    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
     assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat)
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_ctx'")[0] == 2
 
@@ -252,8 +252,8 @@ def test_a_rerun_with_everything_stored_asks_nothing(pg, corpus, fake_chat, fake
 def test_a_dry_run_and_a_scope_with_no_such_project_ask_nothing(pg, corpus, fake_chat, fake_model, band_on):
     c = first_pass(pg, corpus, 0.6)
     n = len(fake_model)
-    assert second.measure(pg, corpus, c, "cra", dry_run=True, **QUIET) is None
-    assert second.measure(pg, corpus, c, "cra", api_key="k", projects=["P9"], **QUIET) == 0
+    assert second.measure_second(pg, corpus, c, "cra", dry_run=True, **QUIET) is None
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", projects=["P9"], **QUIET) == 0
     assert len(fake_model) == n and not fake_chat.calls
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_ctx'")[0] == 0
 
@@ -261,7 +261,7 @@ def test_a_dry_run_and_a_scope_with_no_such_project_ask_nothing(pg, corpus, fake
 def test_with_the_band_off_the_second_look_does_nothing(pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.6)
     n = len(fake_model)
-    assert second.measure(pg, corpus, c, "cra", api_key="k", **QUIET) == 0
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0
     assert second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 0
     assert len(fake_model) == n and not fake_chat.calls
     # the floor of the tests is 0.5, so 0.6 is committed by the floor alone
@@ -278,7 +278,7 @@ def test_the_pair_stage_asks_nothing_under_the_band_rule(pg, corpus, fake_model,
 def test_later_stages_ask_about_the_sentences_committed_under_the_band_rule(pg, corpus, fake_chat, fake_model, band_on):
     c = first_pass(pg, corpus, 0.6)
     assert checks.committed_at_ask(pg, c, "cra") == []                # in the band, no second look: not asked
-    second.measure(pg, corpus, c, "cra", api_key="k", **QUIET)
+    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
     assert checks.committed_at_ask(pg, c, "cra") == []                # committed, but not yet known to be digital
     second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
     assert checks.committed_at_ask(pg, c, "cra") == [c.index[0]["unit_id"]]
@@ -336,7 +336,7 @@ def test_publish_carries_the_new_columns_and_keeps_the_not_digital_out_of_the_co
     u0, u1 = c.index[0]["unit_id"], c.index[2]["unit_id"]
     funnel_assets = funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
     assert funnel_assets is not None
-    second.measure(pg, corpus, c, "cra", api_key="k", **QUIET)
+    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
     checks.types(pg, corpus, c, "cra", api_key="k", **QUIET)
     second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
     second.policy(pg, corpus, c, ["cra"], api_key="k", **QUIET)

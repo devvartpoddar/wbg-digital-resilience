@@ -86,7 +86,7 @@ def posterior(conn, kind, label_set, qshas, vector_of):
 
 def band():
     """The band rule's settings (band.*); only `on` is read while it is off."""
-    on = bool(panel.get("band.on", False))
+    on = bool(setting("band.on"))
     if not on:
         return {"on": False}
     return {"on": True, "low": float(setting("band.low")), "keep": float(setting("band.keep")),
@@ -168,7 +168,7 @@ def committed_units(conn, corpus, names):
 
 def digital_settings():
     """(on, floor): whether the digital rule applies (digital.on) and the P(yes) a sentence needs."""
-    return bool(panel.get("digital.on", False)), float(panel.get("digital.floor", 0.5))
+    return bool(setting("digital.on")), float(setting("digital.floor"))
 
 
 def digital_scores(conn):
@@ -298,17 +298,23 @@ def has_scores(conn, kind):
 
 def policy_on():
     """Whether the policy question is asked (policy.on)."""
-    return bool(panel.require("policy.on"))
+    return bool(setting("policy.on"))
 
 
 def activities_on():
     """Whether the activities stage asks and publishes anything (activities.on)."""
-    return bool(panel.require("activities.on"))
+    return bool(setting("activities.on"))
 
 
 def links_strengths():
     """Whether the link strengths (strong, asset) replace the old link question."""
-    return bool(panel.get("links.strengths", False))
+    return bool(setting("links.strengths"))
+
+
+def package_band():
+    """(low, yes): the first-pass P(yes) of a package x asset pair from which it gets the second
+    look (link.asset_band_low) and at which it counts without one (link.asset_yes)."""
+    return float(setting("link.asset_band_low")), float(setting("link.asset_yes"))
 
 
 def package_asset_posteriors(conn):
@@ -327,8 +333,7 @@ def package_asset_sets(conn, only=None):
     package_asset_second) says yes. A missing second look is never a yes.
     `only` limits the packages (indexed once as a set, so a list of 14,000 costs nothing per pair)."""
     only = None if only is None else set(only)
-    yes = float(setting("link.asset_yes"))
-    low = float(panel.get("link.asset_band_low", yes))
+    low, yes = package_band()
     strengths = links_strengths()
     second = {(pid, aid): float(score) >= 1 for _, aid, pid, score, *_ in scores(conn, "package_asset_second")} \
         if strengths else {}

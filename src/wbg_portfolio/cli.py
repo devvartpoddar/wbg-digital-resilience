@@ -767,7 +767,7 @@ def run(args, data):
                     if funnel.run(conn, data, name, corpus=corpus, **kw) is None and not args.dry_run:
                         ok = False
                         continue
-                    if second.measure(conn, data, corpus, name, **kw) is None and not args.dry_run:
+                    if second.measure_second(conn, data, corpus, name, **kw) is None and not args.dry_run:
                         ok = False
                 if ok:
                     # once whatever the measure: the digital and policy questions of the committed

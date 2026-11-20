@@ -36,7 +36,7 @@ def brief(data=None):
                 lines.append(f"scores:   {kind:<14} {r[0]:>9,} rows, {r[1]} set(s)")
         r = _n(conn, f"SELECT count(*) FILTER (WHERE kind = 'measure_ctx' AND score >= %s), "
                      f"count(*) FILTER (WHERE kind = 'measure_ctx') FROM {S}.scores",
-               (float(panel.get("band.context", 0.7)),))
+               (float(panel.require("band.context")),))
         if r and r[1]:
             lines.append(f"band:     {r[1]:,} pair(s) given a second look, {r[0]:,} with a context score "
                          f"at band.context or more")
