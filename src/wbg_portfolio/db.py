@@ -23,6 +23,10 @@ CREATE TABLE IF NOT EXISTS {s}.answers (
   model text NOT NULL, state_sha text NOT NULL, question_sha text NOT NULL,
   answer jsonb NOT NULL, served text, cost_usd numeric, call_sha text, asked_at timestamptz,
   PRIMARY KEY (model, state_sha, question_sha));
+CREATE TABLE IF NOT EXISTS {s}.chat_failures (
+  model text NOT NULL, state_sha text NOT NULL, question_sha text NOT NULL,
+  raw text, reason text, at timestamptz NOT NULL DEFAULT now());
+CREATE INDEX IF NOT EXISTS chat_failures_key ON {s}.chat_failures (model, state_sha, question_sha);
 CREATE TABLE IF NOT EXISTS {s}.states (sha text PRIMARY KEY, state jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS {s}.questions (sha text PRIMARY KEY, question jsonb NOT NULL);
 CREATE TABLE IF NOT EXISTS {s}.grades (

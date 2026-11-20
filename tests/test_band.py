@@ -76,17 +76,46 @@ def test_a_dry_run_estimates_and_asks_nothing(pg, fake_chat):
     assert got == {} and st["to_ask"] == 1 and st["estimate_usd"] > 0 and not fake_chat.calls
 
 
-def test_an_unreadable_reply_is_counted_stored_as_a_failure_and_asked_again(pg, fake_chat):
+def test_an_unreadable_reply_is_a_failure_row_never_an_answer_and_a_later_reading_is_kept(pg, fake_chat):
     fake_chat.reply = lambda prompt: "Yes, I think so."
     got, st = chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
     assert got == {} and st["unparsed"] == 1
-    stored = db.one(pg, f"SELECT answer FROM {db.STORE}.answers")[0]
-    assert stored["failed"] is True and stored["grade"] is None and stored["raw"] == "Yes, I think so."
+    assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.answers")[0] == 0
+    f = db.rows(pg, f"SELECT model, state_sha, question_sha, raw, at FROM {db.STORE}.chat_failures")
+    assert len(f) == 1 and f[0][3] == "Yes, I think so." and f[0][4] is not None
     fake_chat.reply = lambda prompt: '{"grade": 1}'
     got, st = chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
     assert got["a"]["grade"] == 1 and st["unparsed"] == 0 and len(fake_chat.calls) == 2
-    assert db.one(pg, f"SELECT count(*), bool_or(answer->>'failed' = 'true') FROM {db.STORE}.answers")[0] == 1
+    assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.answers")[0] == 1
+    assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.chat_failures")[0] == 1       # the failure row stays
     assert chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)[1]["to_ask"] == 0
+
+
+def test_a_question_unreadable_max_attempts_times_is_given_up_and_a_third_run_asks_nothing(pg, fake_chat):
+    fake_chat.reply = lambda prompt: "prose, not JSON"
+    items = [("a", {"sentence": "one"}, GRADE), ("b", {"sentence": "two"}, GRADE)]
+    logged = []
+    for run_no, asked in ((1, 2), (2, 2), (3, 0), (4, 0)):
+        n = len(fake_chat.calls)
+        got, st = chat.ask(pg, items, stage="t", api_key="k", log=logged.append)
+        assert got == {} and len(fake_chat.calls) - n == asked, run_no
+    assert st["gave_up"] == 2 and "gave up on 2 question(s)" in chat.estimate_line("t", st)
+    assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.chat_failures")[0] == 4
+    assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.answers")[0] == 0           # never a row, never a yes
+    # a reply that is JSON but not the answer asked for is a failure of the same kind
+    # (the answers table is only ever added to: no UPDATE, no DELETE)
+
+
+def test_the_chat_asker_never_updates_or_deletes_an_answer_row(pg, fake_chat):
+    pg.execute(f"CREATE OR REPLACE FUNCTION {db.STORE}.no_change() RETURNS trigger AS $$ BEGIN "
+               f"RAISE EXCEPTION 'answers is only added to'; END $$ LANGUAGE plpgsql")
+    pg.execute(f"CREATE TRIGGER no_change BEFORE UPDATE OR DELETE ON {db.STORE}.answers "
+               f"FOR EACH ROW EXECUTE FUNCTION {db.STORE}.no_change()")
+    pg.commit()
+    for reply in ("not json", "still not json", '{"grade": 2}'):
+        fake_chat.reply = lambda prompt, r=reply: r
+        chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
+        chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
 
 
 def test_a_request_that_fails_is_counted_and_nothing_is_invented(pg, fake_chat, monkeypatch):
@@ -344,3 +373,41 @@ def test_a_run_of_some_measures_keeps_the_rows_of_the_other_measures_sentences(
     # a run over every measure replaces the whole kind, as before
     run(pg, corpus, c, ["cra"], every=["cra"], api_key="k", **QUIET)
     assert other not in {r[2] for r in decide.scores(pg, kind)}
+
+
+def test_every_chat_request_carries_max_tokens_and_activities_get_more(pg, fake_chat):
+    chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
+    assert fake_chat.calls[-1]["max_tokens"] == panel.require("second.max_tokens") == 300
+    q = chat.question("Group.", "activities")
+    fake_chat.reply = lambda prompt: '{"activities": [{"label": "x", "sentences": [1]}]}'
+    chat.ask(pg, [("a", {"sentences": "1. one"}, q)], stage="t", api_key="k", **QUIET)
+    assert fake_chat.calls[-1]["max_tokens"] == panel.require("activities.max_tokens") == 1500
+
+
+def test_a_response_without_a_cost_is_priced_from_its_tokens_or_the_estimate(pg, fake_chat, monkeypatch):
+    from wbg_portfolio import api
+    inner = api.post
+    seen = {}
+
+    def post(path, b, key, **kw):
+        r = inner(path, b, key, **kw)
+        r["usage"] = seen["usage"]
+        return r
+    monkeypatch.setattr(api, "post", post)
+    q, state = GRADE, {"sentence": "one"}
+    text = chat.prompt(state, q)
+    seen["usage"] = {"prompt_tokens": 1_000_000, "completion_tokens": 2_000_000}      # no cost field
+    got, st = chat.ask(pg, [("a", state, q)], stage="t", api_key="k", workers=1, log=lambda *_: None)
+    assert abs(st["cost_usd"] - (0.10 + 2 * 0.50)) < 1e-9
+    seen["usage"] = {}                                                                   # no usage at all
+    got, st = chat.ask(pg, [("b", {"sentence": "two"}, q)], stage="t", api_key="k", workers=1, log=lambda *_: None)
+    assert st["cost_usd"] > 0 and abs(st["cost_usd"] - chat.estimate(chat.prompt({"sentence": "two"}, q), q)) < 1e-12
+    seen["usage"] = {"cost": 0.25}                                                       # a reported cost wins
+    got, st = chat.ask(pg, [("c", {"sentence": "three"}, q)], stage="t", api_key="k", workers=1, log=lambda *_: None)
+    assert st["cost_usd"] == 0.25
+
+
+def test_the_estimate_uses_the_prompt_length_and_the_panels_prices(pg, fake_chat):
+    short = chat.ask(pg, [("a", {"sentence": "x"}, GRADE)], stage="t", dry_run=True)[1]["estimate_usd"]
+    long = chat.ask(pg, [("a", {"sentence": "x" * 40_000}, GRADE)], stage="t", dry_run=True)[1]["estimate_usd"]
+    assert abs((long - short) - 0.001) < 1e-6                    # 10,000 more prompt tokens at US$0.10 per million

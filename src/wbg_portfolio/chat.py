@@ -11,9 +11,12 @@ asks only what the store lacks.
 items = [(item, state, question)]. A state is a dict of fields (what the model
 is shown); a question is built by question() and says how to reply. An answer
 is {"grade": int|None, "labels": [..]|None, "raw": the reply, "failed": bool}.
-A reply that is not exactly the JSON asked for is stored as a failure (grade
-and labels None), counted in stats["unparsed"], left out of the returned
-answers, and asked again at the next run. It is never read as a yes.
+A reply that is not exactly the JSON asked for is never stored in answers
+(which only gains rows): each failed attempt is one insert-only row of
+<store>.chat_failures (model, state_sha, question_sha, raw text, at), counted
+in stats["unparsed"] and left out of the returned answers. A question that has
+failed second.max_attempts times is not asked again (stats["gave_up"], logged);
+it is never read as a yes.
 
 Replies (reply["form"]): grade (0 to reply["max"]), yesno (yes or no), choice
 (one of reply["options"]), labels (any of reply["options"], at most
@@ -37,14 +40,41 @@ from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 
 PATH = "/v1/chat/completions"
-PRICE_PER_MTOK = 0.30     # US$ per million prompt tokens, replies included: for estimates only
-REPLY_TOKENS = 40
 FORMS = ("grade", "yesno", "choice", "labels", "assets", "activities")
 
 
 def model():
     """The pinned chat model (second.model)."""
     return str(panel.require("second.model"))
+
+
+def max_tokens(q):
+    """Most tokens a reply to this question may hold: second.max_tokens, or
+    activities.max_tokens for the activities form (a list of labelled groups)."""
+    return int(panel.require("activities.max_tokens" if q["reply"]["form"] == "activities"
+                             else "second.max_tokens"))
+
+
+def estimate(prompt_text, q):
+    """US$ an item may cost: its prompt (characters / 4 tokens) at second.price_in_per_mtok plus a
+    reply of up to max_tokens at second.price_out_per_mtok. An upper bound, so a cap is not passed
+    by an estimate that is too low."""
+    return (len(prompt_text) / 4 * float(panel.require("second.price_in_per_mtok"))
+            + max_tokens(q) * float(panel.require("second.price_out_per_mtok"))) / 1e6
+
+
+def cost_of(response, prompt_text, text, q):
+    """What a response cost: usage.cost when it reports one, else its token counts at the panel's
+    prices, else the estimate (never 0, so the cap cannot be bypassed by a missing field)."""
+    usage = response.get("usage") or {}
+    if usage.get("cost") is not None:
+        return float(usage["cost"])
+    p_in, p_out = float(panel.require("second.price_in_per_mtok")), float(panel.require("second.price_out_per_mtok"))
+    t_in, t_out = usage.get("prompt_tokens"), usage.get("completion_tokens")
+    if t_in is None and t_out is None:
+        return estimate(prompt_text, q)
+    return ((t_in if t_in is not None else len(prompt_text) / 4) * p_in
+            + (t_out if t_out is not None else len(text or "") / 4) * p_out) / 1e6
 
 
 # ----------------------------------------------------------------- questions
@@ -152,22 +182,43 @@ def usable(answer):
 
 # ---------------------------------------------------------------- the asker
 
+def _insert_context(conn, states, qs):
+    for s_sha, state in states.items():
+        conn.execute(f"INSERT INTO {db.STORE}.states (sha, state) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                     (s_sha, json.dumps(state, ensure_ascii=False)))
+    for q_sha, q in qs.items():
+        conn.execute(f"INSERT INTO {db.STORE}.questions (sha, question) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                     (q_sha, json.dumps(q, ensure_ascii=False)))
+
+
 def _store(conn, mdl, rows, states, qs):
-    """Write answers once; a stored failure is replaced by a later reading."""
+    """Add answers (never update one); the states and questions they were given."""
     with conn.transaction():
         for s_sha, q_sha, answer, served, cost, call, at in rows:
             conn.execute(f"INSERT INTO {db.STORE}.answers (model, state_sha, question_sha, answer, served, "
                          f"cost_usd, call_sha, asked_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                         f"ON CONFLICT (model, state_sha, question_sha) DO UPDATE SET answer = EXCLUDED.answer, "
-                         f"served = EXCLUDED.served, cost_usd = EXCLUDED.cost_usd, call_sha = EXCLUDED.call_sha, "
-                         f"asked_at = EXCLUDED.asked_at WHERE {db.STORE}.answers.answer->>'failed' = 'true'",
+                         f"ON CONFLICT (model, state_sha, question_sha) DO NOTHING",
                          (mdl, s_sha, q_sha, json.dumps(answer, ensure_ascii=False), served, cost, call, at))
-        for s_sha, state in states.items():
-            conn.execute(f"INSERT INTO {db.STORE}.states (sha, state) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                         (s_sha, json.dumps(state, ensure_ascii=False)))
-        for q_sha, q in qs.items():
-            conn.execute(f"INSERT INTO {db.STORE}.questions (sha, question) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                         (q_sha, json.dumps(q, ensure_ascii=False)))
+        _insert_context(conn, states, qs)
+
+
+def _store_failure(conn, mdl, s_sha, q_sha, raw, reason, state, q):
+    """One attempt that could not be read: an insert-only row of chat_failures."""
+    with conn.transaction():
+        conn.execute(f"INSERT INTO {db.STORE}.chat_failures (model, state_sha, question_sha, raw, reason, at) "
+                     f"VALUES (%s, %s, %s, %s, %s, now())", (mdl, s_sha, q_sha, raw, reason))
+        _insert_context(conn, {s_sha: state}, {q_sha: q})
+
+
+def failure_counts(conn, mdl, keys):
+    """{(state_sha, question_sha): attempts that could not be read}."""
+    if not keys:
+        return {}
+    db.temp_keys(conn, "chat_keys", ["state_sha", "question_sha"], keys)
+    return {(s, q): n for s, q, n in db.rows(
+        conn, f"SELECT f.state_sha, f.question_sha, count(*) FROM {db.STORE}.chat_failures f "
+              f"JOIN chat_keys k USING (state_sha, question_sha) WHERE f.model = %s "
+              f"GROUP BY f.state_sha, f.question_sha", (mdl,))}
 
 
 def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=asker.WORKERS,
@@ -179,16 +230,25 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
     (replies that were not the JSON asked for), seconds."""
     mdl = mdl or model()
     keyed = [(item, state, Q.sha(state), q, Q.sha(q)) for item, state, q in items]
-    have = asker.stored(conn, mdl, sorted({(s, qs) for _, _, s, _, qs in keyed}))
-    todo = {}
+    keys = sorted({(s, qs) for _, _, s, _, qs in keyed})
+    have = asker.stored(conn, mdl, keys)
+    # an answer an older version stored as a failure is not an answer: it counts as one attempt
+    legacy = {k for k, v in have.items() if v.get("failed")}
+    attempts = failure_counts(conn, mdl, keys)
+    limit = int(panel.require("second.max_attempts"))
+    todo, gave_up = {}, set()
     for item, state, s_sha, q, q_sha in keyed:
-        got = have.get((s_sha, q_sha))
-        if got is None or got.get("failed"):
-            todo.setdefault((s_sha, q_sha), (state, q))
+        k = (s_sha, q_sha)
+        got = have.get(k)
+        if got is not None and k not in legacy:
+            continue
+        if attempts.get(k, 0) + (k in legacy) >= limit:
+            gave_up.add(k)
+        else:
+            todo.setdefault(k, (state, q))
     sent = {k: prompt(state, q) for k, (state, q) in todo.items()}
-    chars = sum(len(p) for p in sent.values())
-    stats = {"stored": sum(1 for v in have.values() if not v.get("failed")), "to_ask": len(todo),
-             "estimate_usd": (chars / 4 + REPLY_TOKENS * len(todo)) / 1e6 * PRICE_PER_MTOK,
+    stats = {"stored": sum(1 for k, v in have.items() if k not in legacy), "to_ask": len(todo),
+             "estimate_usd": sum(estimate(sent[k], todo[k][1]) for k in todo), "gave_up": len(gave_up),
              "calls": 0, "cost_usd": 0.0, "failures": [], "unparsed": 0, "seconds": 0.0}
     if todo and not dry_run:
         if not api_key:
@@ -199,26 +259,28 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
 
             def one(key):
                 state, q = todo[key]
-                body = {"model": mdl, "temperature": 0,
+                body = {"model": mdl, "temperature": 0, "max_tokens": max_tokens(q),
                         "messages": [{"role": "user", "content": sent[key]}]}
                 r = api.post(PATH, body, api_key, timeout=120)
                 try:
                     text = r["choices"][0]["message"]["content"]
                 except (KeyError, IndexError, TypeError):
                     raise api.Transport(f"reply has no message: {str(r)[:200]}")
-                cost = float((r.get("usage") or {}).get("cost") or 0)
+                cost = cost_of(r, sent[key], text, q)
                 served = r.get("model", "")
                 try:
                     answer = dict(parse(text, q["reply"]), raw=text)
                 except (ValueError, TypeError) as exc:
-                    answer = {"grade": None, "labels": None, "raw": text, "failed": True,
-                              "reason": str(exc)[:200]}
+                    with lock:
+                        _store_failure(conn, mdl, key[0], key[1], text, str(exc)[:200], state, q)
+                        stats["unparsed"] += 1
+                    return cost
                 at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
                 with lock:
                     _store(conn, mdl, [(key[0], key[1], answer, served, cost, Q.sha(body), at)],
                            {key[0]: state}, {key[1]: q})
                     have[key] = dict(answer, served=served)
-                    stats["unparsed"] += bool(answer.get("failed"))
+                    legacy.discard(key)
                 return cost
 
             with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -239,7 +301,7 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
     out = {}
     for item, _, s_sha, _, q_sha in keyed:
         a = have.get((s_sha, q_sha))
-        if usable(a):
+        if usable(a) and (s_sha, q_sha) not in legacy:
             out[item] = a
     return out, stats
 
@@ -247,4 +309,6 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
 def estimate_line(stage, stats):
     return (f"  {stage}: {stats['stored']:,} answers stored; {stats['to_ask']:,} requests to make "
             f"(about US${stats['estimate_usd']:.3f})"
-            + (f"; {stats['unparsed']} reply(ies) unreadable, asked again next run" if stats["unparsed"] else ""))
+            + (f"; {stats['unparsed']} reply(ies) unreadable" if stats["unparsed"] else "")
+            + (f"; gave up on {stats['gave_up']:,} question(s) unreadable second.max_attempts times "
+               f"(not asked again, never a yes)" if stats.get("gave_up") else ""))
