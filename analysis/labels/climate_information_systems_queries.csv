@@ -5,3 +5,9 @@ climate_information_systems,search_data_management,"A maintained platform will i
 climate_information_systems,search_health_climate_surveillance,Health surveillance will incorporate weather data to predict climate-sensitive disease.,health_climate_surveillance,true
 climate_information_systems,search_climate_services,A weather information portal will publish forecasts and seasonal bulletins for users.,climate_services,true
 climate_information_systems,search_parent,Climate and hazard information systems will be established and maintained.,,true
+climate_information_systems,adaptation_climate_smart_agriculture,A mobile agricultural advisory service will tell farmers when to plant and irrigate using weather forecasts.,adaptation_advice,true
+climate_information_systems,adaptation_drought_water_management,A digital irrigation scheduling tool will advise water managers how much water to release during drought.,adaptation_advice,true
+climate_information_systems,adaptation_adaptation_decision_support,A digital planning tool will use flood-risk data to rank investments and schedule protective maintenance.,adaptation_advice,true
+climate_information_systems,adaptation_shock_response_targeting,A digital tool will combine climate-shock data with social registries to target support.,adaptation_advice,true
+climate_information_systems,adaptation_climate_advisory,A mobile application will advise households and businesses how to adapt to climate risks.,adaptation_advice,true
+climate_information_systems,adaptation_parent,A mobile advisory tool will use weather forecasts to recommend protective actions to farmers and businesses.,adaptation_advice,true
