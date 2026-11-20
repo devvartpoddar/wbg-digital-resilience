@@ -10,6 +10,11 @@ old file store holds (data/classify/answers/<model>/<aa>/<sha>.json, keyed
 sha256({model, state, question})) is read from there once and copied into
 Postgres, so nothing already paid for is asked again.
 
+Each answer is committed as it is stored, so nothing paid for is lost to a crash. Items with the same state and
+question are asked once. A response with an incomplete answer keeps its complete ones (the cost is recorded once);
+a request the provider refuses is split into single items, and an item refused alone is recorded in
+<store>.refused and skipped (api.Refused: a bad key, no credit or a run with no answer at all still stop it).
+
 Batches: items sharing a question set go together, up to ask.batch_items a
 request and ask.batch_max_chars characters, ordered by the hash of their
 state, so which items share a request depends on the items alone and not on

@@ -14,7 +14,10 @@ is {"grade": int|None, "labels": [..]|None, "raw": the reply, "failed": bool}.
 A reply that is not exactly the JSON asked for is never stored in answers
 (which only gains rows): each failed attempt is one insert-only row of
 <store>.chat_failures (model, state_sha, question_sha, raw text, at), counted
-in stats["unparsed"] and left out of the returned answers. A question that has
+in stats["unparsed"] and left out of the returned answers. An empty reply (HTTP 200, no content) is not such an
+attempt: it is a provider hiccup, asked again up to EMPTY_TRIES times in the run and, if it stays empty, a failed
+request (stats["failures"]) that never counts toward the limit below. A request the provider refuses for this
+item alone (HTTP 4xx, once the run has had answers) is recorded in <store>.refused and skipped (stats["refused"]). A question that has
 failed second.max_attempts times is not asked again (stats["gave_up"], logged);
 it is never read as a yes.
 

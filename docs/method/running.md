@@ -89,6 +89,8 @@ To try this code on the real corpus without touching `wbg` (the schema the dashb
 6. The full dry run, to read the estimate: `./wbg_portfolio run --from classify --dry-run`. Stop and ask if it is more than expected (the second looks of about 25,000 pairs and the digital question for each committed sentence are the bulk, section above).
 7. The full run: `./wbg_portfolio run --from classify --max-spend <the estimate, rounded up>`. If the cap stops it, run it again: it resumes from the store.
 
+**Check the store first.** Every paid stage starts by printing the answer store it uses and how many answers it holds (per model), for example `store wbg_store (scores in wbg_v2): 412,000 answers (...)`. Setting `WBG_SCHEMA` without `WBG_STORE` makes the store `<schema>_store`, which is empty: every question would be asked and paid for again. A run with an empty store, under any pair other than the default `wbg` and `wbg_store`, therefore refuses to start (plain message, non-zero exit). Say `--fresh-store` only when a new, empty store is really meant.
+
 **Comparing `wbg_v2` with `wbg`** (psql, database `work`; the first three are model readings and will differ, which is the point):
 
 ```sql
@@ -113,19 +115,26 @@ The ids of the two schemas' assets differ (four assets against thirteen), so com
 
 ## What a change costs
 
-Answers are the only thing that costs money. An answer is stored under the model, the exact state sent (the sentence with its lead-in, section and component; a package with its component; a commitment and a package) and the exact question (its wording and scale, not its id). A stage asks only the keys the store lacks. So:
+Answers are the only thing that costs money. An answer is stored under the model, the exact state sent (the sentence with its lead-in, section and component; a package with its description and component) and the exact question (its wording and scale, not its id). A stage asks only the keys the store lacks, so changing anything that sits inside a state or a question asks again for every answer that held it. Settle the things below, in this order, before paying; the first rows cost the most to redo.
 
-- **Nothing**: a set whose questions, gates, patterns, search run and round settings match its last finished run is skipped whole (`wbg.funnel_state` holds the fingerprint): no store read, no scores rewritten. The link stage always covers every active measure, whatever subset a run names, because it replaces its whole kind.
-- **A decision threshold, `asset.*`, `types.multiple`, `floor.types`, `band.keep`, `band.context`, `band.second_grade`, `digital.floor`, `posterior.*`, `dashboard.*`**: nothing. `./wbg_portfolio publish` rereads the scores (a minute or two). `band.low` changes which pairs get a second look: only the pairs newly in the band are asked. `second.model` or `second.context_chars` asks every second look again.
-- **A definition, a phrase or a pattern edit**: only the sentences whose question changed, or that the new gate or pattern newly admits. `./wbg_portfolio run --from search --measures <set>`.
-- **An ask floor (`floor.ask`, `asset.ask_floor`), a gate, a round setting, `link.*`**: the sentences or pairs newly let in. The feedback rounds run only when round 0 asked something new of a set already scored, so a re-run after a refit does not move the admitted pool.
-- **`ask.context`**: every sentence-level question is a new state. A whole-cohort re-ask (about US$6 to 9 at the current corpus and gates). Test it first on the graded sentences.
-- **A measure of another family** (added, edited or switched off): nothing. A measure's own questions hold only its own definition. What every family shares, and so re-asks every family when changed: the grade scale, the asset map, `ask.context`, `floor.ask` and the model.
-- **A new document**: its own sentences only.
-- **The code of a corpus stage** (projects, clean, components, clean_procurement): that stage and what follows it run again, at no model cost; `clean` reads every PDF again (hours). Moving the code into the `wbg_portfolio` package (2026-10-25) changed every file's bytes, so the first `./wbg_portfolio run` after it rebuilds the corpus once; the parse check (`text_sha256`) then shows whether the text came out the same.
-- **The model snapshot (`questions.MODEL`)**: everything; a deliberate step followed by re-measurement.
+| What must be final before paying | What it re-asks | About |
+|---|---|---|
+| The parse: the document set, `data/appraisal/*.csv`, `data/text/*.txt` (section titles, component names and numbers, lead-ins, sentence and paragraph boundaries) and `data/procurement/packages.csv` (description, component, category) | Every sentence under anything that changed, in every stage; a changed sentence is also embedded again. Check a dry run against the store on exactly the data to be paid on. | US$10 to 12 |
+| The grade scale (`analysis/labels/scale.csv`, or a `<set>_scale.csv`) and the decision model version (`questions.MODEL`) | Every first pass (the assets and every measure) and every second look of the decision model | US$10 to 12 |
+| The chat model version (`second.model`) | Every chat second look, the policy flag, the asset opinion and kinds, the package question and the activities | US$4 |
+| The digital flag definition (`inputs/taxonomy/flags.csv`, row `digital`) | The digital question for every sentence in the asked band, then the later questions of the sentences it newly lets in | US$1 |
+| An asset definition (`inputs/taxonomy/assets.csv`) | That asset's first pass, its package questions, its kinds, and the asset opinion of every committed, digital sentence | US$1 each |
+| A measure definition or name (`analysis/labels/<id>.csv`) | That measure's first pass (and its feedback rounds), its second looks, its package-to-measure question and its activities | US$0.50 each |
+| A measure type (name or definition) | That type for the measure's committed, digital sentences | US$0.002 per type |
+| `second.context_chars` and `ask.context` | The questions that carry the paragraph (the longer paragraphs only, for `second.context_chars`) | up to US$3 and US$6 to 9 |
+| A threshold inside the asked range (`band.low`, `band.keep`, `band.context`, `band.second_grade`, `digital.floor` down to `digital.ask_low`, `link.asset_yes`, `link.asset_band_low`, `link.strong_yes`, `asset.floor`, `floor.types`, `types.multiple`, `posterior.*`, `dashboard.*`) | Nothing: `./wbg_portfolio publish` rereads the stored scores | free |
+| A threshold outside the asked range (`band.ask_low` or `digital.ask_low` lowered, `link.asset_ask_low` lowered, `asset.floor` lowered) | Only the pairs newly let in: about US$0.11 per 1,000 measure pairs, US$0.08 per 1,000 package pairs | US$0.5 to 4 |
 
-Estimates (2026-10-22, 251 projects, about 150,000 searched sentences, starting gates 0.3): embedding about US$1; the asset map US$0.8 to 1.2; twelve measures US$3 to 5; types and package links US$1 to 2; **about US$6 to 9 for a clean run**. The dry run gives the figure for the corpus as it stands.
+What else is free or cheap. A set whose questions, gates, patterns, search run and round settings match its last finished run is skipped whole (`wbg.funnel_state` holds the fingerprint). A phrase or pattern edit asks only the sentences it newly admits. A gate, an ask floor (`floor.ask`, `asset.ask_floor`) or a round setting asks only the sentences newly let in; the feedback rounds run only when round 0 asked something new. A measure of another family changes nothing here: a measure's own questions hold only its own definition; what every family shares is the scale, the asset map, `ask.context`, `floor.ask` and the model. A new document asks its own sentences only. The code of a corpus stage runs that stage and what follows again at no model cost (`clean` reads every PDF again: hours). The order of rows in a file never changes a question: the assets and kinds a question lists are sorted by id. Setting a reply or a request knob (`second.max_tokens`, `second.reasoning`, `activities.reasoning`) asks nothing again but changes the answers still to come, so fix them with the model.
+
+Estimates (2026-10-22, 251 projects, about 150,000 searched sentences, starting gates 0.3): embedding about US$1; the asset map US$0.8 to 1.2; twelve measures US$3 to 5; types and package links US$1 to 2; **about US$6 to 9 for a clean run, US$15 to 19 with the second looks and the chat questions**. The dry run gives the figure for the corpus as it stands.
+
+**What a run never loses.** Each answer is committed as it arrives, so a crash, a kill or the spend cap loses nothing already paid for. A batch with one unreadable answer keeps its good ones and the bad one alone is asked again. Identical (state, question) items in one stage are asked once. An empty reply from the chat model is asked again within the run and never counts toward `second.max_attempts`; only a reply with content that cannot be read does. An item the provider refuses alone (an HTTP 4xx for that request, after the run has had answers from the same model) is recorded in `<store>.refused`, skipped, and listed at the end of the run; delete its row there to ask it again. A refusal about the whole request (a bad key, no credit, or nothing answered at all) stops the run.
 
 ## Clean run on the box
 
