@@ -170,13 +170,14 @@ STAGES = [
      [("documents",), ("appraisal", "paragraphs.csv")],
      [("appraisal", "components.csv")]),
     ("clean_procurement", "clean_procurement.py",
-     ["clean_procurement.py", "glue.py", "text_rules.py", "plan_table.py", "links.py",
-      "keys.py", "procurement_vocab.json"],
+     ["clean_procurement.py", "glue.py", "text_rules.py", "plan_table.py", "plan_pdf.py",
+      "links.py", "keys.py", "procurement_vocab.json"],
      [("procurement", "packages_raw.csv"), ("procurement", "notices_raw.csv"),
       ("procurement", "awards_raw.csv"), ("appraisal", "components.csv"),
-      ("appraisal", "paragraphs.csv")],
+      ("appraisal", "paragraphs.csv"), ("plan_pdf", "*.pdf")],
      [("procurement", "packages.csv"), ("procurement", "notices.csv"),
-      ("procurement", "awards.csv"), ("procurement", "superseded_packages.csv")]),
+      ("procurement", "awards.csv"), ("procurement", "superseded_packages.csv"),
+      ("procurement", "plan_pdf_rows.csv")]),
 ]
 
 

@@ -24,6 +24,8 @@ from wbg_portfolio.dates import iso_date                                # noqa: 
 from wbg_portfolio import plan_table                                        # noqa: E402
 from wbg_portfolio import glue                                              # noqa: E402
 from wbg_portfolio import links                                             # noqa: E402
+from wbg_portfolio import panel                                             # noqa: E402
+from wbg_portfolio import plan_pdf                                          # noqa: E402
 
 CLEAN_VERSION = "proc-clean-11"
 
@@ -710,6 +712,98 @@ def clean_packages(rows, counters, vocab=None, names=None, comps=None):
     return out
 
 
+PDF_KEYS = ("plan_pdf_plans_read", "plan_pdf_plans_accepted", "plan_pdf_plans_rejected_by_guard",
+            "packages_component_from_plan_pdf", "packages_amount_from_plan_pdf",
+            "packages_plan_pdf_component_disagrees")
+PDF_LINE = ("plan PDF: {plan_pdf_plans_read} plans read, {plan_pdf_plans_accepted} accepted, "
+            "{plan_pdf_plans_rejected_by_guard} rejected by the guard; packages that gained a component "
+            "{packages_component_from_plan_pdf}, an amount {packages_amount_from_plan_pdf}; "
+            "component disagreements kept as the text reading had them "
+            "{packages_plan_pdf_component_disagrees}\n")
+
+
+def _components_differ(today_number, today_name, found):
+    """Whether the PDF's component (number, name, ...) names another component than the text
+    reading's: by number when both have one, else by name."""
+    if today_number and found[0]:
+        return today_number != found[0]
+    if today_name and found[1]:
+        return _flat(today_name) != _flat(found[1])
+    return False
+
+
+def merge_plan_pdf(packages, pdf, comps, min_share, counters):
+    """Fill what the text reading left blank from the plan PDF's own columns.
+
+    packages: the cleaned rows of every plan version (before dedupe); pdf: {plan document id:
+    {"rows": [...], "unread": n}} from plan_pdf.read_all. A package is matched to a PDF row
+    by plan document and normalised borrower reference. Per plan document:
+
+    - Guard: the PDF's table is used only when at least min_share of its data rows carry a
+      reference that is one of this plan's packages (rows whose reference could not be read
+      count against it). A plan whose cell text is scrambled reads no reference and is
+      rejected.
+    - A reference printed twice in the PDF, or by two packages of the plan, is not matched
+      (nothing is linked on a guess).
+    - Component: only where the text reading found none. The PDF's cell goes through
+      Components.in_cells, the matcher the text reading uses; component_source is "plan_pdf".
+      Where the text reading has one and the PDF names another, the text reading stays and
+      the disagreement is counted.
+    - Estimated amount: only where the text reading has none (neither the plan's cell nor the
+      description's figure); amount_source is "plan_pdf". A different amount is counted.
+    Nothing the text reading produced is overwritten."""
+    by_doc = defaultdict(list)
+    for r in packages:
+        by_doc[r["plan_version"]].append(r)
+    for doc in sorted(pdf):
+        rows = by_doc.get(doc)
+        if not rows:
+            counters["plan_pdf_not_in_any_plan"] += 1
+            continue
+        counters["plan_pdf_plans_read"] += 1
+        data_rows = pdf[doc]["rows"]
+        keys = Counter(plan_pdf.ref_key(norm_ref(r["borrower_ref"])) for r in rows)
+        total = len(data_rows) + int(pdf[doc].get("unread") or 0)
+        hit = sum(1 for d in data_rows if d["ref_key"] in keys)
+        counters["plan_pdf_rows_read"] += total
+        counters[f"plan_pdf_plan {doc}: rows read"] = total
+        counters[f"plan_pdf_plan {doc}: rows matched"] = hit
+        counters[f"plan_pdf_plan {doc}: packages"] = len(rows)
+        if not total or hit / total < min_share:
+            counters[f"plan_pdf_plan {doc}: rejected by the guard"] = 1
+            counters["plan_pdf_plans_rejected_by_guard"] += 1
+            counters["plan_pdf_rows_in_rejected_plans"] += total
+            continue
+        counters["plan_pdf_plans_accepted"] += 1
+        counters["plan_pdf_rows_matched"] += hit
+        printed = Counter(d["ref_key"] for d in data_rows)
+        by_key = {d["ref_key"]: d for d in data_rows if printed[d["ref_key"]] == 1}
+        for r in rows:
+            key = plan_pdf.ref_key(norm_ref(r["borrower_ref"]))
+            d = by_key.get(key)
+            if d is None or keys[key] != 1:
+                if key in printed:
+                    counters["plan_pdf_rows_ambiguous_reference"] += 1
+                continue
+            cell = d["component_cell"]
+            found = comps.in_cells(r["project_id"], cell) if cell else None
+            if r["component_number"] or r["component"]:
+                if found and _components_differ(r["component_number"], r["component"], found):
+                    r["_plan_pdf_disagrees"] = 1
+                    counters[f"plan_pdf_plan {doc}: component disagreements"] += 1
+            elif found:
+                r["component_number"], r["component"] = found[0], found[1]
+                r["component_source"], r["component_doc_id"] = "plan_pdf", found[3]
+                counters[f"plan_pdf_plan {doc}: components filled"] += 1
+            if d["amount"]:
+                if not r["estimated_amount"]:
+                    r["estimated_amount"] = d["amount"]
+                    r["amount_source"] = "plan_pdf"
+                    counters[f"plan_pdf_plan {doc}: amounts filled"] += 1
+                elif float(r["estimated_amount"]) != float(d["amount"]):
+                    r["_plan_pdf_amount_differs"] = 1
+
+
 def dedupe_packages(rows, counters):
     """One row per package: the newest plan version's row, whole."""
     # The key is the normalised reference ('EDGE- G13' and 'EDGE-G13' are one package).
@@ -902,7 +996,15 @@ def main():
         + [r["description"] for r in awards_raw], args.data)
     comps = read_components(args.data)
     packages = clean_packages(pkg_raw, counters, vocab, names, comps)
+    # The plan PDF's own columns fill what the text reading left blank (never overwrite).
+    merge_plan_pdf(packages, plan_pdf.read_all(args.data), comps,
+                   float(panel.require("plan_pdf.min_match_share")), counters)
     kept, superseded = dedupe_packages(packages, counters)
+    for r in kept:
+        counters["packages_component_from_plan_pdf"] += r["component_source"] == "plan_pdf"
+        counters["packages_amount_from_plan_pdf"] += r["amount_source"] == "plan_pdf"
+        counters["packages_plan_pdf_component_disagrees"] += r.get("_plan_pdf_disagrees", 0)
+        counters["packages_plan_pdf_amount_differs"] += r.get("_plan_pdf_amount_differs", 0)
     notices = clean_notices(notices_raw, counters, vocab, names)
     awards = clean_awards(awards_raw, counters, vocab, names)
     links.link_all(notices, kept, counters, "notices")
@@ -935,6 +1037,7 @@ def main():
                  f"{counters['amount_read_from_text']:,}\n")
         fh.write(f"dates read out of the description text:   "
                  f"{counters['date_read_from_text']:,}\n")
+        fh.write(PDF_LINE.format(**{k: counters[k] for k in PDF_KEYS}))
         fh.write("\nvalue coverage on the packages written:\n")
         for field in ("category", "method", "status"):
             fh.write(f"  {field:<10} distinct={counters[f'{field}_values']:<5}"
@@ -948,6 +1051,7 @@ def main():
     print(f"packages {counters['packages_out']:,} (from {counters['packages_in']:,} "
           f"rows), superseded {counters['package_versions_superseded']:,}")
     print(f"notices {counters['notices_in']:,}  awards {counters['awards_in']:,}")
+    print(PDF_LINE.format(**{k: counters[k] for k in PDF_KEYS}), end="")
     print(f"wrote {proc}/{{packages,notices,awards,superseded_packages}}.csv")
     return 0
 

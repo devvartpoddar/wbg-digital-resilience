@@ -55,6 +55,37 @@ The word lists the readers match against (status map, method names and method te
 19. Every notice and award is linked to its plan package by project and normalised borrower reference; a reference chain is first reduced as in 3.1 step 7. `package_link` says how: `reference` (one package has it); `reference_and_description` (several share a generic reference and the description's match key picks one); `ambiguous` (several share it and the description does not pick; left unlinked); `not_in_plan` (no package has it: a plan not disclosed, or a reference printed differently); `no_reference`. Nothing is linked on a guess.
 20. Every award also lists in `notice_ids` the notices of the same project and normalised reference, so a contract meets its tender even when no disclosed plan holds the package. Where both are linked to a package it must be the same one; an unlinked award does not take a notice whose reference was ambiguous.
 
+### 3.4 The plan PDF as an enrichment (`src/wbg_portfolio/plan_pdf.py`, `clean_procurement.merge_plan_pdf`)
+
+The text rendition loses the table's columns; the plan's PDF keeps them. The PDF is read **only to fill what the text reading left blank**, never to replace anything.
+
+1. **Read.** pdfplumber's table extraction (default line detection, no model) on every page of `data/raw/plan_pdf/<plan document id>.pdf`. A table's heading row is found by the words of its cells with whitespace and case ignored (a column edge breaks "Estimated Am / ount"); the reference, Component and Estimated Amount column names, in English, French, Spanish and Portuguese, are in `procurement_vocab.json` (`plan_pdf_headers`). A table that continues on the next page repeats no heading: the last heading of the same width is used. The borrower reference is the first cell's text up to its "/", read with every space removed (a clipped cell breaks it anywhere; text the row above left at the top is skipped); a cell with no reference is an unread row. The amount must be a plain number (stored as `21828.00`, US$ as in the text reading). Rows are cached in `data/procurement/plan_pdf_rows.csv` keyed on the PDF's checksum, so a PDF is read once.
+2. **Match.** A PDF row is matched to the package of the same plan document with the same reference, compared as upper-case letters and digits only. A reference printed twice in the PDF, or by two packages of the plan, is not matched.
+3. **Guard.** A plan's PDF is used only when at least `plan_pdf.min_match_share` (control panel, 0.5) of its data rows carry a reference that is one of the plan's packages; unread rows count against it. A plan whose cell text is scrambled in the PDF reads no reference and is rejected; it keeps the text reading alone.
+4. **Fill.** `component_number` / `component` only where the text reading found none: the PDF's cell goes through the same matcher as the text reading's (`Components.in_cells`: the longest stretch of a component name, else the number the plan prints) and `component_matched_by` is `plan_pdf`. The estimated amount only where the text reading has none (neither the Estimated Amount cell nor a figure in the description): `amount_source` is `plan_pdf`.
+5. **Never overwrite.** Where the text reading has a component and the PDF names another, the text reading stays and the disagreement is counted (`packages_plan_pdf_component_disagrees`; likewise a different amount, `packages_plan_pdf_amount_differs`). The description is not read from the PDF: its words are broken at the cell edge as in the text.
+6. **Seen.** `./wbg_portfolio status` prints how many packages gained a component and an amount from the plan PDF; the clean stage prints the same, with the plans read, accepted and rejected by the guard, and `data/reports/clean_procurement.txt` lists the counters. A plan without a PDF, or whose PDF failed, is read from the text alone.
+
+**Measured 2026-11-21** on 12 plans of 12 projects, run on a throwaway data folder with the real fetch and clean (no model). Counted per plan document, over the packages of that plan version; "disagreements" are packages where the text reading had a component and the PDF's cell names another (the text reading was kept). No value the text reading had was changed (checked by comparing the two packages tables).
+
+| Plan | Packages | PDF rows read (matched) | Components filled | Amounts filled | Disagreements | Note |
+|---|---|---|---|---|---|---|
+| 40107975 | 283 | 378 (0) | 0 | 0 | | rejected by the guard: cell text scrambled |
+| 40110606 | 243 | 243 (243) | 209 | 243 | 1 | |
+| 40115160 | 264 | 264 (236) | 194 | 234 | 7 | |
+| 40134071 | 140 | 140 (140) | 0 | 5 | 0 | Component column empty in the PDF |
+| 40137886 | 122 | 124 (124) | 0 | 4 | 0 | Component column empty in the PDF |
+| 40136923 | 191 | 192 (187) | 0 | 8 | 0 | components already read |
+| 40032248 | 63 | 63 (63) | 51 | 0 | 0 | |
+| 40121625 | 89 | 90 (90) | 0 | 2 | 0 | Component column empty in the PDF |
+| 40134888 | 61 | 62 (61) | 0 | 0 | 0 | no Estimated Amount column; no component printed |
+| 40112011 | 67 | 67 (67) | 43 | 0 | 0 | |
+| 40130555 | 60 | 15 (15) | 0 | 0 | 0 | the extraction found 15 rows of 60 |
+| 40108771 | 165 | 168 (168) | 90 | 127 | 3 | |
+
+The first six are the plans of the trial that chose the method; the last six (different regions, approval years 2020 to 2024, chosen for many packages without a component) were not seen before. Across the 12 plans, 575 packages gained a component and 599 an estimated amount. Reading takes about one second a page, once per PDF (the rows are cached by checksum); a re-run with nothing new gave a byte-identical `packages.csv`.
+
+
 ### 3.3 Word repair (`src/wbg_portfolio/glue.py`)
 
 Plan cells are clipped at the column edge, so words come apart ("S upply") or run together ("ofDigital"). No dictionary is used; every decision comes from counts in this corpus. Only package, notice and award descriptions are repaired.

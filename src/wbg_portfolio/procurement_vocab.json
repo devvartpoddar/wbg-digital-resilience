@@ -1,5 +1,10 @@
 {
   "plan_sections": ["WORKS", "GOODS", "NON CONSULTING SERVICES", "CONSULTING FIRMS", "INDIVIDUAL CONSULTANTS"],
+  "plan_pdf_headers": {
+    "reference": ["activityreferenceno", "activityreference", "référence", "referencia"],
+    "component": ["component", "composante", "componente"],
+    "amount": ["estimatedamount", "montantestimé", "montantestime", "importeestimado", "valorestimado"]
+  },
   "plan_columns": {
     "base": [
       ["borrower_ref", "Activity Reference No."],

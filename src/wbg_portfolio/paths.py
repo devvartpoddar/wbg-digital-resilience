@@ -34,6 +34,7 @@ LAYOUT = {
     "pdf": "raw/pdf",
     "pdf_text": "raw/pdf_text",
     "plans": "raw/plans",
+    "plan_pdf": "raw/plan_pdf",
     "notices_json": "raw/notices",
     "awards_json": "raw/awards",
     "projects_json": "raw/projects",

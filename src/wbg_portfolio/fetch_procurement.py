@@ -20,7 +20,8 @@ from wbg_portfolio.paths import REPO as ROOT
 from wbg_portfolio.paths import data_root, where, write_fetch_status  # noqa: E402
 
 from wbg_portfolio import plan_table                                     # noqa: E402
-from wbg_portfolio.fetch import get, now_stamp, read_cohort, write_atomic  # noqa: E402
+from wbg_portfolio.fetch import (get, now_stamp, read_cohort, write_atomic,  # noqa: E402
+                                 complete_pdf)
 from wbg_portfolio.common import read_csv, sha_text, write_csv  # noqa: E402
 from wbg_portfolio.dates import iso_date                    # noqa: E402
 from wbg_portfolio.clean_procurement import (                        # noqa: E402
@@ -176,6 +177,7 @@ def list_plans(project_id, log, delay):
             "disclosure_date": (val.get("disclosure_date") or "")[:10],
             "lang": val.get("lang") or "",
             "txturl": val.get("txturl") or "",
+            "pdfurl": val.get("pdfurl") or "",
         })
     time.sleep(delay)
     return docs
@@ -575,6 +577,7 @@ def collect_plans(projects, data, log, refresh, delay, workers=6, previous=None)
         print(f"[{n}/{total}] {pid}: {len(docs)} plans listed, "
               f"{len(tasks)} renditions to have", flush=True)
 
+    pdf_report = fetch_plan_pdfs(tasks, data, log, refresh, delay, workers)
     rows, fetch_failures, free_text_chars, bundle_docs = [], [], [], []
     empty_docs = []
     blobs, stamps = {}, {}
@@ -634,7 +637,58 @@ def collect_plans(projects, data, log, refresh, delay, workers=6, previous=None)
     print(f"  parsed {len(rows):,} package rows from {len(blobs):,} renditions",
           flush=True)
     return (rows, listing_failures, no_plan, fetch_failures, free_text_chars,
-            bundle_docs, empty_docs)
+            bundle_docs, empty_docs, pdf_report)
+
+
+def _fetch_plan_pdf(path, url, refresh, delay):
+    """(sha256, True) of a plan PDF downloaded now, ("", False) when the file was already on
+    disk. Only a whole PDF is stored (fetch.complete_pdf): a throttled interface answers an
+    HTML page with status 200, a cut connection truncates."""
+    if os.path.exists(path) and not refresh:
+        return "", False
+    blob = get(url, timeout=180).content
+    if not complete_pdf(blob):
+        raise RuntimeError(f"plan PDF {os.path.basename(path)}: not a whole PDF "
+                           f"({len(blob)} bytes), not stored")
+    store_keeping_old(path, blob)
+    time.sleep(delay)
+    return sha_text(blob), True
+
+
+def fetch_plan_pdfs(tasks, data, log, refresh, delay, workers):
+    """Download the PDF beside each plan rendition (same document id), data/raw/plan_pdf/
+    <doc id>.pdf. A plan with no PDF address or whose PDF cannot be fetched is listed and
+    skipped: the pipeline reads its text rendition alone, as before. Returns
+    {"fetched": n, "cached": n, "no_pdf": [doc ids], "failed": [(project, doc, why)]}."""
+    out = {"fetched": 0, "cached": 0, "no_pdf": [], "failed": []}
+    pdf_dir = where(data, "plan_pdf")
+    jobs = []
+    for pid, d in tasks:
+        if d.get("pdfurl"):
+            jobs.append((pid, d))
+        else:
+            out["no_pdf"].append(d["doc_id"])
+    if not jobs:
+        return out
+    os.makedirs(pdf_dir, exist_ok=True)
+    with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
+        futures = {pool.submit(_fetch_plan_pdf, os.path.join(pdf_dir, f"{d['doc_id']}.pdf"),
+                               d["pdfurl"], refresh, delay): (pid, d) for pid, d in jobs}
+        for fut in as_completed(futures):
+            pid, d = futures[fut]
+            try:
+                sha, new = fut.result()
+            except Exception as exc:                   # noqa: BLE001
+                out["failed"].append((pid, d["doc_id"], str(exc)[:200]))
+                continue
+            if new:
+                out["fetched"] += 1
+                log.record("plan_pdf", d["pdfurl"], f"doc={d['doc_id']}", 1, sha)
+            else:
+                out["cached"] += 1
+    out["no_pdf"].sort()
+    out["failed"].sort()
+    return out
 
 
 def store_keeping_old(path, blob):
@@ -867,13 +921,15 @@ def main():
 
     plan_rows, listing_fail, no_plan, plan_fail, free_chars = [], [], [], [], []
     bundle_docs, empty_docs = [], []
+    pdf_report = {"fetched": 0, "cached": 0, "no_pdf": [], "failed": []}
     if not args.skip_plans:
         previous = {}
         for r in read_csv(os.path.join(proc_dir, "packages_raw.csv")):
             previous.setdefault(r["plan_doc_id"], (r["content_sha256"], r["fetched_at"]))
         (plan_rows, listing_fail, no_plan, plan_fail, free_chars, bundle_docs,
-         empty_docs) = collect_plans(projects, args.data, log, args.refresh,
-                                     args.delay, workers=args.workers, previous=previous)
+         empty_docs, pdf_report) = collect_plans(projects, args.data, log, args.refresh,
+                                                 args.delay, workers=args.workers,
+                                                 previous=previous)
 
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
@@ -989,6 +1045,12 @@ def main():
         fh.write(f"plan listing failures ({len(listing_fail)}):\n")
         for pid, exc in listing_fail:
             fh.write(f"  {pid}\t{exc}\n")
+        fh.write(f"plan PDFs: {pdf_report['fetched']} downloaded, {pdf_report['cached']} already on "
+                 f"disk, {len(pdf_report['no_pdf'])} plans list no PDF address, "
+                 f"{len(pdf_report['failed'])} could not be fetched (skipped; the text rendition "
+                 f"is read alone)\n")
+        for pid, did, exc in pdf_report["failed"]:
+            fh.write(f"  {pid}\t{did}\t{exc}\n")
         fh.write(f"plan fetch failures ({len(plan_fail)}):\n")
         for pid, did, exc in plan_fail:
             fh.write(f"  {pid}\t{did}\t{exc}\n")
@@ -999,6 +1061,8 @@ def main():
         for pid, exc in award_fail:
             fh.write(f"  {pid}\t{exc}\n")
 
+    print(f"plan PDFs: {pdf_report['fetched']} downloaded, {pdf_report['cached']} on disk, "
+          f"{len(pdf_report['failed'])} failed (logged, skipped)")
     print(f"\nplan documents: {len(seen_hash)}  packages: {len(prep):,}  "
           f"notices: {len(notices):,}  awards: {len(awards):,}")
     print(f"wrote {proc_dir}/{{packages_raw,notices_raw,awards_raw}}.csv")
