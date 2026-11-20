@@ -300,6 +300,7 @@ act AS (
   WHERE (i.is_ipf OR NOT s.ipf_only)
     AND (%(project)s::text[] IS NULL OR a.project_id = ANY (%(project)s::text[]))
     AND (%(activity_id)s::text[] IS NULL OR a.activity_id = ANY (%(activity_id)s::text[]))
+    AND (%(cohort)s::text IS NULL OR i.cohort_set = %(cohort)s::text)
   GROUP BY a.activity_id, a.project_id, a.label_set),
 u AS (
   SELECT DISTINCT ON (a.activity_id, a.unit_id)
@@ -417,11 +418,11 @@ _ACTIVITY_WHERE = """
   AND (%(family)s::text IS NULL OR %(family)s::text = ANY (string_to_array(x.family, '|')))"""
 
 
-def _activity_params(family, filters):
-    return dict(_filters(ACTIVITY_FILTERS, filters), family=family)
+def _activity_params(family, filters, cohort=None):
+    return dict(_filters(ACTIVITY_FILTERS, filters), family=family, cohort=cohort)
 
 
-def families(q):
+def families(q, cohort=None):
     """The families of measures that exist (climate, cloud_data, ...) and, under each, its
     measures with counts of projects and activities. A measure whose family is "a|b" has a row
     under both. One row per family and measure: family, label_set (the measure's id),
@@ -442,7 +443,8 @@ def families(q):
         a AS (
           SELECT DISTINCT a.label_set, a.activity_id, a.project_id
           FROM wbg.activities a JOIN wbg.project_info i ON i.project_id = a.project_id
-          CROSS JOIN wbg.dashboard_settings s WHERE i.is_ipf OR NOT s.ipf_only)
+          CROSS JOIN wbg.dashboard_settings s WHERE (i.is_ipf OR NOT s.ipf_only)
+            AND (%(cohort)s::text IS NULL OR i.cohort_set = %(cohort)s::text))
         SELECT fam.family, fam.label_set, fam.label_name AS measure_name, fam.definition,
                (SELECT count(DISTINCT project_id) FROM a WHERE a.label_set = fam.label_set)
                  AS measure_projects,
@@ -454,7 +456,7 @@ def families(q):
                  WHERE f2.family = fam.family) AS family_activities,
                count(*) OVER (PARTITION BY fam.family) AS family_measures
         FROM fam
-        ORDER BY family_measures DESC, fam.family, fam.label_name"""), None))
+        ORDER BY family_measures DESC, fam.family, fam.label_name"""), {"cohort": cohort}))
 
 
 _ACTIVITY_COLUMNS = """
@@ -470,7 +472,7 @@ _ACTIVITY_COLUMNS = """
         x.linked_packages, x.strong_packages, x.next_package_date, x.best_link_strength"""
 
 
-def activities(q, family=None, **filters):
+def activities(q, family=None, *, cohort=None, **filters):
     """One row per activity (the distinct thing a project commits to do for a measure, as the
     chat model grouped the project's committed, digital sentences).
 
@@ -493,13 +495,13 @@ def activities(q, family=None, **filters):
     family: only measures of that family. Filters (a value or a list): project, country (name or
     ISO code), region, measure (id or name), type (id; '(no type)' for none), asset (id;
     '(no asset)' for none), asset_type (an asset type's id), instrument, activity_id."""
-    p = _activity_params(family, filters)
+    p = _activity_params(family, filters, cohort)
     return _numbers(q(_sql("WITH" + _ACTIVITY_CTES + "\nSELECT" + _ACTIVITY_COLUMNS + """
         FROM x WHERE""" + _ACTIVITY_WHERE + """
         ORDER BY x.project_name, x.measure_name, x.activity_label, x.activity_id"""), p))
 
 
-def activity_sentences(q, activity_ids=None, family=None, **filters):
+def activity_sentences(q, activity_ids=None, family=None, *, cohort=None, **filters):
     """The sentences of activities: those of `activity_ids`, or, with none given, of the
     activities the filters choose (the same family and filters as activities()). One row per
     activity and sentence, in reading order (document date, page).
@@ -515,7 +517,7 @@ def activity_sentences(q, activity_ids=None, family=None, **filters):
     posterior_probability, firmness."""
     if activity_ids is not None:
         filters["activity_id"] = list(dict.fromkeys(activity_ids)) or ["-"]   # none asked: no rows
-    p = _activity_params(family, filters)
+    p = _activity_params(family, filters, cohort)
     return _numbers(q(_sql("WITH" + _ACTIVITY_CTES + """
         SELECT x.activity_id, x.project_id, x.project_name, x.country_name, x.region, x.place,
                x.label_set, x.measure_name, x.activity_label, x.instrument, x.asset_column,
@@ -561,8 +563,9 @@ _SERVES = """
 """
 
 
-def _packages(q, family, linked_only, filters):
+def _packages(q, family, linked_only, filters, cohort=None):
     p = _filters(PACKAGE_FILTERS, filters)
+    p["cohort"] = cohort
     p["status"] = _statuses(p["status"])
     p["family"] = family
     p["activity_id"] = None
@@ -641,6 +644,7 @@ def _packages(q, family, linked_only, filters):
           WHERE a.package_id = ps.package_id AND a.signed_date IS NOT NULL
           ORDER BY a.signed_date DESC, a.award_id DESC LIMIT 1) aw ON true
         WHERE (i.is_ipf OR NOT s.ipf_only)
+          AND (%(cohort)s::text IS NULL OR i.cohort_set = %(cohort)s::text)
           AND (%(project)s::text[] IS NULL OR ps.project_id = ANY (%(project)s::text[]))
           AND (%(package_id)s::text[] IS NULL OR ps.package_id = ANY (%(package_id)s::text[]))
           AND (%(country)s::text[] IS NULL OR h.country_name = ANY (%(country)s::text[])
@@ -663,7 +667,7 @@ def _packages(q, family, linked_only, filters):
     return df
 
 
-def packages_detail(q, family=None, **filters):
+def packages_detail(q, family=None, *, cohort=None, **filters):
     """One row per package linked to a commitment, with every procurement field the published
     tables hold, its project, its asset(s), its link, the measures it names and the activities
     it serves; soonest first (next date, else due date).
@@ -688,7 +692,7 @@ def packages_detail(q, family=None, **filters):
     or a shared one), status (a package status or a stage such as 'Coming up'), strength
     ('strong', 'asset'), package_id, and, of the activities it serves (it counts when one meets all
     that are given), type, asset_type, instrument."""
-    return _packages(q, family, True, filters)
+    return _packages(q, family, True, filters, cohort)
 
 
 def package(q, package_id):
@@ -722,7 +726,7 @@ def package(q, package_id):
     }
 
 
-def not_digital(q, project_id=None, measure=None):
+def not_digital(q, project_id=None, measure=None, *, cohort=None):
     """The committed sentences the digital question says are not a digital asset or the digital
     sector: kept out of every commitment, listed so a person can see what the rule leaves out.
     One row per sentence, measure and project; the models' reading, not a person's.
@@ -748,11 +752,12 @@ def not_digital(q, project_id=None, measure=None):
         LEFT JOIN wbg.paragraphs pa ON pa.paragraph_id = su.paragraph_id
         LEFT JOIN wbg.documents d ON d.document_id = n.document_id
         WHERE (i.is_ipf OR NOT s.ipf_only)
+          AND (%(cohort)s::text IS NULL OR i.cohort_set = %(cohort)s::text)
           AND (%(project)s::text[] IS NULL OR n.project_id = ANY (%(project)s::text[]))
           AND (%(measure)s::text[] IS NULL OR n.label_set = ANY (%(measure)s::text[])
                OR n.measure_name = ANY (%(measure)s::text[]))
         ORDER BY n.project_name, n.measure_name, d.disclosure_date, pa.page_from, n.unit_id"""),
-        {"project": _list(project_id), "measure": _list(measure)}))
+        {"project": _list(project_id), "measure": _list(measure), "cohort": cohort}))
 
 
 def asset_types(q):
@@ -909,11 +914,11 @@ _DOWNLOAD_SPEC = {"activity": _ACTIVITY_DOWNLOAD, "sentence": _SENTENCE_DOWNLOAD
 _DATE_COLUMNS = ("closing_date", "next_package_date")
 
 
-def _project_frame(q, family, filters):
+def _project_frame(q, family, filters, cohort=None):
     """Projects with their facts, counts and the measures they have: one query for the levels
     project and project_flags. A filter on measure, type, asset, asset type or instrument keeps the
     projects with an activity that meets it, and the counts are of those activities."""
-    p = _activity_params(family, filters)
+    p = _activity_params(family, filters, cohort)
     p["restrict"] = any(p[k] for k in ("measure", "type", "asset", "asset_type", "instrument", "activity_id"))
     df = _numbers(q(_sql("WITH" + _ACTIVITY_CTES + """,
         sel AS (SELECT x.* FROM x WHERE""" + _ACTIVITY_WHERE + """),
@@ -930,6 +935,7 @@ def _project_frame(q, family, filters):
           JOIN wbg.project_info i ON i.project_id = h.project_id
           CROSS JOIN wbg.dashboard_settings st
           WHERE h.documents_read > 0 AND (i.is_ipf OR NOT st.ipf_only)
+            AND (%(cohort)s::text IS NULL OR i.cohort_set = %(cohort)s::text)
             AND (%(project)s::text[] IS NULL OR h.project_id = ANY (%(project)s::text[]))
             AND (%(country)s::text[] IS NULL OR h.country_name = ANY (%(country)s::text[])
                  OR h.country_code = ANY (%(country)s::text[]))
@@ -960,7 +966,7 @@ def _project_frame(q, family, filters):
     return df
 
 
-def download(q, level, family=None, **filters):
+def download(q, level, family=None, *, cohort=None, **filters):
     """A frame to hand to a person as a sheet: fixed, plainly named columns for each level
     (filters choose rows, never columns). level is one of 'project_flags', 'project', 'activity',
     'sentence', 'package'; family and the filters are those of activities() (for 'package', of
@@ -976,7 +982,7 @@ def download(q, level, family=None, **filters):
         if bad:
             raise TypeError(f"filter {', '.join(bad)} is of packages: use it with level 'package'")
     if level in ("project_flags", "project"):
-        df = _project_frame(q, family, filters)
+        df = _project_frame(q, family, filters, cohort)
         if level == "project":
             return df[[c for c, _ in _PROJECT_COLUMNS]].reset_index(drop=True)
         out = df[[c for c, _ in _PROJECT_FACTS]].copy()
@@ -984,11 +990,11 @@ def download(q, level, family=None, **filters):
             out[m] = df["measures_present"].map(lambda have, m=m: int(isinstance(have, list) and m in have))
         return out.reset_index(drop=True)
     if level == "activity":
-        src = activities(q, family, **filters)
+        src = activities(q, family, cohort=cohort, **filters)
     elif level == "sentence":
-        src = activity_sentences(q, None, family, **filters)
+        src = activity_sentences(q, None, family, cohort=cohort, **filters)
     else:
-        src = packages_detail(q, family, **filters)
+        src = packages_detail(q, family, cohort=cohort, **filters)
     spec = _DOWNLOAD_SPEC[level]
     out = src[[s for _, s, _ in spec]].copy()
     out.columns = [c for c, _, _ in spec]

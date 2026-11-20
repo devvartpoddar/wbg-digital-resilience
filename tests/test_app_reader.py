@@ -92,6 +92,30 @@ def test_the_families_list_their_measures_and_a_measure_in_two_appears_under_bot
     assert fam.set_index("label_set").loc["cra", "measure_activities"] == (a["label_set"] == "cra").sum()
 
 
+def test_one_cohort_argument_narrows_every_reader_function_the_same_way(demo):
+    projects = app.projects(demo)
+    both = set(projects["cohort_set"])
+    assert both == {"digital", "digital_contributor"}             # the demo carries both values
+    for cohort in both:
+        mine = set(projects.loc[projects["cohort_set"] == cohort, "project_id"])
+        a = app.activities(demo, cohort=cohort)
+        assert len(a) and set(a["project_id"]) <= mine
+        assert set(app.activity_sentences(demo, None, None, cohort=cohort)["project_id"]) <= mine
+        assert set(app.packages_detail(demo, cohort=cohort)["project_id"]) <= mine
+        assert set(app.not_digital(demo, cohort=cohort)["project_id"]) <= mine
+        for level in ("project_flags", "project", "activity", "sentence"):
+            assert set(app.download(demo, level, cohort=cohort)["project_id"]) <= mine
+        assert len(app.download(demo, "package", cohort=cohort)) == len(app.packages_detail(demo, cohort=cohort))
+        f = app.families(demo, cohort=cohort)
+        assert f["family_activities"].max() <= a["activity_id"].nunique()
+    whole = app.activities(demo)
+    parts = [app.activities(demo, cohort=c) for c in both]
+    assert sum(len(x) for x in parts) == len(whole) and not set(parts[0]["activity_id"]) & set(parts[1]["activity_id"])
+    assert app.families(demo)["family_activities"].max() >= app.families(demo, cohort="digital")["family_activities"].max()
+    with pytest.raises(TypeError):
+        app.activities(demo, cohrt="digital")                       # a misspelt cohort still fails
+
+
 def test_an_activity_has_its_assets_types_instrument_and_procurement(demo):
     a = app.activities(demo)
     assert list(a.columns) == ACTIVITY_COLUMNS and len(a) > 50 and a["activity_id"].is_unique
