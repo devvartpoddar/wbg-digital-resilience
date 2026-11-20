@@ -4,4 +4,4 @@ disaster_recovery,replication_failover,Replication and failover,Replicates data 
 disaster_recovery,recovery_site,Recovery site,Establishes or uses a secondary computing environment to restore services after disruption. Replication or failover may also qualify when explicit.,true,v2.0
 disaster_recovery,recovery_objectives,Recovery plans and objectives,"Defines technical recovery objectives, plans or tested procedures for digital systems. Generic organisational continuity plans without a technical mechanism are insufficient.",true,v2.0
 disaster_recovery,records_digitisation,Digitising records against loss,Digitises and backs up physical records explicitly to preserve them against disaster loss. Digitisation alone is insufficient.,true,v2.0
-disaster_recovery,continuity_backup_policy,Continuity and backup policy and plans,"Sets or requires backup, recovery or continuity rules, standards or plans for data, systems or services.",true,v2.1
+disaster_recovery,continuity_backup_policy,Continuity and backup policy and plans,"Sets or requires backup, recovery or continuity rules, standards or plans for data, systems or services.",false,v2.1
