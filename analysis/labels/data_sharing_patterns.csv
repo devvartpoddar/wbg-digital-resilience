@@ -1,5 +1,3 @@
 measure_id,pattern_id,pattern,flags,type_id,active
 data_sharing,search_interoperability,\binteroperability (?:frameworks?|standards?)\b,IGNORECASE,,true
-data_sharing,search_data_exchange,\bdata exchange (?:platforms?|layers?|hubs?|systems?)\b,IGNORECASE,exchange_platform,false
 data_sharing,search_sharing_agreements,\bdata[- ]sharing (?:agreements?|protocols?|frameworks?|arrangements?)\b,IGNORECASE,sharing_governance,true
-data_sharing,search_api_gateway,\bAPI gateways?\b|\bservice bus(?:es)?\b,IGNORECASE,,false

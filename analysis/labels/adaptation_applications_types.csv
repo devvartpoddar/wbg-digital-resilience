@@ -1,6 +1,0 @@
-measure_id,type_id,type_name,definition,active,version
-adaptation_applications,climate_smart_agriculture,Farm and livestock advisory,"Climate-informed advice on farm, livestock or fisheries decisions. Includes planting, irrigation and stock protection; excludes information without actionable advice.",true,v2.0
-adaptation_applications,drought_water_management,Drought and water management,"Climate-informed decisions on water allocation, irrigation scheduling or drought response by authorities or utilities. Farm-level advice may also qualify when explicit.",true,v2.0
-adaptation_applications,adaptation_decision_support,Planning and investment decision support,"Climate-informed selection or prioritisation of adaptation investments, maintenance or asset-management actions. Excludes information display without decision support.",true,v2.0
-adaptation_applications,shock_response_targeting,Shock-response targeting tools,Uses climate or hazard information with household or registry data to identify recipients of shock-related support. Generic social registries alone are insufficient.,true,v2.0
-adaptation_applications,climate_advisory,"Advisory to households, firms and communities","Climate-informed advice to households, firms or communities outside farm and water-management applications. Excludes hazard alerts without a distinct advisory function.",true,v2.0

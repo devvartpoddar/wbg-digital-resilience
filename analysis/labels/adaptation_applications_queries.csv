@@ -1,7 +1,0 @@
-measure_id,query_id,query,type_id,active
-adaptation_applications,search_climate_smart_agriculture,A mobile agricultural advisory service will tell farmers when to plant and irrigate using weather forecasts.,climate_smart_agriculture,true
-adaptation_applications,search_drought_water_management,A digital irrigation scheduling tool will advise water managers how much water to release during drought.,drought_water_management,true
-adaptation_applications,search_adaptation_decision_support,A digital planning tool will use flood-risk data to rank investments and schedule protective maintenance.,adaptation_decision_support,true
-adaptation_applications,search_shock_response_targeting,A digital tool will combine climate-shock data with social registries to target support.,shock_response_targeting,true
-adaptation_applications,search_climate_advisory,A mobile application will advise households and businesses how to adapt to climate risks.,climate_advisory,true
-adaptation_applications,search_parent,A mobile advisory tool will use weather forecasts to recommend protective actions to farmers and businesses.,,true

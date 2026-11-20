@@ -5,4 +5,3 @@ energy_efficiency,efficient_facilities,Efficient buildings and facilities,"Whole
 energy_efficiency,efficient_cooling,Efficient cooling,Cooling equipment or design explicitly intended to reduce energy use. Heat protection may separately qualify when a hazard-protection function is stated.,true,v2.0
 energy_efficiency,energy_management,Energy monitoring and management,Monitoring or control systems explicitly used to reduce energy consumption. Metering alone without an efficiency function is insufficient.,true,v2.0
 energy_efficiency,legacy_replacement,Replacement of inefficient technology,Replaces existing technology explicitly to reduce energy use. Equipment or network-efficiency types may also qualify when supported.,true,v2.0
-energy_efficiency,energy_standards,Energy and green-ICT standards and requirements,"Sets or requires energy-efficiency or green-ICT standards, rules or plans for equipment, networks, facilities or procurement.",false,v2.1

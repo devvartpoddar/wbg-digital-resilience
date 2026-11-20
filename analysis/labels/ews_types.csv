@@ -4,5 +4,4 @@ ews,cell_broadcast,Cell broadcast,Disseminates hazard warnings through mobile-ne
 ews,emergency_messaging,Other public warning channels and last-mile reach,"Disseminates public hazard warnings through SMS, apps, sirens, radio, television or community channels. Excludes cell broadcast, which has its own type.",true,v2.0
 ews,institutional_alerting,Alerts to institutions and responders,"Directs hazard warnings to identified institutions, staff, responders or road users to trigger protective action. Audience must be explicit.",true,v2.0
 ews,sector_warning,Sector early warning,"Issues sector-specific warnings with an explicit climate or natural-hazard connection, such as climate-sensitive disease or pest warnings. Generic surveillance is insufficient.",true,v2.0
-ews,alert_interoperability,Alerting standards and interoperability,"Implements common alert formats or technical links between warning systems, such as the Common Alerting Protocol.",false,v2.1
 ews,early_warning_design,Early warning system design and planning,"Designs or plans an early warning system or its protocols, such as a feasibility study, a warning protocol or an alerting plan.",true,v2.1
