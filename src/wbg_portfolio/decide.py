@@ -325,7 +325,8 @@ def package_asset_sets(conn, only=None):
     link.asset_yes or more; with links.strengths also from link.asset_band_low
     up to link.asset_yes when the chat model's second look (kind
     package_asset_second) says yes. A missing second look is never a yes.
-    `only` limits the packages."""
+    `only` limits the packages (indexed once as a set, so a list of 14,000 costs nothing per pair)."""
+    only = None if only is None else set(only)
     yes = float(setting("link.asset_yes"))
     low = float(panel.get("link.asset_band_low", yes))
     strengths = links_strengths()

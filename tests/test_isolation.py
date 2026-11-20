@@ -18,3 +18,13 @@ def test_the_store_is_derived_from_the_schema_unless_named():
     assert _names() == ["wbg", "wbg_store"]
     assert _names(WBG_SCHEMA="wbg_v2") == ["wbg_v2", "wbg_v2_store"]
     assert _names(WBG_SCHEMA="wbg_v2", WBG_STORE="wbg_store") == ["wbg_v2", "wbg_store"]
+
+
+def test_the_run_report_reads_the_quality_table_of_the_schema_it_was_given(pg):
+    from wbg_portfolio import db, run_report
+    pg.execute(f"CREATE TABLE {db.SCHEMA}.measure_quality (label_set text, sheet text, graded_units int, "
+               f"precision numeric, recall numeric)")
+    pg.execute(f"INSERT INTO {db.SCHEMA}.measure_quality VALUES ('cra', 'evaluation', 40, 0.9, 0.8)")
+    pg.commit()
+    sheet, rows = run_report.quality()
+    assert sheet == "evaluation" and [r[0] for r in rows] == ["cra"]

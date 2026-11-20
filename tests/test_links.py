@@ -75,3 +75,19 @@ def test_an_award_names_the_notices_of_its_reference_and_package():
                "package_id": "P1:cs-indv:bbbb"}]
     links.link_awards_to_notices(awards, notices)
     assert [a["notice_ids"] for a in awards] == ["N1", "N2", ""]
+
+
+def test_package_asset_sets_indexes_the_packages_once(pg, monkeypatch):
+    from wbg_portfolio import decide
+    monkeypatch.setattr(decide, "package_asset_posteriors",
+                        lambda conn: {(f"pk{i}", "fiber"): 0.99 for i in range(2000)})
+
+    class Counting(list):
+        looked_up = 0
+
+        def __contains__(self, x):
+            Counting.looked_up += 1
+            return super().__contains__(x)
+    only = Counting(f"pk{i}" for i in range(500))
+    got = decide.package_asset_sets(pg, only)
+    assert len(got) == 500 and Counting.looked_up == 0

@@ -5,7 +5,7 @@ Reads  data/reports/{fetch,clean,audit,fetch_procurement,clean_procurement,
        audit_procurement}.txt, the last run's stage times (run_stages.jsonl, as
        ./wbg_portfolio run writes them), and from Postgres the spend of that run's window
        (<store>.spend) and the evaluation's precision and recall per measure
-       (wbg.measure_quality). A missing database leaves those sections empty
+       (<schema>.measure_quality). A missing database leaves those sections empty
        rather than failing the note.
 Writes data/reports/{date} {topic}.md
 
@@ -24,6 +24,7 @@ output, because a script cannot know what is surprising.
 import argparse, json, os, re, subprocess, sys
 from datetime import date
 
+from wbg_portfolio import db
 from wbg_portfolio.paths import REPO as ROOT
 from wbg_portfolio.paths import data_root, where  # noqa: E402
 
@@ -122,11 +123,11 @@ def spend_by_stage(run):
 
 
 def quality():
-    """(sheet, rows) from wbg.measure_quality: precision and recall per measure
+    """(sheet, rows) from <schema>.measure_quality (db.SCHEMA): precision and recall per measure
     at its floor. The evaluation sheet is the figure to quote; a training sheet
     is an upper estimate."""
-    rows = _query("SELECT label_set, sheet, graded_units, precision, recall FROM wbg.measure_quality "
-                  "ORDER BY sheet, label_set")
+    rows = _query("SELECT label_set, sheet, graded_units, precision, recall "
+                  f"FROM {db.SCHEMA}.measure_quality ORDER BY sheet, label_set")
     if not rows:
         return None, []
     sheet = "evaluation" if any(r[1] == "evaluation" for r in rows) else rows[0][1]
@@ -136,7 +137,7 @@ def quality():
 def _query(sql, params=()):
     try:
         import psycopg
-        with psycopg.connect("postgresql:///work") as conn:
+        with psycopg.connect(db.DSN) as conn:
             with conn.cursor() as cur:
                 cur.execute(sql, params)
                 return [r for r in cur.fetchall()]
