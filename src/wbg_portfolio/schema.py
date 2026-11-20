@@ -409,7 +409,7 @@ TABLES = {
             "linked_asset_level": "unit, second_look (the chat model's second look), paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
             "score_first": "The first-pass score the band rule reads: the posterior of grades 2 and 3 from the sentence asked alone.",
-            "score_context": "The decision model's score for the same question asked with the paragraph beside the sentence; empty unless the pair's first-pass score is in the band (band.low to band.keep). Model-graded, not person-graded.",
+            "score_context": "The decision model's score for the same question asked with the paragraph beside the sentence; empty unless the pair's first-pass score was asked about (band.ask_low to band.ask_high; a look above band.keep decides nothing). Model-graded, not person-graded.",
             "second_grade": "The chat model's grade 0 to 3 for the pair, asked in the band; empty otherwise. Reading is the model's: a missing second look never counts as yes.",
             "decided_by": "score (first-pass score at band.keep or more), second_look (in the band, and both looks reach band.context and band.second_grade) or empty (not committed). With band.on false: score when the posterior reaches the measure's floor.",
             "is_digital": "True when the digital question (the sentence with its paragraph beside it, asked once whatever the measure) scores digital.floor or more. The dashboards count a committed sentence only when this is true; with digital.on false every sentence is true.",
@@ -562,7 +562,8 @@ TABLES = {
                  "subtype_id": "The finer kind of the asset (assets_subtypes.csv), chosen by the chat model; empty where it was not asked or its answer was not one of the asset's kinds.",
                  "asset_level": "unit (the first pass), second_look (the chat model's second look at a committed, digital sentence the first pass gave no asset), paragraph or none.",
                  "own_best_asset_id": "The sentence's own best asset, whatever its probability.",
-                 "own_best_probability": "Its posterior probability."}),
+                 "own_best_probability": "Its posterior probability.",
+                 "second_look_asset_id": "The assets the chat model named for this sentence (asset.ask_high: asked also where the first pass has an asset), joined by |, in the order it named them; empty where it was not asked or named none. Read it against asset_id to measure how often the two agree; it decides nothing where the first pass has an asset."}),
     "commitment_package_links": dict(
         key=("label_set", "unit_id", "package_id"),
         foreign=[("package_id", "packages", "package_id"),

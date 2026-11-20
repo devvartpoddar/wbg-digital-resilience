@@ -43,7 +43,7 @@ def test_the_real_taxonomy_has_four_assets_each_with_kinds_and_no_cybersecurity(
     assert "cybersecurity" not in assets and not any("cyber" in r["id"] for rows in sub.values() for r in rows)
 
 
-def test_the_second_look_asks_only_sentences_with_no_first_pass_asset(pg, corpus, fake_chat, pipeline_on):
+def test_the_second_look_asks_only_sentences_with_no_first_pass_asset(pg, corpus, fake_chat, pipeline_on, narrow_asks):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: '{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
@@ -57,7 +57,7 @@ def test_the_second_look_asks_only_sentences_with_no_first_pass_asset(pg, corpus
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1 and len(fake_chat.calls) == 1
 
 
-def test_it_asks_again_only_for_what_is_missing(pg, corpus, fake_chat, pipeline_on):
+def test_it_asks_again_only_for_what_is_missing(pg, corpus, fake_chat, pipeline_on, narrow_asks):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: '{"assets": []}'
     second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
@@ -69,7 +69,7 @@ def test_it_asks_again_only_for_what_is_missing(pg, corpus, fake_chat, pipeline_
     assert count(pg, "asset_second") == 2
 
 
-def test_an_asset_or_kind_the_files_do_not_have_is_discarded_and_counted(pg, corpus, fake_chat, pipeline_on):
+def test_an_asset_or_kind_the_files_do_not_have_is_discarded_and_counted(pg, corpus, fake_chat, pipeline_on, narrow_asks):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: json.dumps({"assets": [{"asset": "cybersecurity", "subtype": "x"},
                                                        {"asset": "fiber", "subtype": "invented"}]})
@@ -81,7 +81,7 @@ def test_an_asset_or_kind_the_files_do_not_have_is_discarded_and_counted(pg, cor
     assert decide.asset_second_looks(pg) == {u1: [("fiber", "")]}
 
 
-def test_a_repeated_asset_counts_once_and_none_is_a_valid_answer(pg, corpus, fake_chat, pipeline_on):
+def test_a_repeated_asset_counts_once_and_none_is_a_valid_answer(pg, corpus, fake_chat, pipeline_on, narrow_asks):
     kept, la, lk = second.valid_assets(["fiber/backbone", "fiber/unspecified", "towers/mast"],
                                        *Q.asset_catalogue())
     assert kept == [("fiber", "backbone"), ("towers", "mast")] and (la, lk) == (1, 0)
@@ -144,8 +144,32 @@ def test_the_levels_and_kinds_reach_unit_assets(pg, corpus, fake_chat, fake_mode
             f"WHERE asset_id <> ''")}
     assert rows[(u0, "towers")][:2] == ("mast", "unit") and rows[(u0, "towers")][2] is not None
     assert rows[(u1, "fiber")] == ("backbone", "second_look", None)
+    # the chat model's asset is published beside a first-pass one, so agreement can be measured
+    agree = dict(db.rows(pg, f"SELECT unit_id, second_look_asset_id FROM {db.SCHEMA}.unit_assets "
+                             f"WHERE asset_id <> ''"))
+    assert agree == {u0: "fiber", u1: "fiber"}
     af = {u: lvl for u, lvl in db.rows(pg, f"SELECT unit_id, linked_asset_level FROM {db.SCHEMA}.measure_findings")}
     assert af[u1] == "second_look"
     # the second look's asset counts on the dashboards at the level the panel allows
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.commitment_units WHERE unit_id = %s AND asset_id = 'fiber' "
                       f"AND asset_from = 'second_look'", (u1,))[0] == 1
+
+
+def test_the_asset_second_look_is_asked_also_under_asset_ask_high_and_never_changes_the_decision(
+        pg, corpus, fake_chat, fake_model, pipeline_on, monkeypatch):
+    c, u0, u1 = ready(pg, corpus, fake_chat)
+    fake_chat.reply = lambda p: '{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
+    from wbg_portfolio import panel
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "asset.ask_high": 0.8})   # only where none at the floor
+    assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "asset.ask_high": 1.01})  # every committed digital one
+    assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 2
+    assert len(fake_chat.calls) == 2                                                    # u1 was not asked again
+    own = decide.asset_map(pg, c)
+    assert decide.unit_assets(c, own, decide.asset_second_looks(pg))[u0][1][0][0] == "towers"   # first pass wins
+    # moving asset.floor up at publish asks nothing: the chat model's opinion is already there
+    n = len(fake_chat.calls)
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "asset.floor": 0.99})
+    lvl = decide.unit_assets(c, own, decide.asset_second_looks(pg))
+    assert lvl[u0][1] == [("fiber", None)] and lvl[u0][2] == "second_look" and len(fake_chat.calls) == n

@@ -52,7 +52,7 @@ GRADE_COLS = ["label_set", "unit_id", "paragraph_id", "doc_id", "project_ids", "
               "label_id", "asked", "route", "round", "best_cosine", "confidence", "p0", "p1", "p2", "p3",
               "p_committed_calibrated", "model_served"]
 UNIT_ASSET_COLS = ["unit_id", "asset_rank", "paragraph_id", "project_ids", "asset_id", "subtype_id", "probability",
-                   "asset_level", "own_best_asset_id", "own_best_probability"]
+                   "asset_level", "own_best_asset_id", "own_best_probability", "second_look_asset_id"]
 PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "score_a", "score_b", "p_keep_a", "p_keep_b",
              "model_served"]
 PACKAGE_ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",

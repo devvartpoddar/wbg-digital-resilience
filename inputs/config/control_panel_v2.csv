@@ -6,6 +6,7 @@ ask.batch_max_chars,80000,every model question (src/ask.py),Characters a batched
 ask.max_request_chars,30000,every model question (src/ask.py),Characters one item's request may hold before its questions are split over several.
 asset.gate_cosine,0.3,asset map (src/funnel.py),"Starting gate for the asset map until the skip rule fits one: a sentence is asked an asset at this cosine to its phrases or above, or when a word pattern matches."
 asset.floor,0.8,asset map,A sentence has an asset of its own at this posterior or above (read at publish).
+asset.ask_high,1.01,asset map (what is asked),"A committed, digital sentence whose best first-pass asset is below this (or has none) also gets the chat model's asset opinion (1.01 = every committed, digital sentence). Keep at or above asset.floor. The first pass still wins at asset.floor; the opinion fills only where there is none."
 asset.ask_floor,0.8,asset map,What the asset map's feedback rounds count as a yes (in what is asked).
 asset.decay,0,asset map,"Paragraph rule: earlier sentences' asset scores summed, each multiplied by this per sentence back; 0 = off."
 asset.paragraph_floor,0.3,asset map,The decayed sum's own floor (level paragraph).
@@ -52,13 +53,17 @@ dashboard.apply_measure_pair_checks,false,dashboards,"Drop a sentence from a mea
 second.model,anthropic/claude-haiku-5.5,every second look (src/chat.py),"The chat model asked for every second look, one item a request, temperature 0. Pinned: another id is another model and re-asks every second look."
 second.context_chars,1800,context questions (src/questions.py),Characters of the paragraph a context question sends beside the sentence.
 band.on,true,"commitment (src/decide.py, src/second.py)","The band rule decides which sentences a measure commits (true), replacing the per-measure floors (floor.default, floor.<set>) and the pair check; false: the floors and the pair check decide as before."
-band.low,0.5,band rule,A first-pass score from this up to band.keep is in the band and gets a second look; below it the sentence is not committed.
+band.low,0.5,band rule,"A first-pass score from this up to band.keep is in the band and is committed only when both second looks agree; below it the sentence is not committed. What is asked is band.ask_low to band.ask_high, never narrower than this."
 band.keep,0.9,band rule,A first-pass score at this or above is committed on its own.
 band.context,0.7,band rule,"In the band, the decision model asked again with the paragraph beside the sentence must score this or above."
 band.second_grade,2,band rule,"In the band, the chat model's grade (0 to 3) must be this or above, and the context score must also reach band.context. A missing second look is never a yes."
+band.ask_low,0.5,band rule (what is asked),"The second look is asked for first-pass scores from here up to band.ask_high (nothing below 0.50 was right in a trial of 40). Keep at or below band.low. Moving it needs a new run only when lowered."
+band.ask_high,1.01,band rule (what is asked),"The second look is asked for first-pass scores below this (1.01 = every score from band.ask_low up). Keep at or above band.keep. A look stored above band.keep decides nothing; it is published for reading, and lets band.keep be raised at publish without asking again."
 digital.on,true,"digital question (src/decide.py, sql/views)",Apply the digital rule (true): a committed sentence counts on the dashboards only when the digital question says it is digital. false: no digital question is asked and every sentence counts.
 digital.floor,0.5,digital question (src/second.py),"A committed sentence is digital at this P(yes) or above (asked once per sentence, with its paragraph beside it)."
-link.asset_band_low,0.3,package to asset (src/checks.py),A package-to-asset first-pass P(yes) from here up to link.asset_yes gets the chat model's second look.
+link.asset_band_low,0.3,package to asset (src/checks.py),"A package-to-asset first-pass P(yes) from here up to link.asset_yes counts when the chat model's second look says yes. What is asked is link.asset_ask_low to link.asset_ask_high, never narrower than this."
+link.asset_ask_low,0.3,package to asset (what is asked),"The chat model's second look at a package x asset pair is asked for first-pass P(yes) from here up to link.asset_ask_high. Keep at or below link.asset_band_low."
+link.asset_ask_high,1.01,package to asset (what is asked),"Asked for first-pass P(yes) below this (1.01 = every pair from link.asset_ask_low up). Keep at or above link.asset_yes. Decisions stay link.asset_band_low and link.asset_yes."
 link.strong_yes,0.7,package to measure (src/checks.py),"A package is strongly linked to a measure at this P(yes) or above, when asked directly about the measure."
 link.strengths,true,commitment to package (src/checks.py),"Link strengths (strong when the package is asked about the measure directly; asset when it shares a top-level asset) replace the old link question (true; the old question is not asked, stored scores stay); false: the old link question as before."
 activities.max_sentences,40,activities (src/activities.py),Most sentences of one project x measure group the chat model is shown at once; a larger group is split by document and each part merged separately.

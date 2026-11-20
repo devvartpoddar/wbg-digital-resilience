@@ -5,7 +5,7 @@ second look; both must agree. Nothing here decides: each step asks and writes
 scores, and src/wbg_portfolio/decide.py reads them.
 
   measure_second  every sentence x measure whose first-pass posterior is in
-            [band.low, band.keep): the decision model again with the
+            [band.ask_low, band.ask_high): the decision model again with the
             paragraph beside the sentence (kind measure_ctx, P(grades 2, 3)),
             and the chat model's grade 0 to 3 (kind measure_second)
   digital   every committed sentence, once whatever its measure: is it a
@@ -13,13 +13,20 @@ scores, and src/wbg_portfolio/decide.py reads them.
   policy    every committed sentence: investment or policy instrument, by the
             chat model (kind policy, score 1 for policy, 0 for investment)
   asset_second, asset_subtype   the chat model's assets, and the kind of each,
-            for the committed, digital sentences (kinds asset_second, asset_subtype)
+            for the committed, digital sentences (kinds asset_second, asset_subtype);
+            asset_second for those whose best first-pass asset is under asset.ask_high
   package_asset_second   every package x asset pair whose first-pass P(yes) is
-            in [link.asset_band_low, link.asset_yes): the chat model's yes or no
+            in [link.asset_ask_low, link.asset_ask_high): the chat model's yes or no
+
+What is asked and what decides are separate, the same way for each look: the
+`*ask_low`/`*ask_high` settings say which pairs are asked (wide), and
+decide.py applies band.low/band.keep, link.asset_band_low/link.asset_yes and
+asset.floor to the stored scores at publish. A look stored where it decides
+nothing is published for reading only.
 
 The three second looks (measure_second, asset_second, package_asset_second) read
 alike: the same call shape, the same log tail, a missing look is waiting and never
-a yes (asset_second has no score to band: it asks the sentences the first pass gave no asset). Question wording is all in questions.py; rows and writes are checks._row and
+a yes (asset_second has no score to band: it asks the sentences whose best first-pass asset is under asset.ask_high). Question wording is all in questions.py; rows and writes are checks._row and
 checks.write_scoped; asking is chat.asked and checks._ask.
 
 Every step honours projects (only those projects' sentences are asked, and
@@ -61,12 +68,12 @@ def measure_second(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_r
     if not b["on"]:
         return 0
     units, scope = _in_scope(corpus, [u for u, r in decide.measure_units(conn, corpus, name).items()
-                                      if r["in_band"]], projects)
+                                      if r["asked"]], projects)
     labs, scale = Q.load(name)
     lab = labs[0]
     gq = Q.graded_questions(name)[0][lab["id"]]
     cq, sq = Q.in_context(gq), Q.second_grade_question(lab, scale)
-    log(f"second look {name}: {len(units):,} sentence(s) with a first score in [{b['low']}, {b['keep']})")
+    log(f"second look {name}: {len(units):,} sentence(s) with a first score in [{b['ask_low']}, {b['ask_high']})")
     ctx = checks._ask(conn, model, [(u, corpus.context_state(u), {lab["id"]: cq}) for u in units],
                       f"second:{name}:context", name, api_key, dry_run, workers, log, data)
     second, ok = chat.asked(conn, [(u, corpus.chat_state(u), sq) for u in units], f"second:{name}:chat", name,
@@ -164,21 +171,23 @@ def first_pass_assets(conn, corpus):
 def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
                  projects=None, every=None, **_):
     """The chat model's second look at the assets: every committed, digital
-    sentence with no asset at asset.floor from the first pass is shown with its
-    paragraph and the four assets, and names up to two (or none) with a kind
-    each. Writes kind asset_second (label_set assets, label second; the answer's
+    sentence whose best first-pass asset is under asset.ask_high (no asset at all
+    counts as under) is shown with its paragraph and the four assets, and names
+    up to two (or none) with a kind each. The decision does not change: the first
+    pass wins at asset.floor and the look fills only where there is none. Writes kind asset_second (label_set assets, label second; the answer's
     labels are the valid "asset/subtype" pairs). While band.on is off nothing is asked."""
     if not decide.band()["on"]:
         return 0
     if checks.cannot_estimate(conn, dry_run, log, "asset second look", ("asset", "classify"), digital=True):
         return None
-    first = first_pass_assets(conn, corpus)
+    high = decide.asset_ask_high()
+    own = decide.asset_map(conn, corpus)
     digital_units = decide.committed_digital_units(conn, corpus, names)
-    units, scope = _in_scope(corpus, [u for u in digital_units if u not in first], projects,
-                             digital_units, _partial(names, every))
+    units, scope = _in_scope(corpus, [u for u in digital_units if max(own.get(u, {}).values(), default=0.0) < high],
+                             projects, digital_units, _partial(names, every))
     assets, subtypes = Q.asset_catalogue()
     q = Q.asset_second_question(assets, subtypes)
-    log(f"asset second look: {len(units):,} committed digital sentence(s) with no asset from the first pass")
+    log(f"asset second look: {len(units):,} committed digital sentence(s) whose best first-pass asset is under {high}")
     got, ok = chat.asked(conn, [(u, corpus.context_state(u), q) for u in units], "asset_second", Q.ASSETS, api_key,
                     dry_run, workers, log)
     if dry_run:
@@ -231,7 +240,7 @@ def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, worke
 def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=False, workers=ask.WORKERS,
                          log=print, projects=None, **_):
     """The chat model's second look at a package's assets: every package x asset
-    whose first-pass P(yes) is from link.asset_band_low up to link.asset_yes is
+    whose first-pass P(yes) is from link.asset_ask_low up to link.asset_ask_high is
     asked yes or no (package description, category, component, the asset's
     definition). Writes kind package_asset_second (label_set assets, label the
     asset, item the package; score 1 yes, 0 no). Not asked while link.strengths is off."""
@@ -239,17 +248,18 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
         return 0
     if checks.cannot_estimate(conn, dry_run, log, "package asset second look", ("package_asset", "link")):
         return None
-    low, yes = decide.package_band()
+    decide.package_band()                                  # checks the asked band covers the decision band
+    low, high = decide.package_ask()
     packages = {p["package_id"]: p for p in checks.load_packages(data, projects)}
     assets = {a["id"]: a for a in Q.asset_catalogue()[0]}
     post = decide.package_asset_posteriors(conn)
     qs = {a: Q.package_asset_second_question(assets[a]) for a in assets}
-    pairs = sorted((pid, aid) for (pid, aid), p in post.items() if pid in packages and aid in qs and low <= p < yes)
+    pairs = sorted((pid, aid) for (pid, aid), p in post.items() if pid in packages and aid in qs and low <= p < high)
 
     def state(p):
         s = Q.package_state(p)
         return dict(s, category=p["category"]) if p.get("category") else s
-    log(f"package asset second look: {len(pairs):,} package x asset pair(s) with a first score in [{low}, {yes})")
+    log(f"package asset second look: {len(pairs):,} package x asset pair(s) with a first score in [{low}, {high})")
     got, ok = chat.asked(conn, [((pid, aid), state(packages[pid]), qs[aid]) for pid, aid in pairs],
                     "package_asset_second", Q.ASSETS, api_key, dry_run, workers, log)
     if dry_run:

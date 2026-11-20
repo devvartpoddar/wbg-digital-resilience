@@ -44,7 +44,7 @@ def test_the_old_link_question_is_asked_while_the_strengths_are_off(pg, corpus, 
     assert count(pg, "link") > 0
 
 
-def test_a_package_asset_in_the_band_needs_the_chat_models_yes(pg, corpus, fake_chat, pipeline_on):
+def test_a_package_asset_in_the_band_needs_the_chat_models_yes(pg, corpus, fake_chat, pipeline_on, narrow_asks):
     c = ready(pg, corpus)
     set_first_pass(pg, "P1-1", "fiber", 0.4)
     assert decide.package_asset_sets(pg) == {"P1-1": {"towers"}}
@@ -63,6 +63,32 @@ def test_a_package_asset_in_the_band_needs_the_chat_models_yes(pg, corpus, fake_
         fake_chat.reply = lambda p, r=reply: r
         second.package_asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
         assert decide.package_asset_sets(pg) == {"P1-1": {"towers"}}
+
+
+def test_the_package_pair_above_the_yes_line_is_asked_and_moving_the_line_up_asks_nothing(
+        pg, corpus, fake_chat, pipeline_on, monkeypatch):
+    from wbg_portfolio import panel
+    c = ready(pg, corpus)
+    set_first_pass(pg, "P1-1", "fiber", 0.8)                            # above link.asset_yes (0.67)
+    fake_chat.reply = lambda p: '{"answer": "no"}'
+    assert second.package_asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 2
+    assert decide.package_asset_sets(pg) == {"P1-1": {"towers", "fiber"}}      # a stored no changes nothing at 0.8
+    n = len(fake_chat.calls)
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.asset_yes": 0.9})
+    assert decide.package_asset_sets(pg) == {"P1-1": {"towers"}}               # now in the band: the chat no counts
+    fake_chat.reply = lambda p: '{"answer": "yes"}'
+    pg.execute(f"DELETE FROM {db.SCHEMA}.scores WHERE kind = 'package_asset_second' AND label_id = 'fiber'")
+    pg.execute(f"DELETE FROM {db.STORE}.answers WHERE model = 'anthropic/claude-haiku-5.5'")
+    pg.commit()
+    second.package_asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
+    assert decide.package_asset_sets(pg) == {"P1-1": {"towers", "fiber"}}
+    assert len(fake_chat.calls) > n                                     # (that last run re-asked: the answers were deleted)
+    n = len(fake_chat.calls)
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.asset_yes": 0.95})
+    decide.package_asset_sets(pg)
+    assert second.package_asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) is not None
+    assert len(fake_chat.calls) == n                                    # a decision line moved: nothing asked
 
 
 def test_a_dry_run_and_the_strengths_off_ask_nothing(pg, corpus, fake_chat, pipeline_on, monkeypatch):

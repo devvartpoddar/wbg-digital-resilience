@@ -368,6 +368,20 @@ def pipeline_on(monkeypatch):
 
 
 @pytest.fixture
+def narrow_asks(monkeypatch):
+    """What is asked narrowed to what decides (the behaviour before the asked bands were separated):
+    the measure second look only in [band.low, band.keep), package assets only in
+    [link.asset_band_low, link.asset_yes), the asset second look only where the first pass has none."""
+    from wbg_portfolio import panel
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.ask_low": live()["band.low"],
+                                                    "band.ask_high": live()["band.keep"],
+                                                    "link.asset_ask_low": live()["link.asset_band_low"],
+                                                    "link.asset_ask_high": live()["link.asset_yes"],
+                                                    "asset.ask_high": live()["asset.floor"]})
+
+
+@pytest.fixture
 def v2_panel(monkeypatch):
     """The real inputs/config/control_panel_v2.csv, named by a path from the repository root as
     $WBG_PANEL is set on the box: what the run over the data copy reads."""

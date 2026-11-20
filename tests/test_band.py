@@ -255,7 +255,8 @@ def test_an_unreadable_second_look_is_never_a_yes(pg, corpus, fake_chat, band_on
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_second'")[0] == 0
 
 
-def test_a_score_at_the_keep_level_needs_no_second_look(pg, corpus, fake_chat, fake_model, band_on):
+def test_with_the_asked_band_narrowed_a_score_at_the_keep_level_needs_no_second_look(
+        pg, corpus, fake_chat, fake_model, band_on, narrow_asks):
     c = first_pass(pg, corpus, 0.95)
     n = len(fake_model)
     assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0
@@ -374,7 +375,7 @@ def test_publish_carries_the_new_columns_and_keeps_the_not_digital_out_of_the_co
     r0, r1 = rows[u0], rows[u1]
     assert r0[1:3] == (True, "second_look") and float(r0[3]) == 0.6 and float(r0[4]) >= 0.7 and r0[5] == 3
     assert r0[6] is True and r0[8] == "investment"
-    assert r1[1:3] == (True, "score") and r1[4] is None and r1[5] is None and r1[6] is False and float(r1[7]) < 0.5
+    assert r1[1:3] == (True, "score") and r1[4] is not None and r1[5] is not None and r1[6] is False and float(r1[7]) < 0.5
     nd = db.rows(pg, f"SELECT unit_id, project_id, digital_p FROM {db.SCHEMA}.not_digital_findings")
     assert [(u, p) for u, p, _ in nd] == [(u1, "P1")]
     assert u1 not in {u for (u,) in db.rows(pg, f"SELECT unit_id FROM {db.SCHEMA}.commitment_units")}
@@ -447,3 +448,69 @@ def test_the_estimate_uses_the_prompt_length_and_the_panels_prices(pg, fake_chat
     short = chat.ask(pg, [("a", {"sentence": "x"}, GRADE)], stage="t", dry_run=True)[1]["estimate_usd"]
     long = chat.ask(pg, [("a", {"sentence": "x" * 40_000}, GRADE)], stage="t", dry_run=True)[1]["estimate_usd"]
     assert abs((long - short) - 0.001) < 1e-6                    # 10,000 more prompt tokens at US$0.10 per million
+
+
+# ------------------------------------------------ what is asked and what decides
+
+def pin(monkeypatch, **kw):
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), **kw})
+
+
+def test_a_pair_above_the_keep_line_gets_a_second_look_and_stays_committed_whatever_it_says(
+        pg, corpus, fake_chat, band_on):
+    c = first_pass(pg, corpus, 0.95)
+    u0 = c.index[0]["unit_id"]
+    fake_chat.reply = lambda prompt: '{"grade": 0}'
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 1
+    row = decide.measure_units(pg, c, "cra")[u0]
+    assert (row["committed"], row["decided_by"], row["waiting"]) == (True, "score", False)
+    assert row["second_grade"] == 0 and row["score_context"] is not None      # stored, and readable
+
+
+def test_moving_the_keep_line_up_changes_the_decision_with_no_model_call(pg, corpus, fake_chat, fake_model, band_on,
+                                                                          monkeypatch):
+    c = first_pass(pg, corpus, 0.95)
+    u0 = c.index[0]["unit_id"]
+    fake_chat.reply = lambda prompt: '{"grade": 1}'
+    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
+    calls = (len(fake_model), len(fake_chat.calls))
+    assert committed(pg, c)[u0] == (True, "score", False)
+    pin(monkeypatch, **{"band.keep": 0.97})                        # the 0.95 pair is now in the band
+    assert committed(pg, c)[u0] == (False, "", False)              # the stored chat grade (1) is under 2
+    fake_chat.reply = lambda prompt: '{"grade": 3}'
+    pin(monkeypatch, **{"band.keep": 0.97, "band.second_grade": 1})
+    assert committed(pg, c)[u0] == (True, "second_look", False)
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 1       # nothing new to ask
+    assert (len(fake_model), len(fake_chat.calls)) == calls
+
+
+def test_the_asked_band_is_what_is_asked_and_never_below_it(pg, corpus, fake_chat, band_on, monkeypatch):
+    c = first_pass(pg, corpus, 0.45, units=(0, 1))
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0       # under band.ask_low
+    pin(monkeypatch, **{"band.ask_low": 0.4, "band.low": 0.4})
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 2
+    pin(monkeypatch, **{"band.ask_high": 0.95})
+    c2 = first_pass(pg, corpus, 0.95, units=(0,))
+    assert decide.measure_units(pg, c2, "cra")[c2.index[0]["unit_id"]]["asked"] is False
+
+
+@pytest.mark.parametrize("settings,words", [
+    ({"band.ask_low": 0.6}, "band.ask_low (0.6) is above"),
+    ({"band.ask_high": 0.8}, "band.ask_high (0.8) is below"),
+    ({"link.asset_ask_low": 0.4}, "link.asset_ask_low (0.4) is above"),
+    ({"link.asset_ask_high": 0.2}, "link.asset_ask_high (0.2) is below"),
+])
+def test_a_decision_band_wider_than_the_asked_band_fails_loudly(monkeypatch, settings, words):
+    pin(monkeypatch, **{"band.on": True}, **settings)
+    with pytest.raises(SystemExit) as e:
+        decide.band()
+        decide.package_band()
+    assert words in str(e.value)
+
+
+def test_the_asset_ask_line_cannot_be_under_the_asset_floor(monkeypatch):
+    pin(monkeypatch, **{"asset.ask_high": 0.1})
+    with pytest.raises(SystemExit) as e:
+        decide.asset_ask_high()
+    assert "asset.ask_high (0.1) is below asset.floor" in str(e.value)

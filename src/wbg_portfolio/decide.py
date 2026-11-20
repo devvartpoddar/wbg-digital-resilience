@@ -89,8 +89,23 @@ def band():
     on = bool(setting("band.on"))
     if not on:
         return {"on": False}
-    return {"on": True, "low": float(setting("band.low")), "keep": float(setting("band.keep")),
-            "context": float(setting("band.context")), "second_grade": float(setting("band.second_grade"))}
+    b = {"on": True, "low": float(setting("band.low")), "keep": float(setting("band.keep")),
+         "context": float(setting("band.context")), "second_grade": float(setting("band.second_grade")),
+         "ask_low": float(setting("band.ask_low")), "ask_high": float(setting("band.ask_high"))}
+    check_asked("band.", b["ask_low"], b["low"], b["ask_high"], b["keep"])
+    return b
+
+
+def check_asked(prefix, ask_low, low, ask_high, keep):
+    """Fail loudly when the decision band is wider than the asked band: a pair the
+    decision needs a second look for, but that was never asked, would wait forever."""
+    if ask_low > low:
+        raise SystemExit(f"panel: {prefix}ask_low ({ask_low}) is above the lowest score the decision reads "
+                         f"a second look for ({low}); lower {prefix}ask_low to {low} or less, else pairs "
+                         f"between them would wait for a second look that is never asked")
+    if ask_high < keep:
+        raise SystemExit(f"panel: {prefix}ask_high ({ask_high}) is below the score that is kept on its own "
+                         f"({keep}); raise {prefix}ask_high to {keep} or more")
 
 
 def band_rule(post, ctx, second, b):
@@ -111,9 +126,10 @@ def band_rule(post, ctx, second, b):
     return False, "", False
 
 
-def in_band(post, b):
-    """True for a first-pass score the second look is asked about."""
-    return b["low"] <= post < b["keep"]
+def asked_band(post, b):
+    """True for a first-pass score the second look is asked about: band.ask_low up to
+    band.ask_high. What it decides is band_rule's, from band.low and band.keep."""
+    return b["ask_low"] <= post < b["ask_high"]
 
 
 def look_scores(conn, kind, name):
@@ -151,11 +167,11 @@ def measure_units(conn, corpus, name):
             row["committed"], row["decided_by"], row["waiting"] = band_rule(
                 post, row["score_context"], row["second_grade"], b)
             row["asked_yes"] = row["committed"]
-            row["in_band"] = in_band(post, b)
+            row["asked"] = asked_band(post, b)
         else:
             row["committed"], row["asked_yes"] = post >= fl, post >= ask_fl
             row["decided_by"] = "score" if row["committed"] else ""
-            row["in_band"] = False
+            row["asked"] = False
         out[uid] = row
     return out
 
@@ -253,6 +269,16 @@ def asset_settings():
             "multiple": bool(setting("asset.multiple"))}
 
 
+def asset_ask_high():
+    """The best first-pass asset score under which a committed, digital sentence also gets the
+    chat model's asset opinion (asset.ask_high); never below asset.floor, which decides."""
+    high, fl = float(setting("asset.ask_high")), float(setting("asset.floor"))
+    if high < fl:
+        raise SystemExit(f"panel: asset.ask_high ({high}) is below asset.floor ({fl}); raise asset.ask_high "
+                         f"to {fl} or more, else sentences the first pass gave no asset would not be asked")
+    return high
+
+
 def asset_second_looks(conn):
     """{unit_id: [(asset_id, subtype_id)]} the chat model's second look named
     (kind asset_second), only assets the asset file still has; a sentence it
@@ -317,9 +343,23 @@ def link_strengths():
 
 
 def package_band():
-    """(low, yes): the first-pass P(yes) of a package x asset pair from which it gets the second
-    look (link.asset_band_low) and at which it counts without one (link.asset_yes)."""
-    return float(setting("link.asset_band_low")), float(setting("link.asset_yes"))
+    """(low, yes): the first-pass P(yes) of a package x asset pair from which a chat yes counts
+    (link.asset_band_low) and at which it counts without one (link.asset_yes). What the chat model
+    is asked about is wider: package_ask()."""
+    low, yes = float(setting("link.asset_band_low")), float(setting("link.asset_yes"))
+    package_ask(low, yes)
+    return low, yes
+
+
+def package_ask(low=None, yes=None):
+    """(ask_low, ask_high): the first-pass P(yes) of a package x asset pair that gets the chat
+    model's second look (link.asset_ask_low up to link.asset_ask_high); checked against the
+    decision band."""
+    low = float(setting("link.asset_band_low")) if low is None else low
+    yes = float(setting("link.asset_yes")) if yes is None else yes
+    a, b = float(setting("link.asset_ask_low")), float(setting("link.asset_ask_high"))
+    check_asked("link.asset_", a, low, b, yes)
+    return a, b
 
 
 def package_asset_posteriors(conn):
@@ -536,12 +576,14 @@ def asset_rows(conn, corpus, amap, ua, kinds=None, second=None):
                 "asset_level": level, "own_best_asset_id": best,
                 "own_best_probability": f"{own[best]:.4f}" if best else ""}
         looked = dict(second.get(uid, []))
+        chat_assets = "|".join(a for a, _ in second.get(uid, []))
         for k, (a, p) in enumerate(win, 1):
             kind = looked.get(a, "") if level == "second_look" else kinds.get((uid, a), "")
-            assets.append(dict(base, asset_rank=k, asset_id=a, subtype_id=kind,
+            assets.append(dict(base, asset_rank=k, asset_id=a, subtype_id=kind, second_look_asset_id=chat_assets,
                                probability="" if p is None else f"{p:.4f}"))
         if not win:
-            assets.append(dict(base, asset_rank=0, asset_id="", subtype_id="", probability=""))
+            assets.append(dict(base, asset_rank=0, asset_id="", subtype_id="", probability="",
+                               second_look_asset_id=chat_assets))
     return grades, assets
 
 
