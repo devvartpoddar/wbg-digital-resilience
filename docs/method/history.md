@@ -37,6 +37,18 @@ Settings with no row were set by judgement, not grades (round sizes, minimum cou
 - **Per-measure floors on P(grade 3)** read off the v5 sheet (0.3 to 0.6 by measure): sheet s2 mean precision 0.64, recall 0.81; s4 0.61 and 0.69, ranging 0.21 to 0.92 by measure. Replaced by one floor on P(2)+P(3).
 - **The paragraph asset map** (every model paragraph graded, 18,834 on 70 projects, US$1.88 for nine assets): replaced by the sentence map on 2026-10-22.
 
+## 2026-11-20 trials
+
+Graded by models, not checked by people: read each figure as a measurement of agreement with the graders used, not as a verified precision. The thresholds of the band rule were chosen on the same 360 items they were measured on.
+
+- **First-pass scores.** Kept sentence x measure pairs scoring 0.90 or more are 96 per cent right; those from 0.80 to 0.90 are 76 to 82 per cent right. The pair check removes about 3,000 above-floor pairs, of which about 80 per cent are right; about 550 sentences lose every measure.
+- **Band rule** (held-out sample of 360 pairs): precision 0.92 to 0.96 and recall 0.41 to 0.61 by a three-grader majority; 0.86 to 0.92 and 0.48 to 0.74 under the strictest grader.
+- **"Is this digital"**, asked with the paragraph as context: 96 per cent precision and 90 per cent recall on "not digital"; 2 to 3 per cent of truly digital sentences wrongly excluded. Asked of the sentence alone it wrongly excludes 10 to 12 per cent.
+- **Noise in one stored score.** A stored score is one noisy draw (batches of 50): agreement between two batches is 0.96 for measures.
+- **Package to asset:** precision 0.96, recall 0.71; with a second look on the band, recall 0.93.
+- **Strong link** (the package asked directly about the measure): precision 0.87, recall 0.88, against 0.33 and 0.19 for the old link question read as "names the measure". The old question read as "delivers" gave links by a shared asset that were right about 15 per cent of the time, so the label for a shared-asset link is "same asset".
+- **Activities** (a chat model shown a whole project x measure group): pairwise precision 0.93 for groups up to 8 sentences, 0.97 for 12 to 20, 0.78 above 20.
+
 ## Definitions
 
 - **v4** (2026-10-20): each measure defined by the intervention, never the asset, with boundaries between neighbours. Before it, climate governance graded 1,300 units committed and about 262 of 680 renewable-energy units were energy-access programmes. The first risk-assessment run had 47 of 153 committed units on the Bank's own concept-stage screening, which the word "screening" invited: a definition is a filter and is tuned like one.

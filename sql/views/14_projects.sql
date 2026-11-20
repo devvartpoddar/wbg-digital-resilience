@@ -136,6 +136,8 @@ SELECT pp.project_id, ua.asset_id, l.label_name AS asset_name,
        count(DISTINCT ua.unit_id) FILTER (WHERE ua.asset_level = 'unit') AS sentences_naming_it,
        count(DISTINCT ua.unit_id) FILTER (WHERE ua.asset_level = 'paragraph')
          AS sentences_from_paragraph,
+       count(DISTINCT ua.unit_id) FILTER (WHERE ua.asset_level = 'second_look')
+         AS sentences_from_second_look,
        count(DISTINCT ua.paragraph_id) AS paragraphs,
        max(ua.probability) FILTER (WHERE ua.asset_level = 'unit') AS best_probability
 FROM wbg.unit_assets ua
@@ -144,4 +146,4 @@ LEFT JOIN wbg.labels l ON l.label_set = 'assets' AND l.label_id = ua.asset_id
 WHERE ua.asset_level <> 'none'
 GROUP BY pp.project_id, ua.asset_id, l.label_name;
 COMMENT ON VIEW wbg.project_assets IS
-  'One row per project and digital asset the asset map finds there: sentences that name it (their own posterior at the control panel''s asset.floor; grades 2 supported and 3 financed counted together) and sentences that take it from earlier sentences of their paragraph. The model''s reading, not a person''s; documented is not done.';
+  'One row per project and digital asset the asset map finds there: sentences that name it (their own posterior at the control panel''s asset.floor; grades 2 supported and 3 financed counted together) sentences that take it from earlier sentences of their paragraph, and committed, digital sentences the chat model''s second look gave it. The model''s reading, not a person''s; documented is not done.';

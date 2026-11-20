@@ -5,7 +5,7 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 ## 0. Running it
 
 ```
-./wbg_portfolio run                                  # fetch > prepare > embed > search > classify > measure > link > publish
+./wbg_portfolio run                                  # fetch > prepare > embed > search > classify > measure > link > activities > publish
 ./wbg_portfolio run --from search --measures cra     # a changed measure, from its search to Postgres
 ./wbg_portfolio run --only measure --measures a b c  # three measures through the funnel, together
 ./wbg_portfolio run --from classify                  # the asset definitions changed: the map and everything after it
@@ -22,15 +22,18 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 | prepare | read the PDFs, clean, sentences, components, procurement tables; load the corpus tables and cut a release when they changed | `data/raw/` | `data/appraisal/`, `data/procurement/`, Postgres corpus tables |
 | embed | the sentence vectors, only what the cache lacks | `data/appraisal/` | `data/embeddings/` |
 | search | every label set's phrases against the vectors (cosines) | `data/embeddings/`, the label files | `data/search/<set>-<version>/` |
-| classify | the asset map: the funnel over the asset set (section 5b) | the search run, the store | `wbg.scores` (kind asset) |
-| measure | every measure through the funnel, then its second look in the band (decision model with the paragraph, chat model grade), its types; then once for all committed sentences the digital question and the policy flag; the pair checks only while `band.on` is false (5c, 5d, 5g) | the search runs, the store, `wbg.scores` | `wbg.scores` (kinds measure, measure_ctx, measure_second, type, digital, policy, pair) |
-| link | which asset each package buys and which commitments it carries out (5e) | `data/procurement/packages.csv`, `wbg.scores` | `wbg.scores` (kinds package_asset, link) |
+| classify | the asset map, first pass: the funnel over the four assets (section 5b) | the search run, the store | `wbg.scores` (kind asset) |
+| measure | every measure through the funnel, then its second look in the band (decision model with the paragraph, chat model grade); then once for all committed sentences the digital question, the policy flag, and for the digital ones the assets' second look and kinds; then the types (they need none of those); the pair checks only while `band.on` is false (5b, 5c, 5d, 5g) | the search runs, the store, `wbg.scores` | `wbg.scores` (kinds measure, measure_ctx, measure_second, digital, policy, asset_second, asset_subtype, type, pair) |
+| link | which asset each package has (first pass, then the chat model's second look on the band), and each package's fit to the measures of its project, the strong link (5e); the old link question only while `links.strengths` is false | `data/procurement/packages.csv`, `wbg.scores` | `wbg.scores` (kinds package_asset, package_asset_second, package_measure, link) |
+| activities | the distinct activities of each project x measure group of committed, digital sentences, by the chat model (section 5f) | `wbg.scores` | `wbg.scores` (kind activity) |
 | publish | every decision table from the scores as the control panel reads them now, then the views (5g) | `wbg.scores`, the panel, the fits | schema `wbg` |
 | audit | the parse and procurement audits, only with `--to audit` or `--only audit` | | `data/reports/audit*.txt` |
 
 The model stages run in one process, with one Postgres connection and one reading of the corpus. Each asks only what the store lacks and stops on a failed request; the next run resumes. **Spend.** `--max-spend X` caps what the whole run may spend: the ledger (`wbg_store.spend`) is read before each step and the step stops before a request that would pass what is left; a stop or a refusal still lands in the ledger. `--dry-run` skips fetch and prepare and prints each model stage's estimate (stored answers, requests to make, about how much) without writing anything.
 
-**The measure stage's second looks (2026-11-20).** They honour `--project` (only those projects' sentences are asked and only their rows replaced), `--dry-run` (an estimate line per step: `second:<set>:context`, `second:<set>:chat`, `digital`, `policy`) and `--max-spend`, and ask nothing the store holds; a pair whose second look failed or could not be read waits (not committed) and the run says how many. What they cost: the decision model's context asks about US$0.03 per 1,000 pairs, the chat model's second looks about US$0.15 per 1,000. For the full data about 25,000 pairs are expected in the band, so about US$0.75 for the context asks and US$3.75 for the chat grades the first time, plus the digital question (decision model) and the policy flag (chat model) for each committed sentence. `./wbg_portfolio status` shows the rows of each new kind.
+**The measure stage's second looks (2026-11-20).** They honour `--project` (only those projects' sentences are asked and only their rows replaced), `--dry-run` (an estimate line per step: `second:<set>:context`, `second:<set>:chat`, `digital`, `policy`, `asset_second`, `asset_subtype`) and `--max-spend`, and ask nothing the store holds; a pair whose second look failed or could not be read waits (not committed) and the run says how many. What they cost: the decision model's context asks about US$0.03 per 1,000 pairs, the chat model's second looks about US$0.15 per 1,000. For the full data about 25,000 pairs are expected in the band, so about US$0.75 for the context asks and US$3.75 for the chat grades the first time, plus the digital question (decision model) and the policy flag (chat model) for each committed sentence. `./wbg_portfolio status` shows the rows of each new kind.
+
+**The link and activities stages (2026-11-20).** `link` and `activities` honour `--project`, `--dry-run` and `--max-spend` the same way and print an estimate line per step (`link:assets`, `package_asset_second`, `package_measure:<set>`, `activities`). A dry run estimates what the stored scores before it make askable: on an empty store the later steps show zero, because nothing is committed yet. A reply the chat model gives that is not the JSON asked for is stored as a failure, counted and asked again at the next run; it is never read as a yes.
 
 **Isolation.** `WBG_SCHEMA=wbg_v2 WBG_STORE=wbg_store ./wbg_portfolio run ...` writes scores, decision tables and views into `wbg_v2` and reuses every stored answer (the store is additive and keyed on model, exact state and exact question); `WBG_DATA` points at a copy of `data/`. `$WBG_STORE` defaults to `<schema>_store`.
 
@@ -39,6 +42,52 @@ The model stages run in one process, with one Postgres connection and one readin
 **No option overrides a threshold.** Every gate, floor, depth and round setting is a line of `inputs/config/control_panel.csv` (section 5g); the commands take a selection, `--dry-run`, `--max-spend` and the worker count, nothing else that moves a number.
 
 **Selecting projects.** Filters on the included rows of `inputs/config/cohort.csv`: `--project`; `--country` (code); `--region` (part of the name); `--fy` (approval fiscal year); `--practice` (Global Practice name or code, or part); `--unit` (managing unit or code, or part); `--set` (`digital` or `digital_contributor`). Each takes several values; different filters combine with "and". A project outside the cohort is refused. A run over named projects writes scores for those units only and is not published (set `WBG_PUBLISH_SCOPED=1` for a scratch database). `./wbg_portfolio list` prints a selection, `./wbg_portfolio summary` where each project stands.
+
+## Running beside the live data
+
+To try this code on the real corpus without touching `wbg` (the schema the dashboards read) or `data/`, run it into another schema, reading the stored answers of the live store. Nothing in `wbg`, `wbg_store`'s existing answers or `data/` changes: a test (`tests/test_pipeline_e2e.py`) publishes into one schema over another schema's store and checks that nothing in the first is created, dropped or written.
+
+1. A copy of the data folder, because the corpus stages re-read components and rewrite files under it:
+
+   ```
+   cp -a /ygg/projects/wbg-digital-resilience/data /ygg/projects/wbg-digital-resilience/data-v2
+   ```
+
+2. The environment, in every shell that runs the pipeline for this trial:
+
+   ```
+   export WBG_SCHEMA=wbg_v2 WBG_STORE=wbg_store WBG_DATA=/ygg/projects/wbg-digital-resilience/data-v2
+   ```
+
+   `WBG_SCHEMA` is where scores, decision tables and views go; `WBG_STORE` is where answers are read from and added to (the record is additive: it only gains answers); `WBG_DATA` is the copy. `./wbg_portfolio status` now describes `wbg_v2`.
+3. Bring the copy up to date with the code, which asks no model for answers (new search phrases are embedded; that is a few cents): `./wbg_portfolio run --to search`.
+4. A single-project dry run, to see what each step would ask: `./wbg_portfolio run --from classify --dry-run --project <project id>`. It prints one estimate line per step. On a fresh `wbg_v2` the steps after the first show little, because they wait on the scores before them.
+5. The same project for real, with a small cap: `./wbg_portfolio run --from classify --project <project id> --max-spend 0.50`. A run over named projects is not published (`WBG_PUBLISH_SCOPED=1` publishes it into `wbg_v2` for a look: it is a scratch schema, so that is safe here). Read the output, then `./wbg_portfolio status`.
+6. The full dry run, to read the estimate: `./wbg_portfolio run --from classify --dry-run`. Stop and ask if it is more than expected (the second looks of about 25,000 pairs and the digital question for each committed sentence are the bulk, section above).
+7. The full run: `./wbg_portfolio run --from classify --max-spend <the estimate, rounded up>`. If the cap stops it, run it again: it resumes from the store.
+
+**Comparing `wbg_v2` with `wbg`** (psql, database `work`; the first three are model readings and will differ, which is the point):
+
+```sql
+-- 1. committed sentences per measure
+SELECT 'wbg' AS schema, label_set, count(*) FROM wbg.measure_findings WHERE is_committed GROUP BY label_set
+UNION ALL
+SELECT 'wbg_v2', label_set, count(*) FROM wbg_v2.measure_findings WHERE is_committed AND is_digital GROUP BY label_set
+ORDER BY label_set, schema;
+-- 2. commitments (project x asset x measure x type) and projects with one
+SELECT 'wbg' AS schema, count(*) AS commitments, count(DISTINCT project_id) AS projects FROM wbg.commitments
+UNION ALL SELECT 'wbg_v2', count(*), count(DISTINCT project_id) FROM wbg_v2.commitments;
+-- 3. packages linked: the old link question against the strengths
+SELECT 'wbg old link' AS source, count(DISTINCT package_id) FROM wbg.commitment_packages WHERE posterior_probability >= 0.7
+UNION ALL SELECT 'wbg_v2 strong', count(DISTINCT package_id) FROM wbg_v2.commitment_package_links WHERE strength = 'strong'
+UNION ALL SELECT 'wbg_v2 asset', count(DISTINCT package_id) FROM wbg_v2.commitment_package_links;
+-- 4. what the new tables add
+SELECT (SELECT count(DISTINCT activity_id) FROM wbg_v2.activities) AS activities,
+       (SELECT count(*) FROM wbg_v2.not_digital_findings) AS committed_not_digital,
+       (SELECT count(*) FROM wbg_v2.unit_assets WHERE asset_level = 'second_look') AS asset_rows_from_second_look;
+```
+
+The ids of the two schemas' assets differ (four assets against thirteen), so compare assets by count, not by id. Delete the trial with `DROP SCHEMA wbg_v2 CASCADE` (never `wbg_store`) and remove `data-v2` only after asking.
 
 ## What a change costs
 
