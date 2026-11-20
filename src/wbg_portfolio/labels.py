@@ -197,16 +197,22 @@ def flag(flag_id, dirs=None):
 
 
 def family(name, dirs=None):
-    """The family a measure belongs to: the `family` column of its file
-    (climate, cloud_data, ...), one per measure. Measures of different
-    families never meet: the pair checks test a sentence only between two
-    measures of one family, and the app shows one family at a time, so a
-    change to one family's measures asks nothing about another's. '' for a
-    set with no such column (the assets, a scratch measure)."""
+    """The family column of a measure's file as written: one family
+    (climate, cloud_data, ...) or several joined by "|" for a measure that
+    belongs to more than one (families() splits it). A measure is searched,
+    asked and stored once whatever its families, so belonging to two costs
+    nothing and counts no sentence twice; the family only says where the
+    app shows it. '' for a set with no such column (the assets, a scratch
+    measure)."""
     found = {r["family"] for r in load_set(name, dirs)}
     if len(found) > 1:
-        raise SystemExit(f"labels: {name}.csv names more than one family: {', '.join(sorted(found))}")
+        raise SystemExit(f"labels: {name}.csv gives different families on different rows: {', '.join(sorted(found))}")
     return found.pop()
+
+
+def families(name, dirs=None):
+    """The set of families a measure belongs to (empty for a set with none)."""
+    return {f.strip() for f in family(name, dirs).split("|") if f.strip()}
 
 
 def _optional(name, suffix, dirs, taxonomy):

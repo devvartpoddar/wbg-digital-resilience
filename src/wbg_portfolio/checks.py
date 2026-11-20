@@ -303,7 +303,7 @@ def pairs(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
         log("pairs: replaced by the band rule (band.on); nothing asked, stored pair checks kept")
         return 0
     by_unit = defaultdict(set)
-    family = {name: labels.family(name) for name in names}
+    family = {name: labels.families(name) for name in names}
     for name in names:
         for u in committed_at_ask(conn, corpus, name):
             by_unit[u].add(name)
@@ -311,7 +311,7 @@ def pairs(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
     from itertools import combinations
     for u in sorted(by_unit):
         for a, b in combinations(sorted(by_unit[u]), 2):
-            if family[a] != family[b]:
+            if not family[a] & family[b]:
                 continue
             qs.setdefault((a, b), Q.pair_questions(a, b))
             items.append(((u, a, b), corpus.state(u), qs[(a, b)]))

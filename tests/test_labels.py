@@ -120,15 +120,18 @@ def test_a_pattern_row_may_ask_for_case(tmp_path):
         labels.load_patterns("m", dirs=(str(d),))
 
 
-def test_every_repository_measure_names_one_family():
-    """A measure with no family would be pair-checked against nothing and
-    shown nowhere; the families in use are few and written the same way."""
+def test_every_repository_measure_names_a_family():
+    """A measure with no family would be shown nowhere; the families in use
+    are few and written the same way. A measure may belong to several,
+    joined by "|": it is still asked and stored once."""
     families = {name: labels.family(name) for name in labels.label_sets(include_inactive=True)
                 if name not in ("assets", "assets_subtypes", "flags")}
     assert all(families.values()), [n for n, f in families.items() if not f]
     assert families["cra"] == "climate" and families["cloud_strategy"] == "cloud_data"
-    assert set(families.values()) == {"climate", "cloud_data"}
-    assert labels.family("assets") == ""
+    every = {name: labels.families(name) for name in families}
+    assert set().union(*every.values()) == {"climate", "cloud_data"}
+    assert every["disaster_recovery"] == {"climate", "cloud_data"} and every["cra"] == {"climate"}
+    assert labels.family("assets") == "" and labels.families("assets") == set()
 
 
 def test_pair_checks_stay_inside_a_family(monkeypatch):
