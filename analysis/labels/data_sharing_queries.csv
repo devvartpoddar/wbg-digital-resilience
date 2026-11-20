@@ -1,7 +1,7 @@
 measure_id,query_id,query,type_id,active
 data_sharing,search_interoperability_framework,"A national interoperability framework will establish legal, semantic and technical standards.",interoperability_framework,true
-data_sharing,search_exchange_platform,A secure government data exchange platform will connect registries and service systems.,exchange_platform,true
-data_sharing,search_apis_integration,Priority agencies will expose standards-based APIs through a managed gateway.,apis_integration,true
+data_sharing,search_exchange_platform,A secure government data exchange platform will connect registries and service systems.,exchange_platform,false
+data_sharing,search_apis_integration,Priority agencies will expose standards-based APIs through a managed gateway.,apis_integration,false
 data_sharing,search_sharing_governance,"Data-sharing agreements will define purpose, authorisation, audit and accountability.",sharing_governance,true
-data_sharing,search_data_models_semantics,Common identifiers and canonical data models will support consistent exchange.,data_models_semantics,true
-data_sharing,search_parent,"Government systems will exchange data with each other through shared standards, platforms and agreements.",,true
+data_sharing,search_data_models_semantics,Common identifiers and canonical data models will support consistent exchange.,data_models_semantics,false
+data_sharing,search_parent,Government systems will exchange data with each other through shared standards and agreements.,,true

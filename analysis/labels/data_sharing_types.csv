@@ -1,6 +1,6 @@
 measure_id,type_id,type_name,definition,active,version
 data_sharing,interoperability_framework,Interoperability framework,"Defines legal, organisational, semantic and technical rules for exchanging data.",true,v1.0
-data_sharing,exchange_platform,Data exchange platform,"Builds shared infrastructure such as an interoperability layer, API gateway, service bus or secure exchange hub.",true,v1.0
-data_sharing,apis_integration,APIs and system integration,Develops interfaces and integrations for governed machine-to-machine exchange.,true,v1.0
+data_sharing,exchange_platform,Data exchange platform,"Builds shared infrastructure such as an interoperability layer, API gateway, service bus or secure exchange hub.",false,v2.0
+data_sharing,apis_integration,APIs and system integration,Develops interfaces and integrations for governed machine-to-machine exchange.,false,v2.0
 data_sharing,sharing_governance,Data-sharing governance,"Creates agreements, consent, authorisation, purpose limitation, audit and accountability controls.",true,v1.0
-data_sharing,data_models_semantics,Common data models and semantics,"Defines shared schemas, identifiers, vocabularies or reference models for exchanged data.",true,v1.0
+data_sharing,data_models_semantics,Common data models and semantics,"Defines shared schemas, identifiers, vocabularies or reference models for exchanged data.",false,v2.0
