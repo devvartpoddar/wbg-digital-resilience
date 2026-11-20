@@ -16,28 +16,66 @@ from collections import Counter, defaultdict
 
 from wbg_portfolio.paths import data_root, file_sha256, where  # noqa: E402
 from wbg_portfolio.common import write_csv  # noqa: E402
-from wbg_portfolio.keys import name_key, project_parts, project_at  # noqa: E402
+from wbg_portfolio.keys import (name_key, project_parts, project_at, number_key,  # noqa: E402
+                                normal_number, uses_roman, COMPONENT_PREFIX)
 from wbg_portfolio.pdf_layout import _title_line  # noqa: E402
 
 COMP_WORD = r"(?:Component|Composante|Componente|Komponen)"
+# A component's number: digits, a capital letter (A, B, C) or a run of I, V, X (II, III);
+# 'ICT' or 'CERC' is no number. A letter is the number only when no digit or '.N' follows it
+# ('Component B.1' and 'Component A1' are sub-components of B and A).
+_LET = r"(?-i:[A-Z](?![A-Za-z\d]|\.\d)|[IVX]{2,4}(?![A-Za-z\d]|\.\d))"
 # The number is followed by punctuation ('Component 2: ...') or, in some templates, by the
 # title alone ('Component 1 Extending digital connectivity').
 COMP_HEAD = re.compile(
-    rf"^\s*{COMP_WORD}\s*(\d{{1,2}})(?:\s*[:.\-–)]\s*|\s+(?=(?-i:[A-Z(])))(.+?)\s*$", re.I)
+    rf"^\s*{COMP_WORD}\s*(\d{{1,2}}|{_LET})(?:\s*[:.\-–)]\s*|\s+(?=(?-i:[A-Z(])))(.+?)\s*$", re.I)
+# Sub-component number: 2.1, or lettered 'A.1' / 'A1', or roman 'II.1'.
+_SUBID = r"((?-i:\d{1,2}(?=\.)|[A-Z]|[IVX]{2,4}))(?:\.|(?<=[A-Z])(?=\d))(\d{1,2})"
 SUB_HEAD = re.compile(
-    r"^\s*(?:Sub-?component|Sous-composante|Subcomponente)?\s*(\d{1,2})\.(\d{1,2})\.?"
+    r"^\s*(?:Sub-?component|Sous-composante|Subcomponente)?\s*"
+    r"((?-i:\d{1,2}|[A-Z]|[IVX]{2,4}))\.(\d{1,2})\.?"
     r"\s*[:.\-–)]?\s*([A-ZÀ-Þ].+?)\s*$", re.I)
 SUB_WORD_HEAD = re.compile(
-    r"^\s*(?:Sub-?component|Sous-composante|Subcomponente)\s*(\d{1,2})\.(\d{1,2})"
+    rf"^\s*(?:Sub-?component|Sous-composante|Subcomponente)\s*{_SUBID}\.?"
     r"\s*[:.\-–)]?\s*(.+?)\s*$", re.I)
+# 'Component B.1: ...' and 'Component A1: ...': only a letter before the sub-number.
+SUB_COMP_HEAD = re.compile(
+    rf"^\s*{COMP_WORD}\s*(?!\d){_SUBID}\.?\s*[:.\-–)]?\s*(.+?)\s*$", re.I)
+_ROMAN_OK = re.compile(r"^X{0,3}(?:IX|IV|V?I{0,3})$")
+
+
+def _ok(m):
+    """The match, unless its component number is letters that are no letter or numeral."""
+    if m is None:
+        return None
+    n = m.group(1)
+    return m if n.isdigit() or len(n) == 1 or _ROMAN_OK.match(n) else None
+
+
+def comp_match(text):
+    return _ok(COMP_HEAD.match(text))
+
+
+def sub_word_match(text):
+    """'Sub-component 2.1: ...', 'Subcomponent A.2', 'Component B.1: ...'."""
+    return _ok(SUB_WORD_HEAD.match(text)) or _ok(SUB_COMP_HEAD.match(text))
+
+
+def sub_bare_match(text):
+    return _ok(SUB_HEAD.match(text))
+
+
 COST_IN_TEXT = re.compile(
     r"\(\s*(?:US\$|USD|\$|EUR|€|SDR)\s*([\d.,]+)\s*(million|m|billion)?", re.I)
+_SEP = r"\s*(?:,|and|&|et|e|y|or|to|-|–)\s*"
+_LID = r"(?-i:[A-Z])(?:\.?\d{1,2})?(?![A-Za-z\d])"
 MENTION = re.compile(
     r"\b(?:Sub-?components?|Components?|Composantes?|Sous-composantes?|Componentes?|"
     r"Subcomponentes?)\s+((?:\d{1,2}(?:\.\d{1,2})?)"
-    r"(?!\d)(?:\s*(?:,|and|&|et|e|y|or|to|-|–)\s*\d{1,2}(?:\.\d{1,2})?(?![\d.]?\d))*)", re.I)
+    rf"(?!\d)(?:{_SEP}\d{{1,2}}(?:\.\d{{1,2}})?(?![\d.]?\d))*"
+    rf"|{_LID}(?:{_SEP}{_LID})*)", re.I)
 RUN_IN_NUMBER = re.compile(r"^\s*\d{1,3}\.\s+")
-RUN_IN_COMP = re.compile(rf"^\s*{COMP_WORD}\s*(\d{{1,2}})\s*[:.\-\u2013)]\s*[A-Z]")
+RUN_IN_COMP = re.compile(rf"^\s*{COMP_WORD}\s*(\d{{1,2}}|{_LET})\s*[:.\-\u2013)]\s*[A-Z]")
 
 
 def _reader_version():
@@ -59,11 +97,12 @@ TAGGED_BLOCKS = {"narrative", "annex", "table", "heading", "footnote"}
 
 def mentions(text):
     """Component numbers a paragraph names: 'Components 1 and 3',
-    'Sub-component 2.1', 'Composante 2'. Sorted, unique."""
+    'Sub-component 2.1', 'Composante 2', 'Components A and B'. Sorted, unique."""
     out = set()
     for m in MENTION.finditer(text):
-        out.update(re.findall(r"\d{1,2}(?:\.\d{1,2})?", m.group(1)))
-    return sorted(out, key=lambda v: [int(x) for x in v.split(".")])
+        out.update(normal_number(v) for v in
+                   re.findall(r"\d{1,2}(?:\.\d{1,2})?|[A-Z](?:\.?\d{1,2})?", m.group(1)))
+    return sorted(out, key=number_key)
 
 
 class Tagger:
@@ -111,29 +150,29 @@ class Tagger:
         # centre. This subcomponent will finance ...'.
         if not short and block in ("narrative", "annex"):
             head = RUN_IN_NUMBER.sub("", text, count=1)
-            m = SUB_WORD_HEAD.match(head[:200])
+            m = sub_word_match(head[:200])
             # A run-in title ends at its first full stop.
             title = re.split(r"\.\s+", head[:200])[0]
             if m:
                 return self._open_sub(m, title, path)
-            m = RUN_IN_COMP.match(head)
+            m = _ok(RUN_IN_COMP.match(head))
             if m:
                 return self._open(m.group(1), title, path)
         # A short footnote or table row that names a component ("Component 2: see Annex 3",
         # a cost table's row) refers to it; it does not open it.
         if block == "heading" or (short and block in ("narrative", "annex")):
-            m = COMP_HEAD.match(text)
+            m = comp_match(text)
             if m:
                 return self._open(m.group(1), m.group(2), path)
             # A numbered sub-component title is a heading even when set in plain type, if it
             # carries a cost: '1.2. Infrastructure ... (US$15.3 million equivalent)'.
             titled = block == "heading" or bool(COST_IN_TEXT.search(text))
-            m = SUB_WORD_HEAD.match(text)
+            m = sub_word_match(text)
             if m:
                 return self._open_sub(m, text, path)
             # A bare 'N.M Title' is a sub-component only under component N: elsewhere it is
             # as likely a numbered paragraph or a table row.
-            m = SUB_HEAD.match(text) if titled else None
+            m = sub_bare_match(text) if titled else None
             if m and self.comp and m.group(1) == self.comp:
                 return self._open_sub(m, text, path)
         return self.comp, self.sub
@@ -186,8 +225,8 @@ def _cell(c):
 
 NUMBER_WORDS = {"one": 1, "two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
                 "seven": 7, "eight": 8, "nine": 9, "ten": 10}
-COMP_START = re.compile(
-    rf"^\s*{COMP_WORD}\s*(\d{{1,2}}|{'|'.join(NUMBER_WORDS)})\b", re.I)
+_CNUM = rf"(?:\d{{1,2}}|{'|'.join(NUMBER_WORDS)}|{_LET})"
+COMP_START = re.compile(rf"^\s*{COMP_WORD}\s*{_CNUM}(?![A-Za-z\d])", re.I)
 
 
 def _split_number(name, order):
@@ -197,12 +236,17 @@ def _split_number(name, order):
     component: the 2024 data sheet prints every name in one cell."""
     m = re.match(rf"^\s*(?:{COMP_WORD}\s*)?(\d{{1,2}}|{'|'.join(NUMBER_WORDS)})"
                  r"\s*[.:)\-–]?\s+(.+)$", name, re.I)
-    if m:
+    # A letter or numeral is a number only after the word 'Component' ('A. Plan' may be a name).
+    ml = _ok(re.match(rf"^\s*{COMP_WORD}\s*({_LET})\s*[.:)\-–]?\s+(.+)$", name, re.I))
+    if ml and not (m and m.group(1).isdigit()):
+        number, rest = ml.group(1), ml.group(2).strip()
+        m = ml
+    elif m:
         n = m.group(1).lower()
         number, rest = str(NUMBER_WORDS.get(n, n)), m.group(2).strip()
     else:
         number, rest = str(order), name
-    nxt = re.search(rf"\s{COMP_WORD}\s*(?:\d{{1,2}}|{'|'.join(NUMBER_WORDS)})\b", rest, re.I)
+    nxt = re.search(rf"\s{COMP_WORD}\s*{_CNUM}(?![A-Za-z\d])", rest, re.I)
     if nxt:
         rest = rest[:nxt.start()]
     return number, rest.strip(" -–:"), bool(m)
@@ -247,6 +291,9 @@ def _explode(grid):
     return out
 
 
+_CID = r"(?:\d|(?-i:[A-Z](?![A-Za-z\d])))"
+
+
 def read_datasheet(grid):
     """Components from a data-sheet table grid, or []."""
     rows = [[_cell(c) for c in r] for r in _explode(grid)]
@@ -257,10 +304,11 @@ def read_datasheet(grid):
                 re.search(r"current component", joined, re.I):
             start, header_text = i + 1, joined
             # The 2024 template packs the first component into the header row.
-            if re.search(rf"{COMP_WORD}\s*1\b", joined, re.I):
+            if re.search(rf"{COMP_WORD}\s*(?:1\b|(?-i:A)(?![A-Za-z\d]))", joined, re.I):
                 start = i
             break
-        if any(re.match(rf"^{COMP_WORD}\s*1\s*[.:]", v, re.I) for v in r):
+        if any(re.match(rf"^{COMP_WORD}\s*(?:1|(?-i:A)(?![A-Za-z\d]))\s*[.:]", v, re.I)
+               for v in r):
             start = i
             break
     if start is None:
@@ -278,13 +326,14 @@ def read_datasheet(grid):
             continue
         # In the 2024 template a header cell repeats every name; take the cell that names
         # one component.
-        name = next((t for t in texts if re.match(rf"^{COMP_WORD}\s*\d", t, re.I)),
+        name = next((t for t in texts if re.match(rf"^{COMP_WORD}\s*{_CID}", t, re.I)),
                     texts[-1] if texts else "")
         # ... unless it opens with the next component's number ("3. Increasing access ...":
         # a row whose cost is printed on the next page).
-        opens_next = re.match(rf"^(?:{COMP_WORD}\s*)?{len(out) + 1}\s*[.:]\s", name, re.I)
+        opens_next = re.match(rf"^(?:{COMP_WORD}\s*)?(?:{len(out) + 1}|(?-i:{chr(65 + len(out) % 26)}))"
+                              r"\s*[.:]\s", name, re.I)
         if not nums and out and name and not opens_next \
-                and not re.match(rf"^{COMP_WORD}\s*\d", name, re.I):
+                and not re.match(rf"^{COMP_WORD}\s*{_CID}", name, re.I):
             out[-1]["name"] = (out[-1]["name"] + " " + name).strip()
             continue
         if not name:
@@ -371,8 +420,7 @@ def clean_name(name):
     its number, its cost in brackets, a sentence that follows, figures from
     the next columns. '' when what is left is not a name (it opens in lower
     case: a sentence picked up as a heading)."""
-    n = re.sub(r"^(?:Component|Sub-?component)\s*\d+(?:\.\d+)?\s*[.:\-\u2013]?\s*", "",
-               name or "", flags=re.I)
+    n = COMPONENT_PREFIX.sub("", name or "", count=1)
     m = re.search(r"\s*\((?=[^)]*(?:US\$|U\$|US%|IDA|IBRD|SDR|Estimated|[Uu]p to|"
                   r"million|xxx|GoM|PCM))", n)
     if m:
@@ -434,16 +482,16 @@ def read_headings(rows, text):
                     or not _title_line(first):
                 continue
             s = first
-        m = COMP_HEAD.match(s)
+        m = comp_match(s)
         level, number, name = None, None, None
         if m:
             level, number, name = "component", m.group(1), m.group(2)
         else:
             # 'Sub-component 2.1: ...' always; a bare '2.1 Title' only once component 2 has
             # been seen, else it is a numbered section.
-            m = SUB_WORD_HEAD.match(s)
+            m = sub_word_match(s)
             if not m:
-                m = SUB_HEAD.match(s)
+                m = sub_bare_match(s)
                 if m and ("component", m.group(1)) not in seen:
                     m = None
             if m:
@@ -614,8 +662,12 @@ def main():
     for r in out:
         r["name_key"] = name_key(r["name"])
     number_by_name(out)
+    roman = {}
+    for r in out:
+        roman.setdefault((r["doc_id"], r["project_ids"]), []).append(r["number"])
+    roman = {k: uses_roman(v) for k, v in roman.items()}
     out.sort(key=lambda r: (r["doc_id"], r["project_ids"], r["source"], r["level"],
-                            [int(x) for x in r["number"].split(".") if x.isdigit()]))
+                            number_key(r["number"], roman[(r["doc_id"], r["project_ids"])])))
     dest = where(args.data, "appraisal", "components.csv")
     write_csv(dest, COMP_COLS, out)
 

@@ -192,3 +192,176 @@ def test_a_table_without_numbers_takes_them_from_the_names():
     assert got == {"Digital Services for Citizens": "2", "Building the Backbone Network": "1",
                    "Project Management": "3", "Contingent Emergency Response": "4",
                    "Printed Seven": "7"}
+
+
+# ---- lettered and roman components (invented text)
+
+def _rows(text, block="heading"):
+    rows, pos = [], 0
+    for line in text.splitlines(keepends=True):
+        rows.append({"char_start": pos, "char_end": pos + len(line.rstrip("\n")),
+                     "block": block, "page_from": 1})
+        pos += len(line)
+    return rows
+
+
+LETTERED = [
+    ("Component A: Rules and Institutions (US$5 million)", "heading", "II.B"),
+    ("This component will draft the spectrum rules.", "narrative", "II.B"),
+    ("Component B: Shared Masts", "heading", "II.B"),
+    ("This component will build masts in three regions.", "narrative", "II.B"),
+    ("Subcomponent B.1: Tower Sites", "heading", "II.B"),
+    ("Sites will be leased for twenty years.", "narrative", "II.B"),
+    ("Component B.2: Backup Power", "heading", "II.B"),
+    ("Each mast gets a battery.", "narrative", "II.B"),
+    ("Component C Project Management", "heading", "II.B"),
+    ("Staff will be hired.", "narrative", "II.B"),
+    ("Project Beneficiaries", "heading", "II.C"),
+    ("Households will benefit.", "narrative", "II.C"),
+]
+
+
+def test_lettered_components_and_subcomponents_tag_their_paragraphs():
+    t = K.Tagger()
+    got = [t.see(text, block, path) for text, block, path in LETTERED]
+    assert got == [("A", ""), ("A", ""), ("B", ""), ("B", ""), ("B", "B.1"), ("B", "B.1"),
+                   ("B", "B.2"), ("B", "B.2"), ("C", ""), ("C", ""), ("", ""), ("", "")]
+
+
+def test_lettered_titles_are_kept_without_their_letter():
+    t = K.Tagger()
+    t.see("Component A: Rules and Institutions (US$5 million)", "heading", "II.B")
+    assert t.comp_name == "Rules and Institutions"
+    t.see("Component A1: Spectrum Rules", "heading", "II.B")
+    assert (t.comp, t.sub, t.sub_name) == ("A", "A.1", "Spectrum Rules")
+
+
+def test_a_bare_lettered_subheading_opens_only_under_its_component():
+    t = K.Tagger()
+    assert t.see("B.1 Tower Sites", "heading", "II.B") == ("", "")
+    t.see("Component B: Shared Masts", "heading", "II.B")
+    assert t.see("B.1 Tower Sites", "heading", "II.B") == ("B", "B.1")
+
+
+def test_a_lettered_subcomponent_heading_opens_its_missed_component():
+    t = K.Tagger()
+    t.see("Component A: Rules", "heading", "II.B")
+    assert t.see("Subcomponent C.1: Training", "heading", "II.B") == ("C", "C.1")
+
+
+def test_a_long_run_in_lettered_title_opens_it():
+    t = K.Tagger()
+    body = ("Component D: Data Centre. " + "This component will finance the building and "
+            "equipping of a data centre with backup power for the ministry. " * 2)
+    assert t.see(body, "narrative", "II.B") == ("D", "")
+    body = "12. Subcomponent D.2: Cooling. " + "It will fit cooling units to the hall. " * 6
+    assert t.see(body, "narrative", "II.B") == ("D", "D.2")
+
+
+def test_words_that_start_with_capitals_are_not_component_letters():
+    t = K.Tagger()
+    assert t.see("Component CERC Details", "heading", "II.B") == ("", "")
+    assert t.see("Component Management", "heading", "II.B") == ("", "")
+    assert t.see("Component A will help.", "narrative", "II.B") == ("", "")
+
+
+def test_read_headings_finds_lettered_components_and_subcomponents():
+    text = ("Component A: Rules and Institutions (US$5.5 million)\n"
+            "Subcomponent A.1: Spectrum Rules\n"
+            "Component B: Shared Masts\n"
+            "B.1 Tower Sites\n"
+            "Component B.2: Backup Power\n"
+            "Component C1: Training\n")
+    found = K.read_headings(_rows(text), text)
+    assert [(r["level"], r["number"]) for r in found] == [
+        ("component", "A"), ("subcomponent", "A.1"), ("component", "B"),
+        ("subcomponent", "B.1"), ("subcomponent", "B.2"), ("subcomponent", "C.1")]
+    assert found[0]["cost_usd_m"] == "5.50"
+    assert found[1]["name"] == "Spectrum Rules"
+
+
+def test_roman_components_are_numbers_and_sort_by_value():
+    from wbg_portfolio.keys import number_key, uses_roman
+    text = "Component I: Rules\nComponent II: Masts\nComponent III: Management\n"
+    found = K.read_headings(_rows(text), text)
+    assert [r["number"] for r in found] == ["I", "II", "III"]
+    # A lone I is a letter in a lettered document and a numeral beside II.
+    assert not uses_roman(["A", "B", "I"]) and uses_roman(["I", "II", "III"])
+    assert sorted(["III", "II", "I"], key=lambda n: number_key(n, True)) == ["I", "II", "III"]
+    assert sorted(["I", "H", "A"], key=lambda n: number_key(n, False)) == ["A", "H", "I"]
+    assert sorted(["B.2", "B.10", "A", "2", "10"], key=number_key) == \
+        ["2", "10", "A", "B.2", "B.10"]
+
+
+def test_numbered_components_still_read_as_before():
+    t = K.Tagger()
+    assert t.see("Component 1: Rules", "heading", "II.B") == ("1", "")
+    assert t.see("Component 1 Extending connectivity", "heading", "II.B") == ("1", "")
+    assert t.see("Sub-component 1.2: Masts", "heading", "II.B") == ("1", "1.2")
+    assert K.mentions("Component 2 and Sub-component 10.1") == ["2", "10.1"]
+
+
+@pytest.mark.parametrize("heading", [
+    "Component 5: Contingent Emergency Response Component",
+    "Component 5: Contingent Emergency Response Component (CERC)",
+    "Component 5: Contingent Emergency Response Component (CERC) (US$0 million)",
+    "Component 5: Contingent Emergency Response Component (Zero cost)",
+    "Component E: Contingent Emergency Response Component (CERC)",
+    "Component 5 Contingent Emergency Response Component (CERC) - US$0.00"])
+def test_a_contingent_emergency_response_component_heading_opens_its_component(heading):
+    t = K.Tagger()
+    t.see("Component 4: Project Management", "heading", "II.B")
+    comp, _ = t.see(heading, "heading", "II.B")
+    assert comp == heading.split()[1].rstrip(":")
+    assert t.see("This component supports an emergency response if needed.",
+                 "narrative", "II.B")[0] == comp
+    assert t.comp_name.startswith("Contingent Emergency Response Component")
+    text = heading + "\n"
+    assert [r["number"] for r in K.read_headings(_rows(text), text)] == [comp]
+
+
+def test_mentions_read_lettered_components():
+    assert K.mentions("Components A and B, and Sub-component C.2") == ["A", "B", "C.2"]
+    assert K.mentions("Component A1 will") == ["A.1"]
+    assert K.mentions("Component 3, A Study of masts") == ["3"]
+    assert K.mentions("Component Bank financing") == []
+
+
+def test_a_datasheet_table_with_lettered_components_is_read():
+    grid = [["Component Name", "Cost (US$, millions)"],
+            ["Component A: Rules and Institutions", "5.0"],
+            ["Component B: Shared Masts", "12.5"],
+            ["Component C: Project Management", "2.0"],
+            ["Total", "19.5"]]
+    got = K.read_datasheet(grid)
+    assert [(c["number"], c["name"], c["number_printed"]) for c in got] == [
+        ("A", "Rules and Institutions", True), ("B", "Shared Masts", True),
+        ("C", "Project Management", True)]
+
+
+def test_name_keys_and_names_drop_a_lettered_prefix():
+    from wbg_portfolio.keys import name_key
+    assert name_key("Component A: Data Centre") == name_key("Data centre") == "datacentre"
+    assert name_key("Subcomponent B.1 Data Centre") == "datacentre"
+    assert K.clean_name("Component A: Data Centre") == "Data Centre"
+    assert K.clean_name("Component ICT Services") == "Component ICT Services"
+
+
+def test_a_plan_matches_a_lettered_component_by_name_or_letter():
+    from wbg_portfolio import clean_procurement as P
+    rows = [{"project_ids": "P1", "doc_id": "D1", "disclosure_date": "2020-01-01",
+             "number": "A", "name": "Rules and Institutions for Rural Radio"},
+            {"project_ids": "P1", "doc_id": "D1", "disclosure_date": "2020-01-01",
+             "number": "B.1", "name": "Shared Weather Stations, Masts and Relays"}]
+    c = P.Components(rows)
+    assert c.in_cells("P1", "Component A: Something Else Entirely Post") == \
+        ("A", "", "number_only", "")
+    assert c.in_cells("P1", "Component B1 Something Else Entirely Post") == \
+        ("B.1", "", "number_only", "")
+    got = c.in_cells("P1", "A.1 Shared Weather Stations, Masts and Relays")
+    assert got[:3] == ("B.1", "Shared Weather Stations, Masts and Relays", "name_match")
+    desc, comp = c.strip_tail("P1", "Repair of rooftop gauges Component B.1 Shared Weather "
+                                    "Stations, Masts and Relays")
+    assert desc == "Repair of rooftop gauges" and comp[0] == "B.1"
+    assert P.comp_number("A. Rules and Institutions").group(1) == "A"
+    assert P.comp_number("A plan for masts") is None
