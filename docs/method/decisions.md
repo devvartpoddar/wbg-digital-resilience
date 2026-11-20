@@ -10,7 +10,7 @@ Two forms of question. A classification (an asset, a measure) asks `questions.gr
 
 Every sentence-level question sends the same state (`questions.Corpus.state`): the sentence with its list lead-in, the section title and the component heading, and with `ask.context` = `paragraph` the paragraph too. A package sends its description and plan component; a commitment-to-package pair sends both texts and both components.
 
-`ask.ask` takes items (an id, a state, the questions for it), reads the store (`wbg_store.answers`, keyed on model, state and question), reads the old file store once for anything it holds and copies it in, and asks the rest in batches (`ask.batch_items` items sharing a question set, up to `ask.batch_max_chars` characters, ordered by the hash of their state so which items share a request depends on the items alone; one item a request when `ask.batch_items` is 0). Every answer is stored under its own item and question, with the snapshot that served it and its share of the call's cost. An incomplete answer is a failed request; a run with failed requests writes nothing and resumes next time; a refusal (bad key, no credit) stops at once. Spend is recorded per step in `wbg_store.spend`, in a `finally`, and `--max-spend` is enforced from that ledger (`api.Spend`).
+`ask.ask` takes items (an id, a state, the questions for it), reads the store (`<store>.answers`, `$WBG_STORE`, default `<schema>_store`; keyed on model, state and question), reads the old file store once for anything it holds and copies it in, and asks the rest in batches (`ask.batch_items` items sharing a question set, up to `ask.batch_max_chars` characters, ordered by the hash of their state so which items share a request depends on the items alone; one item a request when `ask.batch_items` is 0). Every answer is stored under its own item and question, with the snapshot that served it and its share of the call's cost. An incomplete answer is a failed request; a run with failed requests writes nothing and resumes next time; a refusal (bad key, no credit) stops at once. Spend is recorded per step in `<store>.spend`, in a `finally`, and `--max-spend` is enforced from that ledger (`api.Spend`).
 
 ## The funnel (`src/wbg_portfolio/funnel.py`), the same for assets and measures
 
@@ -22,8 +22,8 @@ Every sentence-level question sends the same state (`questions.Corpus.state`): t
 
 | Kind | Items | Question | Writes |
 |---|---|---|---|
-| type | every unit a measure counts at `floor.ask` x the measure's approved types (and the OTH types the gap step proposed) | fit: is it this kind, told the sentence is already a commitment to the measure | `scores` kind type |
-| pair | every unit two measures both count at `floor.ask`, each side | fit: does the measure apply, the other's boundary (its `boundary` column, else its definition) beside it | kind pair, label set `a|b`, label `keep_a` or `keep_b` |
+| type | every unit a measure commits (at `floor.ask`; under the band rule, the band-committed units) x the measure's approved types (and the OTH types the gap step proposed) | fit: is it this kind, told the sentence is already a commitment to the measure | `scores` kind type |
+| pair (asks nothing while `band.on`) | every unit two measures both count at `floor.ask`, each side | fit: does the measure apply, the other's boundary (its `boundary` column, else its definition) beside it | kind pair, label set `a|b`, label `keep_a` or `keep_b` |
 | package_asset | every package x its best `link.asset_top` assets by cosine | fit: does the package buy, build, install, connect, operate or design the asset | kind package_asset |
 | link | every committed unit x the packages of its project that share an asset (at `link.asset_yes`, at the levels `dashboard.commitment_link_levels` counts), plus its `link.measure_top` nearest by the measure's phrases | fit: would carrying out the package deliver the commitment | kind link, item `unit|package` |
 
@@ -31,16 +31,37 @@ A measure with no type list a person wrote has one proposed from its committed s
 
 ## The decision (`src/wbg_portfolio/decide.py`)
 
-`./wbg_portfolio publish` reads every kind's scores once, through the label's probability layer when one is fitted and `posterior.on` is true (else the score stands), against the label's floor, and writes the tables the views read: `measure_findings` (`is_committed` at `floor.<set>` else `floor.default`; the unit's assets; its types at `floor.types`, every one with `types.multiple`), `paragraph_grades` and `unit_assets` (a sentence's own assets at `asset.floor`, else with `asset.decay` on the assets whose decayed sum over the earlier sentences of its paragraph reaches `asset.paragraph_floor`, every one with `asset.multiple` else the best), `unit_pair_checks` (`p_keep_a`, `p_keep_b`; the views drop a unit from a measure when its side is under `floor.pair_check`), `package_assets` (a package has an asset at `link.asset_yes`), `commitment_packages` (a link counts at `dashboard.package_link_min_probability`). The views join and aggregate; `commitment_units` (section 5f) is the one place that adds the dashboards' own filters. Every comparison is "at or above".
+`./wbg_portfolio publish` reads every kind's scores once, through the label's probability layer when one is fitted and `posterior.on` is true (else the score stands), against the label's floor, and writes the tables the views read: `measure_findings` (`is_committed` by the band rule when `band.on`, else at `floor.<set>` else `floor.default`; `score_first`, `score_context`, `second_grade`, `decided_by`, `is_digital`, `digital_p`, `instrument`; the unit's assets; its types at `floor.types`, every one with `types.multiple`), `paragraph_grades` and `unit_assets` (a sentence's own assets at `asset.floor`, else with `asset.decay` on the assets whose decayed sum over the earlier sentences of its paragraph reaches `asset.paragraph_floor`, every one with `asset.multiple` else the best), `unit_pair_checks` (`p_keep_a`, `p_keep_b`; the views drop a unit from a measure when its side is under `floor.pair_check`), `package_assets` (a package has an asset at `link.asset_yes`), `commitment_packages` (a link counts at `dashboard.package_link_min_probability`). The views join and aggregate; `commitment_units` (section 5f) is the one place that adds the dashboards' own filters. Every comparison is "at or above".
 
 | Decision | Gate | Floor |
 |---|---|---|
 | Asset map | fitted gate, else `asset.gate_cosine`; patterns; rounds | `asset.floor`; `asset.decay`, `asset.paragraph_floor`, `asset.multiple` |
-| Measure | fitted gate, else `measure.gate_cosine`; patterns; rounds | `floor.<set>`, else `floor.default` |
+| Measure | fitted gate, else `measure.gate_cosine`; patterns; rounds | the band rule (`band.*`) when `band.on`, else `floor.<set>`, else `floor.default` |
+| Measure second look | a first score in `[band.low, band.keep)` | `band.context`, `band.second_grade` |
+| Digital | every committed sentence | `digital.floor` |
 | Type | every unit at `floor.ask` | `floor.types`, `types.multiple` |
-| Pair check | every unit two measures count at `floor.ask` | `floor.pair_check` |
+| Pair check (retired while `band.on`) | every unit two measures count at `floor.ask` | `floor.pair_check` |
 | Package to asset | `link.asset_top` by cosine | `link.asset_yes` |
 | Commitment to package | a shared asset, or `link.measure_top` by cosine | `dashboard.package_link_min_probability` |
+
+## The band rule, the digital rule and the second look (`src/wbg_portfolio/second.py`, `src/wbg_portfolio/chat.py`)
+
+The pattern for every step from 2026-11-20: **the judge decides; anything in the uncertain band gets the same second look; both must agree.** The judge is the decision model above. The second look is one pinned chat model (`second.model`, asked through `/v1/chat/completions`, temperature 0, one item a request, told to reply with a short JSON object). `src/wbg_portfolio/chat.py` stores its answers in the same table as the decision model's (`<store>.answers`: model, state, question), counts requests and `--max-spend` in the same ledger, and reads a reply strictly: anything but exactly the JSON asked for is stored as a failure, counted, left without an answer and asked again at the next run. It is never read as a yes.
+
+**The band rule** (`decide.band_rule`, behind `band.on`) replaces the per-measure floor (`floor.default`, `floor.<set>`) and the pair check as the one place that says a sentence commits a measure:
+
+- a first-pass posterior of `band.keep` (0.90) or more is committed on its own (`decided_by` = score);
+- from `band.low` (0.50) up to `band.keep` it is committed only when two second looks agree: the decision model asked the measure's graded question again with the paragraph beside the sentence (kind `measure_ctx`, P(grades 2, 3), at least `band.context` 0.70) and the chat model grades the pair at least `band.second_grade` 2 on the same 0-3 scale (kind `measure_second`; shown the sentence with lead-in, section and component, no paragraph). `decided_by` = second_look;
+- a pair in the band whose second look is missing is not committed; the publish log counts it as "waiting for a second look";
+- below `band.low` it is not committed.
+
+The context question is the same question with one sentence in front saying that only the sentence in the `sentence` field is judged and the `context` field is the paragraph around it, for reference (`questions.in_context`; `Corpus.context_state` cuts the paragraph to `second.context_chars`). The first-pass state and every stored first-pass answer are unchanged. With `band.on` the later stages (types, digital, policy, links) ask about the sentences committed under the band rule instead of the sentences at `floor.ask`, and the pair stage asks nothing (stored pair checks still publish, for comparison; `dashboard.apply_measure_pair_checks` is false). With `band.on` false every stage behaves as before.
+
+**The digital question** (kind `digital`, `digital.on`) is asked once per committed sentence, whatever its measure: the fit question "does a digital asset or the digital sector apply", defined by the `digital` row of `inputs/taxonomy/flags.csv`, with the paragraph beside the sentence. A sentence is digital at P(yes) of `digital.floor` (0.50) or more. A committed sentence counts on the dashboards' commitment views only when it is digital (`measure_findings.is_digital`, `digital_p`); the committed sentences that are not stay in `measure_findings` and are listed in the view `not_digital_findings`. The rule is the same for every family and measure.
+
+**The policy flag** (kind `policy`) is the chat model's reading, for each committed sentence, of investment or policy instrument (the `policy` row of `flags.csv`), shown the paragraph; published as `measure_findings.instrument`. Nothing moves a sentence between measures on it.
+
+**Evidence (2026-11-20; every figure graded by models, not by people).** Kept sentence x measure pairs scoring 0.90 or more are 96 per cent right; those at 0.80 to 0.90, 76 to 82 per cent. The old pair check removed about 3,000 pairs above the floor, about 80 per cent of them right, and about 550 sentences lost every measure. On a held-out sample of 360 pairs the band rule moved precision from 0.92 to 0.96 and recall from 0.41 to 0.61 (three-grader majority), and from 0.86 to 0.92 and 0.48 to 0.74 under the strictest grader; the thresholds were chosen on the same 360 items, so these figures are optimistic. "Is this digital" with the paragraph as context: 96 per cent precision and 90 per cent recall on "not digital", 2 to 3 per cent of truly digital sentences wrongly excluded (asked on the sentence alone, 10 to 12 per cent). A stored score is one noisy draw: two batches of 50 agree at 0.96 for measures.
 
 ## The probability layer (`src/wbg_portfolio/posterior.py`) and the skip rule (`src/wbg_portfolio/skip.py`)
 
