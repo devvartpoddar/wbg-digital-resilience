@@ -574,7 +574,7 @@ TABLES = {
                 "link.strong_yes). strength asset: the package and the sentence share a top-level asset, "
                 "which says only that both concern the same kind of asset, not that the package delivers "
                 "the commitment. A pair that is both is one row, strong, with its shared assets filled. "
-                "Built from the model readings at every publish (links.strengths); the old link question "
+                "Built from the model readings at every publish (link.strengths); the old link question "
                 "is in commitment_packages. The models' reading, not a person's; documented is not done.",
         columns={
             "strength": "strong or asset: see the table comment.",

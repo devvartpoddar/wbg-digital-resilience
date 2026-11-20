@@ -362,7 +362,7 @@ def pipeline_on(monkeypatch):
     from wbg_portfolio import panel
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.on": True, "digital.on": True,
-                                                    "links.strengths": True, "policy.on": True,
+                                                    "link.strengths": True, "policy.on": True,
                                                     "activities.on": True, "floor.ask": 0.99,
                                                     "dashboard.commitment_link_levels": "unit|second_look|none"})
 

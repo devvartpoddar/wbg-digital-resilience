@@ -128,8 +128,7 @@ def second_grade_question(lab, scale):
     """The 0-n grade of a measure on the shared scale (the measure's second look)."""
     grades = "\n".join(f"{i}: {t.replace('{name}', lab['name'])}" for i, t in enumerate(scale))
     return chat_question(
-        f"Grade how the sentence in the 'sentence' field, from a World Bank project appraisal "
-        f"document, relates to {lab['name']}. {lab['name']} means: {lab['definition']}\nGrades:\n{grades}",
+        f"How does {SENTENCE}, relate to {lab['name']}? {lab['name']} means: {lab['definition']}\nGrades:\n{grades}",
         "grade", maximum=len(scale) - 1)
 
 
@@ -155,9 +154,10 @@ def asset_second_question(assets, subtypes):
         listing.append(f"- {a['id']}: {a['name']}. {a['definition']}")
         listing.extend(f"    kind {s['id']}: {s['name']}. {s['definition']}" for s in subtypes.get(a["id"], []))
     return in_context(chat_question(
-        "Which digital asset or assets, if any, does the sentence commit the project to "
-        "financing, building, buying or running? Choose at most two assets from the list, and for each the "
-        "one kind of it that fits best; choose none when the sentence concerns no digital asset. "
+        "Which digital asset or assets, if any, does the sentence in the 'sentence' field commit the project to "
+        "financing, building, buying or running? Choose none when the sentence concerns no digital asset, or "
+        "only digital policy, strategy, training or equipment with no system or network named; otherwise choose at most two assets from the list, "
+        "and for each the one kind of it that fits best. "
         "Assets, with their kinds:\n" + "\n".join(listing),
         "assets", [a["id"] for a in assets], 2))
 
@@ -165,7 +165,7 @@ def asset_second_question(assets, subtypes):
 def asset_subtype_question(asset, kinds):
     """Which kind of an asset a sentence already counted for it concerns."""
     return in_context(chat_question(
-        f"The sentence is already counted as concerning {asset['name']}; this asks only which kind "
+        f"{SENTENCE[:1].upper() + SENTENCE[1:]} is already counted as concerning {asset['name']}; this asks only which kind "
         f"of it. {asset['name']} means: {asset['definition']}\nKinds:\n" +
         "\n".join(f"- {s['id']}: {s['name']}. {s['definition']}" for s in kinds),
         "choice", [s["id"] for s in kinds]))
@@ -175,8 +175,9 @@ def package_asset_second_question(asset):
     """Does the package procure the asset, as the chat model's yes or no."""
     return chat_question(
         f"Does {PACKAGE} procure {asset['name']}, or equipment, works, "
-        f"systems or services for it, named or clearly implied in the package's own description? "
-        f"{asset['name']} means: {asset['definition']}", "yesno")
+        f"systems or services for it, named or clearly implied in the package's own description? A package for "
+        f"something else (vehicles, audits, general works, unrelated consultancy) does not; when the description does not "
+        f"make it clear, answer no. {asset['name']} means: {asset['definition']}", "yesno")
 
 
 def package_measure_question(lab):

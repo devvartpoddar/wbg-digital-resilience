@@ -37,7 +37,7 @@ def test_the_old_link_question_is_retired_when_the_strengths_are_on(pg, corpus, 
 def test_the_old_link_question_is_asked_while_the_strengths_are_off(pg, corpus, fake_model, monkeypatch):
     from wbg_portfolio import panel
     live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "links.strengths": False})
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.strengths": False})
     c = first_pass(pg, corpus, 0.95, units=(0,))
     funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
     checks.links(pg, corpus, c, NAMES, api_key="k", **QUIET)
@@ -71,7 +71,7 @@ def test_a_dry_run_and_the_strengths_off_ask_nothing(pg, corpus, fake_chat, pipe
     assert second.package_asset_second(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None
     from wbg_portfolio import panel
     live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "links.strengths": False})
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.strengths": False})
     assert second.package_asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
     assert not fake_chat.calls and decide.package_asset_sets(pg) == {"P1-1": {"towers"}}
 

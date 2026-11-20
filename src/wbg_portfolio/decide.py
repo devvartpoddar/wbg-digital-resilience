@@ -311,9 +311,9 @@ def activities_on():
     return bool(setting("activities.on"))
 
 
-def links_strengths():
+def link_strengths():
     """Whether the link strengths (strong, asset) replace the old link question."""
-    return bool(setting("links.strengths"))
+    return bool(setting("link.strengths"))
 
 
 def package_band():
@@ -333,13 +333,13 @@ def package_asset_posteriors(conn):
 
 def package_asset_sets(conn, only=None):
     """{package_id: {asset_id}} the packages have. An asset counts at
-    link.asset_yes or more; with links.strengths also from link.asset_band_low
+    link.asset_yes or more; with link.strengths also from link.asset_band_low
     up to link.asset_yes when the chat model's second look (kind
     package_asset_second) says yes. A missing second look is never a yes.
     `only` limits the packages (indexed once as a set, so a list of 14,000 costs nothing per pair)."""
     only = None if only is None else set(only)
     low, yes = package_band()
-    strengths = links_strengths()
+    strengths = link_strengths()
     second = {(pid, aid): float(score) >= 1 for _, aid, pid, score, *_ in scores(conn, "package_asset_second")} \
         if strengths else {}
     out = defaultdict(set)
@@ -357,13 +357,13 @@ def package_measure_scores(conn):
 
 
 def link_strength_rows(conn, corpus, names, ua, packages):
-    """The commitment_package_links rows (nothing unless links.strengths). A
+    """The commitment_package_links rows (nothing unless link.strengths). A
     committed, digital sentence and a package of the same project are linked
     'strong' when the package, asked alone, is about the sentence's measure at
     link.strong_yes or more, and 'asset' when they share a top-level asset (the
     sentence's, at the levels the panel counts, and the package's). A pair that
     is both is one row, 'strong', its shared assets filled."""
-    if not links_strengths():
+    if not link_strengths():
         return []
     strong_yes = float(setting("link.strong_yes"))
     levels = link_levels()

@@ -8,7 +8,7 @@ from wbg_portfolio import panel
 CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "inputs", "config")
 # the settings whose value the new behaviour changes: (shipped file, v2 file)
 DIFFERENCES = {
-    "band.on": ("false", "true"), "digital.on": ("false", "true"), "links.strengths": ("false", "true"),
+    "band.on": ("false", "true"), "digital.on": ("false", "true"), "link.strengths": ("false", "true"),
     "policy.on": ("false", "true"), "activities.on": ("false", "true"), "floor.types": ("0.7", "0.6"),
     "asset.multiple": ("false", "true"), "dashboard.apply_measure_pair_checks": ("true", "false"),
     "dashboard.commitment_link_levels": ("unit|none", "unit|second_look|none"),
@@ -38,7 +38,7 @@ def test_the_shipped_file_keeps_the_live_values_of_the_settings_that_existed(mon
     assert panel.get("floor.types") == 0.7 and panel.get("asset.multiple") is False
     assert panel.get("dashboard.apply_measure_pair_checks") is True
     assert panel.get("dashboard.commitment_link_levels") == "unit|none"
-    for k in ("band.on", "digital.on", "links.strengths", "policy.on", "activities.on"):
+    for k in ("band.on", "digital.on", "link.strengths", "policy.on", "activities.on"):
         assert panel.require(k) is False, k
 
 

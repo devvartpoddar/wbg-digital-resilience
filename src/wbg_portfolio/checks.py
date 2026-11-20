@@ -11,8 +11,8 @@ no) through the one asker, each writing scores (docs/method/decisions.md):
   links            every committed unit x the packages of its project that
                    share an asset, plus the link.measure_top nearest the
                    measure: would carrying out the package deliver it (the
-                   old link question; not asked while links.strengths is on)
-  package_measure  with links.strengths: every package that has an asset x each
+                   old link question; not asked while link.strengths is on)
+  package_measure  with link.strengths: every package that has an asset x each
                    measure its project has a committed, digital sentence for:
                    does the measure apply to the package alone (strong link)
 
@@ -419,7 +419,7 @@ def links(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
           log=print, projects=None):
     """Package to asset, then commitment to package. Writes kinds
     'package_asset' (label_set assets, label the asset, item the package) and
-    'link' (label_set the measure, item 'unit|package'). With links.strengths
+    'link' (label_set the measure, item 'unit|package'). With link.strengths
     the commitment-to-package question is not asked (the strengths replace
     it: package_measure below and the asset-level links at publish); stored
     link scores stay."""
@@ -428,8 +428,8 @@ def links(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
     if first is None:
         return None
     packages, has = first
-    if decide.links_strengths():
-        log("link: the old commitment-to-package question is retired (links.strengths); nothing asked")
+    if decide.link_strengths():
+        log("link: the old commitment-to-package question is retired (link.strengths); nothing asked")
         return len(has)
     # commitment to package (the old question)
     vecs = package_vectors(data, packages, api_key, log)
@@ -501,8 +501,8 @@ def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry
     model's second look) asked, on its own, about each measure its project has
     at least one committed, digital sentence for. Writes kind
     'package_measure' (label_set the measure, item the package). Not asked
-    while links.strengths is off."""
-    if not decide.links_strengths():
+    while link.strengths is off."""
+    if not decide.link_strengths():
         return 0
     if cannot_estimate(conn, dry_run, log, "package_measure", ("package_asset", "link"), digital=True):
         return None

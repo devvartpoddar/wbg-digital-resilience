@@ -47,7 +47,11 @@ def test_a_reply_is_read_only_when_it_is_exactly_the_json_asked_for(text, reply,
     ('{"grade": 4}', {"form": "grade", "max": 3}),
     ('{"grade": true}', {"form": "grade", "max": 3}),
     ('{"grade": "2"}', {"form": "grade", "max": 3}),
-    ('Sure: {"grade": 2}', {"form": "grade", "max": 3}),
+    ("Yes, the answer is yes.", {"form": "yesno"}),
+    ('{"grade": 1} or maybe {"grade": 2}', {"form": "grade", "max": 3}),
+    ('{"grade": 1}{"grade": 1}', {"form": "grade", "max": 3}),
+    ('Sure: {"grade": 7} done', {"form": "grade", "max": 3}),
+    ('Sure: {"answer": "yes" and more', {"form": "yesno"}),
     ('{"answer": "maybe"}', {"form": "yesno"}),
     ('{"answer": "other"}', {"form": "choice", "options": ["investment", "policy"]}),
     ('{"labels": ["c"]}', {"form": "labels", "options": ["a", "b"], "max": 2}),
@@ -57,6 +61,43 @@ def test_a_reply_is_read_only_when_it_is_exactly_the_json_asked_for(text, reply,
 def test_anything_else_is_not_read(text, reply):
     with pytest.raises(ValueError):
         chat.parse(text, reply)
+
+
+@pytest.mark.parametrize("text,reply,expect", [
+    ('Sure: {"grade": 2}', {"form": "grade", "max": 3}, {"grade": 2, "labels": None}),
+    ('{"answer": "no"}\nI chose no because the text is silent.', {"form": "yesno"}, {"grade": 0, "labels": ["no"]}),
+    ('Reasoning first.\n```json\n{"assets": []}\n```\nDone.', {"form": "assets", "max": 2},
+     {"grade": None, "labels": []}),
+])
+def test_prose_before_or_after_one_json_object_is_read_from_the_object(text, reply, expect):
+    assert chat.parse(text, reply) == expect
+
+
+def test_reasoning_is_switched_off_in_the_request_for_the_short_forms_only(pg, fake_chat):
+    chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
+    assert fake_chat.calls[-1]["reasoning"] == {"enabled": False}
+    q = Q.chat_question("Group.", "activities")
+    fake_chat.reply = lambda prompt: '{"activities": [{"label": "x", "sentences": [1]}]}'
+    chat.ask(pg, [("a", {"sentences": "1. one"}, q)], stage="t", api_key="k", **QUIET)
+    assert "reasoning" not in fake_chat.calls[-1]
+    assert panel.require("second.reasoning") is False or panel.require("second.reasoning") == False  # noqa: E712
+    assert "reasoning" not in GRADE and "reasoning" not in GRADE["reply"]
+
+
+def test_the_reasoning_setting_of_the_form_decides(pg, fake_chat, monkeypatch):
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "second.reasoning": True, "activities.reasoning": False})
+    chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
+    assert "reasoning" not in fake_chat.calls[-1]
+    fake_chat.reply = lambda prompt: '{"activities": [{"label": "x", "sentences": [1]}]}'
+    chat.ask(pg, [("a", {"sentences": "1. one"}, Q.chat_question("Group.", "activities"))], stage="t",
+             api_key="k", **QUIET)
+    assert fake_chat.calls[-1]["reasoning"] == {"enabled": False}
+
+
+def test_the_estimate_is_an_upper_bound_at_the_token_cap():
+    q = Q.chat_question("Grade it.", "grade", maximum=3)
+    assert chat.estimate("x" * 400, q) >= 1000 * 0.5 / 1e6
 
 
 def test_what_is_asked_is_stored_under_the_chat_model_and_a_rerun_asks_nothing(pg, fake_chat):
@@ -372,11 +413,11 @@ def test_a_run_of_some_measures_keeps_the_rows_of_the_other_measures_sentences(
 
 def test_every_chat_request_carries_max_tokens_and_activities_get_more(pg, fake_chat):
     chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
-    assert fake_chat.calls[-1]["max_tokens"] == panel.require("second.max_tokens") == 300
+    assert fake_chat.calls[-1]["max_tokens"] == panel.require("second.max_tokens") == 1000
     q = Q.chat_question("Group.", "activities")
     fake_chat.reply = lambda prompt: '{"activities": [{"label": "x", "sentences": [1]}]}'
     chat.ask(pg, [("a", {"sentences": "1. one"}, q)], stage="t", api_key="k", **QUIET)
-    assert fake_chat.calls[-1]["max_tokens"] == panel.require("activities.max_tokens") == 1500
+    assert fake_chat.calls[-1]["max_tokens"] == panel.require("activities.max_tokens") == 4000
 
 
 def test_a_response_without_a_cost_is_priced_from_its_tokens_or_the_estimate(pg, fake_chat, monkeypatch):

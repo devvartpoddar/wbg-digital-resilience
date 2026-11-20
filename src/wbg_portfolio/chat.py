@@ -26,6 +26,17 @@ files by the step, which discards and counts any it does not know), activities
 (a list of labelled groups of sentence numbers; the step validates and
 repairs them). temperature 0; the spend ledger and --max-spend
 work as in src/wbg_portfolio/ask.py. Tests replace api.post (tests/conftest.py fake_chat).
+
+Reasoning is off for the short forms (second.reasoning false: the request body carries
+"reasoning": {"enabled": false}) and on for the activities form (activities.reasoning true: nothing
+extra is sent). Measured 2026-11-20 on the production wording: with reasoning on and
+second.max_tokens 300 the model spent its tokens on hidden reasoning and 61 per cent of grade replies
+came back empty or as prose (asking again did not help; the activities form failed at 1,500 tokens),
+while with reasoning off the same replies were readable and cost about a quarter as much; the
+activities form groups better with reasoning on and 4,000 tokens. The request body is part of how an
+answer is produced, not of the question: it is not in the question dict and not in the question hash.
+A reply may carry prose around one JSON object; that object is read (parse), but a reply with no
+object, with more than one, or with an invalid one is a failure, and a yes is never read out of prose.
 """
 import json
 import re
@@ -51,6 +62,22 @@ def max_tokens(q):
     activities.max_tokens for the activities form (a list of labelled groups)."""
     return int(panel.require("activities.max_tokens" if q["reply"]["form"] == "activities"
                              else "second.max_tokens"))
+
+
+def reasoning(q):
+    """Whether the chat model may reason before it answers this question: activities.reasoning for the
+    activities form, second.reasoning for every other form (read through panel.require)."""
+    return bool(panel.require("activities.reasoning" if q["reply"]["form"] == "activities"
+                              else "second.reasoning"))
+
+
+def request_body(mdl, q, content):
+    """The request sent for one question. "reasoning": {"enabled": false} only when reasoning is off."""
+    body = {"model": mdl, "temperature": 0, "max_tokens": max_tokens(q),
+            "messages": [{"role": "user", "content": content}]}
+    if not reasoning(q):
+        body["reasoning"] = {"enabled": False}
+    return body
 
 
 def estimate(prompt_text, q):
@@ -102,13 +129,34 @@ def prompt(state, q):
 
 # ------------------------------------------------------------------- parsing
 
-def parse(text, reply):
-    """The answer {grade, labels} of a reply, or ValueError. Exactly one JSON
-    object (a code fence around it is allowed) with the key the form asks for
-    and a valid value; anything else is a failure."""
+def _the_object(text):
+    """The one top-level JSON object in a reply: the whole reply, or an object with prose before or
+    after it (a code fence is prose). ValueError when there is none or more than one."""
     t = (text or "").strip()
-    m = re.fullmatch(r"```(?:json)?\s*(.*?)\s*```", t, re.S)
-    obj = json.loads(m.group(1) if m else t)
+    dec, found, i = json.JSONDecoder(), [], 0
+    while True:
+        i = t.find("{", i)
+        if i < 0:
+            break
+        try:
+            obj, end = dec.raw_decode(t, i)
+        except ValueError:
+            i += 1
+            continue
+        found.append(obj)
+        i = end
+    if not found:
+        raise ValueError("no JSON object in the reply")
+    if len(found) > 1:
+        raise ValueError("more than one JSON object in the reply")
+    return found[0]
+
+
+def parse(text, reply):
+    """The answer {grade, labels} of a reply, or ValueError. Exactly one top-level JSON object
+    (prose or a code fence around it is allowed) with the key the form asks for and a valid value;
+    no object, several objects or an invalid one is a failure."""
+    obj = _the_object(text)
     if not isinstance(obj, dict):
         raise ValueError("not a JSON object")
     form = reply["form"]
@@ -210,8 +258,7 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
 
         def one(key):
             state, q = todo[key]
-            body = {"model": mdl, "temperature": 0, "max_tokens": max_tokens(q),
-                    "messages": [{"role": "user", "content": sent[key]}]}
+            body = request_body(mdl, q, sent[key])
             r = api.post(PATH, body, api_key, timeout=120)
             try:
                 text = r["choices"][0]["message"]["content"]

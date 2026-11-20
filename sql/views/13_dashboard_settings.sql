@@ -42,8 +42,8 @@ SELECT
   -- The digital rule: a committed sentence counts only when is_digital (digital_floor).
   {{panel:digital.on}} AS digital_on,
   {{panel:digital.floor}}::numeric AS digital_floor,
-  -- Package links: strengths replace the old link question when links_strengths.
-  {{panel:links.strengths}} AS links_strengths,
+  -- Package links: strengths replace the old link question when link_strengths.
+  {{panel:link.strengths}} AS link_strengths,
   {{panel:link.strong_yes}}::numeric AS link_strong_yes,
   {{panel:link.asset_band_low}}::numeric AS link_asset_band_low,
   {{panel:link.asset_yes}}::numeric AS link_asset_yes,

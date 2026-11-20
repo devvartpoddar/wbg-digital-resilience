@@ -234,8 +234,8 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
     whose first-pass P(yes) is from link.asset_band_low up to link.asset_yes is
     asked yes or no (package description, category, component, the asset's
     definition). Writes kind package_asset_second (label_set assets, label the
-    asset, item the package; score 1 yes, 0 no). Not asked while links.strengths is off."""
-    if not decide.links_strengths():
+    asset, item the package; score 1 yes, 0 no). Not asked while link.strengths is off."""
+    if not decide.link_strengths():
         return 0
     if checks.cannot_estimate(conn, dry_run, log, "package asset second look", ("package_asset", "link")):
         return None

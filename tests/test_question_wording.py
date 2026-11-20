@@ -40,20 +40,20 @@ def questions_of(corpus):
 
 EXPECTED = {
     "activity": "58325e681f9b565b0e00cbe6a8ff8a30ff97abc9e98b74c12dfbb71dde87a6b7",
-    "asset_second": "bdc844768fcbdff0ca93ff4441bf5d404c66e2be1b0550f162e269ee246be3ac",
-    "asset_subtype_fiber": "e68c460ea3d3d9b79681a8c49a2555ee51414e4c11eeacf47ba3732b36daeaed",
-    "asset_subtype_towers": "9fb1f97e20035198b3ed14b187821acd5b87f8b56420bda7c9a2428dcb33580f",
+    "asset_second": "a94286fdaafba85f418587d4af68f81439dafdc82dd8bed76828017d87fde631",
+    "asset_subtype_fiber": "6c522ea529ab20629976529cce68a779c6d86bf7702613c8996b2ef8b3620224",
+    "asset_subtype_towers": "5293b63cc0bb527948d00cd070b02a29c9d195780ece3b60b7014518808ddac4",
     "chat_state": "5546ece881662533110c3e26b36fe7211a1d65f11d3ec335de5e1fca9492b9bf",
     "context_state": "20de94d93a4a2f7bc16725fff10f6c70e426555a3bbb848d6ff644108c48eda2",
     "digital": "c152d16abeba8ba225b8cb00517fcdef09ac369314c3c8bb98965613418205e1",
     "fit": "1b4a5ef9a771ed8d48da8e0605858951d1fe0b4a9a048feccc374ad1867c36eb",
-    "grade_second": "d40fe5e3187aa26d20286dd6f41703cf8ce8ed307e7fb17faef1fa206962899e",
+    "grade_second": "e02a6bbcc1a4dc54e61cf4ee02a38b1144070f11153dabd2a7bf67b388c5a621",
     "graded": "1379624693ebd551d13e6097fc0b359e37c20f1e726f7875de3d619fe7470f20",
     "in_context": "0316a2b2573d82b2777aeab9bef7f82d1fd635216062a13434f8fc62dc9a3eb8",
     "link": "a412390bbec95d8294310168e9e6c60aef22f589a672dd8e2d26d94e3b89e104",
     "package_asset": "f3198cc63b5825a9a082a1a13c9d533c433098b8763e01e3ab8e242a50175101",
-    "package_asset_second_fiber": "47064907a783c02bec2d98236b4a1ccdbf13f53ca66d3d632aaaeab7eb66af44",
-    "package_asset_second_towers": "41f886f96af3d55b857247af25fc400dc6b42d38dd343bdce77d30031d163492",
+    "package_asset_second_fiber": "dd64eb66b1e35897e2213782822a6b4af0720a455c360af1401c9fd951a61390",
+    "package_asset_second_towers": "765bed26a06d65a9c5f4bf800e868cd1da0e5dac536f120519ec7c3d4101d4d4",
     "package_measure": "3fec361e52c31d666b517e5ba5833836e5d84c85e4ce269f9871664861f70bc8",
     "package_state": "d4257434f97726b894ed55bcf40164e69e6f69e96fbff78012208cac51572ca6",
     "pair_a": "f17a7df46f9f976936d772cc625c20b3fbc88d8aaaf3f65bf466b33f666f6297",
@@ -66,3 +66,4 @@ EXPECTED = {
 def test_every_question_and_state_hashes_as_before(corpus):
     got = {k: Q.sha(v) for k, v in questions_of(corpus).items()}
     assert got == EXPECTED
+

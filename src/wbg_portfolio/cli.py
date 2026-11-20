@@ -787,7 +787,7 @@ def run(args, data):
                     ok = checks.pairs(conn, data, corpus, every, **no_projects) is not None or args.dry_run
             elif stage == "link":
                 ok = checks.links(conn, data, corpus, every, **kw) is not None or args.dry_run
-                if ok and decide.links_strengths():
+                if ok and decide.link_strengths():
                     for step in (second.package_asset_second, checks.package_measure):
                         if step(conn, data, corpus, every, **kw) is None and not args.dry_run:
                             ok = False
