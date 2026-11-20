@@ -141,10 +141,14 @@ def _cache_path(data):
     return where(data, "procurement", "plan_pdf_rows.csv")
 
 
-def read_all(data, log=print):
+def read_all(data, log=print, only=None):
     """Rows of every plan PDF in the data folder, read once per PDF checksum.
 
-    Returns {doc_id: {"rows": [...], "unread": n, "sha": ...}} for every PDF on disk; the
+    `only`, a set of plan document ids, restricts the read to those PDFs: a plan document no
+    package draws on can fill nothing, and reading one costs about a second a page. A PDF left
+    out keeps the cache rows it already has, and is read again when a later run asks for it.
+
+    Returns {doc_id: {"rows": [...], "unread": n, "sha": ...}} for every PDF read; the
     cache file holds them (one summary row per PDF, row_index -1, carries the unread count)
     and is rewritten only when a PDF is new or changed. A PDF that cannot be read is logged
     and left out."""
@@ -161,6 +165,8 @@ def read_all(data, log=print):
     pdfs = sorted(glob.glob(where(data, "plan_pdf", "*.pdf")))
     for p in pdfs:
         doc = os.path.splitext(os.path.basename(p))[0]
+        if only is not None and doc not in only:
+            continue
         sha = file_sha256(p, remember=False)
         old = cache.get(doc)
         if old and old["sha"] == sha:
@@ -176,10 +182,14 @@ def read_all(data, log=print):
             r.update(doc_id=doc, pdf_sha256=sha, row_index=i)
         out[doc] = {"sha": sha, "rows": rows, "unread": unread}
         changed = True
-    if changed or set(cache) - set(out) or not os.path.exists(path):
+    # The rows the cache keeps: what this run read, plus the documents it was not asked for.
+    write = dict(out)
+    for doc, d in cache.items():
+        write.setdefault(doc, d)
+    if changed or set(cache) != set(write) or not os.path.exists(path):
         flat = []
-        for doc in sorted(out):
-            d = out[doc]
+        for doc in sorted(write):
+            d = write[doc]
             flat.append({"doc_id": doc, "pdf_sha256": d["sha"], "row_index": -1,
                          "ref_printed": d["unread"]})
             flat.extend(dict(r, doc_id=doc, pdf_sha256=d["sha"]) for r in d["rows"])

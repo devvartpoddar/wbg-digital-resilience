@@ -553,7 +553,8 @@ def _first_token(text, tokens):
 
 # ---------------------------------------------------------------- main stages
 
-def collect_plans(projects, data, log, refresh, delay, workers=6, previous=None):
+def collect_plans(projects, data, log, refresh, delay, workers=6, previous=None,
+                  referenced=None):
     """List every project's plans, download the renditions, then parse them."""
     previous = previous or {}
     raw_dir = where(data, "plans")
@@ -577,7 +578,8 @@ def collect_plans(projects, data, log, refresh, delay, workers=6, previous=None)
         print(f"[{n}/{total}] {pid}: {len(docs)} plans listed, "
               f"{len(tasks)} renditions to have", flush=True)
 
-    pdf_report = fetch_plan_pdfs(tasks, data, log, refresh, delay, workers)
+    pdf_report = fetch_plan_pdfs(tasks, data, log, refresh, delay, workers,
+                                 referenced=referenced)
     rows, fetch_failures, free_text_chars, bundle_docs = [], [], [], []
     empty_docs = []
     blobs, stamps = {}, {}
@@ -655,19 +657,28 @@ def _fetch_plan_pdf(path, url, refresh, delay):
     return sha_text(blob), True
 
 
-def fetch_plan_pdfs(tasks, data, log, refresh, delay, workers):
+def fetch_plan_pdfs(tasks, data, log, refresh, delay, workers, referenced=None):
     """Download the PDF beside each plan rendition (same document id), data/raw/plan_pdf/
     <doc id>.pdf. A plan with no PDF address or whose PDF cannot be fetched is listed and
     skipped: the pipeline reads its text rendition alone, as before. Returns
-    {"fetched": n, "cached": n, "no_pdf": [doc ids], "failed": [(project, doc, why)]}."""
-    out = {"fetched": 0, "cached": 0, "no_pdf": [], "failed": []}
+    {"fetched": n, "cached": n, "no_pdf": [doc ids], "failed": [(project, doc, why)],
+     "not_referenced": [doc ids]}.
+
+    `referenced` is the set of plan document ids the cleaned packages table draws on
+    (referenced_plan_docs). Only those plans' PDFs are downloaded: a plan version the
+    published table never reads can fill nothing, and the corpus lists about thirteen
+    thousand renditions against a few hundred referenced documents. None (the default)
+    downloads every plan that has a PDF address."""
+    out = {"fetched": 0, "cached": 0, "no_pdf": [], "failed": [], "not_referenced": []}
     pdf_dir = where(data, "plan_pdf")
     jobs = []
     for pid, d in tasks:
-        if d.get("pdfurl"):
-            jobs.append((pid, d))
-        else:
+        if not d.get("pdfurl"):
             out["no_pdf"].append(d["doc_id"])
+        elif referenced is not None and d["doc_id"] not in referenced:
+            out["not_referenced"].append(d["doc_id"])
+        else:
+            jobs.append((pid, d))
     if not jobs:
         return out
     os.makedirs(pdf_dir, exist_ok=True)
@@ -688,7 +699,23 @@ def fetch_plan_pdfs(tasks, data, log, refresh, delay, workers):
                 out["cached"] += 1
     out["no_pdf"].sort()
     out["failed"].sort()
+    out["not_referenced"].sort()
     return out
+
+
+def referenced_plan_docs(data):
+    """The plan document ids the cleaned packages table draws on: the distinct plan_version
+    values of data/procurement/packages.csv (one row per package, its newest plan version).
+
+    A plan version the published table never reads can fill nothing, so its PDF is not worth
+    downloading or parsing. The set comes from the last clean, which is a step behind the
+    plan listing being fetched; a run therefore downloads the referenced plans' PDFs and the
+    next run (after the clean has written the new packages.csv) picks up the documents a new
+    plan version brought in. Empty when the table has not been cleaned yet."""
+    path = os.path.join(where(data, "procurement"), "packages.csv")
+    if not os.path.exists(path):
+        return set()
+    return {r["plan_version"] for r in read_csv(path) if r.get("plan_version")}
 
 
 def store_keeping_old(path, blob):
@@ -905,6 +932,9 @@ def main():
                     help="request notices and awards again (they change); plan "
                          "renditions already on disk are kept")
     ap.add_argument("--skip-plans", action="store_true")
+    ap.add_argument("--all-plan-pdfs", action="store_true",
+                    help="download the PDF of every listed plan rendition; by default only "
+                         "the plans the cleaned packages table draws on are downloaded")
     args = ap.parse_args()
 
     projects = read_cohort(args.cohort)
@@ -921,15 +951,18 @@ def main():
 
     plan_rows, listing_fail, no_plan, plan_fail, free_chars = [], [], [], [], []
     bundle_docs, empty_docs = [], []
-    pdf_report = {"fetched": 0, "cached": 0, "no_pdf": [], "failed": []}
+    pdf_report = {"fetched": 0, "cached": 0, "no_pdf": [], "failed": [], "not_referenced": []}
     if not args.skip_plans:
+        # Only the plan documents the cleaned packages draw on: the rest can fill nothing.
+        referenced = None if args.all_plan_pdfs else referenced_plan_docs(args.data)
         previous = {}
         for r in read_csv(os.path.join(proc_dir, "packages_raw.csv")):
             previous.setdefault(r["plan_doc_id"], (r["content_sha256"], r["fetched_at"]))
         (plan_rows, listing_fail, no_plan, plan_fail, free_chars, bundle_docs,
          empty_docs, pdf_report) = collect_plans(projects, args.data, log, args.refresh,
                                                  args.delay, workers=args.workers,
-                                                 previous=previous)
+                                                 previous=previous,
+                                                 referenced=referenced)
 
     # Prepare at output, not at input: nothing is dropped for looking irrelevant.
     seen_hash = {}
@@ -1049,6 +1082,9 @@ def main():
                  f"disk, {len(pdf_report['no_pdf'])} plans list no PDF address, "
                  f"{len(pdf_report['failed'])} could not be fetched (skipped; the text rendition "
                  f"is read alone)\n")
+        fh.write(f"plan PDFs skipped: {len(pdf_report['not_referenced'])} listed plans are not a "
+                 f"plan document the cleaned packages draw on (their PDFs are not downloaded; "
+                 f"--all-plan-pdfs downloads every one)\n")
         for pid, did, exc in pdf_report["failed"]:
             fh.write(f"  {pid}\t{did}\t{exc}\n")
         fh.write(f"plan fetch failures ({len(plan_fail)}):\n")
@@ -1062,7 +1098,8 @@ def main():
             fh.write(f"  {pid}\t{exc}\n")
 
     print(f"plan PDFs: {pdf_report['fetched']} downloaded, {pdf_report['cached']} on disk, "
-          f"{len(pdf_report['failed'])} failed (logged, skipped)")
+          f"{len(pdf_report['failed'])} failed (logged, skipped), "
+          f"{len(pdf_report['not_referenced'])} not referenced by the cleaned packages")
     print(f"\nplan documents: {len(seen_hash)}  packages: {len(prep):,}  "
           f"notices: {len(notices):,}  awards: {len(awards):,}")
     print(f"wrote {proc_dir}/{{packages_raw,notices_raw,awards_raw}}.csv")
