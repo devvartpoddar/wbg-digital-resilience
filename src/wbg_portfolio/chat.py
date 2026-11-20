@@ -30,7 +30,6 @@ work as in src/wbg_portfolio/ask.py. Tests replace api.post (tests/conftest.py f
 import json
 import re
 import time
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 from wbg_portfolio import api
@@ -182,32 +181,12 @@ def usable(answer):
 
 # ---------------------------------------------------------------- the asker
 
-def _insert_context(conn, states, qs):
-    for s_sha, state in states.items():
-        conn.execute(f"INSERT INTO {db.STORE}.states (sha, state) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                     (s_sha, json.dumps(state, ensure_ascii=False)))
-    for q_sha, q in qs.items():
-        conn.execute(f"INSERT INTO {db.STORE}.questions (sha, question) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                     (q_sha, json.dumps(q, ensure_ascii=False)))
-
-
-def _store(conn, mdl, rows, states, qs):
-    """Add answers (never update one); the states and questions they were given."""
-    with conn.transaction():
-        for s_sha, q_sha, answer, served, cost, call, at in rows:
-            conn.execute(f"INSERT INTO {db.STORE}.answers (model, state_sha, question_sha, answer, served, "
-                         f"cost_usd, call_sha, asked_at) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) "
-                         f"ON CONFLICT (model, state_sha, question_sha) DO NOTHING",
-                         (mdl, s_sha, q_sha, json.dumps(answer, ensure_ascii=False), served, cost, call, at))
-        _insert_context(conn, states, qs)
-
-
 def _store_failure(conn, mdl, s_sha, q_sha, raw, reason, state, q):
     """One attempt that could not be read: an insert-only row of chat_failures."""
     with conn.transaction():
         conn.execute(f"INSERT INTO {db.STORE}.chat_failures (model, state_sha, question_sha, raw, reason, at) "
                      f"VALUES (%s, %s, %s, %s, %s, now())", (mdl, s_sha, q_sha, raw, reason))
-        _insert_context(conn, {s_sha: state}, {q_sha: q})
+        asker._insert_context(conn, {s_sha: state}, {q_sha: q})
 
 
 def failure_counts(conn, mdl, keys):
@@ -251,53 +230,37 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
              "estimate_usd": sum(estimate(sent[k], todo[k][1]) for k in todo), "gave_up": len(gave_up),
              "calls": 0, "cost_usd": 0.0, "failures": [], "unparsed": 0, "seconds": 0.0}
     if todo and not dry_run:
-        if not api_key:
-            raise SystemExit(f"{stage}: no credential: set ${api.KEY_VAR}")
-        lock, t0 = Lock(), time.time()
-        with api.Spend(conn, stage, label_set, mdl) as spend:
-            spend.check(stats["estimate_usd"])
+        lock = Lock()
 
-            def one(key):
-                state, q = todo[key]
-                body = {"model": mdl, "temperature": 0, "max_tokens": max_tokens(q),
-                        "messages": [{"role": "user", "content": sent[key]}]}
-                r = api.post(PATH, body, api_key, timeout=120)
-                try:
-                    text = r["choices"][0]["message"]["content"]
-                except (KeyError, IndexError, TypeError):
-                    raise api.Transport(f"reply has no message: {str(r)[:200]}")
-                cost = cost_of(r, sent[key], text, q)
-                served = r.get("model", "")
-                try:
-                    answer = dict(parse(text, q["reply"]), raw=text)
-                except (ValueError, TypeError) as exc:
-                    with lock:
-                        _store_failure(conn, mdl, key[0], key[1], text, str(exc)[:200], state, q)
-                        stats["unparsed"] += 1
-                    return cost
-                at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+        def one(key):
+            state, q = todo[key]
+            body = {"model": mdl, "temperature": 0, "max_tokens": max_tokens(q),
+                    "messages": [{"role": "user", "content": sent[key]}]}
+            r = api.post(PATH, body, api_key, timeout=120)
+            try:
+                text = r["choices"][0]["message"]["content"]
+            except (KeyError, IndexError, TypeError):
+                raise api.Transport(f"reply has no message: {str(r)[:200]}")
+            cost = cost_of(r, sent[key], text, q)
+            served = r.get("model", "")
+            try:
+                answer = dict(parse(text, q["reply"]), raw=text)
+            except (ValueError, TypeError) as exc:
                 with lock:
-                    _store(conn, mdl, [(key[0], key[1], answer, served, cost, Q.sha(body), at)],
-                           {key[0]: state}, {key[1]: q})
-                    have[key] = dict(answer, served=served)
-                    legacy.discard(key)
+                    _store_failure(conn, mdl, key[0], key[1], text, str(exc)[:200], state, q)
+                    stats["unparsed"] += 1
                 return cost
+            at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            with lock:
+                asker._store(conn, mdl, [(key[0], key[1], answer, served, cost, Q.sha(body), at)],
+                             {key[0]: state}, {key[1]: q})
+                have[key] = dict(answer, served=served)
+                legacy.discard(key)
+            return cost
 
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = [pool.submit(one, k) for k in sorted(todo)]
-                for n, f in enumerate(as_completed(futures), 1):
-                    try:
-                        spend.add(f.result())
-                    except api.Transport as exc:
-                        stats["failures"].append(str(exc)[:200])
-                    except (api.Refused, api.CapReached):
-                        pool.shutdown(wait=True, cancel_futures=True)
-                        raise
-                    if n % 500 == 0 or n == len(todo):
-                        log(f"  {n:,}/{len(todo):,} asked, {len(stats['failures'])} failed, "
-                            f"{stats['unparsed']} unreadable, US${spend.cost:.3f}")
-            stats["calls"], stats["cost_usd"] = spend.calls, spend.cost
-        stats["seconds"] = time.time() - t0
+        asker.run_requests(conn, mdl, [(k,) for k in sorted(todo)], one, stats, stage=stage,
+                           label_set=label_set, api_key=api_key, workers=workers, log=log,
+                           tail=lambda: f", {stats['unparsed']} unreadable")
     out = {}
     for item, _, s_sha, _, q_sha in keyed:
         a = have.get((s_sha, q_sha))
@@ -307,8 +270,7 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
 
 
 def estimate_line(stage, stats):
-    return (f"  {stage}: {stats['stored']:,} answers stored; {stats['to_ask']:,} requests to make "
-            f"(about US${stats['estimate_usd']:.3f})"
+    return (asker.estimate_line(stage, stats)
             + (f"; {stats['unparsed']} reply(ies) unreadable" if stats["unparsed"] else "")
             + (f"; gave up on {stats['gave_up']:,} question(s) unreadable second.max_attempts times "
                f"(not asked again, never a yes)" if stats.get("gave_up") else ""))

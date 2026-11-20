@@ -67,6 +67,16 @@ def _legacy(data, model, state, question, aliases):
     return None
 
 
+def _insert_context(conn, states, qs):
+    """The states and questions an answer is about, once each."""
+    for s_sha, state in states.items():
+        conn.execute(f"INSERT INTO {db.STORE}.states (sha, state) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                     (s_sha, json.dumps(state, ensure_ascii=False)))
+    for q_sha, q in qs.items():
+        conn.execute(f"INSERT INTO {db.STORE}.questions (sha, question) VALUES (%s, %s) ON CONFLICT DO NOTHING",
+                     (q_sha, json.dumps(q, ensure_ascii=False)))
+
+
 def _store(conn, model, rows, states, qs):
     """Write answers (and the states and questions they are about) once."""
     with conn.transaction():
@@ -76,12 +86,34 @@ def _store(conn, model, rows, states, qs):
                          f"ON CONFLICT DO NOTHING",
                          (model, s_sha, q_sha, json.dumps(answer, ensure_ascii=False), served, cost,
                           call, at))
-        for s_sha, state in states.items():
-            conn.execute(f"INSERT INTO {db.STORE}.states (sha, state) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                         (s_sha, json.dumps(state, ensure_ascii=False)))
-        for q_sha, q in qs.items():
-            conn.execute(f"INSERT INTO {db.STORE}.questions (sha, question) VALUES (%s, %s) ON CONFLICT DO NOTHING",
-                         (q_sha, json.dumps(q, ensure_ascii=False)))
+        _insert_context(conn, states, qs)
+
+
+def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, workers, log, tail=lambda: ""):
+    """The part every asker shares: check the cap against stats["estimate_usd"], run one(*job) for
+    each job on a pool, count the requests that failed (api.Transport) in stats["failures"], stop
+    at a refusal or the cap, log progress, and write the ledger row (api.Spend). Sets stats calls,
+    cost_usd and seconds. one(*job) returns what the request cost."""
+    if not api_key:
+        raise SystemExit(f"{stage}: no credential: set ${api.KEY_VAR}")
+    t0 = time.time()
+    with api.Spend(conn, stage, label_set, model) as spend:
+        spend.check(stats["estimate_usd"])
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = [pool.submit(one, *job) for job in jobs]
+            for n, f in enumerate(as_completed(futures), 1):
+                try:
+                    spend.add(f.result())
+                except api.Transport as exc:
+                    stats["failures"].append(str(exc)[:200])
+                except (api.Refused, api.CapReached):
+                    pool.shutdown(wait=True, cancel_futures=True)
+                    raise
+                if n % 500 == 0 or n == len(jobs):
+                    log(f"  {n:,}/{len(jobs):,} asked, {len(stats['failures'])} failed{tail()}, "
+                        f"US${spend.cost:.3f}")
+        stats["calls"], stats["cost_usd"] = spend.calls, spend.cost
+    stats["seconds"] = time.time() - t0
 
 
 # ----------------------------------------------------------------- batches
@@ -229,48 +261,30 @@ def ask(conn, model, items, *, stage, label_set="", api_key="", dry_run=False, w
              "estimate_usd": chars / 4 / 1e6 * Q.PRICE_PER_MTOK, "calls": 0, "cost_usd": 0.0,
              "failures": [], "seconds": 0.0}
     if todo and not dry_run:
-        if not api_key:
-            raise SystemExit(f"{stage}: no credential: set ${api.KEY_VAR}")
         lock = Lock()
-        t0 = time.time()
-        with api.Spend(conn, stage, label_set, model) as spend:
-            spend.check(stats["estimate_usd"])
 
-            def one(b, plan):
-                response = api.post("/alpha/decisions", b, api_key)
-                answers = split(response, b)
-                cost = float((response.get("usage") or {}).get("cost") or 0)
-                served = response.get("model", "")
-                at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
-                call = Q.sha(b)
-                share = cost / max(len(plan), 1)
-                rows, states, qs_ = [], {}, {}
-                for (item, s_sha), q, qid, bq in plan:
-                    q_sha = Q.sha(q)
-                    rows.append((s_sha, q_sha, answers[bq], served, share, call, at))
-                    states[s_sha] = missing[(item, s_sha)][0]
-                    qs_[q_sha] = q
-                with lock:
-                    _store(conn, model, rows, states, qs_)
-                    for s_sha, q_sha, a, *_ in rows:
-                        have[(s_sha, q_sha)] = dict(a, served=served)
-                return cost
+        def one(b, plan):
+            response = api.post("/alpha/decisions", b, api_key)
+            answers = split(response, b)
+            cost = float((response.get("usage") or {}).get("cost") or 0)
+            served = response.get("model", "")
+            at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+            call = Q.sha(b)
+            share = cost / max(len(plan), 1)
+            rows, states, qs_ = [], {}, {}
+            for (item, s_sha), q, qid, bq in plan:
+                q_sha = Q.sha(q)
+                rows.append((s_sha, q_sha, answers[bq], served, share, call, at))
+                states[s_sha] = missing[(item, s_sha)][0]
+                qs_[q_sha] = q
+            with lock:
+                _store(conn, model, rows, states, qs_)
+                for s_sha, q_sha, a, *_ in rows:
+                    have[(s_sha, q_sha)] = dict(a, served=served)
+            return cost
 
-            with ThreadPoolExecutor(max_workers=workers) as pool:
-                futures = {pool.submit(one, b, plan): b for b, plan in todo}
-                for n, f in enumerate(as_completed(futures), 1):
-                    try:
-                        spend.add(f.result())
-                    except api.Transport as exc:
-                        stats["failures"].append(str(exc)[:200])
-                    except (api.Refused, api.CapReached):
-                        pool.shutdown(wait=True, cancel_futures=True)
-                        raise
-                    if n % 500 == 0 or n == len(todo):
-                        log(f"  {n:,}/{len(todo):,} asked, {len(stats['failures'])} failed, "
-                            f"US${spend.cost:.3f}")
-            stats["calls"], stats["cost_usd"] = spend.calls, spend.cost
-        stats["seconds"] = time.time() - t0
+        run_requests(conn, model, todo, one, stats, stage=stage, label_set=label_set, api_key=api_key,
+                     workers=workers, log=log)
     out = {}
     for item, state, s_sha, qs in keyed:
         got = {qid: have.get((s_sha, q_sha)) for qid, (q, q_sha) in qs.items()}
@@ -281,5 +295,5 @@ def ask(conn, model, items, *, stage, label_set="", api_key="", dry_run=False, w
 
 def estimate_line(stage, stats):
     return (f"  {stage}: {stats['stored']:,} answers stored"
-            + (f" ({stats['imported']:,} read from the old file store)" if stats["imported"] else "")
+            + (f" ({stats['imported']:,} read from the old file store)" if stats.get("imported") else "")
             + f"; {stats['to_ask']:,} requests to make (about US${stats['estimate_usd']:.3f})")
