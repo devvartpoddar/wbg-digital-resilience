@@ -64,10 +64,8 @@ def measure_second(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_r
     """The band's second look for one measure (one measure a call, unlike the steps below, which take
     every measure's sentences: the band is a measure's own first-pass score). Writes kinds measure_ctx and
     measure_second (label_set the measure). Returns the pairs looked at, or
-    None when a request failed or on a dry run. Does nothing while band.on is off."""
+    None when a request failed or on a dry run."""
     b = decide.band()
-    if not b["on"]:
-        return 0
     units, scope = _in_scope(corpus, [u for u, r in decide.measure_units(conn, corpus, name).items()
                                       if r["asked"]], projects)
     labs, scale = Q.load(name)
@@ -96,15 +94,13 @@ def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=Fal
             log=print, projects=None, every=None):
     """Is each sentence in the asked band of some measure a digital asset or the digital sector, asked
     once whatever its measure (the decision stays with the committed ones). Writes kind digital (label_set and label digital)."""
-    if not decide.digital_settings()[0]:
-        return 0
     if checks.cannot_estimate(conn, dry_run, log, "digital", ("measure", "measure")):
         return None
     units, scope = _in_scope(corpus, decide.digital_asked_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
     q = Q.flag_question("digital")
     b = decide.band()
-    log(f"digital: {len(units):,} sentence(s)" + (f" with a first score in [{b['ask_low']}, {b['ask_high']})" if b["on"] else " committed"))
+    log(f"digital: {len(units):,} sentence(s) with a first score in [{b['ask_low']}, {b['ask_high']})")
     got = checks._ask(conn, model, [(u, corpus.context_state(u), {"digital": q}) for u in units],
                       "digital", "digital", api_key, dry_run, workers, log, data)
     if got is None:
@@ -118,17 +114,14 @@ def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=Fal
 
 def policy(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
            projects=None, every=None, **_):
-    """Investment or policy for each committed sentence (with digital.on, each committed digital one), by the chat model.
-    Writes kind policy (label_set and label policy; score 1 policy, 0 investment).
-    Nothing is asked while policy.on is false."""
-    if not decide.policy_on():
-        return 0
+    """Investment or policy for each committed, digital sentence, by the chat model.
+    Writes kind policy (label_set and label policy; score 1 policy, 0 investment)."""
     if checks.cannot_estimate(conn, dry_run, log, "policy", ("measure", "measure")):
         return None
     units, scope = _in_scope(corpus, decide.committed_digital_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
     q = Q.policy_question()
-    log(f"policy: {len(units):,} committed sentence(s)" + (" that are digital" if decide.digital_settings()[0] else ""))
+    log(f"policy: {len(units):,} committed sentence(s) that are digital")
     got, ok = chat.asked(conn, [(u, corpus.context_state(u), q) for u in units], "policy", "policy", api_key,
                     dry_run, workers, log)
     if dry_run:
@@ -177,9 +170,7 @@ def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, worker
     counts as under) is shown with its paragraph and the four assets, and names
     up to two (or none) with a kind each. The decision does not change: the first
     pass wins at asset.floor and the look fills only where there is none. Writes kind asset_second (label_set assets, label second; the answer's
-    labels are the valid "asset/subtype" pairs). While band.on is off nothing is asked."""
-    if not decide.band()["on"]:
-        return 0
+    labels are the valid "asset/subtype" pairs)."""
     if checks.cannot_estimate(conn, dry_run, log, "asset second look", ("asset", "classify"), digital=True):
         return None
     high = decide.asset_ask_high()
@@ -213,10 +204,7 @@ def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, worke
     """The kind of each asset the first pass gave a committed, digital sentence,
     by the chat model, one question per sentence and asset. Writes kind
     asset_subtype (label_set assets, label the asset). A reply that is not one
-    of the asset's kinds is unreadable (counted, asked again), never stored.
-    While band.on is off nothing is asked."""
-    if not decide.band()["on"]:
-        return 0
+    of the asset's kinds is unreadable (counted, asked again), never stored."""
     if checks.cannot_estimate(conn, dry_run, log, "asset kinds", ("asset", "classify"), digital=True):
         return None
     first = first_pass_assets(conn, corpus)
@@ -245,9 +233,7 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
     whose first-pass P(yes) is from link.asset_ask_low up to link.asset_ask_high is
     asked yes or no (package description, category, component, the asset's
     definition). Writes kind package_asset_second (label_set assets, label the
-    asset, item the package; score 1 yes, 0 no). Not asked while link.strengths is off."""
-    if not decide.link_strengths():
-        return 0
+    asset, item the package; score 1 yes, 0 no)."""
     if checks.cannot_estimate(conn, dry_run, log, "package asset second look", ("package_asset", "link")):
         return None
     decide.package_band()                                  # checks the asked band covers the decision band

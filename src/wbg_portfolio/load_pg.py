@@ -53,12 +53,8 @@ GRADE_COLS = ["label_set", "unit_id", "paragraph_id", "doc_id", "project_ids", "
               "p_committed_calibrated", "model_served"]
 UNIT_ASSET_COLS = ["unit_id", "asset_rank", "paragraph_id", "project_ids", "asset_id", "subtype_id", "probability",
                    "asset_level", "own_best_asset_id", "own_best_probability", "second_look_asset_id"]
-PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "score_a", "score_b", "p_keep_a", "p_keep_b",
-             "model_served"]
 PACKAGE_ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
                       "p_calibrated", "model_served"]
-LINK_COLS = ["label_set", "label_id", "unit_id", "package_id", "project_id", "shared_asset_ids", "route",
-             "measure_rank", "measure_cosine", "probability", "p_calibrated", "model_served"]
 STRENGTH_COLS = ["project_id", "label_set", "unit_id", "package_id", "strength", "shared_asset_ids",
                  "strong_p", "package_category"]
 ACTIVITY_COLS = ["activity_id", "project_id", "label_set", "activity_label", "unit_id", "n_sentences"]
@@ -72,8 +68,8 @@ SCALE_COLS = ["label_set", "label_id", "grade", "description", "version", "file_
 QUALITY_COLS = ["label_set", "version", "question_sha256", "sheet", "graded_units", "precision",
                 "recall", "evaluated_at", "report_path"]
 DECISION_TABLES = {"measure_findings": FINDING_COLS, "paragraph_grades": GRADE_COLS,
-                   "unit_assets": UNIT_ASSET_COLS, "unit_pair_checks": PAIR_COLS,
-                   "package_assets": PACKAGE_ASSET_COLS, "commitment_packages": LINK_COLS,
+                   "unit_assets": UNIT_ASSET_COLS,
+                   "package_assets": PACKAGE_ASSET_COLS,
                    "commitment_package_links": STRENGTH_COLS, "activities": ACTIVITY_COLS,
                    "labels": LABEL_COLS, "measure_types": TYPE_COLS,
                    "asset_subtypes": SUBTYPE_COLS, "flags": FLAG_COLS, "label_queries": QUERY_COLS,

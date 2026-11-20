@@ -218,12 +218,9 @@ def test_with_no_pdf_the_cache_file_is_still_written_so_the_stage_is_not_always_
 
 # ------------------------------------------------------------------ wiring
 
-def test_the_panel_line_is_in_both_files_with_the_same_value():
-    vals = []
-    for name in ("control_panel.csv", "control_panel_v2.csv"):
-        with open(os.path.join(ROOT, "inputs", "config", name), newline="", encoding="utf-8") as fh:
-            vals.append({r["setting"]: r["value"] for r in csv.DictReader(fh)}["plan_pdf.min_match_share"])
-    assert vals == ["0.5", "0.5"]
+def test_the_panel_line_is_written():
+    with open(os.path.join(ROOT, "inputs", "config", "control_panel.csv"), newline="", encoding="utf-8") as fh:
+        assert {r["setting"]: r["value"] for r in csv.DictReader(fh)}["plan_pdf.min_match_share"] == "0.5"
     assert panel.require("plan_pdf.min_match_share") == 0.5
 
 

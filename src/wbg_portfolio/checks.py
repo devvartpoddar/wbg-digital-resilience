@@ -1,23 +1,16 @@
 """The checks made after a classification, each a fit question (yes, unsure,
 no) through the one asker, each writing scores (docs/method/decisions.md):
 
-  types            every unit committed at floor.ask x the measure's approved
+  types            every committed, digital unit x the measure's approved
                    types (and the OTH types the gap step proposed)
-  pairs            every unit two measures both commit at floor.ask, each side
-                   asked with the other measure's boundary beside it (not
-                   asked while band.on: the band rule in src/wbg_portfolio/second.py replaces it)
   package_assets   every procurement package x its best link.asset_top assets
                    by cosine: does the package buy, build or run it
-  links            every committed unit x the packages of its project that
-                   share an asset, plus the link.measure_top nearest the
-                   measure: would carrying out the package deliver it (the
-                   old link question; not asked while link.strengths is on)
-  package_measure  with link.strengths: every package that has an asset x each
-                   measure its project has a committed, digital sentence for:
-                   does the measure apply to the package alone (strong link)
+  package_measure  every package that has an asset x each measure its project
+                   has a committed, digital sentence for: does the measure
+                   apply to the package alone (the strong link)
 
 Sentence-level questions send the same state as the measures did
-(questions.Corpus.state). Nothing here decides; src/wbg_portfolio/decide.py reads the floors.
+(questions.Corpus.state). Nothing here decides; src/wbg_portfolio/decide.py reads the thresholds.
 """
 import csv
 import hashlib
@@ -79,11 +72,10 @@ Sentences:
 # ---------------------------------------------------------------- shared
 
 def committed_at_ask(conn, corpus, name):
-    """[unit_id] a measure counts at floor.ask: the units the checks ask about. With digital.on only
-    those the digital question says are digital (the types, pair checks and links are not asked
-    about the rest)."""
+    """[unit_id] a measure commits that the digital question says are digital: the units the
+    types are asked about."""
     return sorted(decide.only_digital(conn, [u for u, r in decide.measure_units(conn, corpus, name).items()
-                                             if r["asked_yes"]]))
+                                             if r["committed"]]))
 
 
 def write_scores(conn, kind, label_set, rows, replace_where=None, params=()):
@@ -96,11 +88,11 @@ def write_scores(conn, kind, label_set, rows, replace_where=None, params=()):
 
 def cannot_estimate(conn, dry_run, log, step, *needs, digital=False):
     """On a dry run, say so when a step this one reads has not run: (kind, step name) pairs, and
-    with digital the digital step when digital.on. True when it said so, so the caller returns
+    with digital the digital step. True when it said so, so the caller returns
     before printing a number (0) that is not an estimate."""
     if not dry_run:
         return False
-    needs = needs + ((("digital", "digital"),) if digital and decide.digital_settings()[0] else ())
+    needs = needs + ((("digital", "digital"),) if digital else ())
     missing = [name for kind, name in needs if not decide.has_scores(conn, kind)]
     for name in missing:
         log(f"  {step}: cannot estimate until {name} has run")
@@ -246,7 +238,7 @@ def propose(conn, data, corpus, name, *, api_key="", dry_run=False, log=print, m
 
 def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
           log=print):
-    """Every unit committed at floor.ask asked each approved type's fit
+    """Every committed, digital unit asked each approved type's fit
     question; the units no approved type reaches at floor.types asked the OTH
     types (re-proposed first when types.gaps is on). Writes kind 'type'."""
     tq = Q.type_questions(name)
@@ -318,46 +310,6 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
     log(f"  {len(rows):,} type scores written; {len(none):,} units no approved type reaches"
         + (f"; {proposed} OTH type(s) proposed" if proposed is not None else
            f"; {len(oth)} OTH type(s) kept from earlier"))
-    return len(rows)
-
-
-# ---------------------------------------------------------------- pairs
-
-def pairs(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
-          log=print):
-    """A unit two measures of one family both commit at floor.ask is asked,
-    for each side, whether the measure applies with the other's boundary
-    beside it. Measures of different families are never paired, so a family's
-    commitments do not move when another family's measures change. Writes
-    kind 'pair', label_set 'a|b', label_id keep_a / keep_b. While band.on is
-    true the band rule replaces this check: nothing is asked and the stored
-    pair scores are left as they are (they still publish, for comparison)."""
-    if decide.band()["on"]:
-        log("pairs: replaced by the band rule (band.on); nothing asked, stored pair checks kept")
-        return 0
-    by_unit = defaultdict(set)
-    family = {name: labels.families(name) for name in names}
-    for name in names:
-        for u in committed_at_ask(conn, corpus, name):
-            by_unit[u].add(name)
-    items, qs = [], {}
-    from itertools import combinations
-    for u in sorted(by_unit):
-        for a, b in combinations(sorted(by_unit[u]), 2):
-            if not family[a] & family[b]:
-                continue
-            qs.setdefault((a, b), Q.pair_questions(a, b))
-            items.append(((u, a, b), corpus.state(u), qs[(a, b)]))
-    log(f"pairs: {len(items):,} unit pair(s) two measures both commit")
-    got = _ask(conn, model, items, "pairs", "", api_key, dry_run, workers, log, data)
-    if got is None:
-        return None
-    rows = [_row("pair", f"{a}|{b}", side, u, corpus.state(u), qs[(a, b)][side], ans)
-            for (u, a, b), g in got.items() for side, ans in g.items()]
-    t = funnel.table(conn)
-    with conn.transaction():
-        db.replace(conn, t, funnel.SCORE_COLS, rows, "kind = 'pair'")
-    conn.commit()
     return len(rows)
 
 
@@ -448,84 +400,6 @@ def package_assets(conn, data, corpus, *, model=Q.MODEL, api_key="", dry_run=Fal
     return packages, has
 
 
-def links(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
-          log=print, projects=None):
-    """Package to asset, then commitment to package. Writes kinds
-    'package_asset' (label_set assets, label the asset, item the package) and
-    'link' (label_set the measure, item 'unit|package'). With link.strengths
-    the commitment-to-package question is not asked (the strengths replace
-    it: package_measure below and the asset-level links at publish); stored
-    link scores stay."""
-    first = package_assets(conn, data, corpus, model=model, api_key=api_key, dry_run=dry_run, workers=workers,
-                           log=log, projects=projects)
-    if first is None:
-        return None
-    packages, has = first
-    if decide.link_strengths():
-        log("link: the old commitment-to-package question is retired (link.strengths); nothing asked")
-        return len(has)
-    # commitment to package (the old question)
-    vecs = package_vectors(data, packages, api_key, log)
-    amap = decide.asset_map(conn, corpus)
-    ua = decide.unit_assets(corpus, amap)
-    levels = decide.link_levels()
-    by_project = defaultdict(list)
-    for i, p in enumerate(packages):
-        by_project[p["project_id"]].append(i)
-    mtop = int(panel.require("link.measure_top"))
-    pairs_, meta = [], {}
-    for name in names:
-        units = committed_at_ask(conn, corpus, name)
-        if not units:
-            continue
-        mq = search.query_vectors(search.load_queries(name, labels.folder(name)), data, embed.DEFAULT_MODEL,
-                                  embed.DEFAULT_DIM, embed.DEFAULT_BASE, api_key, log=log)
-        mbest = (vecs @ mq.T).max(axis=1)
-        lid = Q.load(name)[0][0]["id"]
-        for u in units:
-            mine = decide.linked_assets(ua.get(u, ({}, [], "none")), levels)
-            paired = set()
-            for pid in corpus.projects(u):
-                for i in by_project.get(pid, []):
-                    p = packages[i]
-                    if mine & has.get(p["package_id"], set()):
-                        paired.add(i)
-                        meta[(name, u, p["package_id"])] = ("asset", None, None)
-                if mtop:
-                    n = 0
-                    for i in sorted(by_project.get(pid, []), key=lambda i: (-mbest[i], packages[i]["package_id"])):
-                        if i in paired:
-                            continue
-                        n += 1
-                        if n > mtop:
-                            break
-                        paired.add(i)
-                        meta[(name, u, packages[i]["package_id"])] = ("measure", n, float(mbest[i]))
-            for i in sorted(paired):
-                p = packages[i]
-                pairs_.append(((name, lid, u, p["package_id"]),
-                               Q.pair_state(corpus.texts[u], corpus.component(u), p), {"link": Q.LINK_QUESTION}))
-    log(f"  {len(pairs_):,} commitment-package pairs")
-    got2 = _ask(conn, model, pairs_, "link:pairs", "", api_key, dry_run, workers, log, data)
-    if got2 is None:
-        return None
-    rows = []
-    for (name, lid, u, pid), g in got2.items():
-        route, rank, cos = meta[(name, u, pid)]
-        rows.append(_row("link", name, lid, f"{u}|{pid}", {}, Q.LINK_QUESTION, g["link"], route=route,
-                         cosine=cos, rank=rank))
-    t = funnel.table(conn)
-    with conn.transaction():
-        if projects:
-            db.replace(conn, t, funnel.SCORE_COLS, rows, "kind = 'link' AND split_part(item_id, '|', 2) = ANY(%s)",
-                       [sorted(p["package_id"] for p in packages)])
-        else:
-            db.replace(conn, t, funnel.SCORE_COLS, rows, "kind = 'link'")
-    conn.commit()
-    log(f"  {len(rows):,} link scores written")
-    return len(rows)
-
-
 # ---------------------------------------------------------------- strong links
 
 def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False,
@@ -533,10 +407,7 @@ def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry
     """The strong link: each package that has an asset (first pass, or the chat
     model's second look) asked, on its own, about each measure its project has
     at least one committed, digital sentence for. Writes kind
-    'package_measure' (label_set the measure, item the package). Not asked
-    while link.strengths is off."""
-    if not decide.link_strengths():
-        return 0
+    'package_measure' (label_set the measure, item the package)."""
     if cannot_estimate(conn, dry_run, log, "package_measure", ("package_asset", "link"), digital=True):
         return None
     packages = load_packages(data, projects)

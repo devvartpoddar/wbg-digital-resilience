@@ -63,8 +63,7 @@ def commit():
         return ""
 
 
-SPEND_GROUP = (("asset:", "classify"), ("types:", "measure"), ("pairs", "measure"),
-               ("link:", "link"))
+SPEND_GROUP = (("asset:", "classify"), ("types:", "measure"), ("link:", "link"))
 
 
 def runs(data):
@@ -106,7 +105,7 @@ def earlier(run, all_runs, keep=5):
 
 def spend_by_stage(run):
     """(stage, calls, US$) from the spend ledger, for the run's own window. The
-    ledger records one row per step (types:<set>, pairs, link: pairs); a step is
+    ledger records one row per step (types:<set>, link:assets); a step is
     folded into the pipeline stage that asked it."""
     if not run:
         return []

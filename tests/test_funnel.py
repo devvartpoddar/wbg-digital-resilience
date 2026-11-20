@@ -1,7 +1,10 @@
 """The funnel (src/wbg_portfolio/funnel.py): gate, patterns, stored answers and feedback
 rounds, the same for the asset map and a measure; scores written once."""
+import pytest
+
 from wbg_portfolio import db
 from wbg_portfolio import funnel
+from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 
 
@@ -11,7 +14,14 @@ def scores(pg, name):
                                      (name,))}
 
 
-def test_a_measure_goes_through_the_gate_and_its_rounds_and_writes_scores(pg, corpus, fake_model):
+@pytest.fixture
+def rounds(monkeypatch):
+    """Feedback rounds count a score of 0.5 as a yes (the other tests ask no rounds)."""
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "floor.ask": 0.5})
+
+
+def test_a_measure_goes_through_the_gate_and_its_rounds_and_writes_scores(pg, corpus, fake_model, rounds):
     out = funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None)
     got = scores(pg, "cra")
     c = Q.Corpus(corpus)
@@ -33,7 +43,7 @@ def test_the_asset_map_is_the_same_funnel_label_by_label(pg, corpus, fake_model)
     assert float(by[("fiber", c.index[0]["unit_id"])][0]) < 0.1
 
 
-def test_a_rerun_is_skipped_as_up_to_date_and_keeps_the_scores(pg, corpus, fake_model):
+def test_a_rerun_is_skipped_as_up_to_date_and_keeps_the_scores(pg, corpus, fake_model, rounds):
     funnel.run(pg, corpus, "cra", api_key="k", log=lambda *_: None)
     before = scores(pg, "cra")
     n = len(fake_model)

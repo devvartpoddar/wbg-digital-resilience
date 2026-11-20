@@ -1,5 +1,5 @@
--- The views the band rule, the digital rule and (later) the link strengths and
--- activities add. Existing views are unchanged.
+-- The views of the band rule, the digital rule, the link strengths and the
+-- activities.
 
 -- Committed sentences the digital question says are not digital: they stay in
 -- measure_findings (is_committed true, is_digital false) and leave the
@@ -24,7 +24,7 @@ COMMENT ON VIEW wbg.not_digital_findings IS
 -- project, with the sentence's measure, asset and type and the package's plan
 -- columns. strength strong: the package, asked on its own, is about the
 -- measure; asset: they share a top-level asset and nothing more. Filter on
--- strength; the old link question's view is commitment_packages_in_context.
+-- strength.
 DROP VIEW IF EXISTS wbg.commitment_package_links_in_context;
 CREATE VIEW wbg.commitment_package_links_in_context AS
 SELECT cl.label_set, f.label_id, f.measure_name, cl.project_id, f.cohort_set, f.project_name,

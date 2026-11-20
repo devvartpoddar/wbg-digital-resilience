@@ -10,7 +10,7 @@ from wbg_portfolio import questions as Q
 from test_decide import run_all
 
 
-def test_tasks_are_self_contained_and_one_per_decision(pg, corpus, fake_model, tmp_path):
+def test_tasks_are_self_contained_and_one_per_decision(pg, corpus, fake_model, fake_chat, tmp_path):
     c = run_all(pg, corpus)
     tasks = grading.draw(pg, corpus, c, 7, log=lambda *_: None)
     assert tasks and all({"task_id", "kind", "question", "allowed", "weight", "chance", "design"} <= set(t) for t in tasks)
@@ -25,13 +25,12 @@ def test_tasks_are_self_contained_and_one_per_decision(pg, corpus, fake_model, t
     other = [t for t in tasks if t["kind"] == "other"]
     assert other and "none" in other[0]["allowed"]
     assert any(t["kind"] == "package_asset" and t["package"] for t in tasks)
-    link = next(t for t in tasks if t["kind"] == "link")
-    assert link["commitment"] and link["package"]
+    assert not any(t["kind"] in ("link", "pair") for t in tasks)
     with pytest.raises(SystemExit):
         grading.draw(pg, corpus, c, 7, log=lambda *_: None)          # a seed already drawn
 
 
-def test_the_draw_is_repeatable(pg, corpus, fake_model, tmp_path):
+def test_the_draw_is_repeatable(pg, corpus, fake_model, fake_chat, tmp_path):
     c = run_all(pg, corpus)
     a = grading.draw(pg, corpus, c, 3, log=lambda *_: None, dry_run=True)
     b = grading.draw(pg, corpus, c, 3, log=lambda *_: None, dry_run=True)
@@ -47,7 +46,7 @@ def write_fills(path, rows):
     return str(path)
 
 
-def test_fills_are_checked_strictly_and_stored_by_text_and_label(pg, corpus, fake_model, tmp_path):
+def test_fills_are_checked_strictly_and_stored_by_text_and_label(pg, corpus, fake_model, fake_chat, tmp_path):
     c = run_all(pg, corpus)
     tasks = grading.draw(pg, corpus, c, 7, log=lambda *_: None)
     u0 = c.index[0]["unit_id"]
@@ -79,7 +78,7 @@ def test_fills_are_checked_strictly_and_stored_by_text_and_label(pg, corpus, fak
                   (grading.sha(c.texts[u0]),))[0] == "1"
 
 
-def test_evaluate_reports_and_writes_fits_from_training_grades_only(pg, corpus, fake_model, tmp_path, monkeypatch):
+def test_evaluate_reports_and_writes_fits_from_training_grades_only(pg, corpus, fake_model, fake_chat, tmp_path, monkeypatch):
     c = run_all(pg, corpus)
     tasks = grading.draw(pg, corpus, c, 7, log=lambda *_: None)
     u0 = c.index[0]["unit_id"]

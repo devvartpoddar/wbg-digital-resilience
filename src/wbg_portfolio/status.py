@@ -29,8 +29,8 @@ def brief(data=None):
         off = [n for n in labels.label_sets(include_inactive=True) if n not in sets and n != Q.ASSETS]
         lines.append(f"measures: {len(sets)} active ({', '.join(sets)})" + (f"; off: {', '.join(off)}" if off else ""))
         for kind in ("asset", "asset_second", "asset_subtype", "measure", "measure_ctx", "measure_second",
-                     "digital", "policy", "type", "pair", "package_asset", "package_asset_second",
-                     "package_measure", "link", "activity", "scratch"):
+                     "digital", "policy", "type", "package_asset", "package_asset_second",
+                     "package_measure", "activity", "scratch"):
             r = _n(conn, f"SELECT count(*), count(DISTINCT label_set) FROM {S}.scores WHERE kind = %s", (kind,))
             if r and r[0]:
                 lines.append(f"scores:   {kind:<14} {r[0]:>9,} rows, {r[1]} set(s)")

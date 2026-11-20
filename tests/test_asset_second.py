@@ -3,6 +3,7 @@ asset_second for a committed, digital sentence the first pass gave no asset,
 asset_subtype for one it did. No model is called: the fake decision and chat models."""
 import json
 
+import pytest
 
 from helpers import QUIET, count, first_pass
 from wbg_portfolio import db
@@ -14,6 +15,14 @@ from wbg_portfolio import questions as Q
 from wbg_portfolio import second
 
 NAMES = ["cra"]
+
+
+@pytest.fixture
+def only_where_none(monkeypatch):
+    """asset.ask_high at asset.floor: the second look is asked only of a sentence with no first-pass asset."""
+    from wbg_portfolio import panel
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "asset.ask_high": live()["asset.floor"]})
 
 
 def ready(pg, corpus, fake_chat):
@@ -43,7 +52,7 @@ def test_the_real_taxonomy_has_four_assets_each_with_kinds_and_no_cybersecurity(
     assert "cybersecurity" not in assets and not any("cyber" in r["id"] for rows in sub.values() for r in rows)
 
 
-def test_the_second_look_asks_only_sentences_with_no_first_pass_asset(pg, corpus, fake_chat, pipeline_on, narrow_asks):
+def test_the_second_look_asks_only_sentences_with_no_first_pass_asset(pg, corpus, fake_chat, only_where_none):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: '{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
@@ -57,7 +66,7 @@ def test_the_second_look_asks_only_sentences_with_no_first_pass_asset(pg, corpus
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1 and len(fake_chat.calls) == 1
 
 
-def test_it_asks_again_only_for_what_is_missing(pg, corpus, fake_chat, pipeline_on, narrow_asks):
+def test_it_asks_again_only_for_what_is_missing(pg, corpus, fake_chat, only_where_none):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: '{"assets": []}'
     second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
@@ -69,7 +78,7 @@ def test_it_asks_again_only_for_what_is_missing(pg, corpus, fake_chat, pipeline_
     assert count(pg, "asset_second") == 2
 
 
-def test_an_asset_or_kind_the_files_do_not_have_is_discarded_and_counted(pg, corpus, fake_chat, pipeline_on, narrow_asks):
+def test_an_asset_or_kind_the_files_do_not_have_is_discarded_and_counted(pg, corpus, fake_chat, only_where_none):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: json.dumps({"assets": [{"asset": "cybersecurity", "subtype": "x"},
                                                        {"asset": "fiber", "subtype": "invented"}]})
@@ -81,7 +90,7 @@ def test_an_asset_or_kind_the_files_do_not_have_is_discarded_and_counted(pg, cor
     assert decide.asset_second_looks(pg) == {u1: [("fiber", "")]}
 
 
-def test_a_repeated_asset_counts_once_and_none_is_a_valid_answer(pg, corpus, fake_chat, pipeline_on, narrow_asks):
+def test_a_repeated_asset_counts_once_and_none_is_a_valid_answer(pg, corpus, fake_chat, only_where_none):
     kept, la, lk = second.valid_assets(["fiber/backbone", "fiber/unspecified", "towers/mast"],
                                        *Q.asset_catalogue())
     assert kept == [("fiber", "backbone"), ("towers", "mast")] and (la, lk) == (1, 0)
@@ -91,7 +100,7 @@ def test_a_repeated_asset_counts_once_and_none_is_a_valid_answer(pg, corpus, fak
     assert decide.asset_second_looks(pg) == {}
 
 
-def test_more_than_two_assets_or_a_malformed_reply_is_never_a_yes(pg, corpus, fake_chat, pipeline_on):
+def test_more_than_two_assets_or_a_malformed_reply_is_never_a_yes(pg, corpus, fake_chat):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: json.dumps({"assets": [{"asset": "fiber"}, {"asset": "towers"}, {"asset": "x"}]})
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
@@ -101,7 +110,7 @@ def test_more_than_two_assets_or_a_malformed_reply_is_never_a_yes(pg, corpus, fa
     assert count(pg, "asset_second") == 0
 
 
-def test_the_kind_is_asked_only_for_sentences_with_a_first_pass_asset(pg, corpus, fake_chat, pipeline_on):
+def test_the_kind_is_asked_only_for_sentences_with_a_first_pass_asset(pg, corpus, fake_chat):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     assert second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
     assert len(fake_chat.calls) == 1 and "kind mast" not in fake_chat.prompts()[0] and "- mast:" in fake_chat.prompts()[0]
@@ -117,20 +126,14 @@ def test_the_kind_is_asked_only_for_sentences_with_a_first_pass_asset(pg, corpus
     assert decide.asset_kinds(pg) == {}
 
 
-def test_nothing_is_asked_while_the_band_rule_is_off_or_on_a_dry_run(pg, corpus, fake_chat, pipeline_on, monkeypatch):
+def test_nothing_is_asked_on_a_dry_run(pg, corpus, fake_chat):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     assert second.asset_second(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None
     assert second.asset_subtype(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None
     assert not fake_chat.calls
-    from wbg_portfolio import panel
-    live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.on": False})
-    assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
-    assert second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
-    assert not fake_chat.calls
 
 
-def test_the_levels_and_kinds_reach_unit_assets(pg, corpus, fake_chat, fake_model, pipeline_on):
+def test_the_levels_and_kinds_reach_unit_assets(pg, corpus, fake_chat, fake_model):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: ('{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
                                  if '"assets": [{"asset"' in p else '{"answer": "mast"}')
@@ -164,7 +167,7 @@ def test_the_levels_and_kinds_reach_unit_assets(pg, corpus, fake_chat, fake_mode
 
 
 def test_the_asset_second_look_is_asked_also_under_asset_ask_high_and_never_changes_the_decision(
-        pg, corpus, fake_chat, fake_model, pipeline_on, monkeypatch):
+        pg, corpus, fake_chat, fake_model, monkeypatch):
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: '{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
     from wbg_portfolio import panel

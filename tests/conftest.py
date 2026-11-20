@@ -19,12 +19,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(
 os.environ.setdefault("WBG_ASK_BATCH", "0")
 
 STARTING = {"posterior.on": "true", "floor.default": "0.5", "floor.types": "0.5",
-            "floor.pair_check": "0.5", "asset.floor": "0.3", "asset.decay": "0.4",
-            "asset.multiple": "true", "link.asset_yes": "0.5", "floor.ask": "0.5",
+            "asset.floor": "0.3", "asset.decay": "0.4",
+            "asset.multiple": "true", "link.asset_yes": "0.5", "floor.ask": "0.99",
             "asset.ask_floor": "0.3"}
-# The shipped control_panel.csv holds the live behaviour with every new switch off, so the older
-# tests need no pin for them; the new tests switch the settings on (pipeline_on) or run with
-# inputs/config/control_panel_v2.csv itself.
+# The tests read inputs/config/control_panel.csv with these starting values pinned on top.
 
 
 def _test_panel():
@@ -43,7 +41,8 @@ def _test_panel():
     return path
 
 
-os.environ.setdefault("WBG_PANEL", _test_panel())
+from wbg_portfolio import panel as _panel
+_panel.PATH = _test_panel()
 
 
 def write_csv(path, cols, rows):
@@ -353,36 +352,3 @@ def fake_chat(monkeypatch, fake_model):
                 "choices": [{"message": {"content": chat.reply(b["messages"][0]["content"])}}]}
     monkeypatch.setattr(api, "post", post)
     return chat
-
-
-@pytest.fixture
-def pipeline_on(monkeypatch):
-    """The band rule, the digital rule, the link strengths, the policy question and the activities
-    switched on, as in control_panel_v2.csv."""
-    from wbg_portfolio import panel
-    live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.on": True, "digital.on": True,
-                                                    "link.strengths": True, "policy.on": True,
-                                                    "activities.on": True, "floor.ask": 0.99,
-                                                    "dashboard.commitment_link_levels": "unit|second_look|none"})
-
-
-@pytest.fixture
-def narrow_asks(monkeypatch):
-    """What is asked narrowed to what decides (the behaviour before the asked bands were separated):
-    the measure second look only in [band.low, band.keep), package assets only in
-    [link.asset_band_low, link.asset_yes), the asset second look only where the first pass has none."""
-    from wbg_portfolio import panel
-    live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.ask_low": live()["band.low"],
-                                                    "band.ask_high": live()["band.keep"],
-                                                    "link.asset_ask_low": live()["link.asset_band_low"],
-                                                    "link.asset_ask_high": live()["link.asset_yes"],
-                                                    "asset.ask_high": live()["asset.floor"]})
-
-
-@pytest.fixture
-def v2_panel(monkeypatch):
-    """The real inputs/config/control_panel_v2.csv, named by a path from the repository root as
-    $WBG_PANEL is set on the box: what the run over the data copy reads."""
-    monkeypatch.setenv("WBG_PANEL", "inputs/config/control_panel_v2.csv")

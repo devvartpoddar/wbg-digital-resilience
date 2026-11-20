@@ -14,7 +14,7 @@ the gate (docs/method/decisions.md).
    rounds run out.
 4. Every answer becomes one row of <schema>.scores: kind, label set, label,
    unit, the score (src/wbg_portfolio/questions.py score) and the route it was asked by.
-   src/wbg_portfolio/decide.py reads the floors onto it.
+   src/wbg_portfolio/decide.py reads the band rule onto it.
 """
 import time
 

@@ -89,7 +89,7 @@ INTEGER = {"ordinal", "asset_rank", "text_start_offset", "text_end_offset", "pdf
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
            "units_hit_count", "most_likely_grade", "feedback_round", "second_grade",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
-           "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
+           "template_project_count", "cosine_rank", "graded_units", "grade",
            "graded_yes", "graded_no", "positives", "calls", "units_seen", "units_graded",
            "n_sentences"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
@@ -101,12 +101,11 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "probability_grade_2", "probability_grade_3",
            "posterior_probability", "best_type_probability", "weight", "gate", "share_lost",
            "cost_usd", "seconds", "stratum_size", "stratum_drawn",
-           "model_cost_usd", "precision", "recall", "measure_cosine",
+           "model_cost_usd", "precision", "recall",
            "paragraph_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
            "template_wording_share", "score_first", "score_context", "digital_p", "strong_p",
-           "cosine", "probability", "p_only_a", "p_only_b", "p_both", "p_neither",
-           "p_keep_a", "p_keep_b", "score_a", "score_b"}
+           "cosine", "probability"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
            "was_sent_to_model", "was_asked", "is_committed", "is_digital"}
@@ -351,7 +350,7 @@ TABLES = {
             "is_active": "Whether the label is searched and graded.",
             "version": "The hand-kept version of the row.",
             "family": "The family the measure belongs to (climate, cloud_data): measures of different "
-                      "families are never pair-checked against each other and are shown apart. Empty for the assets.",
+                      "the app shows measures of one family together. Empty for the assets.",
             "folder": "Where the set lives in git.",
         }),
     "search_paragraphs": dict(
@@ -398,7 +397,7 @@ TABLES = {
             "matched_patterns": "Pattern ids that matched.",
             "firmness": "activity, outcome or none, from wording lists.",
             "was_sent_to_model": "False when a gate kept the unit from being graded.",
-            "is_committed": "The one decision: posterior_probability at or above the measure's floor (control panel inputs/config/control_panel.csv, floor.<set> else floor.default).",
+            "is_committed": "The one decision, the band rule: a first-pass score at band.keep or more, or in the band with both second looks agreeing (decided_by says which; control panel inputs/config/control_panel.csv, band.*).",
             "paragraph_best_asset_id": "For a sentence whose own best asset is under the control panel's asset.floor: the asset with the highest sum of its own score and the earlier sentences' scores in its paragraph, each weighted by asset.decay per sentence back; empty otherwise.",
             "paragraph_best_asset_probability": "That decayed sum (at most 1).",
             "unit_best_asset_id": "The sentence asset map's best asset for the sentence itself.",
@@ -411,8 +410,8 @@ TABLES = {
             "score_first": "The first-pass score the band rule reads: the posterior of grades 2 and 3 from the sentence asked alone.",
             "score_context": "The decision model's score for the same question asked with the paragraph beside the sentence; empty unless the pair's first-pass score was asked about (band.ask_low to band.ask_high; a look above band.keep decides nothing). Model-graded, not person-graded.",
             "second_grade": "The chat model's grade 0 to 3 for the pair, asked in the band; empty otherwise. Reading is the model's: a missing second look never counts as yes.",
-            "decided_by": "score (first-pass score at band.keep or more), second_look (in the band, and both looks reach band.context and band.second_grade) or empty (not committed). With band.on false: score when the posterior reaches the measure's floor.",
-            "is_digital": "True when the digital question (the sentence with its paragraph beside it, asked once whatever the measure) scores digital.floor or more. The dashboards count a committed sentence only when this is true; with digital.on false every sentence is true.",
+            "decided_by": "score (first-pass score at band.keep or more), second_look (in the band, and both looks reach band.context and band.second_grade) or empty (not committed).",
+            "is_digital": "True when the digital question (the sentence with its paragraph beside it, asked once whatever the measure) scores digital.floor or more. The dashboards count a committed sentence only when this is true.",
             "digital_p": "P(yes) of the digital question; empty when not asked (it is asked of committed sentences only).",
             "instrument": "investment or policy, the chat model's reading of the committed sentence (flags.csv, policy); empty when not asked.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
@@ -508,7 +507,7 @@ TABLES = {
         comment="Which digital asset a procurement package buys, builds, installs, connects "
                 "or operates: one row per package and asset asked (its best few by cosine "
                 "over the asset taxonomy's phrases), with the decision model's yes "
-                "probability and its posterior (src/wbg_portfolio/link_packages.py). A package has the "
+                "probability and its posterior (src/wbg_portfolio/checks.py). A package has the "
                 "asset when posterior_probability reaches the control panel's link.asset_yes; "
                 "a package may have several.",
         columns={
@@ -517,49 +516,6 @@ TABLES = {
             "cosine_rank": "The asset's rank among the package's assets by that cosine; 1 is the best.",
             "probability": "The decision model's probability that the package procures this asset.",
             "model_served": "The decision-model snapshot that answered.",
-        }),
-    "unit_pair_checks": dict(
-        key=("unit_id", "set_a", "set_b"), foreign=[],
-        comment="For a unit two measures both commit: a fit question per side, yes, unsure or "
-                "no, does the measure apply with the other's boundary beside it (src/wbg_portfolio/commit_checks.py). The commitment "
-                "views keep the unit in a measure when its side's posterior reaches "
-                "floor.pair_check (dashboard_settings.apply_measure_pair_checks).",
-        columns={"set_a": "The first measure's set (alphabetical).",
-                 "set_b": "The second measure's set.",
-                 "decision": "only_a, only_b, both or neither: which sides reach floor.pair_check.",
-                 "score_a": "The model's P(yes) that the first measure applies.",
-                 "score_b": "The same for the second measure.",
-                 "p_keep_a": "The posterior that the sentence is the first measure (the score through that measure's pair layer when fitted); the views keep it there at floor.pair_check.",
-                 "p_keep_b": "The same for the second measure.",
-                 "prior_probability_a": "Prior input: the first measure's probability for the unit (its probability layer's, else the model's score).",
-                 "prior_phrase_cosine_a": "Prior input: the unit's cosine to the first measure's phrases.",
-                 "prior_probability_b": "Prior input: the second measure's probability for the unit.",
-                 "prior_phrase_cosine_b": "Prior input: the unit's cosine to the second measure's phrases."}),
-    "commitment_packages": dict(
-        key=("label_set", "label_id", "unit_id", "package_id"),
-        foreign=[("package_id", "packages", "package_id"),
-                 ("unit_id", "search_units", "unit_id"),
-                 ("project_id", "projects", "project_id")],
-        comment="Which procurement packages would carry out a commitment: one row per "
-                "committed unit and package of the same project that share an asset, "
-                "or that is among the project's packages nearest the "
-                "measure itself (route), with the decision model's yes probability "
-                "(src/wbg_portfolio/link_packages.py). Many to many: a commitment may link to several "
-                "packages and a package to several commitments. A link counts when "
-                "posterior_probability (the model's yes through the link layer once fitted) "
-                "reaches dashboard.package_link_min_probability.",
-        columns={
-            "label_set": "The measure's set.",
-            "label_id": "The measure.",
-            "unit_id": "The committed unit (wbg.measure_findings).",
-            "shared_asset_ids": "Assets both sides have: the unit's (asset.floor, or asset.paragraph_floor at the link levels counted) and the package's (posterior at link.asset_yes).",
-            "route": "How the pair was made: asset (a shared asset) or measure (the package is among the project's nearest to the measure's phrases; no asset needed).",
-            "measure_rank": "For the measure route, the package's rank by cosine to the measure among the project's packages not paired by asset.",
-            "measure_cosine": "For the measure route, the package description's best cosine to the measure's phrases and definition.",
-            "probability": "The decision model's probability that carrying out the package is where the commitment is delivered or applied.",
-            "model_served": "The decision-model snapshot that answered.",
-            "prior_phrase_cosine": "Prior input: the package description's best cosine to the measure's phrases.",
-            "prior_phrase_match": "Prior input: the share of the package description's information found in the commitment sentence, words weighted by rarity.",
         }),
     "unit_assets": dict(
         key=("unit_id", "asset_rank"),
@@ -594,8 +550,8 @@ TABLES = {
                 "link.strong_yes). strength asset: the package and the sentence share a top-level asset, "
                 "which says only that both concern the same kind of asset, not that the package delivers "
                 "the commitment. A pair that is both is one row, strong, with its shared assets filled. "
-                "Built from the model readings at every publish (link.strengths); the old link question "
-                "is in commitment_packages. The models' reading, not a person's; documented is not done.",
+                "Built from the model readings at every publish. The models' reading, not a person's; "
+                "documented is not done.",
         columns={
             "strength": "strong or asset: see the table comment.",
             "shared_asset_ids": "The top-level assets the sentence and the package share (empty for a strong link with none).",

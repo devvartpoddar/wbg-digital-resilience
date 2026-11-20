@@ -1,24 +1,29 @@
 """The checks (src/wbg_portfolio/checks.py) and the one decision (src/wbg_portfolio/decide.py), end to
-end on the invented corpus: funnel, types, pairs, links, publish, views."""
+end on the invented corpus: funnel, second looks, types, package assets and links, publish, views."""
 from wbg_portfolio import db
 from wbg_portfolio import checks
 from wbg_portfolio import decide
 from wbg_portfolio import funnel
 from wbg_portfolio import load_pg
 from wbg_portfolio import questions as Q
+from wbg_portfolio import second
 
 
 def run_all(pg, corpus, log=lambda *_: None):
     c = Q.Corpus(corpus)
     funnel.run(pg, corpus, "assets", corpus=c, api_key="k", log=log)
     funnel.run(pg, corpus, "cra", corpus=c, api_key="k", log=log)
+    second.measure_second(pg, corpus, c, "cra", api_key="k", log=log)
+    for step in (second.digital, second.policy, second.asset_second, second.asset_subtype):
+        step(pg, corpus, c, ["cra"], api_key="k", log=log)
     checks.types(pg, corpus, c, "cra", api_key="k", log=log)
-    checks.pairs(pg, corpus, c, ["cra"], api_key="k", log=log)
-    checks.links(pg, corpus, c, ["cra"], api_key="k", log=log)
+    checks.package_assets(pg, corpus, c, api_key="k", log=log)
+    second.package_asset_second(pg, corpus, c, ["cra"], api_key="k", log=log)
+    checks.package_measure(pg, corpus, c, ["cra"], api_key="k", log=log)
     return c
 
 
-def test_types_are_asked_of_committed_units_with_the_sentence_state(pg, corpus, fake_model):
+def test_types_are_asked_of_committed_units_with_the_sentence_state(pg, corpus, fake_model, fake_chat):
     c = run_all(pg, corpus)
     u0 = c.index[0]["unit_id"]
     rows = db.rows(pg, f"SELECT label_id, item_id, score FROM {db.SCHEMA}.scores WHERE kind = 'type'")
@@ -29,17 +34,16 @@ def test_types_are_asked_of_committed_units_with_the_sentence_state(pg, corpus, 
     assert typed and typed[0]["state"]["section"] == "Project Components"     # the same state as the measure
 
 
-def test_packages_get_their_best_assets_and_commitments_their_packages(pg, corpus, fake_model):
+def test_packages_get_their_best_assets_and_commitments_their_packages(pg, corpus, fake_model, fake_chat):
     run_all(pg, corpus)
     pa = db.rows(pg, f"SELECT item_id, label_id, score, rank FROM {db.SCHEMA}.scores WHERE kind = 'package_asset'")
     assert {(p, a) for p, a, _, _ in pa} == {("P1-1", "towers"), ("P1-1", "fiber"), ("P1-2", "towers"), ("P1-2", "fiber")}
     assert float(next(s for p, a, s, _ in pa if (p, a) == ("P1-1", "towers"))) >= 0.89
-    links = db.rows(pg, f"SELECT item_id, route, score FROM {db.SCHEMA}.scores WHERE kind = 'link'")
-    assert {r for _, r, _ in links} == {"asset", "measure"}
-    assert any(i.endswith("|P1-1") and float(s) >= 0.89 for i, _, s in links)
+    pm = db.rows(pg, f"SELECT label_set, item_id, score FROM {db.SCHEMA}.scores WHERE kind = 'package_measure'")
+    assert [(m, p) for m, p, _ in pm] == [("cra", "P1-1")] and float(pm[0][2]) >= 0.89
 
 
-def test_publish_writes_the_decision_tables_and_the_views_build(pg, corpus, fake_model):
+def test_publish_writes_the_decision_tables_and_the_views_build(pg, corpus, fake_model, fake_chat):
     c = run_all(pg, corpus)
     with load_pg.transaction(pg):
         load_pg.load(pg, corpus, log=lambda *_: None)
@@ -47,7 +51,7 @@ def test_publish_writes_the_decision_tables_and_the_views_build(pg, corpus, fake
     f = db.rows(pg, f"SELECT unit_id, is_committed, posterior_probability, linked_asset_id, type_ids_above_threshold "
                     f"FROM {db.SCHEMA}.measure_findings ORDER BY unit_id")
     u0 = c.index[0]["unit_id"]
-    assert [r[0] for r in f] == sorted(c.index[i]["unit_id"] for i in range(len(c.index)))
+    assert [r[0] for r in f] == [u0]                       # the funnel asked the one sentence the gate let in
     row = next(r for r in f if r[0] == u0)
     assert row[1] is True and float(row[2]) > 0.85 and row[3] == "towers" and row[4] == ["site"]
     assert all(r[1] is False for r in f if r[0] != u0)
@@ -59,12 +63,12 @@ def test_publish_writes_the_decision_tables_and_the_views_build(pg, corpus, fake
     assert pk == [("P1-1",)]
 
 
-def test_a_moved_floor_is_a_publish_not_a_run(pg, corpus, fake_model, monkeypatch):
+def test_a_moved_threshold_is_a_publish_not_a_run(pg, corpus, fake_model, fake_chat, monkeypatch):
     c = run_all(pg, corpus)
     n = len(fake_model)
     from wbg_portfolio import panel
     live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "floor.default": 0.99})
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.keep": 0.99, "band.second_grade": 4})
     with load_pg.transaction(pg):
         load_pg.load(pg, corpus, log=lambda *_: None)
     decide.publish(pg, corpus, corpus=c, log=lambda *_: None, views=False)

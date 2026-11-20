@@ -82,7 +82,7 @@ def test_the_ids_are_deterministic():
 
 # ------------------------------------------------------------------ the step
 
-def test_a_group_is_shown_numbered_with_its_places_and_asked_once(pg, corpus, fake_chat, pipeline_on):
+def test_a_group_is_shown_numbered_with_its_places_and_asked_once(pg, corpus, fake_chat):
     c = ready(pg, corpus)
     logged = []
     assert activities.run(pg, corpus, c, NAMES, api_key="k", log=logged.append) == 1
@@ -98,7 +98,7 @@ def test_a_group_is_shown_numbered_with_its_places_and_asked_once(pg, corpus, fa
     assert len(fake_chat.calls) == 1                                     # stored: a rerun asks nothing
 
 
-def test_a_dropped_and_a_repeated_sentence_are_repaired_and_counted_in_the_log(pg, corpus, fake_chat, pipeline_on):
+def test_a_dropped_and_a_repeated_sentence_are_repaired_and_counted_in_the_log(pg, corpus, fake_chat):
     c = ready(pg, corpus)
     u0, u1 = c.index[0]["unit_id"], c.index[1]["unit_id"]
     fake_chat.reply = reply(("Assess hazards", [1]))                     # drops sentence 2
@@ -118,7 +118,7 @@ def test_a_dropped_and_a_repeated_sentence_are_repaired_and_counted_in_the_log(p
     assert [(a["label"], a["unit_ids"]) for a in acts] == [("First", [u0, u1])]
 
 
-def test_a_group_of_one_is_one_activity_without_a_call_and_a_changed_group_asks_again(pg, corpus, fake_chat, pipeline_on):
+def test_a_group_of_one_is_one_activity_without_a_call_and_a_changed_group_asks_again(pg, corpus, fake_chat):
     c = ready(pg, corpus, units=(0,))
     assert activities.run(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
     assert not fake_chat.calls and count(pg, "activity") == 0
@@ -129,7 +129,7 @@ def test_a_group_of_one_is_one_activity_without_a_call_and_a_changed_group_asks_
     assert activities.run(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1 and len(fake_chat.calls) == 1
 
 
-def test_a_dry_run_asks_nothing_and_a_failed_request_is_resumed(pg, corpus, fake_chat, pipeline_on, monkeypatch):
+def test_a_dry_run_asks_nothing_and_a_failed_request_is_resumed(pg, corpus, fake_chat, monkeypatch):
     c = ready(pg, corpus)
     assert activities.run(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None and not fake_chat.calls
     assert count(pg, "activity") == 0
@@ -144,13 +144,13 @@ def test_a_dry_run_asks_nothing_and_a_failed_request_is_resumed(pg, corpus, fake
     assert activities.run(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
 
 
-def test_the_scope_replaces_only_that_projects_groups(pg, corpus, fake_chat, pipeline_on):
+def test_the_scope_replaces_only_that_projects_groups(pg, corpus, fake_chat):
     c = ready(pg, corpus)
     assert activities.run(pg, corpus, c, NAMES, api_key="k", projects=["P9"], **QUIET) == 0
     assert count(pg, "activity") == 0 and not fake_chat.calls
 
 
-def test_the_table_and_the_summary(pg, corpus, fake_chat, pipeline_on):
+def test_the_table_and_the_summary(pg, corpus, fake_chat):
     c = ready(pg, corpus)
     u0, u1 = c.index[0]["unit_id"], c.index[1]["unit_id"]
     checks.types(pg, corpus, c, "cra", api_key="k", **QUIET)

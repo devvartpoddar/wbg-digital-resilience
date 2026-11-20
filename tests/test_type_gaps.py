@@ -1,4 +1,4 @@
-"""The gap step of checks.types under the v2 panel (band.on, digital.on): the sentences no approved
+"""The gap step of checks.types (types.gaps on): the sentences no approved
 type reaches are shown to the generative model once, which proposes OTH types. No model is called:
 the fake decision and chat models."""
 import json
@@ -18,7 +18,7 @@ PROPOSAL = json.dumps({"types": [{"type_id": "backup", "type_name": "Off-site ba
 
 
 @pytest.fixture
-def gaps(monkeypatch, v2_panel, fake_chat):
+def gaps(monkeypatch, fake_chat):
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "types.gaps": True, "types.gap_min_units": 1,
                                                     "floor.types": 1.01, "floor.ask": 0.99})

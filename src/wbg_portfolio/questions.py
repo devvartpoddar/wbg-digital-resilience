@@ -5,7 +5,7 @@ state is built from.
 Two forms of question (docs/method/decisions.md). A classification (asset,
 measure) asks graded_question on the set's 0-3 scale, scored as the
 probability of the grades the panel counts (read.grades). A check made after
-it (type, pair check, package to asset, commitment to package) asks
+it (type, package to asset, package to measure) asks
 fit_question, yes / unsure / no, told what is already decided, scored as
 P(yes). Every sentence-level question sends the same state (sentence_state):
 the sentence with its list lead-in, the section title, the component, and
@@ -60,16 +60,6 @@ def load(name, folder=None):
     if not 2 <= len(scale) <= 5:
         raise SystemExit(f"{path} needs 2 to 5 grades")
     return active, scale
-
-
-def boundary(name):
-    """(label name, boundary text) of a measure: its boundary column, else its
-    definition."""
-    for r in labels.rows(os.path.join(labels.folder(name), f"{name}.csv")):
-        if labels.is_active(r):
-            nm = next(r[c] for c in r if c.endswith("_name")).strip()
-            return nm, " ".join((r.get("boundary") or r["definition"]).split())
-    raise SystemExit(f"{name} has no active label")
 
 
 # ------------------------------------------------------------------ questions
@@ -221,35 +211,12 @@ def type_questions(name):
     return out
 
 
-def pair_questions(a, b):
-    """{'keep_a', 'keep_b'}: does each measure apply, the other's boundary beside it."""
-    out = {}
-    for key, s, o in (("keep_a", a, b), ("keep_b", b, a)):
-        lab = load(s)[0][0]
-        on, ob = boundary(o)
-        out[key] = fit_question(lab, given=(
-            f"The sentence is counted for both {lab['name']} and {on} ({ob}); this asks only "
-            f"whether it commits the project to {lab['name']}, whatever it does for {on}. "))
-    return out
-
-
 def package_asset_questions():
     """{asset_id: fit question}: does the package buy, build, install, connect,
     operate or design the asset."""
     return {a["id"]: fit_question(a, PACKAGE, given=(
         f"It applies when what the package procures is {a['name']}, or equipment, works, "
         f"systems or services for it, named or clearly implied. ")) for a in load(ASSETS)[0]}
-
-
-LINK_QUESTION = fit_question(
-    {"id": "pair", "name": "carrying out the commitment in the 'commitment' field",
-     "definition": ("the package procures, builds, installs or contracts the asset, works, "
-                    "equipment, system or service the commitment concerns, or the study or "
-                    "service the commitment itself requires, so the commitment is delivered or "
-                    "applied through what the package delivers. Both come from the same World "
-                    "Bank project: the commitment from its appraisal document, the package from "
-                    "its procurement plan. Belonging to the same project is not enough.")},
-    PACKAGE)
 
 
 def score(answer, fit=False):
@@ -269,15 +236,6 @@ def package_state(p):
     state = {"package": p["text"]}
     if p.get("component"):
         state["component"] = p["component"]
-    return state
-
-
-def pair_state(unit_text, unit_component, p):
-    state = {"commitment": unit_text, "package": p["text"]}
-    if unit_component:
-        state["commitment_component"] = unit_component
-    if p.get("component"):
-        state["package_component"] = p["component"]
     return state
 
 

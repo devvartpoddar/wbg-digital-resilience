@@ -20,13 +20,6 @@ GRADE = Q.chat_question("Grade it.", "grade", maximum=3)
 CHOICE = Q.chat_question("Which?", "choice", ["investment", "policy"])
 
 
-@pytest.fixture
-def band_on(monkeypatch):
-    live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.on": True, "digital.on": True,
-                                                    "policy.on": True, "floor.ask": 0.99})
-
-
 # ------------------------------------------------------------ the chat asker
 
 @pytest.mark.parametrize("text,reply,expect", [
@@ -228,7 +221,7 @@ def committed(pg, c, name="cra"):
     return {u: (r["committed"], r["decided_by"], r["waiting"]) for u, r in decide.measure_units(pg, c, name).items()}
 
 
-def test_a_pair_in_the_band_is_committed_only_when_both_looks_agree(pg, corpus, fake_chat, band_on):
+def test_a_pair_in_the_band_is_committed_only_when_both_looks_agree(pg, corpus, fake_chat):
     c = first_pass(pg, corpus, 0.6)
     u0 = c.index[0]["unit_id"]
     assert committed(pg, c)[u0] == (False, "", True)          # no second look yet: waiting, not committed
@@ -240,14 +233,14 @@ def test_a_pair_in_the_band_is_committed_only_when_both_looks_agree(pg, corpus, 
     assert "[sentence]" in ask and "[section]" in ask and "[context]" not in ask      # no paragraph for the chat grade
 
 
-def test_the_chat_model_saying_no_keeps_the_pair_out(pg, corpus, fake_chat, band_on):
+def test_the_chat_model_saying_no_keeps_the_pair_out(pg, corpus, fake_chat):
     c = first_pass(pg, corpus, 0.6)
     fake_chat.reply = lambda prompt: '{"grade": 1}'
     second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
     assert committed(pg, c)[c.index[0]["unit_id"]] == (False, "", False)
 
 
-def test_an_unreadable_second_look_is_never_a_yes(pg, corpus, fake_chat, band_on):
+def test_an_unreadable_second_look_is_never_a_yes(pg, corpus, fake_chat):
     c = first_pass(pg, corpus, 0.6)
     fake_chat.reply = lambda prompt: "grade 3"
     assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) is not None
@@ -256,7 +249,10 @@ def test_an_unreadable_second_look_is_never_a_yes(pg, corpus, fake_chat, band_on
 
 
 def test_with_the_asked_band_narrowed_a_score_at_the_keep_level_needs_no_second_look(
-        pg, corpus, fake_chat, fake_model, band_on, narrow_asks):
+        pg, corpus, fake_chat, fake_model, monkeypatch):
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.ask_low": live()["band.low"],
+                                                    "band.ask_high": live()["band.keep"]})
     c = first_pass(pg, corpus, 0.95)
     n = len(fake_model)
     assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0
@@ -264,7 +260,7 @@ def test_with_the_asked_band_narrowed_a_score_at_the_keep_level_needs_no_second_
     assert committed(pg, c)[c.index[0]["unit_id"]] == (True, "score", False)
 
 
-def test_a_rerun_with_everything_stored_asks_nothing(pg, corpus, fake_chat, fake_model, band_on):
+def test_a_rerun_with_everything_stored_asks_nothing(pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.6, units=(0, 1))
     second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
     n_model, n_chat = len(fake_model), len(fake_chat.calls)
@@ -274,7 +270,7 @@ def test_a_rerun_with_everything_stored_asks_nothing(pg, corpus, fake_chat, fake
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_ctx'")[0] == 2
 
 
-def test_a_dry_run_and_a_scope_with_no_such_project_ask_nothing(pg, corpus, fake_chat, fake_model, band_on):
+def test_a_dry_run_and_a_scope_with_no_such_project_ask_nothing(pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.6)
     n = len(fake_model)
     assert second.measure_second(pg, corpus, c, "cra", dry_run=True, **QUIET) is None
@@ -283,24 +279,7 @@ def test_a_dry_run_and_a_scope_with_no_such_project_ask_nothing(pg, corpus, fake
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_ctx'")[0] == 0
 
 
-def test_with_the_band_off_the_second_look_does_nothing(pg, corpus, fake_chat, fake_model):
-    c = first_pass(pg, corpus, 0.6)
-    n = len(fake_model)
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0
-    assert second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 0
-    assert len(fake_model) == n and not fake_chat.calls
-    # the floor of the tests is 0.5, so 0.6 is committed by the floor alone
-    assert committed(pg, c)[c.index[0]["unit_id"]] == (True, "score", False)
-
-
-def test_the_pair_stage_asks_nothing_under_the_band_rule(pg, corpus, fake_model, band_on):
-    c = first_pass(pg, corpus, 0.95)
-    n = len(fake_model)
-    assert checks.pairs(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 0
-    assert len(fake_model) == n
-
-
-def test_later_stages_ask_about_the_sentences_committed_under_the_band_rule(pg, corpus, fake_chat, fake_model, band_on):
+def test_later_stages_ask_about_the_sentences_committed_under_the_band_rule(pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.6)
     assert checks.committed_at_ask(pg, c, "cra") == []                # in the band, no second look: not asked
     second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
@@ -316,7 +295,7 @@ def test_later_stages_ask_about_the_sentences_committed_under_the_band_rule(pg, 
     assert checks.committed_at_ask(pg, c, "cra") == []
 
 
-def test_digital_is_asked_once_per_committed_sentence_and_a_rerun_asks_nothing(pg, corpus, fake_chat, fake_model, band_on):
+def test_digital_is_asked_once_per_committed_sentence_and_a_rerun_asks_nothing(pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.95, units=(0, 2))
     u0, u1 = c.index[0]["unit_id"], c.index[2]["unit_id"]
     assert second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 2
@@ -333,7 +312,7 @@ def test_digital_is_asked_once_per_committed_sentence_and_a_rerun_asks_nothing(p
 
 
 def test_loosening_band_context_counts_the_newly_committed_sentences_with_no_model_call(
-        pg, corpus, fake_chat, fake_model, band_on, monkeypatch):
+        pg, corpus, fake_chat, fake_model, monkeypatch):
     c = first_pass(pg, corpus, 0.6, units=(0,))
     u0 = c.index[0]["unit_id"]
     live = panel.settings
@@ -354,7 +333,7 @@ def test_loosening_band_context_counts_the_newly_committed_sentences_with_no_mod
     assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat)
 
 
-def test_policy_is_asked_of_committed_digital_sentences_only_and_a_rerun_asks_nothing(pg, corpus, fake_chat, band_on):
+def test_policy_is_asked_of_committed_digital_sentences_only_and_a_rerun_asks_nothing(pg, corpus, fake_chat):
     c = first_pass(pg, corpus, 0.95, units=(0, 2))
     u0, u1 = c.index[0]["unit_id"], c.index[2]["unit_id"]            # u1 (the road) is committed but not digital
     fake_chat.reply = lambda prompt: ('{"answer": "policy"}' if "road" in prompt else '{"answer": "investment"}')
@@ -367,15 +346,8 @@ def test_policy_is_asked_of_committed_digital_sentences_only_and_a_rerun_asks_no
     assert len(fake_chat.calls) - n == 1
 
 
-def test_with_the_digital_rule_off_policy_is_asked_of_every_committed_sentence(pg, corpus, fake_chat, band_on, monkeypatch):
-    live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "digital.on": False})
-    c = first_pass(pg, corpus, 0.95, units=(0, 2))
-    assert second.policy(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 2
-
-
 def test_publish_carries_the_new_columns_and_keeps_the_not_digital_out_of_the_commitments(
-        pg, corpus, fake_chat, fake_model, band_on):
+        pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.6, units=(0, 2))
     pg.execute(f"UPDATE {db.SCHEMA}.scores SET score = 0.95 WHERE kind = 'measure' AND item_id = %s",
                (c.index[2]["unit_id"],))
@@ -402,11 +374,11 @@ def test_publish_carries_the_new_columns_and_keeps_the_not_digital_out_of_the_co
     assert [(u, p) for u, p, _ in nd] == [(u1, "P1")]
     assert u1 not in {u for (u,) in db.rows(pg, f"SELECT unit_id FROM {db.SCHEMA}.commitment_units")}
     assert u0 in {u for (u,) in db.rows(pg, f"SELECT unit_id FROM {db.SCHEMA}.commitment_units")}
-    assert db.one(pg, f"SELECT band_on, band_low, digital_on, digital_floor, second_model "
-                      f"FROM {db.SCHEMA}.dashboard_settings") == (True, 0.5, True, 0.5, "anthropic/claude-haiku-5.5")
+    assert db.one(pg, f"SELECT band_low, digital_floor, second_model "
+                      f"FROM {db.SCHEMA}.dashboard_settings") == (0.5, 0.5, "anthropic/claude-haiku-5.5")
 
 
-def test_publish_says_how_many_pairs_wait_for_a_second_look(pg, corpus, fake_model, band_on):
+def test_publish_says_how_many_pairs_wait_for_a_second_look(pg, corpus, fake_model):
     c = first_pass(pg, corpus, 0.6)
     logged = []
     decide.publish(pg, corpus, corpus=c, log=logged.append, views=False)
@@ -416,7 +388,7 @@ def test_publish_says_how_many_pairs_wait_for_a_second_look(pg, corpus, fake_mod
 
 @pytest.mark.parametrize("step,kind", [("digital", "digital"), ("policy", "policy")])
 def test_a_run_of_some_measures_keeps_the_rows_of_the_other_measures_sentences(
-        pg, corpus, fake_chat, fake_model, band_on, step, kind):
+        pg, corpus, fake_chat, fake_model, step, kind):
     c = first_pass(pg, corpus, 0.95, units=(0, 2))
     other = "X:other-measures-sentence"
     run = getattr(second, step)
@@ -480,7 +452,7 @@ def pin(monkeypatch, **kw):
 
 
 def test_a_pair_above_the_keep_line_gets_a_second_look_and_stays_committed_whatever_it_says(
-        pg, corpus, fake_chat, band_on):
+        pg, corpus, fake_chat):
     c = first_pass(pg, corpus, 0.95)
     u0 = c.index[0]["unit_id"]
     fake_chat.reply = lambda prompt: '{"grade": 0}'
@@ -490,7 +462,7 @@ def test_a_pair_above_the_keep_line_gets_a_second_look_and_stays_committed_whate
     assert row["second_grade"] == 0 and row["score_context"] is not None      # stored, and readable
 
 
-def test_moving_the_keep_line_up_changes_the_decision_with_no_model_call(pg, corpus, fake_chat, fake_model, band_on,
+def test_moving_the_keep_line_up_changes_the_decision_with_no_model_call(pg, corpus, fake_chat, fake_model,
                                                                           monkeypatch):
     c = first_pass(pg, corpus, 0.95)
     u0 = c.index[0]["unit_id"]
@@ -507,7 +479,7 @@ def test_moving_the_keep_line_up_changes_the_decision_with_no_model_call(pg, cor
     assert (len(fake_model), len(fake_chat.calls)) == calls
 
 
-def test_the_asked_band_is_what_is_asked_and_never_below_it(pg, corpus, fake_chat, band_on, monkeypatch):
+def test_the_asked_band_is_what_is_asked_and_never_below_it(pg, corpus, fake_chat, monkeypatch):
     c = first_pass(pg, corpus, 0.45, units=(0, 1))
     assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0       # under band.ask_low
     pin(monkeypatch, **{"band.ask_low": 0.4, "band.low": 0.4})
@@ -524,7 +496,7 @@ def test_the_asked_band_is_what_is_asked_and_never_below_it(pg, corpus, fake_cha
     ({"link.asset_ask_high": 0.2}, "link.asset_ask_high (0.2) is below"),
 ])
 def test_a_decision_band_wider_than_the_asked_band_fails_loudly(monkeypatch, settings, words):
-    pin(monkeypatch, **{"band.on": True}, **settings)
+    pin(monkeypatch, **settings)
     with pytest.raises(SystemExit) as e:
         decide.band()
         decide.package_band()

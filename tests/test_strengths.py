@@ -2,6 +2,8 @@
 asset-level links and the table they publish (src/wbg_portfolio/second.py,
 checks.py, decide.py). The fake decision and chat models only."""
 
+import pytest
+
 from helpers import QUIET, count, first_pass
 from wbg_portfolio import checks
 from wbg_portfolio import db
@@ -13,11 +15,20 @@ from wbg_portfolio import second
 NAMES = ["cra"]
 
 
+@pytest.fixture
+def asked_where_it_decides(monkeypatch):
+    """The package asset second look asked only for first-pass P(yes) in [link.asset_band_low, link.asset_yes)."""
+    from wbg_portfolio import panel
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.asset_ask_low": live()["link.asset_band_low"],
+                                                    "link.asset_ask_high": live()["link.asset_yes"]})
+
+
 def ready(pg, corpus):
     c = first_pass(pg, corpus, 0.95, units=(0, 1))
     funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
     second.digital(pg, corpus, c, NAMES, api_key="k", **QUIET)
-    assert checks.links(pg, corpus, c, NAMES, api_key="k", **QUIET) is not None
+    assert checks.package_assets(pg, corpus, c, api_key="k", **QUIET) is not None
     return c
 
 
@@ -27,24 +38,14 @@ def set_first_pass(pg, package, asset, score):
     pg.commit()
 
 
-def test_the_old_link_question_is_retired_when_the_strengths_are_on(pg, corpus, fake_model, pipeline_on):
+def test_no_commitment_to_package_question_is_asked(pg, corpus, fake_model):
     ready(pg, corpus)
     assert count(pg, "package_asset") == 4 and count(pg, "link") == 0
     assert not any("carrying out" in json_q for b in fake_model for json_q in
                    (q["instructions"] for q in b["questions"].values()))
 
 
-def test_the_old_link_question_is_asked_while_the_strengths_are_off(pg, corpus, fake_model, monkeypatch):
-    from wbg_portfolio import panel
-    live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.strengths": False})
-    c = first_pass(pg, corpus, 0.95, units=(0,))
-    funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
-    checks.links(pg, corpus, c, NAMES, api_key="k", **QUIET)
-    assert count(pg, "link") > 0
-
-
-def test_a_package_asset_in_the_band_needs_the_chat_models_yes(pg, corpus, fake_chat, pipeline_on, narrow_asks):
+def test_a_package_asset_in_the_band_needs_the_chat_models_yes(pg, corpus, fake_chat, asked_where_it_decides):
     c = ready(pg, corpus)
     set_first_pass(pg, "P1-1", "fiber", 0.4)
     assert decide.package_asset_sets(pg) == {"P1-1": {"towers"}}
@@ -66,7 +67,7 @@ def test_a_package_asset_in_the_band_needs_the_chat_models_yes(pg, corpus, fake_
 
 
 def test_the_package_pair_above_the_yes_line_is_asked_and_moving_the_line_up_asks_nothing(
-        pg, corpus, fake_chat, pipeline_on, monkeypatch):
+        pg, corpus, fake_chat, monkeypatch):
     from wbg_portfolio import panel
     c = ready(pg, corpus)
     set_first_pass(pg, "P1-1", "fiber", 0.8)                            # above link.asset_yes (0.67)
@@ -91,19 +92,15 @@ def test_the_package_pair_above_the_yes_line_is_asked_and_moving_the_line_up_ask
     assert len(fake_chat.calls) == n                                    # a decision line moved: nothing asked
 
 
-def test_a_dry_run_and_the_strengths_off_ask_nothing(pg, corpus, fake_chat, pipeline_on, monkeypatch):
+def test_a_dry_run_asks_nothing(pg, corpus, fake_chat):
     c = ready(pg, corpus)
     set_first_pass(pg, "P1-1", "fiber", 0.4)
     assert second.package_asset_second(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None
-    from wbg_portfolio import panel
-    live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.strengths": False})
-    assert second.package_asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
     assert not fake_chat.calls and decide.package_asset_sets(pg) == {"P1-1": {"towers"}}
 
 
 def test_the_strong_question_is_asked_of_packages_with_an_asset_for_the_measures_of_their_project(
-        pg, corpus, fake_model, pipeline_on):
+        pg, corpus, fake_model):
     c = ready(pg, corpus)
     n = len(fake_model)
     assert checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
@@ -119,10 +116,10 @@ def test_the_strong_question_is_asked_of_packages_with_an_asset_for_the_measures
     assert checks.package_measure(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None and len(fake_model) == n
 
 
-def test_a_measure_with_no_committed_digital_sentence_in_the_project_is_not_asked(pg, corpus, fake_model, pipeline_on):
+def test_a_measure_with_no_committed_digital_sentence_in_the_project_is_not_asked(pg, corpus, fake_model):
     c = first_pass(pg, corpus, 0.95, units=(0,))
     funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
-    checks.links(pg, corpus, c, NAMES, api_key="k", **QUIET)            # digital never asked: not digital
+    checks.package_assets(pg, corpus, c, api_key="k", **QUIET)         # digital never asked: not digital
     n = len(fake_model)
     assert checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
     assert len(fake_model) == n
@@ -139,7 +136,7 @@ def links(pg):
         pg, f"SELECT unit_id, package_id, strength, shared_asset_ids, strong_p FROM {db.SCHEMA}.commitment_package_links")}
 
 
-def test_strong_and_asset_links_are_one_row_per_pair(pg, corpus, fake_chat, pipeline_on):
+def test_strong_and_asset_links_are_one_row_per_pair(pg, corpus, fake_chat):
     c = ready(pg, corpus)
     u0, u1 = c.index[0]["unit_id"], c.index[1]["unit_id"]
     set_first_pass(pg, "P1-1", "fiber", 0.4)
@@ -168,10 +165,23 @@ def test_strong_and_asset_links_are_one_row_per_pair(pg, corpus, fake_chat, pipe
     assert set(links(pg)) == {(u0, "P1-1")}
 
 
-def test_no_link_row_without_the_strengths(pg, corpus, fake_model):
-    c = first_pass(pg, corpus, 0.95, units=(0,))
-    funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
-    checks.links(pg, corpus, c, NAMES, api_key="k", **QUIET)
+def test_the_views_the_app_reads_carry_both_kinds_of_link(pg, corpus, fake_chat):
+    """commitment_package_status (read by app.packages and app.coming_up) is fed by the links: strength
+    strong with the strong-link probability, or asset with none."""
+    c = ready(pg, corpus)
+    checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET)
     publish(pg, corpus, c)
-    assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.commitment_package_links")[0] == 0
-    assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.commitment_packages")[0] > 0
+    q = f"SELECT package_id, strength, link_probability, units_linked FROM {db.SCHEMA}.commitment_package_status"
+    got = db.rows(pg, q)
+    assert {(p, s, n) for p, s, _, n in got} == {("P1-1", "strong", 1)} and len(got) == 2   # a commitment each
+    assert all(float(pr) >= 0.7 for _, _, pr, _ in got)
+    link_floor, pair_floor = db.one(pg, f"SELECT package_link_min_probability, pair_check_floor "
+                                        f"FROM {db.SCHEMA}.dashboard_settings")
+    assert float(link_floor) == 0.7 and pair_floor is None
+    pg.execute(f"UPDATE {db.SCHEMA}.scores SET score = 0.5 WHERE kind = 'package_measure'")
+    pg.commit()
+    decide.publish(pg, corpus, corpus=c, log=lambda *_: None)
+    assert db.rows(pg, q) == [("P1-1", "asset", None, 1)]      # the tower sentence shares an asset; the fibre one does not
+    assert db.one(pg, f"SELECT measures_linked, commitments_linked, best_commitment_probability "
+                      f"FROM {db.SCHEMA}.packages_with_commitments WHERE package_id = 'P1-1'") == (["cra"], 1, None)
+    assert db.one(pg, f"SELECT count(*), min(strength) FROM {db.SCHEMA}.commitment_packages_in_context") == (1, "asset")

@@ -782,13 +782,9 @@ def run(args, data):
                         checks.propose(conn, data, corpus, name, api_key=key, dry_run=args.dry_run)
                         if checks.types(conn, data, corpus, name, **no_projects) is None and not args.dry_run:
                             ok = False
-                if ok:
-                    # across every active measure, whatever subset this run was given:
-                    # the pair and link stages replace their whole kind
-                    ok = checks.pairs(conn, data, corpus, every, **no_projects) is not None or args.dry_run
             elif stage == "link":
-                ok = checks.links(conn, data, corpus, every, **kw) is not None or args.dry_run
-                if ok and decide.link_strengths():
+                ok = checks.package_assets(conn, data, corpus, **kw) is not None or args.dry_run
+                if ok:
                     for step in (second.package_asset_second, checks.package_measure):
                         if step(conn, data, corpus, every, **kw) is None and not args.dry_run:
                             ok = False

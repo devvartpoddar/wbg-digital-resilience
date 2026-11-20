@@ -1,14 +1,14 @@
 -- The few readings the dashboard views apply, in one place. Each value is a
--- control-panel setting (inputs/config/control_panel.csv, dashboard.*),
--- filled in at publish: a change is one edit there and a publish. Upstream,
--- only dashboard.commitment_link_levels is also read (by the package links,
--- src/wbg_portfolio/link_packages.py, keyed on it); the model's answers depend on none.
+-- control-panel setting (inputs/config/control_panel.csv), filled in at
+-- publish: a change is one edit there and a publish. Upstream, only
+-- dashboard.commitment_link_levels is also read (by the package links,
+-- src/wbg_portfolio/decide.py); the model's answers depend on none.
 DROP VIEW IF EXISTS wbg.dashboard_settings CASCADE;
 CREATE VIEW wbg.dashboard_settings AS
 SELECT
-  -- A unit counts towards a commitment when it is committed (its posterior
-  -- at its measure's floor, control panel floor.*), its posterior is at
-  -- least this (a further floor over every measure; 0),
+  -- A unit counts towards a commitment when it is committed (the band rule,
+  -- control panel band.*), its posterior is at least this (a further floor
+  -- over every measure; 0),
   {{panel:dashboard.commitment_min_probability}}::numeric AS commitment_min_probability,
   -- and its asset is found at one of these levels: 'unit', the sentence's
   -- own words name it; 'paragraph', the sentence names none and an earlier
@@ -17,40 +17,35 @@ SELECT
   {{panel:dashboard.commitment_link_levels}} AS commitment_link_levels,
   -- Only Investment Project Financing operations.
   {{panel:dashboard.ipf_only}} AS ipf_only,
-  -- A package is linked to a commitment at this probability or more.
-  {{panel:dashboard.package_link_min_probability}}::numeric AS package_link_min_probability,
+  -- The probability at which a package is strongly linked to a measure
+  -- (link.strong_yes). A package linked only by a shared asset has none.
+  {{panel:link.strong_yes}}::numeric AS package_link_min_probability,
   -- Another project prints a sentence near-identically when its committed
   -- sentences hold at least this share of the sentence's six-word runs.
   {{panel:dashboard.near_copy_share}}::numeric AS near_copy_share,
-  -- A unit two measures both commit leaves a measure the pair check says it
-  -- is not (only the other measure, or neither; src/wbg_portfolio/commit_checks.py).
-  {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks,
-  -- when its side's posterior (p_keep_a or p_keep_b: the measure's graded
-  -- question again, the other beside it) falls short of this (floor.pair_check).
-  {{panel:floor.pair_check}}::numeric AS pair_check_floor,
-  -- The band rule (control panel band.*), which replaces the per-measure floors
-  -- and the pair check while band_on: a first-pass score of band_keep or more is
-  -- committed; one from band_low to band_keep is committed only when the
+  -- Kept so a reader that asks for it still finds the column: there is no
+  -- pair check any more, so it is always null.
+  NULL::numeric AS pair_check_floor,
+  -- The band rule (control panel band.*): a first-pass score of band_keep or
+  -- more is committed; one from band_low to band_keep is committed only when the
   -- paragraph-aware score reaches band_context and the chat model's grade
   -- reaches band_second_grade. Decided at publish (measure_findings.is_committed);
   -- shown here so a reader sees the rule behind the counts.
-  {{panel:band.on}} AS band_on,
   {{panel:band.low}}::numeric AS band_low,
   {{panel:band.keep}}::numeric AS band_keep,
   {{panel:band.context}}::numeric AS band_context,
   {{panel:band.second_grade}}::numeric AS band_second_grade,
   -- The digital rule: a committed sentence counts only when is_digital (digital_floor).
-  {{panel:digital.on}} AS digital_on,
   {{panel:digital.floor}}::numeric AS digital_floor,
-  -- Package links: strengths replace the old link question when link_strengths.
-  {{panel:link.strengths}} AS link_strengths,
+  -- Package links: strong when the package, asked alone, is about the measure
+  -- (link_strong_yes); asset when it shares a top-level asset.
   {{panel:link.strong_yes}}::numeric AS link_strong_yes,
   {{panel:link.asset_band_low}}::numeric AS link_asset_band_low,
   {{panel:link.asset_yes}}::numeric AS link_asset_yes,
   {{panel:activities.max_sentences}}::integer AS activities_max_sentences,
   {{panel:second.model}} AS second_model;
 COMMENT ON VIEW wbg.dashboard_settings IS
-  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, the posterior each side needs to stay, the band rule''s thresholds and whether it is on, the digital rule and its floor, the package-link settings and the chat model of the second looks.';
+  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package is strongly linked (package_link_min_probability, the same as link_strong_yes), the share of six-word runs that makes another project''s wording a near copy, the band rule''s thresholds, the digital rule and its floor, the package-link settings and the chat model of the second looks. pair_check_floor is always null: the pair check no longer exists.';
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the

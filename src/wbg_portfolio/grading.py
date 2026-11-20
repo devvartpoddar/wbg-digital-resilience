@@ -37,15 +37,20 @@ from wbg_portfolio.paths import where
 NEAR = 0.2                       # "near" a floor: within this of it
 ELUSION_BAND = 0.10              # "near" a gate: within this much below it
 TRAIN = {"measure": {"train:near": 30, "train:far": 10}, "asset": {"train:near": 15, "train:far": 5},
-         "asset_paragraph": 60, "random": 50, "pairs": 15, "package_assets": 15, "links": 15}
+         "asset_paragraph": 60, "random": 50, "package_assets": 15}
 EVAL = {"committed_total": 900, "not_committed": 30, "asset": {"eval:asset_yes": 20, "eval:asset_no": 5},
-        "asset_paragraph": 40, "random": 50, "package_assets": 15, "links": 15}
+        "asset_paragraph": 40, "random": 50, "package_assets": 15}
 ELUSION = {"near": 25, "far": 25}
 GRADES = ["0", "1", "2", "3", "unsure"]
 YES_NO = ["yes", "no", "unsure"]
-FIT_KINDS = ("type", "pair", "package_asset", "link")
-FLOOR_OF = {"measure": None, "asset": "asset.floor", "type": "floor.types", "pair": "floor.pair_check",
-            "package_asset": "link.asset_yes", "link": "dashboard.package_link_min_probability"}
+FIT_KINDS = ("type", "package_asset")
+FLOOR_OF = {"measure": None, "asset": "asset.floor", "type": "floor.types", "package_asset": "link.asset_yes"}
+
+
+def measure_floor():
+    """The cut the evaluation reads a measure's first-pass score at, and the draw's "near" strata
+    are measured from (floor.default); the pipeline's own commitment is the band rule."""
+    return float(panel.require("floor.default"))
 
 
 def sha(text):
@@ -90,20 +95,17 @@ def frames(conn, data, corpus, names):
             continue
         lab = Q.load(name)[0][0]
         f["measures"][name] = {"units": units, "label_id": lab["id"], "name": lab["name"],
-                               "definition": lab["definition"], "floor": decide.floor(name),
+                               "definition": lab["definition"], "floor": measure_floor(),
                                "types": decide.types_of(conn, corpus, name),
                                "type_defs": {t["type_id"]: t for t in labels.load_types(name)}}
     amap = decide.asset_map(conn, corpus)
     assets = Q.load(Q.ASSETS)[0]
     f["assets"] = {"amap": amap, "ua": decide.unit_assets(corpus, amap), "defs": {a["id"]: a for a in assets},
                    "floor": float(panel.require("asset.floor"))}
-    f["pairs"] = decide.pair_checks(conn, corpus)
     from wbg_portfolio import checks
     f["packages"] = {p["package_id"]: p for p in checks.load_packages(data)}
     f["package_assets"] = [(lset, aid, pid, float(score)) for lset, aid, pid, score, *_ in
                            decide.scores(conn, "package_asset") if pid in f["packages"]]
-    f["links"] = [(lset, lid, item, float(score)) for lset, lid, item, score, *_ in decide.scores(conn, "link")
-                  if item.rsplit("|", 1)[1] in f["packages"] and item.rsplit("|", 1)[0] in corpus.row_of]
     return f
 
 
@@ -162,13 +164,6 @@ def items_and_targets(f, corpus, design, data):
             for asset, _ in win:
                 add(("sentence", uid, (("asset", asset),)), "asset_paragraph")
     targets["asset_paragraph"] = (EVAL if ev else TRAIN)["asset_paragraph"]
-    if not ev:
-        for uid, sa, sb, ka, kb, *_ in f["pairs"]:
-            s = band(min(ka, kb), BANDS)
-            if s:
-                add(("sentence", uid, (("measure", sa), ("measure", sb))), f"pairs:{s}")
-        for s, *_ in BANDS:
-            targets[f"pairs:{s}"] = TRAIN["pairs"]
     for r in corpus.index:
         add(("sentence", r["unit_id"], (("block",),)), "random")
     targets["random"] = (EVAL if ev else TRAIN)["random"]
@@ -177,13 +172,8 @@ def items_and_targets(f, corpus, design, data):
         s = band(score, BANDS)
         if s:
             add(("package", pid, (("package_asset", aid),)), f"package_assets:{pre}{s}")
-    for lset, lid, item, score in f["links"]:
-        s = band(score, BANDS)
-        if s:
-            add(("package", item.rsplit("|", 1)[1], (("link", lset, item.rsplit("|", 1)[0]),)), f"links:{pre}{s}")
     for s, *_ in BANDS:
         targets[f"package_assets:{pre}{s}"] = (EVAL if ev else TRAIN)["package_assets"]
-        targets[f"links:{pre}{s}"] = (EVAL if ev else TRAIN)["links"]
     return items, targets
 
 
@@ -306,14 +296,6 @@ def build_tasks(f, corpus, drawn, items, design, seed, scale):
                          definition=a["definition"], question=pk_q[ln[1]]["instructions"], scale=fit_text,
                          answer="grade", allowed=YES_NO)
                 out.append(t)
-            elif ln[0] == "link":
-                name, uid2 = ln[1], ln[2]
-                m = f["measures"][name]
-                t.update(kind="link", label_set=name, label_id=m["label_id"], label_name=m["name"],
-                         definition=m["definition"], commitment=corpus.texts[uid2], unit_id=uid2,
-                         commitment_component=corpus.component(uid2), item_sha=p_sha(corpus.texts[uid2], base["item_sha"]),
-                         question=Q.LINK_QUESTION["instructions"], scale=fit_text, answer="grade", allowed=YES_NO)
-                out.append(t)
         # the closing task: anything else that applies (measures and assets not listed)
         k += 1
         listed = {x["label_set"] if x["kind"] == "measure" else x["label_id"]
@@ -325,10 +307,6 @@ def build_tasks(f, corpus, drawn, items, design, seed, scale):
                                   "concern? Answer none, or ids joined by |."),
                         allowed=["none"] + [i for i in ids if i not in listed], answer="ids"))
     return out
-
-
-def p_sha(text, package_sha):
-    return sha(sha(text) + "|" + package_sha)
 
 
 def draw(conn, data, corpus, seed, design="train", names=None, log=print, dry_run=False):
@@ -405,7 +383,7 @@ def check_fills(tasks, fills):
 
 def grade_rows(tasks, fills, source, grader_default=""):
     """The grade rows a filled task file gives: kinds measure, asset, type,
-    pair (from two measure grades), package_asset, link, other."""
+    package_asset, other."""
     by_block = defaultdict(list)
     for t in tasks:
         by_block[t["block"]].append(t)
@@ -423,8 +401,6 @@ def grade_rows(tasks, fills, source, grader_default=""):
                 qsha[key] = Q.sha(next(iter(Q.type_questions(label_set).values()))[label_id])
             elif kind == "package_asset":
                 qsha[key] = Q.sha(Q.package_asset_questions()[label_id])
-            elif kind == "link":
-                qsha[key] = Q.sha(Q.LINK_QUESTION)
             else:
                 qsha[key] = ""
         return qsha[key]
@@ -449,7 +425,7 @@ def grade_rows(tasks, fills, source, grader_default=""):
                 parent = measures.get(t["label_set"])
                 if parent and parent[0] >= lo:
                     rows.append(row(t, "type", t["label_set"], t["label_id"], g))
-            elif t["kind"] in ("asset", "package_asset", "link"):
+            elif t["kind"] in ("asset", "package_asset"):
                 rows.append(row(t, t["kind"], t["label_set"], t["label_id"], g))
             elif t["kind"] == "other":
                 ids = set() if g == "none" else {x.strip() for x in g.split("|") if x.strip()}
@@ -457,16 +433,6 @@ def grade_rows(tasks, fills, source, grader_default=""):
                     is_asset = any(a["id"] == i for a in Q.load(Q.ASSETS)[0])
                     rows.append(row(t, "other", Q.ASSETS if is_asset else i, i if is_asset else "", "yes",
                                     question_sha=""))
-        # pair checks: two measure grades on one sentence answer them
-        names = sorted(measures)
-        for i, a in enumerate(names):
-            for b in names[i + 1:]:
-                (ga, ta), (gb, tb) = measures[a], measures[b]
-                w = max(ta["weight"], tb["weight"])
-                rows.append(row(ta, "pair", f"{a}|{b}", "keep_a", "yes" if ga >= lo else "no", weight=w,
-                                question_sha=Q.sha(Q.pair_questions(a, b)["keep_a"])))
-                rows.append(row(tb, "pair", f"{a}|{b}", "keep_b", "yes" if gb >= lo else "no", weight=w,
-                                question_sha=Q.sha(Q.pair_questions(a, b)["keep_b"])))
     return rows
 
 
@@ -529,7 +495,7 @@ def spotcheck(data, seed, fills_path, out_path):
 
 def import_legacy(conn, data, log=print):
     """The grades of the file-based sheets (data/labels/*_units.csv,
-    pairs.csv, package_assets.csv, package_links.csv) into the store, once."""
+    package_assets.csv) into the store, once."""
     import glob
     rows = []
     now = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -558,28 +524,19 @@ def import_legacy(conn, data, log=print):
                     for tid in sorted(types):
                         rows.append(dict(base, kind="type", label_set=name, label_id=tid,
                                          grade="yes" if tid in yes else "no"))
-    for file, kind in (("package_assets.csv", "package_asset"), ("package_links.csv", "link"),
-                       ("pairs.csv", "pair")):
-        path = where(data, "labels", file)
-        if not os.path.exists(path):
-            continue
+    path = where(data, "labels", "package_assets.csv")
+    if os.path.exists(path):
         with open(path, newline="", encoding="utf-8") as fh:
             for r in csv.DictReader(fh):
                 a = (r.get("answer") or r.get("applies") or "").strip().lower()
-                base = {"design": "eval" if (r.get("stratum") or "").startswith("eval") else "train",
-                        "grader": "person", "source": r.get("source", file),
-                        "question_sha": r.get("question_sha256", ""), "stratum": r.get("stratum", ""),
-                        "weight": float(r.get("weight") or 1.0), "note": "", "graded_at": r.get("graded_on") or now}
-                if kind == "package_asset" and a in ("yes", "no"):
-                    rows.append(dict(base, kind=kind, label_set=Q.ASSETS, label_id=r["asset_id"],
-                                     item_sha=r["package_sha256"], grade=a))
-                elif kind == "link" and a in ("yes", "no"):
-                    rows.append(dict(base, kind=kind, label_set=r["label_set"], label_id=Q.load(r["label_set"])[0][0]["id"],
-                                     item_sha=p_sha_from(r["text_sha256"], r["package_sha256"]), grade=a))
-                elif kind == "pair" and a in ("only a", "only b", "both", "neither"):
-                    for side, yes in (("keep_a", a in ("only a", "both")), ("keep_b", a in ("only b", "both"))):
-                        rows.append(dict(base, kind=kind, label_set=f"{r['set_a']}|{r['set_b']}", label_id=side,
-                                         item_sha=r["text_sha256"], grade="yes" if yes else "no"))
+                if a in ("yes", "no"):
+                    rows.append({"design": "eval" if (r.get("stratum") or "").startswith("eval") else "train",
+                                 "grader": "person", "source": r.get("source", "package_assets.csv"),
+                                 "question_sha": r.get("question_sha256", ""), "stratum": r.get("stratum", ""),
+                                 "weight": float(r.get("weight") or 1.0), "note": "",
+                                 "graded_at": r.get("graded_on") or now, "kind": "package_asset",
+                                 "label_set": Q.ASSETS, "label_id": r["asset_id"],
+                                 "item_sha": r["package_sha256"], "grade": a})
     seen = {}
     for r in rows:                                   # the latest grade of an item wins
         k = (r["kind"], r["label_set"], r["label_id"], r["item_sha"], r["design"])
@@ -588,10 +545,6 @@ def import_legacy(conn, data, log=print):
     n = store_grades(conn, list(seen.values()))
     log(f"check: {n} grades imported from the file sheets")
     return n
-
-
-def p_sha_from(text_sha, package_sha):
-    return sha(text_sha + "|" + package_sha)
 
 
 # ---------------------------------------------------------------- evaluation
@@ -661,53 +614,19 @@ def blocks(conn, corpus, kind, names):
                 if v is not None:
                     b[2][u] = v
                 b[4][u] = design
-    elif kind == "pair":
-        raw = {(lset, side, u): float(s) for lset, side, u, s, *_ in decide.scores(conn, "pair")}
-        for lset, side, item_sha, design, grade, w, stratum in grades_of(conn, kind):
-            u = by_sha.get(item_sha)
-            if u is None or (lset, side, u) not in raw:
-                continue
-            a, b_ = lset.split("|")
-            b = out.setdefault((lset, side), ([], {}, {}, Q.sha(Q.pair_questions(a, b_)[side]), {}))
-            b[0].append((f"{u}#{lset}", 1 if grade == "yes" else 0, float(w or 1), set(corpus.projects(u))))
-            b[1][f"{u}#{lset}"] = raw[(lset, side, u)]
-            v = corpus.vector(u)
-            if v is not None:
-                b[2][f"{u}#{lset}"] = v
-            b[4][f"{u}#{lset}"] = design
-    elif kind in ("package_asset", "link"):
+    elif kind == "package_asset":
         from wbg_portfolio import checks
         packages = {p["sha"]: p for p in checks.load_packages(corpus.data)}
-        if kind == "package_asset":
-            raw = {(aid, pid): float(s) for _, aid, pid, s, *_ in decide.scores(conn, "package_asset")}
-            pq = Q.package_asset_questions()
-            by_pid = {p["package_id"]: p for p in packages.values()}
-            for lset, aid, item_sha, design, grade, w, stratum in grades_of(conn, kind):
-                p = packages.get(item_sha)
-                if not p or (aid, p["package_id"]) not in raw:
-                    continue
-                b = out.setdefault((Q.ASSETS, aid), ([], {}, {}, Q.sha(pq[aid]), {}))
-                b[0].append((p["package_id"], 1 if grade == "yes" else 0, float(w or 1), {p["project_id"]}))
-                b[1][p["package_id"]] = raw[(aid, p["package_id"])]
-                b[4][p["package_id"]] = design
-        else:
-            raw = {(lset, item): float(s) for lset, lid, item, s, *_ in decide.scores(conn, "link")}
-            link_sha = {}
-            for (lset, item) in raw:
-                u, pid = item.rsplit("|", 1)
-                if u in corpus.texts:
-                    link_sha[(lset, p_sha(corpus.texts[u], next((p["sha"] for p in packages.values()
-                                                                 if p["package_id"] == pid), "")))] = (lset, item)
-            for lset, lid, item_sha, design, grade, w, stratum in grades_of(conn, kind):
-                key = link_sha.get((lset, item_sha))
-                if not key:
-                    continue
-                b = out.setdefault(("links", "link"), ([], {}, {}, Q.sha(Q.LINK_QUESTION), {}))
-                item = key[1]
-                b[0].append((item, 1 if grade == "yes" else 0, float(w or 1),
-                             set(corpus.projects(item.rsplit("|", 1)[0]))))
-                b[1][item] = raw[key]
-                b[4][item] = design
+        raw = {(aid, pid): float(s) for _, aid, pid, s, *_ in decide.scores(conn, "package_asset")}
+        pq = Q.package_asset_questions()
+        for lset, aid, item_sha, design, grade, w, stratum in grades_of(conn, kind):
+            p = packages.get(item_sha)
+            if not p or (aid, p["package_id"]) not in raw:
+                continue
+            b = out.setdefault((Q.ASSETS, aid), ([], {}, {}, Q.sha(pq[aid]), {}))
+            b[0].append((p["package_id"], 1 if grade == "yes" else 0, float(w or 1), {p["project_id"]}))
+            b[1][p["package_id"]] = raw[(aid, p["package_id"])]
+            b[4][p["package_id"]] = design
     return out
 
 
@@ -760,8 +679,7 @@ def evaluate_kind(conn, corpus, kind, names, log, grid=False):
             oof_all.append(o.get(item, score[item]))
             ys.append(y)
             ws.append(w)
-    fl = decide.floor(names[0]) if kind == "measure" and len(names) == 1 else \
-        float(panel.require(FLOOR_OF[kind])) if FLOOR_OF.get(kind) else float(panel.require("floor.default"))
+    fl = float(panel.require(FLOOR_OF[kind])) if FLOOR_OF.get(kind) else measure_floor()
     all_rows = [(i, y, w, None) for i, (y, w) in enumerate(zip(ys, ws))]
     lines += ["", "Raw score:"] + pr_table(all_rows, dict(enumerate(raw_all)), fl, kind)
     if oof:
@@ -868,8 +786,7 @@ def evaluate(conn, data, corpus=None, names=None, log=print, grid=False):
              "sample size. Training rows fit the layers and gates; evaluation rows never do. Figures on "
              "training rows are upper estimates: quote an evaluation draw's.", ""]
     quality = []
-    for kind, ns in (("measure", names), ("asset", [Q.ASSETS]), ("type", names), ("pair", names),
-                     ("package_asset", names), ("link", names)):
+    for kind, ns in (("measure", names), ("asset", [Q.ASSETS]), ("type", names), ("package_asset", names)):
         try:
             got, bl = evaluate_kind(conn, corpus, kind, ns, log, grid=grid and kind == "measure")
         except SystemExit as exc:
@@ -881,7 +798,7 @@ def evaluate(conn, data, corpus=None, names=None, log=print, grid=False):
                     rs = [r for r in rows if design[r[0]] == des]
                     if not rs:
                         continue
-                    fl = decide.floor(lset)
+                    fl = measure_floor()
                     p, r, _ = posterior.weighted_pr([score[x[0]] for x in rs], [x[1] for x in rs], [x[2] for x in rs], fl)
                     quality.append({"label_set": lset, "version": "", "question_sha256": qsha,
                                     "sheet": "evaluation" if des == "eval" else "training", "graded_units": len(rs),

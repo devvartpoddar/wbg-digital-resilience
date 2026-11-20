@@ -14,7 +14,7 @@ The part of this repository that changes often. `src/` is the pipeline: it fetch
 A label set's name is its file name without `.csv`, and the same name must not exist in both folders. Every command takes any set by name:
 
 ```
-./wbg_portfolio add cra                                # a new or revised measure: search, funnel, types, pair checks, publish
+./wbg_portfolio add cra                                # a new or revised measure: search, funnel, second looks, types, publish
 ./wbg_portfolio run --only measure --measures cra      # the funnel again for one set
 ./wbg_portfolio publish                                # the decision tables and views from the stored scores
 ```

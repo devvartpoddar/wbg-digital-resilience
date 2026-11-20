@@ -132,24 +132,3 @@ def test_every_repository_measure_names_a_family():
     assert set().union(*every.values()) == {"climate", "cloud_data"}
     assert every["disaster_recovery"] == {"climate", "cloud_data"} and every["cra"] == {"climate"}
     assert labels.family("assets") == "" and labels.families("assets") == set()
-
-
-def test_pair_checks_stay_inside_a_family(monkeypatch):
-    """A sentence two measures of one family count is asked about; one that a
-    climate and a cloud measure both count is not, so neither family's
-    commitments depend on the other's definitions."""
-    from wbg_portfolio import checks
-    from wbg_portfolio import questions as Q
-    counted = {"backup_power": ["u1", "u2"], "energy_efficiency": ["u1"],
-               "datacenter_infrastructure": ["u1", "u2", "u3"], "cloud_strategy": ["u3"]}
-    monkeypatch.setattr(checks, "committed_at_ask", lambda conn, corpus, name: counted[name])
-    monkeypatch.setattr(Q, "pair_questions", lambda a, b: {"keep_a": a, "keep_b": b})
-    asked = []
-    monkeypatch.setattr(checks, "_ask", lambda conn, model, items, *a, **k: asked.extend(items))
-
-    class Corpus:
-        def state(self, u):
-            return {"unit": u}
-    checks.pairs(None, None, Corpus(), sorted(counted), log=lambda *_: None)
-    assert sorted(key for key, _, _ in asked) == [
-        ("u1", "backup_power", "energy_efficiency"), ("u3", "cloud_strategy", "datacenter_infrastructure")]

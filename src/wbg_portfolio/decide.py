@@ -3,14 +3,14 @@ tables the dashboards' views read (docs/method/decisions.md).
 
 A score is the model's answer (src/wbg_portfolio/funnel.py, src/wbg_portfolio/checks.py); a decision is
 that score, through the label's probability layer when one is fitted and on,
-against the label's floor. Nothing here asks the model; a moved floor is a
-publish. The one place that says what "committed" means is committed();
+against the measure's band rule (a first-pass score, then two second looks in
+the band) or the other labels' floors. Nothing here asks the model; a moved
+threshold is a publish. The one place that says what "committed" means is committed();
 the views only join and aggregate.
 
   publish(conn, data)   rewrite measure_findings, paragraph_grades, unit_assets,
-                        unit_pair_checks, package_assets, commitment_packages,
-                        commitment_package_links, activities, the label tables,
-                        then the views
+                        package_assets, commitment_package_links, activities, the
+                        label tables, then the views
 """
 import re
 import time
@@ -50,11 +50,6 @@ def firmness(text):
     return "activity" if ACTIVITY.search(text) else "outcome" if OUTCOME.search(text) else "none"
 
 
-def floor(name):
-    v = panel.get(f"floor.{name}")
-    return float(v if v is not None else panel.require("floor.default"))
-
-
 def setting(key):
     return panel.require(key)
 
@@ -85,11 +80,8 @@ def posterior(conn, kind, label_set, qshas, vector_of):
 
 
 def band():
-    """The band rule's settings (band.*); only `on` is read while it is off."""
-    on = bool(setting("band.on"))
-    if not on:
-        return {"on": False}
-    b = {"on": True, "low": float(setting("band.low")), "keep": float(setting("band.keep")),
+    """The band rule's settings (band.*)."""
+    b = {"low": float(setting("band.low")), "keep": float(setting("band.keep")),
          "context": float(setting("band.context")), "second_grade": float(setting("band.second_grade")),
          "ask_low": float(setting("band.ask_low")), "ask_high": float(setting("band.ask_high"))}
     check_asked("band.", b["ask_low"], b["low"], b["ask_high"], b["keep"])
@@ -139,10 +131,8 @@ def look_scores(conn, kind, name):
 
 def measure_units(conn, corpus, name):
     """{unit_id: row} of a measure's scored units with posterior, committed and
-    asked_yes. With band.on, committed is the band rule (band_rule) and
-    asked_yes is the same: the sentences the later stages ask about are the
-    committed ones. Without it, committed is the posterior at the measure's
-    floor and asked_yes the posterior at floor.ask. A row also says its first
+    asked. committed is the band rule (band_rule): the sentences the later
+    stages ask about are the committed ones. A row also says its first
     score (score_first), the two looks (score_context, second_grade, None when
     not asked), decided_by ('score', 'second_look' or '') and waiting (in the
     band, a look missing)."""
@@ -150,10 +140,7 @@ def measure_units(conn, corpus, name):
     qshas = {lid: Q.sha(q) for lid, q in qs.items()}
     p = posterior(conn, "measure", name, qshas, corpus.vector)
     b = band()
-    if b["on"]:
-        ctx, second = look_scores(conn, "measure_ctx", name), look_scores(conn, "measure_second", name)
-    else:
-        fl, ask_fl = floor(name), float(setting("floor.ask"))
+    ctx, second = look_scores(conn, "measure_ctx", name), look_scores(conn, "measure_second", name)
     out = {}
     for lset, lid, uid, score, answer, served, route, rnd, cos, rank in scores(conn, "measure", name):
         if uid not in corpus.row_of:
@@ -162,23 +149,16 @@ def measure_units(conn, corpus, name):
         row = {"label_id": lid, "score": float(score), "answer": answer, "served": served,
                "route": route, "round": rnd, "cosine": float(cos or 0), "posterior": post,
                "score_first": post, "score_context": None, "second_grade": None, "waiting": False}
-        if b["on"]:
-            row["score_context"], row["second_grade"] = ctx.get(uid), second.get(uid)
-            row["committed"], row["decided_by"], row["waiting"] = band_rule(
-                post, row["score_context"], row["second_grade"], b)
-            row["asked_yes"] = row["committed"]
-            row["asked"] = asked_band(post, b)
-        else:
-            row["committed"], row["asked_yes"] = post >= fl, post >= ask_fl
-            row["decided_by"] = "score" if row["committed"] else ""
-            row["asked"] = False
+        row["score_context"], row["second_grade"] = ctx.get(uid), second.get(uid)
+        row["committed"], row["decided_by"], row["waiting"] = band_rule(
+            post, row["score_context"], row["second_grade"], b)
+        row["asked"] = asked_band(post, b)
         out[uid] = row
     return out
 
 
 def committed_units(conn, corpus, names):
-    """[unit_id] committed to any of the measures, in order: the sentences the
-    digital and policy questions are asked about."""
+    """[unit_id] committed to any of the measures, in order."""
     return sorted({u for n in names for u, r in measure_units(conn, corpus, n).items() if r["committed"]})
 
 
@@ -186,15 +166,14 @@ def digital_asked_units(conn, corpus, names):
     """[unit_id] the digital question is asked about: every sentence with a first-pass score
     in the asked band [band.ask_low, band.ask_high) for at least one of the measures (the range the
     measure second look is asked for), so a threshold loosened at publish finds the newly committed
-    sentences already scored. Committed sentences outside that range are added; with the band rule
-    off, the committed ones."""
+    sentences already scored. Committed sentences outside that range are added."""
     asked = {u for n in names for u, r in measure_units(conn, corpus, n).items() if r.get("asked")}
     return sorted(asked | set(committed_units(conn, corpus, names)))
 
 
-def digital_settings():
-    """(on, floor): whether the digital rule applies (digital.on) and the P(yes) a sentence needs."""
-    return bool(setting("digital.on")), float(setting("digital.floor"))
+def digital_floor():
+    """The P(yes) the digital question needs for a sentence to count as digital (digital.floor)."""
+    return float(setting("digital.floor"))
 
 
 def digital_scores(conn):
@@ -202,19 +181,17 @@ def digital_scores(conn):
     return {uid: float(score) for _, _, uid, score, *_ in scores(conn, "digital")}
 
 
-def is_digital(p, on=None, fl=None):
+def is_digital(p, fl=None):
     """Whether a sentence with the digital question's P(yes) `p` (None when not
-    asked) counts as digital. With the rule off every sentence does; a sentence
-    not asked is not digital."""
-    on0, fl0 = digital_settings()
-    on, fl = on0 if on is None else on, fl0 if fl is None else fl
-    return True if not on else (p is not None and p >= fl)
+    asked) counts as digital: a sentence not asked is not digital."""
+    fl = digital_floor() if fl is None else fl
+    return p is not None and p >= fl
 
 
 def only_digital(conn, units):
-    """The units the digital rule keeps (all of them while digital.on is false)."""
-    dig, (on, fl) = digital_scores(conn), digital_settings()
-    return [u for u in units if is_digital(dig.get(u), on, fl)]
+    """The units the digital rule keeps."""
+    dig, fl = digital_scores(conn), digital_floor()
+    return [u for u in units if is_digital(dig.get(u), fl)]
 
 
 def committed_digital_units(conn, corpus, names):
@@ -337,21 +314,6 @@ def has_scores(conn, kind):
     return db.exists(conn, t) and bool(db.one(conn, f"SELECT count(*) FROM {t} WHERE kind = %s", (kind,))[0])
 
 
-def policy_on():
-    """Whether the policy question is asked (policy.on)."""
-    return bool(setting("policy.on"))
-
-
-def activities_on():
-    """Whether the activities stage asks and publishes anything (activities.on)."""
-    return bool(setting("activities.on"))
-
-
-def link_strengths():
-    """Whether the link strengths (strong, asset) replace the old link question."""
-    return bool(setting("link.strengths"))
-
-
 def package_band():
     """(low, yes): the first-pass P(yes) of a package x asset pair from which a chat yes counts
     (link.asset_band_low) and at which it counts without one (link.asset_yes). What the chat model
@@ -383,20 +345,18 @@ def package_asset_posteriors(conn):
 
 def package_asset_sets(conn, only=None):
     """{package_id: {asset_id}} the packages have. An asset counts at
-    link.asset_yes or more; with link.strengths also from link.asset_band_low
+    link.asset_yes or more, and from link.asset_band_low
     up to link.asset_yes when the chat model's second look (kind
     package_asset_second) says yes. A missing second look is never a yes.
     `only` limits the packages (indexed once as a set, so a list of 14,000 costs nothing per pair)."""
     only = None if only is None else set(only)
     low, yes = package_band()
-    strengths = link_strengths()
-    second = {(pid, aid): float(score) >= 1 for _, aid, pid, score, *_ in scores(conn, "package_asset_second")} \
-        if strengths else {}
+    second = {(pid, aid): float(score) >= 1 for _, aid, pid, score, *_ in scores(conn, "package_asset_second")}
     out = defaultdict(set)
     for (pid, aid), p in package_asset_posteriors(conn).items():
         if only is not None and pid not in only:
             continue
-        if p >= yes or (strengths and low <= p < yes and second.get((pid, aid))):
+        if p >= yes or (low <= p < yes and second.get((pid, aid))):
             out[pid].add(aid)
     return out
 
@@ -407,14 +367,12 @@ def package_measure_scores(conn):
 
 
 def link_strength_rows(conn, corpus, names, ua, packages):
-    """The commitment_package_links rows (nothing unless link.strengths). A
+    """The commitment_package_links rows. A
     committed, digital sentence and a package of the same project are linked
     'strong' when the package, asked alone, is about the sentence's measure at
     link.strong_yes or more, and 'asset' when they share a top-level asset (the
     sentence's, at the levels the panel counts, and the package's). A pair that
     is both is one row, 'strong', its shared assets filled."""
-    if not link_strengths():
-        return []
     strong_yes = float(setting("link.strong_yes"))
     levels = link_levels()
     has = package_asset_sets(conn)
@@ -475,28 +433,6 @@ def type_winners(probs):
     return win if multiple else win[:1]
 
 
-def pair_checks(conn, corpus):
-    """[(unit_id, set_a, set_b, p_keep_a, p_keep_b, raw_a, raw_b, served)]."""
-    rows = defaultdict(dict)
-    served = {}
-    for lset, side, uid, score, answer, sv, *_ in scores(conn, "pair"):
-        a, b = lset.split("|")
-        rows[(uid, a, b)][side] = float(score)
-        served[(uid, a, b)] = sv
-    qa = {}
-    out = []
-    for (uid, a, b), sides in sorted(rows.items()):
-        if "keep_a" not in sides or "keep_b" not in sides:
-            continue
-        for s, other, key in ((a, b, "keep_a"), (b, a, "keep_b")):
-            if (s, other) not in qa:
-                qa[(s, other)] = Q.sha(Q.pair_questions(s, other)[key]) if s < other or True else None
-        pa = posterior(conn, "pair", f"{a}|{b}", {"keep_a": qa[(a, b)], "keep_b": qa[(b, a)]}, corpus.vector)
-        out.append((uid, a, b, pa("keep_a", uid, sides["keep_a"]), pa("keep_b", uid, sides["keep_b"]),
-                    sides["keep_a"], sides["keep_b"], served[(uid, a, b)]))
-    return out
-
-
 # ---------------------------------------------------------------- the tables
 
 def _probs(answer):
@@ -508,7 +444,7 @@ def measure_rows(conn, corpus, names, ua, stats=None):
     """One row per scored sentence x measure. stats, a dict, collects the count
     of pairs waiting for a second look and of committed pairs with no digital answer."""
     fl_rows, stats = [], {} if stats is None else stats
-    dig, (dig_on, dig_floor), instrument = digital_scores(conn), digital_settings(), instruments(conn)
+    dig, dig_floor, instrument = digital_scores(conn), digital_floor(), instruments(conn)
     for name in names:
         units = measure_units(conn, corpus, name)
         tps = types_of(conn, corpus, name)
@@ -518,7 +454,7 @@ def measure_rows(conn, corpus, names, ua, stats=None):
             r = corpus.row(uid)
             stats["waiting"] = stats.get("waiting", 0) + u["waiting"]
             stats["no_digital_answer"] = stats.get("no_digital_answer", 0) + (
-                dig_on and u["committed"] and uid not in dig)
+                u["committed"] and uid not in dig)
             own, win, level = ua.get(uid, ({}, [], "none"))
             best = max(own, key=own.get) if own else ""
             probs = tps.get(uid, {})
@@ -554,7 +490,7 @@ def measure_rows(conn, corpus, names, ua, stats=None):
                 "score_context": "" if u["score_context"] is None else f"{u['score_context']:.4f}",
                 "second_grade": "" if u["second_grade"] is None else f"{u['second_grade']:g}",
                 "decided_by": u["decided_by"],
-                "is_digital": str(is_digital(dig.get(uid), dig_on, dig_floor)).lower(),
+                "is_digital": str(is_digital(dig.get(uid), dig_floor)).lower(),
                 "digital_p": f"{dig[uid]:.4f}" if uid in dig else "",
                 "instrument": instrument.get(uid, ""),
                 "model_served": u["served"] or "", "text": text})
@@ -597,50 +533,20 @@ def asset_rows(conn, corpus, amap, ua, kinds=None, second=None):
     return grades, assets
 
 
-def pair_rows(conn, corpus):
-    fl = float(setting("floor.pair_check"))
-    out = []
-    for uid, a, b, ka, kb, ra, rb, served in pair_checks(conn, corpus):
-        d = ("both" if ka >= fl and kb >= fl else "only_a" if ka >= fl else "only_b" if kb >= fl
-             else "neither")
-        out.append({"unit_id": uid, "set_a": a, "set_b": b, "decision": d, "score_a": f"{ra:.3f}",
-                    "score_b": f"{rb:.3f}", "p_keep_a": f"{ka:.3f}", "p_keep_b": f"{kb:.3f}",
-                    "model_served": served or ""})
-    return out
-
-
-def package_rows(conn, corpus, ua, packages):
-    """(package_assets rows, commitment_packages rows)."""
+def package_asset_rows(conn, packages):
+    """The package_assets rows: every package x asset the first pass asked about."""
     pq = Q.package_asset_questions()
     pa = posterior(conn, "package_asset", Q.ASSETS, {a: Q.sha(q) for a, q in pq.items()}, lambda i: None)
     by_pkg = {p["package_id"]: p for p in packages}
-    assets, has = [], defaultdict(set)
-    yes = float(setting("link.asset_yes"))
+    assets = []
     for lset, aid, pid, score, answer, served, route, rnd, cos, rank in scores(conn, "package_asset"):
         if pid not in by_pkg:
             continue
-        prob = pa(aid, pid, score)
         assets.append({"package_id": pid, "project_id": by_pkg[pid]["project_id"], "label_id": aid,
                        "cosine": f"{float(cos or 0):.4f}", "cosine_rank": rank or "",
-                       "probability": f"{float(score):.3f}", "p_calibrated": f"{prob:.3f}",
+                       "probability": f"{float(score):.3f}", "p_calibrated": f"{pa(aid, pid, score):.3f}",
                        "model_served": served or ""})
-        if prob >= yes:
-            has[pid].add(aid)
-    pl = posterior(conn, "link", "links", {"link": Q.sha(Q.LINK_QUESTION)}, lambda i: None)
-    links = []
-    levels = link_levels()
-    for lset, lid, item, score, answer, served, route, rnd, cos, rank in scores(conn, "link"):
-        uid, pid = item.rsplit("|", 1)
-        if pid not in by_pkg or uid not in corpus.row_of:
-            continue
-        shared = linked_assets(ua.get(uid, ({}, [], "none")), levels) & has.get(pid, set())
-        links.append({"label_set": lset, "label_id": lid, "unit_id": uid, "package_id": pid,
-                      "project_id": by_pkg[pid]["project_id"], "shared_asset_ids": "|".join(sorted(shared)),
-                      "route": route, "measure_rank": rank or "",
-                      "measure_cosine": f"{float(cos):.4f}" if cos is not None else "",
-                      "probability": f"{float(score):.3f}", "p_calibrated": f"{pl('link', item, score):.3f}",
-                      "model_served": served or ""})
-    return assets, links
+    return assets
 
 
 def publish(conn, data, *, corpus=None, log=print, views=True):
@@ -651,7 +557,7 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
     corpus = corpus or Q.Corpus(data)
     names = [n for n in labels.label_sets() if n != Q.ASSETS]
     amap = asset_map(conn, corpus)
-    second = asset_second_looks(conn) if band()["on"] else {}
+    second = asset_second_looks(conn)
     ua = unit_assets(corpus, amap, second)
     grades, assets = asset_rows(conn, corpus, amap, ua, asset_kinds(conn), second)
     counts = {}
@@ -660,9 +566,8 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
         log(f"  {counts['waiting']:,} pair(s) in the band are waiting for a second look; not committed")
     if counts.get("no_digital_answer"):
         log(f"  {counts['no_digital_answer']:,} committed pair(s) have no digital answer yet; not digital")
-    pairs = pair_rows(conn, corpus)
     packages = checks.load_packages(data)
-    pk_assets, links = package_rows(conn, corpus, ua, packages)
+    pk_assets = package_asset_rows(conn, packages)
     strengths = link_strength_rows(conn, corpus, names, ua, packages)
     from wbg_portfolio import activities
     acts = activities.rows(conn, data, corpus, names, log=log)
@@ -679,9 +584,7 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
                                   ("measure_findings", load_pg.FINDING_COLS, findings),
                                   ("paragraph_grades", load_pg.GRADE_COLS, grades),
                                   ("unit_assets", load_pg.UNIT_ASSET_COLS, assets),
-                                  ("unit_pair_checks", load_pg.PAIR_COLS, pairs),
                                   ("package_assets", load_pg.PACKAGE_ASSET_COLS, pk_assets),
-                                  ("commitment_packages", load_pg.LINK_COLS, links),
                                   ("commitment_package_links", load_pg.STRENGTH_COLS, strengths),
                                   ("activities", load_pg.ACTIVITY_COLS, acts)):
             written[table] = load_pg.load_rows(conn, table, cols, rows, "decide")[0]

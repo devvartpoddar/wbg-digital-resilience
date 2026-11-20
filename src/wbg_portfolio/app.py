@@ -188,7 +188,7 @@ def packages(q, project_id):
         SELECT DISTINCT ON (package_id) package_id, description_clean AS description, category,
                method_code, estimated_amount_usd, package_status, next_date, due_date, signed_date
         FROM wbg.commitment_package_status WHERE project_id = %(pid)s
-        ORDER BY package_id, link_probability DESC"""), {"pid": project_id}))
+        ORDER BY package_id, link_probability DESC NULLS LAST"""), {"pid": project_id}))
     if df.empty:
         return df.assign(stage=pd.Series(dtype=str), date=pd.Series(dtype="datetime64[ns]"),
                          date_kind=pd.Series(dtype=str))
@@ -356,7 +356,7 @@ _ABOUT = {
     "measures": "WITH" + _SCOPE + """
         SELECT (SELECT count(DISTINCT f.unit_id) FROM wbg.measure_findings f JOIN docs USING (document_id)
                  WHERE f.was_sent_to_model AND f.is_committed) AS at_threshold,
-               (SELECT count(DISTINCT c.unit_id) FROM wbg.unit_pair_checks c JOIN units USING (unit_id)) AS overlap_tested,
+               0 AS overlap_tested,   -- the pair check is gone: nothing is tested for overlap
                (SELECT count(DISTINCT unit_id) FROM wbg.commitment_units) AS kept,
                (SELECT count(DISTINCT unit_id) FROM wbg.commitment_units WHERE type_id <> '(no type)') AS with_type,
                (SELECT count(*) FROM wbg.commitments) AS commitments,
@@ -400,12 +400,14 @@ def about(q):
     The thresholds the page quotes come from the control panel."""
     from wbg_portfolio import panel
     out = {}
-    floors = {}
-    for key in ("floor.default", "floor.cyber_security", "floor.types", "asset.floor", "link.asset_yes"):
-        try:
-            floors[key] = float(panel.require(key))
-        except Exception:
-            floors[key] = None
+    # floor.default is now only the cut the evaluation reads a first-pass score at; the commitment
+    # is the band rule, so band.low, band.keep and band.context are given too. floor.cyber_security
+    # stays as a key but is always None: there are no per-measure floors any more.
+    floors = {"floor.cyber_security": None}
+    for key in ("floor.default", "floor.types", "asset.floor", "link.asset_yes", "band.low", "band.keep",
+                "band.context"):
+        v = panel.get(key)
+        floors[key] = None if v is None else float(v)
     out["floors"] = floors
     for name, sql in _ABOUT.items():
         try:

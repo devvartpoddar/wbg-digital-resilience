@@ -2,7 +2,6 @@
 what is not is asked in batches and stored under the exact text and
 question sent."""
 import json
-import os
 
 import pytest
 
@@ -124,7 +123,6 @@ def test_a_sentence_state_carries_section_component_and_optionally_the_paragraph
     assert s["section"] == "Project Components" and s["component"] == "1 Connectivity"
     assert "paragraph" not in s
     from wbg_portfolio import panel
-    monkeypatch.setenv("WBG_PANEL", os.environ["WBG_PANEL"])
     monkeypatch.setattr(panel, "get", lambda k, d=None: "paragraph" if k == "ask.context" else d)
     c2 = Q.Corpus(corpus)
     assert "Floods are frequent." in c2.state(uid)["paragraph"]

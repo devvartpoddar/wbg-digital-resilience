@@ -1,8 +1,7 @@
 """The real stage entry points, as ./wbg_portfolio run calls them (cli.main), from
 classify to publish, on the invented corpus with the fake decision and chat models:
-band rule, digital rule and link strengths on, the scores in one schema and the
-stored answers read from a store of another name (WBG_SCHEMA / WBG_STORE). No
-model is called."""
+the scores in one schema and the stored answers read from a store of another name
+(WBG_SCHEMA / WBG_STORE). No model is called."""
 import os
 import uuid
 
@@ -13,15 +12,14 @@ from wbg_portfolio import api
 from wbg_portfolio import cli
 from wbg_portfolio import db
 from wbg_portfolio import load_pg
-from wbg_portfolio import panel
 from wbg_portfolio import search
 
-NEW_TABLES = ("commitment_package_links", "activities")
-NEW_VIEWS = ("not_digital_findings", "commitment_package_links_in_context", "activity_summary")
+TABLES = ("commitment_package_links", "activities")
+VIEWS = ("not_digital_findings", "commitment_package_links_in_context", "activity_summary")
 
 
 @pytest.fixture
-def v2(monkeypatch):
+def schema(monkeypatch):
     """Scores, decision tables and views in schema t_<x>; stored answers in t_<x>_store
     (WBG_SCHEMA=t_<x> WBG_STORE=t_<x>_store, as WBG_SCHEMA=wbg_v2 WBG_STORE=wbg_store would)."""
     try:
@@ -60,7 +58,7 @@ def wide_corpus(corpus, fake_model, monkeypatch):
 
 
 @pytest.fixture
-def wide(corpus, fake_model, fake_chat, v2_panel, monkeypatch):
+def wide(corpus, fake_model, fake_chat, monkeypatch):
     return wide_corpus(corpus, fake_model, monkeypatch)
 
 
@@ -72,37 +70,37 @@ def rows(conn, sql):
     return db.rows(conn, sql.replace("{S}", db.SCHEMA))
 
 
-def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(v2, wide, fake_model, fake_chat, capsys):
+def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(schema, wide, fake_model, fake_chat, capsys):
     corpus = wide
     default = fake_chat.reply
     fake_chat.reply = lambda p: ('{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
                                  if '"assets": [{"asset"' in p and "fibre backbone" in p else default(p))
-    with load_pg.transaction(v2):
-        load_pg.load(v2, corpus, log=lambda *_: None)
+    with load_pg.transaction(schema):
+        load_pg.load(schema, corpus, log=lambda *_: None)
     assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
     out = capsys.readouterr().out
     for stage in ("classify", "measure", "link", "activities", "publish"):
         assert f"#### {stage}" in out
-    for table in (*NEW_TABLES, "measure_findings", "unit_assets", "commitment_packages", "package_assets"):
-        assert db.exists(v2, f"{db.SCHEMA}.{table}"), table
-    for t in NEW_TABLES:
-        assert rows(v2, f"SELECT count(*) FROM {{S}}.{t}")[0][0] > 0, t
-    for v in NEW_VIEWS:
-        assert rows(v2, f"SELECT count(*) FROM {{S}}.{v}")[0][0] > 0, v
-    kinds = {k for (k,) in rows(v2, "SELECT DISTINCT kind FROM {S}.scores")}
+    for table in (*TABLES, "measure_findings", "unit_assets", "package_assets"):
+        assert db.exists(schema, f"{db.SCHEMA}.{table}"), table
+    for t in TABLES:
+        assert rows(schema, f"SELECT count(*) FROM {{S}}.{t}")[0][0] > 0, t
+    for v in VIEWS:
+        assert rows(schema, f"SELECT count(*) FROM {{S}}.{v}")[0][0] > 0, v
+    kinds = {k for (k,) in rows(schema, "SELECT DISTINCT kind FROM {S}.scores")}
     assert {"measure", "digital", "policy", "asset", "type", "package_asset", "package_measure",
-            "activity"} <= kinds and "link" not in kinds
+            "activity"} <= kinds and not {"link", "pair"} & kinds
     # the second looks that the first pass left to the chat model
     assert {"asset_second", "asset_subtype"} <= kinds
-    assert {r[0] for r in rows(v2, "SELECT DISTINCT asset_level FROM {S}.unit_assets")} >= {"unit", "second_look", "none"}
+    assert {r[0] for r in rows(schema, "SELECT DISTINCT asset_level FROM {S}.unit_assets")} >= {"unit", "second_look", "none"}
     # a second run asks nothing, of either model
-    v2.commit()
+    schema.commit()
     n_model, n_chat = len(fake_model), len(fake_chat.calls)
     assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
     assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat)
 
 
-def test_a_dry_run_asks_nothing_prints_estimates_and_writes_nothing(v2, wide, fake_model, fake_chat, capsys):
+def test_a_dry_run_asks_nothing_prints_estimates_and_writes_nothing(schema, wide, fake_model, fake_chat, capsys):
     corpus = wide
     assert run(corpus, "--from", "classify", "--to", "publish", "--dry-run") == 0
     out = capsys.readouterr().out
@@ -115,16 +113,16 @@ def test_a_dry_run_asks_nothing_prints_estimates_and_writes_nothing(v2, wide, fa
         assert f"{step}: cannot estimate until {until} has run" in out, step
     for stage in ("classify", "measure", "link", "activities"):
         assert f"#### {stage}" in out
-    assert "#### publish" in out and db.one(v2, f"SELECT count(*) FROM {db.STORE}.answers")[0] == 0
-    assert not db.exists(v2, f"{db.SCHEMA}.activities") and not db.exists(v2, f"{db.SCHEMA}.measure_findings")
+    assert "#### publish" in out and db.one(schema, f"SELECT count(*) FROM {db.STORE}.answers")[0] == 0
+    assert not db.exists(schema, f"{db.SCHEMA}.activities") and not db.exists(schema, f"{db.SCHEMA}.measure_findings")
 
 
-def test_a_dry_run_after_a_run_still_asks_nothing(v2, wide, fake_model, fake_chat, capsys):
+def test_a_dry_run_after_a_run_still_asks_nothing(schema, wide, fake_model, fake_chat, capsys):
     corpus = wide
-    with load_pg.transaction(v2):
-        load_pg.load(v2, corpus, log=lambda *_: None)
+    with load_pg.transaction(schema):
+        load_pg.load(schema, corpus, log=lambda *_: None)
     assert run(corpus, "--from", "classify", "--to", "activities", "--max-spend", "1") == 0
-    v2.commit()
+    schema.commit()
     n_model, n_chat = len(fake_model), len(fake_chat.calls)
     capsys.readouterr()
     assert run(corpus, "--from", "classify", "--to", "activities", "--dry-run") == 0
@@ -132,24 +130,24 @@ def test_a_dry_run_after_a_run_still_asks_nothing(v2, wide, fake_model, fake_cha
     assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat) and "0 requests to make" in out
 
 
-def test_a_run_for_one_project_asks_for_that_project_only_and_honours_the_cap(v2, wide, fake_model, fake_chat,
+def test_a_run_for_one_project_asks_for_that_project_only_and_honours_the_cap(schema, wide, fake_model, fake_chat,
                                                                          monkeypatch, capsys):
     corpus = wide
     monkeypatch.setenv("WBG_PUBLISH_SCOPED", "1")
     monkeypatch.setattr(cli, "_sel", lambda args: cli.Selection([{"project_id": "P1"}], "test"))
-    with load_pg.transaction(v2):
-        load_pg.load(v2, corpus, log=lambda *_: None)
+    with load_pg.transaction(schema):
+        load_pg.load(schema, corpus, log=lambda *_: None)
     assert run(corpus, "--from", "classify", "--to", "publish", "--project", "P1", "--max-spend", "1") == 0
-    v2.commit()
-    assert rows(v2, "SELECT count(*) FROM {S}.activities")[0][0] > 0
-    v2.commit()
+    schema.commit()
+    assert rows(schema, "SELECT count(*) FROM {S}.activities")[0][0] > 0
+    schema.commit()
     n_model, n_chat = len(fake_model), len(fake_chat.calls)
     assert n_chat > 0
     assert run(corpus, "--from", "classify", "--to", "publish", "--project", "P1", "--max-spend", "1") == 0
     assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat)
 
 
-def test_the_spend_cap_stops_a_run_before_the_chat_model_is_asked(v2, wide, fake_model, fake_chat, capsys):
+def test_the_spend_cap_stops_a_run_before_the_chat_model_is_asked(schema, wide, fake_model, fake_chat, capsys):
     corpus = wide
     with pytest.raises(SystemExit):
         run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "0.0000001")
@@ -178,7 +176,7 @@ def snapshot(conn, schema):
 
 
 def test_a_run_into_another_schema_over_the_live_store_leaves_the_live_schema_untouched(
-        corpus, fake_model, fake_chat, pipeline_on, monkeypatch, capsys):
+        corpus, fake_model, fake_chat, monkeypatch, capsys):
     """The live data is schema A (its presentation tables and views) with its store A_store. A run
     with WBG_SCHEMA=B WBG_STORE=A_store reads A_store's answers and writes B alone: nothing in A is
     created, dropped or written, and A_store gains no answer and loses none."""
@@ -232,35 +230,3 @@ def test_a_run_into_another_schema_over_the_live_store_leaves_the_live_schema_un
             conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
         conn.commit()
         conn.close()
-
-
-@pytest.fixture
-def wide_default(corpus, fake_model, fake_chat, monkeypatch):
-    """The same corpus under the shipped control_panel.csv: every new switch off."""
-    return wide_corpus(corpus, fake_model, monkeypatch)
-
-
-OLD_KINDS = {"measure", "asset", "type", "pair", "link", "package_asset"}
-
-
-def test_with_the_shipped_panel_a_full_run_behaves_as_before_the_second_looks(
-        v2, wide_default, fake_model, fake_chat, capsys):
-    """No chat call, no new kind of score, no activities row, and only the decision-model questions
-    the earlier stages asked (the first pass, types, pairs, links); a second run asks nothing."""
-    corpus = wide_default
-    assert panel.require("band.on") is False and panel.require("policy.on") is False
-    with load_pg.transaction(v2):
-        load_pg.load(v2, corpus, log=lambda *_: None)
-    assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
-    assert fake_chat.calls == []
-    kinds = {k for (k,) in rows(v2, "SELECT DISTINCT kind FROM {S}.scores")}
-    assert kinds <= OLD_KINDS and {"measure", "link"} <= kinds
-    assert rows(v2, "SELECT count(*) FROM {S}.activities")[0][0] == 0
-    # every question the decision model got is a first-pass, type, pair or link question: none is
-    # the context question, the digital flag or a package-measure question
-    asked = {q["instructions"] for b in fake_model for q in b["questions"].values()}
-    assert asked and not any("paragraph beside" in t or "digital sector" in t for t in asked)
-    v2.commit()
-    n = len(fake_model)
-    assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
-    assert len(fake_model) == n and fake_chat.calls == []

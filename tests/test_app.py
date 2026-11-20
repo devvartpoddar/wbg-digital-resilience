@@ -25,7 +25,7 @@ def _published(pg, corpus):
     return _q(pg)
 
 
-def test_the_app_reads_commitments_with_stage_place_and_evidence(pg, corpus, fake_model):
+def test_the_app_reads_commitments_with_stage_place_and_evidence(pg, corpus, fake_model, fake_chat):
     q = _published(pg, corpus)
     df = app.commitments(q)
     assert list(df[["project_id", "label_set", "asset_id", "type_id"]].itertuples(index=False, name=None)) == \
@@ -55,7 +55,7 @@ def test_the_app_reads_commitments_with_stage_place_and_evidence(pg, corpus, fak
     assert t["n"].tolist() == [1] and t["of"].tolist() == [len(base)]
 
 
-def test_the_app_reads_measures_types_assets_and_a_project(pg, corpus, fake_model):
+def test_the_app_reads_measures_types_assets_and_a_project(pg, corpus, fake_model, fake_chat):
     q = _published(pg, corpus)
     m = app.measures(q)
     assert "cra" in m["label_set"].tolist()

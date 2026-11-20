@@ -1,50 +1,43 @@
-"""The two control panel files cannot drift, and the shipped one behaves as the live
-pipeline did: every new switch off, every old setting at its old value."""
+"""The one control panel file: each setting once, every setting read in the code written, and
+every description says what the setting does now."""
 import csv
 import os
-
-from wbg_portfolio import panel
+import re
 
 CONFIG = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "inputs", "config")
-# the settings whose value the new behaviour changes: (shipped file, v2 file)
-DIFFERENCES = {
-    "band.on": ("false", "true"), "digital.on": ("false", "true"), "link.strengths": ("false", "true"),
-    "policy.on": ("false", "true"), "activities.on": ("false", "true"), "floor.types": ("0.7", "0.6"),
-    "asset.multiple": ("false", "true"), "dashboard.apply_measure_pair_checks": ("true", "false"),
-    "dashboard.commitment_link_levels": ("unit|none", "unit|second_look|none"),
-    "types.gaps": ("off", "on"),
-}
+SRC = os.path.join(os.path.dirname(CONFIG), "..", "src", "wbg_portfolio")
 
 
-def read(name):
-    with open(os.path.join(CONFIG, name), newline="", encoding="utf-8") as fh:
-        rows = list(csv.DictReader(fh))
-    return rows, {r["setting"]: r["value"] for r in rows}
+def shipped():
+    with open(os.path.join(CONFIG, "control_panel.csv"), newline="", encoding="utf-8") as fh:
+        return list(csv.DictReader(fh))
 
 
-def test_the_two_files_have_the_same_settings_and_differ_only_in_the_new_behaviour():
-    a_rows, a = read("control_panel.csv")
-    b_rows, b = read("control_panel_v2.csv")
-    assert [r["setting"] for r in a_rows] == [r["setting"] for r in b_rows]
-    assert len(a) == len(a_rows), "a setting is written twice"
-    assert {k for k in a if a[k] != b[k]} == set(DIFFERENCES)
-    for k, (old, new) in DIFFERENCES.items():
-        assert (a[k], b[k]) == (old, new), k
-    # the other columns (stage, what it does) are the same too
-    assert [{**r, "value": ""} for r in a_rows] == [{**r, "value": ""} for r in b_rows]
+def test_there_is_one_panel_file_and_each_setting_is_written_once():
+    assert sorted(f for f in os.listdir(CONFIG) if f.startswith("control_panel")) == ["control_panel.csv"]
+    names = [r["setting"] for r in shipped()]
+    assert len(names) == len(set(names))
+    assert all(r["value"].strip() != "" and r["what_it_does"].strip() for r in shipped())
 
 
-def test_the_shipped_file_keeps_the_live_values_of_the_settings_that_existed(monkeypatch):
-    monkeypatch.setenv("WBG_PANEL", os.path.join(CONFIG, "control_panel.csv"))
-    assert panel.get("floor.types") == 0.7 and panel.get("asset.multiple") is False
-    assert panel.get("dashboard.apply_measure_pair_checks") is True
-    assert panel.get("dashboard.commitment_link_levels") == "unit|none"
-    for k in ("band.on", "digital.on", "link.strengths", "policy.on", "activities.on"):
-        assert panel.require(k) is False, k
+def test_every_setting_the_code_reads_is_written():
+    written = {r["setting"] for r in shipped()}
+    read = set()
+    for name in os.listdir(SRC):
+        if name.endswith(".py"):
+            with open(os.path.join(SRC, name), encoding="utf-8") as fh:
+                read |= set(re.findall(r"""(?:panel\.(?:get|require)|setting)\(\s*["']([a-z_]+\.[a-z_.]+)["']""",
+                                       fh.read()))
+    assert read, "the pattern found no setting"
+    assert read <= written, sorted(read - written)
 
 
-def test_a_relative_panel_path_is_read_from_the_repository_root(monkeypatch, tmp_path):
-    monkeypatch.chdir(tmp_path)
-    monkeypatch.setenv("WBG_PANEL", "inputs/config/control_panel_v2.csv")
-    assert panel.path() == os.path.join(panel.ROOT, "inputs", "config", "control_panel_v2.csv")
-    assert panel.require("band.on") is True and panel.get("floor.types") == 0.6
+def test_the_retired_settings_are_gone_and_no_description_speaks_of_a_before_and_after():
+    written = {r["setting"] for r in shipped()}
+    gone = {"band.on", "digital.on", "link.strengths", "policy.on", "activities.on", "floor.pair_check",
+            "floor.cyber_security", "floor.public_institutions", "link.measure_top",
+            "dashboard.apply_measure_pair_checks", "dashboard.package_link_min_probability"}
+    assert not gone & written, sorted(gone & written)
+    bad = re.compile(r"\bv2\b|\bnew\b|\bold\b|retired|when on|as before", re.I)
+    for r in shipped():
+        assert not bad.search(r["what_it_does"]), r["setting"]

@@ -18,8 +18,7 @@ COMMENT ON VIEW wbg.package_status_order IS
   'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Not in latest plan, Cancelled.';
 
 -- One row per committed unit that counts, per project: the base of the
--- views below. Committed is the one decision (is_committed: the posterior of
--- grades 2 and 3 at the measure's floor). The asset is the one the sentence
+-- views below. Committed is the one decision (is_committed: the band rule). The asset is the one the sentence
 -- names or, where it names none, its paragraph's (the decayed sum); the type
 -- its chosen one (control panel floor.types).
 -- Materialised: built once per load, not once per card, and indexed, so a
@@ -44,22 +43,14 @@ WITH f AS (
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
   JOIN wbg.project_info i ON i.project_id = pp.project_id
   CROSS JOIN wbg.dashboard_settings s
-  -- committed: the posterior at the measure's floor (src/wbg_portfolio/measure.py is_committed)
+  -- committed: the band rule (src/wbg_portfolio/decide.py band_rule)
   WHERE f.was_sent_to_model AND f.is_committed
     AND f.posterior_probability >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
     -- the digital rule: a committed sentence counts only when it is digital
-    -- (the rest are in wbg.not_digital_findings); with digital.on false every
-    -- sentence is digital
+    -- (the rest are in wbg.not_digital_findings)
     AND f.is_digital
-    -- a pair check whose posterior that the unit is this measure, with the
-    -- other beside it, falls short of the pair check's floor (floor.pair_check)
-    AND NOT (s.apply_measure_pair_checks AND EXISTS (
-      SELECT 1 FROM wbg.unit_pair_checks c
-      WHERE c.unit_id = f.unit_id
-        AND ((c.set_a = f.label_set AND c.p_keep_a < s.pair_check_floor)
-          OR (c.set_b = f.label_set AND c.p_keep_b < s.pair_check_floor))))
 ),
 u AS (
   SELECT f.label_set, f.label_id, f.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
@@ -91,7 +82,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. A unit two measures commit is dropped from a measure its pair check says it is not while dashboard_settings.apply_measure_pair_checks is true (it is false under the band rule). Only digital sentences count (measure_findings.is_digital); the committed sentences that are not digital are in wbg.not_digital_findings.';
+  'Every committed unit that counts (committed by the band rule; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. Only digital sentences count (measure_findings.is_digital); the committed sentences that are not digital are in wbg.not_digital_findings.';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$
@@ -110,15 +101,15 @@ $do$;
 -- every link (47 s for a count).
 CREATE MATERIALIZED VIEW wbg.commitment_package_status AS
 WITH l AS MATERIALIZED (
-  SELECT u.commitment_id, u.unit_id, cp.package_id, cp.posterior_probability AS probability
+  SELECT u.commitment_id, u.unit_id, cl.package_id, cl.strength,
+         CASE WHEN cl.strength = 'strong' THEN cl.strong_p END AS probability
   FROM wbg.commitment_units u
-  JOIN wbg.commitment_packages cp
-    ON cp.label_set = u.label_set AND cp.label_id = u.label_id
-   AND cp.unit_id = u.unit_id AND cp.project_id = u.project_id
-  CROSS JOIN wbg.dashboard_settings ds
-  WHERE cp.posterior_probability >= ds.package_link_min_probability
+  JOIN wbg.commitment_package_links cl
+    ON cl.label_set = u.label_set AND cl.unit_id = u.unit_id AND cl.project_id = u.project_id
 )
-SELECT l.commitment_id, l.package_id, max(l.probability) AS link_probability,
+SELECT l.commitment_id, l.package_id,
+       CASE WHEN bool_or(l.strength = 'strong') THEN 'strong' ELSE 'asset' END AS strength,
+       max(l.probability) AS link_probability,
        count(DISTINCT l.unit_id) AS units_linked,
        s.project_id, s.description_clean, s.category, s.method_code, s.estimated_amount_usd,
        s.planned_date, s.due_date, s.plan_status, s.in_latest_plan, s.notice_date,
@@ -133,7 +124,7 @@ CREATE UNIQUE INDEX ON wbg.commitment_package_status (commitment_id, package_id)
 CREATE INDEX ON wbg.commitment_package_status (package_id);
 ANALYZE wbg.commitment_package_status;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_package_status IS
-  'One row per commitment and procurement package the decision model links to any of its sentences at the reading threshold (dashboard_settings.package_link_min_probability): the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A link means the package is likely where the commitment is carried out; it is the model''s reading, unmeasured until a sample is graded.';
+  'One row per commitment and procurement package linked to any of its sentences (commitment_package_links: strong when the package, asked alone, is about the measure; asset when they share a top-level asset): strength is strong when any of the links is, else asset; link_probability is the strongest strong-link probability and is null when every link is by shared asset; the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A strong link says the package, read alone, is about the measure; an asset link says only that both concern the same kind of asset. Both are the models'' reading, unmeasured until a sample is graded.';
 
 -- Near-identical wording across projects: word-for-word equality is rare,
 -- while the operations of one programme print one climate section with
