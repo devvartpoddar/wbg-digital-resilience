@@ -95,9 +95,34 @@ def write_scores(conn, kind, label_set, rows, replace_where=None, params=()):
     conn.commit()
 
 
-def _row(kind, label_set, label_id, item, state, q, answer, route="", rnd=0, cosine=None, rank=None):
+def cannot_estimate(conn, dry_run, log, step, *needs, digital=False):
+    """On a dry run, say so when a step this one reads has not run: (kind, step name) pairs, and
+    with digital the digital step when digital.on. True when it said so, so the caller returns
+    before printing a number (0) that is not an estimate."""
+    if not dry_run:
+        return False
+    needs = needs + ((("digital", "digital"),) if digital and decide.digital_settings()[0] else ())
+    missing = [name for kind, name in needs if not decide.has_scores(conn, kind)]
+    for name in missing:
+        log(f"  {step}: cannot estimate until {name} has run")
+    return bool(missing)
+
+
+def write_scoped(conn, kind, label_set, rows, scope=None, replace_where="item_id = ANY(%s)"):
+    """write_scores replacing the kind's rows of the set (scope None: all of them) or only the
+    rows `replace_where` picks out of the items in scope (a run over named projects replaces
+    only its own rows)."""
+    if scope is None:
+        write_scores(conn, kind, label_set, rows)
+    else:
+        write_scores(conn, kind, label_set, rows, replace_where, [sorted(scope)])
+
+
+def _row(kind, label_set, label_id, item, state, q, answer, route="", rnd=0, cosine=None, rank=None, score=None):
+    """A scores row. score: the answer's P(yes) of a fit question unless the step names it."""
+    score = Q.score(answer, fit=True) if score is None else score
     return {"kind": kind, "label_set": label_set, "label_id": label_id, "item_id": item,
-            "state_sha": Q.sha(state), "question_sha": Q.sha(q), "score": round(Q.score(answer, fit=True), 6),
+            "state_sha": Q.sha(state), "question_sha": Q.sha(q), "score": round(float(score), 6),
             "answer": {k: v for k, v in answer.items() if k != "served"}, "served": answer.get("served", ""),
             "route": route, "round": rnd, "cosine": None if cosine is None else round(cosine, 6), "rank": rank}
 
@@ -387,10 +412,7 @@ def package_assets(conn, data, corpus, *, model=Q.MODEL, api_key="", dry_run=Fal
                              route="cosine", cosine=cos, rank=rank))
             if Q.score(g[a], fit=True) >= yes:
                 has[pid].add(a)
-    if projects:
-        write_scores(conn, "package_asset", Q.ASSETS, rows, "item_id = ANY(%s)", [sorted(by_pkg)])
-    else:
-        write_scores(conn, "package_asset", Q.ASSETS, rows)
+    write_scoped(conn, "package_asset", Q.ASSETS, rows, by_pkg if projects else None)
     return packages, has
 
 
@@ -493,9 +515,7 @@ def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry
     while links.strengths is off."""
     if not decide.links_strengths():
         return 0
-    from wbg_portfolio import second
-    if second.cannot_estimate(conn, dry_run, log, "package_measure", ("package_asset", "link"),
-                              *([("digital", "digital")] if decide.digital_settings()[0] else [])):
+    if cannot_estimate(conn, dry_run, log, "package_measure", ("package_asset", "link"), digital=True):
         return None
     packages = load_packages(data, projects)
     if not packages:
@@ -527,7 +547,7 @@ def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry
     for name, (lab, q, got) in asked.items():
         rows = [_row("package_measure", name, lab["id"], pid, Q.package_state(by_pkg[pid]), q[lab["id"]],
                      g[lab["id"]]) for pid, g in got.items()]
-        write_scores(conn, "package_measure", name, rows, "item_id = ANY(%s)", [sorted(by_pkg)])
+        write_scoped(conn, "package_measure", name, rows, by_pkg)
         n += len(rows)
     log(f"  {n:,} package-measure scores written")
     return n

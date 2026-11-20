@@ -26,32 +26,6 @@ from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 
 
-def _row(kind, label_set, label_id, item, state, q, answer, score):
-    return {"kind": kind, "label_set": label_set, "label_id": label_id, "item_id": item,
-            "state_sha": Q.sha(state), "question_sha": Q.sha(q), "score": round(float(score), 6),
-            "answer": {k: v for k, v in answer.items() if k != "served"}, "served": answer.get("served", ""),
-            "route": "", "round": 0, "cosine": None, "rank": None}
-
-
-def _write(conn, kind, label_set, rows, scope):
-    """Replace the kind's rows of the set: all, or those of the sentences in scope."""
-    if scope is None:
-        checks.write_scores(conn, kind, label_set, rows)
-    else:
-        checks.write_scores(conn, kind, label_set, rows, "item_id = ANY(%s)", [sorted(scope)])
-
-
-def cannot_estimate(conn, dry_run, log, step, *needs):
-    """On a dry run, say so when a step this one reads has not run: (kind, step name) pairs.
-    True when it said so, so the caller returns before printing a number (0) that is not an estimate."""
-    if not dry_run:
-        return False
-    missing = [name for kind, name in needs if not decide.has_scores(conn, kind)]
-    for name in missing:
-        log(f"  {step}: cannot estimate until {name} has run")
-    return bool(missing)
-
-
 def _partial(names, every):
     """True when a run names only some of the active measures (--measures a b)."""
     return every is not None and not set(every) <= set(names)
@@ -104,11 +78,11 @@ def measure(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=Fals
                        api_key, dry_run, workers, log)
     if dry_run or ctx is None:
         return None
-    _write(conn, "measure_ctx", name,
-           [_row("measure_ctx", name, lab["id"], u, corpus.context_state(u), cq, g[lab["id"]],
-                 Q.score(g[lab["id"]])) for u, g in ctx.items()], scope)
-    _write(conn, "measure_second", name,
-           [_row("measure_second", name, lab["id"], u, corpus.chat_state(u), sq, a, a["grade"])
+    checks.write_scoped(conn, "measure_ctx", name,
+           [checks._row("measure_ctx", name, lab["id"], u, corpus.context_state(u), cq, g[lab["id"]],
+                        score=Q.score(g[lab["id"]])) for u, g in ctx.items()], scope)
+    checks.write_scoped(conn, "measure_second", name,
+           [checks._row("measure_second", name, lab["id"], u, corpus.chat_state(u), sq, a, score=a["grade"])
             for u, a in second.items()], scope)
     waiting = sum(1 for u in units if u not in second)
     log(f"  {len(ctx):,} context scores and {len(second):,} chat grades written; "
@@ -122,7 +96,7 @@ def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=Fal
     once whatever its measure. Writes kind digital (label_set and label digital)."""
     if not decide.digital_settings()[0]:
         return 0
-    if cannot_estimate(conn, dry_run, log, "digital", ("measure", "measure")):
+    if checks.cannot_estimate(conn, dry_run, log, "digital", ("measure", "measure")):
         return None
     units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
@@ -132,8 +106,7 @@ def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=Fal
                       "digital", "digital", api_key, dry_run, workers, log, data)
     if got is None:
         return None
-    _write(conn, "digital", "digital", [_row("digital", "digital", "digital", u, corpus.context_state(u), q,
-                                              g["digital"], Q.score(g["digital"], fit=True))
+    checks.write_scoped(conn, "digital", "digital", [checks._row("digital", "digital", "digital", u, corpus.context_state(u), q, g["digital"])
                                          for u, g in got.items()], scope)
     log(f"  {len(got):,} digital scores written")
     return len(got)
@@ -154,7 +127,7 @@ def policy(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.
     Nothing is asked while policy.on is false."""
     if not decide.policy_on():
         return 0
-    if cannot_estimate(conn, dry_run, log, "policy", ("measure", "measure")):
+    if checks.cannot_estimate(conn, dry_run, log, "policy", ("measure", "measure")):
         return None
     units, scope = _in_scope(corpus, decide.committed_digital_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
@@ -164,8 +137,8 @@ def policy(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.
                     dry_run, workers, log)
     if dry_run:
         return None
-    _write(conn, "policy", "policy", [_row("policy", "policy", "policy", u, corpus.context_state(u), q, a,
-                                            a["labels"][0] == "policy") for u, a in got.items()], scope)
+    checks.write_scoped(conn, "policy", "policy", [checks._row("policy", "policy", "policy", u, corpus.context_state(u), q, a,
+                                                   score=a["labels"][0] == "policy") for u, a in got.items()], scope)
     log(f"  {len(got):,} policy answers written")
     return len(got) if ok else None
 
@@ -248,8 +221,7 @@ def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, worker
     labels are the valid "asset/subtype" pairs). While band.on is off nothing is asked."""
     if not decide.band()["on"]:
         return 0
-    if cannot_estimate(conn, dry_run, log, "asset second look", ("asset", "classify"),
-                       *([("digital", "digital")] if decide.digital_settings()[0] else [])):
+    if checks.cannot_estimate(conn, dry_run, log, "asset second look", ("asset", "classify"), digital=True):
         return None
     first = first_pass_assets(conn, corpus)
     digital_units = decide.committed_digital_units(conn, corpus, names)
@@ -266,10 +238,10 @@ def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, worker
     for u, a in got.items():
         kept, la, lk = valid_assets(a["labels"], assets, subtypes)
         lost_a, lost_k = lost_a + la, lost_k + lk
-        rows.append(_row("asset_second", Q.ASSETS, "second", u, corpus.context_state(u), q,
-                         dict(a, labels=[f"{x}/{y}" for x, y in kept], discarded=len(a["labels"]) - len(kept)),
-                         len(kept)))
-    _write(conn, "asset_second", Q.ASSETS, rows, scope)
+        rows.append(checks._row("asset_second", Q.ASSETS, "second", u, corpus.context_state(u), q,
+                                dict(a, labels=[f"{x}/{y}" for x, y in kept], discarded=len(a["labels"]) - len(kept)),
+                                score=len(kept)))
+    checks.write_scoped(conn, "asset_second", Q.ASSETS, rows, scope)
     log(f"  {len(rows):,} asset second looks written, {sum(1 for r in rows if r['score']):,} with an asset"
         + (f"; discarded {lost_a} unknown or repeated asset id(s) and {lost_k} unknown kind(s)"
            if lost_a or lost_k else ""))
@@ -285,8 +257,7 @@ def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, worke
     While band.on is off nothing is asked."""
     if not decide.band()["on"]:
         return 0
-    if cannot_estimate(conn, dry_run, log, "asset kinds", ("asset", "classify"),
-                       *([("digital", "digital")] if decide.digital_settings()[0] else [])):
+    if checks.cannot_estimate(conn, dry_run, log, "asset kinds", ("asset", "classify"), digital=True):
         return None
     first = first_pass_assets(conn, corpus)
     digital_units = decide.committed_digital_units(conn, corpus, names)
@@ -299,8 +270,8 @@ def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, worke
     got, ok = _chat(conn, items, "asset_subtype", Q.ASSETS, api_key, dry_run, workers, log)
     if dry_run:
         return None
-    _write(conn, "asset_subtype", Q.ASSETS,
-           [_row("asset_subtype", Q.ASSETS, a, u, corpus.context_state(u), qs[a], ans, 1)
+    checks.write_scoped(conn, "asset_subtype", Q.ASSETS,
+           [checks._row("asset_subtype", Q.ASSETS, a, u, corpus.context_state(u), qs[a], ans, score=1)
             for (u, a), ans in got.items()], scope)
     log(f"  {len(got):,} asset kinds written")
     return len(got) if ok else None
@@ -325,7 +296,7 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
     asset, item the package; score 1 yes, 0 no). Not asked while links.strengths is off."""
     if not decide.links_strengths():
         return 0
-    if cannot_estimate(conn, dry_run, log, "package asset second look", ("package_asset", "link")):
+    if checks.cannot_estimate(conn, dry_run, log, "package asset second look", ("package_asset", "link")):
         return None
     low, yes = float(panel.require("link.asset_band_low")), float(panel.require("link.asset_yes"))
     packages = {p["package_id"]: p for p in checks.load_packages(data, projects)}
@@ -342,12 +313,9 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
                     "package_asset_second", Q.ASSETS, api_key, dry_run, workers, log)
     if dry_run:
         return None
-    rows = [_row("package_asset_second", Q.ASSETS, aid, pid, state(packages[pid]), qs[aid], a, a["grade"])
-            for (pid, aid), a in got.items()]
-    if projects:
-        checks.write_scores(conn, "package_asset_second", Q.ASSETS, rows, "item_id = ANY(%s)", [sorted(packages)])
-    else:
-        checks.write_scores(conn, "package_asset_second", Q.ASSETS, rows)
+    rows = [checks._row("package_asset_second", Q.ASSETS, aid, pid, state(packages[pid]), qs[aid], a,
+                        score=a["grade"]) for (pid, aid), a in got.items()]
+    checks.write_scoped(conn, "package_asset_second", Q.ASSETS, rows, packages if projects else None)
     waiting = len(pairs) - len(got)
     log(f"  {len(rows):,} package asset second looks written; {waiting:,} pair(s) waiting (not counted)")
     return len(rows) if ok else None

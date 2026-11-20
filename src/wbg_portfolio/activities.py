@@ -26,6 +26,7 @@ import hashlib
 import os
 
 from wbg_portfolio import ask
+from wbg_portfolio import checks
 from wbg_portfolio import chat
 from wbg_portfolio import decide
 from wbg_portfolio import panel
@@ -165,11 +166,9 @@ def run(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WOR
     makes it). Writes kind activity (label_set the measure, label activity,
     item project|measure|sha). Returns the number of parts written, or None on
     a dry run or a failed request. Nothing is asked while activities.on is false."""
-    from wbg_portfolio import checks
     if not decide.activities_on():
         return 0
-    if second.cannot_estimate(conn, dry_run, log, "activities", ("measure", "measure"),
-                              *([("digital", "digital")] if decide.digital_settings()[0] else [])):
+    if checks.cannot_estimate(conn, dry_run, log, "activities", ("measure", "measure"), digital=True):
         return None
     kinds, cap = document_kinds(data), max_sentences()
     todo, one = [], 0
@@ -193,15 +192,12 @@ def run(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WOR
         a = _answer(list(part), got[key])
         for k, v in a["repair"].items():
             counts[k] += v
-        rows_by_set[name].append(second._row(KIND, name, LABEL_ID, item_id(pid, name, part),
-                                             state(corpus, kinds, list(part)), qs[name],
-                                             dict(got[key], **a), len(a["activities"])))
+        rows_by_set[name].append(checks._row(KIND, name, LABEL_ID, item_id(pid, name, part),
+                                            state(corpus, kinds, list(part)), qs[name],
+                                            dict(got[key], **a), score=len(a["activities"])))
     for name in names:
-        if projects:
-            checks.write_scores(conn, KIND, name, rows_by_set[name], "split_part(item_id, '|', 1) = ANY(%s)",
-                                [sorted(projects)])
-        else:
-            checks.write_scores(conn, KIND, name, rows_by_set[name])
+        checks.write_scoped(conn, KIND, name, rows_by_set[name], projects or None,
+                            "split_part(item_id, '|', 1) = ANY(%s)")
     n = sum(len(r) for r in rows_by_set.values())
     log(f"  {n:,} group(s) written; repaired {counts['missing']} dropped sentence(s), {counts['repeated']} "
         f"repeated, {counts['unknown']} unknown sentence number(s), {counts['empty']} empty activit(ies)")

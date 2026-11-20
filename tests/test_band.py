@@ -374,8 +374,8 @@ def test_a_run_of_some_measures_keeps_the_rows_of_the_other_measures_sentences(
     other = "X:other-measures-sentence"
     run = getattr(second, step)
     second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)           # policy asks only digital sentences
-    checks.write_scores(pg, kind, kind, [second._row(kind, kind, kind, other, {"s": 1}, {"q": 1},
-                                                      {"labels": ["policy"]}, 1)])
+    checks.write_scores(pg, kind, kind, [checks._row(kind, kind, kind, other, {"s": 1}, {"q": 1},
+                                                      {"labels": ["policy"]}, score=1)])
     pg.commit()
     # a subset run (cra of cra and another measure): the other measure's row stays
     kept = run(pg, corpus, c, ["cra"], every=["cra", "another"], api_key="k", **QUIET)
