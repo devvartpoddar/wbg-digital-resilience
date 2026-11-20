@@ -29,6 +29,7 @@ from wbg_portfolio import ask
 from wbg_portfolio import checks
 from wbg_portfolio import chat
 from wbg_portfolio import decide
+from wbg_portfolio import labels
 from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 from wbg_portfolio.paths import where
@@ -44,7 +45,6 @@ def max_sentences():
 
 def document_kinds(data):
     """{doc_id: doc_kind} of the fetched documents."""
-    from wbg_portfolio import labels
     path = where(data, "documents")
     return {r["doc_id"]: r.get("doc_kind", "") for r in labels.rows(path)} if os.path.exists(path) else {}
 

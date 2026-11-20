@@ -5,6 +5,7 @@ import json
 
 import pytest
 
+from helpers import QUIET, first_pass
 from wbg_portfolio import chat
 from wbg_portfolio import checks
 from wbg_portfolio import db
@@ -15,7 +16,6 @@ from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 from wbg_portfolio import second
 
-QUIET = dict(log=lambda *_: None)
 GRADE = Q.chat_question("Grade it.", "grade", maximum=3)
 CHOICE = Q.chat_question("Which?", "choice", ["investment", "policy"])
 
@@ -182,23 +182,6 @@ def test_the_band_rule(post, ctx, second, expect):
 
 
 # ------------------------------------------------------------ the steps
-
-def first_pass(pg, corpus, score=0.6, units=(0,)):
-    """cra scored by the funnel, then the first-pass score of the chosen units set by hand."""
-    c = Q.Corpus(corpus)
-    funnel.run(pg, corpus, "cra", corpus=c, api_key="k", **QUIET)
-    base = db.rows(pg, f"SELECT item_id FROM {db.SCHEMA}.scores WHERE kind = 'measure' AND label_set = 'cra'")
-    template = base[0][0]
-    for i in units:
-        u = c.index[i]["unit_id"]
-        if u != template:
-            pg.execute(f"INSERT INTO {db.SCHEMA}.scores SELECT kind, label_set, label_id, %s, state_sha, "
-                       f"question_sha, score, answer, served, route, round, cosine, rank FROM {db.SCHEMA}.scores "
-                       f"WHERE item_id = %s AND kind = 'measure'", (u, template))
-        pg.execute(f"UPDATE {db.SCHEMA}.scores SET score = %s WHERE item_id = %s AND kind = 'measure'", (score, u))
-    pg.commit()
-    return c
-
 
 def committed(pg, c, name="cra"):
     return {u: (r["committed"], r["decided_by"], r["waiting"]) for u, r in decide.measure_units(pg, c, name).items()}

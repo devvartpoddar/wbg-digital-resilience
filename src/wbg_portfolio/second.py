@@ -4,7 +4,7 @@ One pattern: the judge decides; anything in the uncertain band gets the same
 second look; both must agree. Nothing here decides: each step asks and writes
 scores, and src/wbg_portfolio/decide.py reads them.
 
-  measure   every sentence x measure whose first-pass posterior is in
+  measure_second  every sentence x measure whose first-pass posterior is in
             [band.low, band.keep): the decision model again with the
             paragraph beside the sentence (kind measure_ctx, P(grades 2, 3)),
             and the chat model's grade 0 to 3 (kind measure_second)
@@ -12,6 +12,15 @@ scores, and src/wbg_portfolio/decide.py reads them.
             digital asset or the digital sector (kind digital, P(yes))
   policy    every committed sentence: investment or policy instrument, by the
             chat model (kind policy, score 1 for policy, 0 for investment)
+  asset_second, asset_subtype   the chat model's assets, and the kind of each,
+            for the committed, digital sentences (kinds asset_second, asset_subtype)
+  package_asset_second   every package x asset pair whose first-pass P(yes) is
+            in [link.asset_band_low, link.asset_yes): the chat model's yes or no
+
+The three second looks (measure_second, asset_second, package_asset_second) read
+alike: the same call shape, the same log tail, a missing look is waiting and never
+a yes (asset_second has no score to band: it asks the sentences the first pass gave no asset). Question wording is all in questions.py; rows and writes are checks._row and
+checks.write_scoped; asking is chat.asked and checks._ask.
 
 Every step honours projects (only those projects' sentences are asked, and
 only their rows are replaced), dry_run (estimates, nothing asked) and the
