@@ -140,7 +140,7 @@ Estimates (2026-10-22, 251 projects, about 150,000 searched sentences, starting 
 
 A measure is three small files and one command; the only part a person must write is the definition:
 
-- `analysis/labels/<id>.csv`: `measure_id`, `measure_name`, `definition` (three to six sentences: what counts, what does not; name the measure, never the digital asset, the asset map supplies that link), `boundary` (optional: what the measure is not, for people; nothing reads it), `theme`, `family` (the family it belongs to, one per measure: `climate`, `cloud_data`; see section 5c), `active`, `version`;
+- `analysis/labels/<id>.csv`: `measure_id`, `measure_name`, `definition` (three to six sentences: what counts, what does not; name the measure, never the digital asset, the asset map supplies that link), `theme`, `family` (the family it belongs to, one per measure: `climate`, `cloud_data`; see section 5c), `active`, `version`;
 - `<id>_queries.csv`: six to ten search phrases, each a sentence a document might write;
 - `<id>_patterns.csv` (optional): one or two whole-word patterns (`\bunderground\b`, not `ducts?`, which also matches "conducted");
 - `<id>_types.csv` (optional): the approved types; without one, the first run proposes a list into `data/types/<id>_types.csv` for a person to approve into the labels folder.
