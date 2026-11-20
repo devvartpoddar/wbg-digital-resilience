@@ -59,6 +59,11 @@ def brief(data=None):
                      f"(SELECT count(DISTINCT activity_id) FROM {S}.activities) FROM {S}.commitment_package_links")
         if r and (r[0] or r[1] or r[2]):
             lines.append(f"links:    {r[0]:,} strong, {r[1]:,} asset-level (sentence x package); {r[2]:,} activities")
+        r = _n(conn, f"SELECT count(*) FILTER (WHERE component_matched_by = 'plan_pdf'), "
+                     f"count(*) FILTER (WHERE amount_source = 'plan_pdf'), count(*) FROM {S}.packages")
+        if r and r[2]:
+            lines.append(f"plan pdf: {r[0]:,} of {r[2]:,} packages gained a component and {r[1]:,} an "
+                         f"estimated amount from the plan PDF (docs/method/procurement.md 3.4)")
         r = _n(conn, f"SELECT count(*) FROM {S}.commitments")
         if r and r[0] is not None:
             lines.append(f"dashboards: {r[0]:,} commitments")

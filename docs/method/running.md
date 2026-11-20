@@ -19,7 +19,7 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 | Stage | What it does | Reads | Writes |
 |---|---|---|---|
 | fetch | the appraisal documents, procurement records and project records the selected projects lack | the Bank's interfaces | `data/raw/` |
-| prepare | read the PDFs, clean, sentences, components, procurement tables; load the corpus tables and cut a release when they changed | `data/raw/` | `data/appraisal/`, `data/procurement/`, Postgres corpus tables |
+| prepare | read the PDFs, clean, sentences, components, procurement tables (the plan PDFs in `data/raw/plan_pdf/` fill blank components and amounts); load the corpus tables and cut a release when they changed | `data/raw/` | `data/appraisal/`, `data/procurement/`, Postgres corpus tables |
 | embed | the sentence vectors, only what the cache lacks | `data/appraisal/` | `data/embeddings/` |
 | search | every label set's phrases against the vectors (cosines) | `data/embeddings/`, the label files | `data/search/<set>-<version>/` |
 | classify | the asset map, first pass: the funnel over the four assets (section 5b) | the search run, the store | `wbg.scores` (kind asset) |
