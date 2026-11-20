@@ -671,6 +671,8 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
         load_pg.prepare(conn)
         for table, cols, rows in (("labels", load_pg.LABEL_COLS, load_pg.label_rows()),
                                   ("measure_types", load_pg.TYPE_COLS, load_pg.type_rows(data)),
+                                  ("asset_subtypes", load_pg.SUBTYPE_COLS, load_pg.subtype_rows()),
+                                  ("flags", load_pg.FLAG_COLS, load_pg.flag_rows()),
                                   *zip(("label_queries", "label_patterns", "label_scale"),
                                        (load_pg.QUERY_COLS, load_pg.PATTERN_COLS, load_pg.SCALE_COLS),
                                        load_pg.definition_rows()),

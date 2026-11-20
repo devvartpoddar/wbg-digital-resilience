@@ -434,6 +434,25 @@ TABLES = {
                  "definition": "The definition the decision model was given.",
                  "merged_from": "Type ids the file merges into this one (merge_into), "
                                 "pipe-separated; their yes answers count as this type's."}),
+    "asset_subtypes": dict(
+        key=("asset_id", "subtype_id"), foreign=[],
+        comment="The finer kinds of each asset (inputs/taxonomy/assets_subtypes.csv, kept by a person), "
+                "one row per asset and kind with its name and definition, so unit_assets.subtype_id "
+                "can be read by name. Inactive kinds are listed too, marked.",
+        columns={"asset_id": "The asset (a label of the assets set) the kind belongs to.",
+                 "subtype_id": "The kind's id, as unit_assets.subtype_id carries it.",
+                 "subtype_name": "The kind's name.",
+                 "definition": "The definition the chat model was shown for the kind.",
+                 "is_active": "Whether the kind is offered to the chat model.",
+                 "version": "The hand-kept version of the row."}),
+    "flags": dict(
+        key=("flag_id",), foreign=[],
+        comment="The yes-or-no flags asked of a committed sentence whatever its measure "
+                "(inputs/taxonomy/flags.csv, kept by a person): digital and policy, with the definitions "
+                "the chat model was given. They are definitions, not label sets.",
+        columns={"flag_name": "What the flag says of a sentence.",
+                 "definition": "The definition the chat model was given.",
+                 "version": "The hand-kept version of the row."}),
     "measure_quality": dict(
         key=("label_set", "question_sha256", "sheet"), foreign=[],
         comment="How well the pipeline decides a measure, against a sheet a person graded "

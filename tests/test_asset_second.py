@@ -148,6 +148,14 @@ def test_the_levels_and_kinds_reach_unit_assets(pg, corpus, fake_chat, fake_mode
     agree = dict(db.rows(pg, f"SELECT unit_id, second_look_asset_id FROM {db.SCHEMA}.unit_assets "
                              f"WHERE asset_id <> ''"))
     assert agree == {u0: "fiber", u1: "fiber"}
+    # a kind is readable by name: its table, and beside the ids in the asset map
+    names = {(a, k): n for a, k, n in db.rows(
+        pg, f"SELECT asset_id, subtype_id, subtype_name FROM {db.SCHEMA}.asset_subtypes")}
+    assert names[("fiber", "backbone")] and names[("towers", "mast")]
+    mapped = {(u, a): n for u, a, n in db.rows(
+        pg, f"SELECT unit_id, asset_id, subtype_name FROM {db.SCHEMA}.asset_map")}
+    assert mapped[(u1, "fiber")] == names[("fiber", "backbone")]
+    assert {f for (f,) in db.rows(pg, f"SELECT flag_id FROM {db.SCHEMA}.flags")} == {"digital", "policy"}
     af = {u: lvl for u, lvl in db.rows(pg, f"SELECT unit_id, linked_asset_level FROM {db.SCHEMA}.measure_findings")}
     assert af[u1] == "second_look"
     # the second look's asset counts on the dashboards at the level the panel allows

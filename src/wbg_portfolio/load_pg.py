@@ -64,6 +64,8 @@ STRENGTH_COLS = ["project_id", "label_set", "unit_id", "package_id", "strength",
 ACTIVITY_COLS = ["activity_id", "project_id", "label_set", "activity_label", "unit_id", "n_sentences"]
 LABEL_COLS = ["label_set", "label_id", "name", "definition", "active", "version", "family", "folder"]
 TYPE_COLS = ["label_set", "label_id", "type_id", "type_name", "definition", "merged_from"]
+SUBTYPE_COLS = ["asset_id", "subtype_id", "subtype_name", "definition", "active", "version"]
+FLAG_COLS = ["flag_id", "flag_name", "definition", "version"]
 QUERY_COLS = ["label_set", "label_id", "query_id", "query", "active", "version", "file_sha256"]
 PATTERN_COLS = ["label_set", "label_id", "pattern_id", "pattern", "active", "version", "file_sha256"]
 SCALE_COLS = ["label_set", "label_id", "grade", "description", "version", "file_sha256"]
@@ -73,7 +75,8 @@ DECISION_TABLES = {"measure_findings": FINDING_COLS, "paragraph_grades": GRADE_C
                    "unit_assets": UNIT_ASSET_COLS, "unit_pair_checks": PAIR_COLS,
                    "package_assets": PACKAGE_ASSET_COLS, "commitment_packages": LINK_COLS,
                    "commitment_package_links": STRENGTH_COLS, "activities": ACTIVITY_COLS,
-                   "labels": LABEL_COLS, "measure_types": TYPE_COLS, "label_queries": QUERY_COLS,
+                   "labels": LABEL_COLS, "measure_types": TYPE_COLS,
+                   "asset_subtypes": SUBTYPE_COLS, "flags": FLAG_COLS, "label_queries": QUERY_COLS,
                    "label_patterns": PATTERN_COLS, "label_scale": SCALE_COLS,
                    "measure_quality": QUALITY_COLS}
 ROLLUP_COLS = ["label_set", "run", "label_id", "paragraph_id", "doc_id", "project_ids",
@@ -335,6 +338,24 @@ def label_rows():
     return [{"label_set": name, "label_id": r["id"], "name": r["name"], "definition": r["definition"],
              "active": r["active"], "version": r["version"], "family": r["family"], "folder": r["folder"]}
             for name in labels.label_sets() for r in labels.load_set(name)]
+
+
+def subtype_rows():
+    """Every finer kind of every asset (assets_subtypes.csv), inactive ones
+    too, marked."""
+    path = os.path.join(labels.folder("assets"), "assets_subtypes.csv")
+    if not os.path.exists(path):
+        return []
+    return [{"asset_id": r["asset_id"].strip(), "subtype_id": r["subtype_id"].strip(),
+             "subtype_name": " ".join(r["subtype_name"].split()),
+             "definition": " ".join(r["definition"].split()), "active": labels.is_active(r),
+             "version": (r.get("version") or "").strip()} for r in labels.rows(path)]
+
+
+def flag_rows():
+    """The yes/no flags of flags.csv (digital, policy) with their definitions."""
+    return [{"flag_id": f["id"], "flag_name": f["name"], "definition": f["definition"],
+             "version": f["version"]} for f in labels.load_flags().values()]
 
 
 def type_rows(data):
