@@ -18,6 +18,7 @@ import numpy
 
 from wbg_portfolio.paths import REPO as ROOT
 from wbg_portfolio import api  # noqa: E402
+from wbg_portfolio import common  # noqa: E402
 from wbg_portfolio.paths import data_root, where  # noqa: E402
 from wbg_portfolio import units  # noqa: E402
 
@@ -304,7 +305,8 @@ def fetch_missing(todo, unique, root, dim, *, model, api_key, base_url, log,
         futures = [pool.submit(_embed_batch, n, len(batches), batch, unique, root, dim,
                                model=model, api_key=api_key, base_url=base_url, log=log)
                    for n, batch in enumerate(batches, 1)]
-        for done, f in enumerate(as_completed(futures), 1):
+        progress = common.Progress("  embed: requests", len(batches), log)
+        for f in as_completed(futures):
             r, t, st, sg, rl, sv, fl = f.result()
             stats["requests"] += r
             stats["tokens"] += t
@@ -313,8 +315,7 @@ def fetch_missing(todo, unique, root, dim, *, model, api_key, base_url, log,
             rate_limit = rl or rate_limit
             served = sv or served
             failures.extend(fl)
-            if done % 10 == 0 or done == len(batches):
-                log(f"  {done}/{len(batches)} requests, {stats['stored']:,} vectors cached")
+            progress.step(f"{stats['stored']:,} vectors cached")
     stats["rate_limit"] = rate_limit
     stats["served_model"] = served
     return stats, failures
@@ -512,9 +513,7 @@ def main():
     # A run that embedded nothing keeps the manifest of the run that did: the provenance of
     # the vectors is what was paid for and served, not the cache hit that read them back.
     if stats["requests"] or not os.path.exists(man_path):
-        with open(man_path, "w", encoding="utf-8") as fh:
-            json.dump(manifest, fh, indent=2, sort_keys=True)
-            fh.write("\n")
+        common.write_atomic(man_path, json.dumps(manifest, indent=2, sort_keys=True) + "\n")
     else:
         log(f"  {os.path.basename(man_path)} kept (nothing embedded this run)")
 

@@ -7,12 +7,12 @@ Writes data/raw/pdf/{doc_id}.pdf, data/raw/documents.csv (one row per document),
 
 Resumable: a PDF already on disk is not fetched again.
 """
-import argparse, csv, os, re, sys, threading, time
+import argparse, csv, os, re, sys, time
 import urllib.parse
 
 from wbg_portfolio.paths import REPO as ROOT
 from wbg_portfolio import api  # noqa: E402
-from wbg_portfolio.common import read_csv, sha_text, write_csv  # noqa: E402
+from wbg_portfolio.common import read_csv, sha_text, write_atomic, write_csv  # noqa: E402,F401
 from wbg_portfolio.paths import data_root, where, write_fetch_status  # noqa: E402
 WDS = "https://search.worldbank.org/api/v3/wds"
 
@@ -74,21 +74,6 @@ def now_stamp():
 def complete_pdf(blob):
     """Whether a body is a whole PDF: the %PDF header and %%EOF near the end."""
     return blob.startswith(b"%PDF") and b"%%EOF" in blob[-PDF_TAIL:]
-
-
-def write_atomic(dest, blob):
-    """Write aside under a name unique to this process and thread, then rename
-    into place, so two threads fetching one file never share a temporary file
-    (the file keeps the default permissions, unlike a tempfile.mkstemp one)."""
-    tmp = f"{dest}.{os.getpid()}.{threading.get_ident()}.part"
-    try:
-        with open(tmp, "wb") as fh:
-            fh.write(blob)
-        os.replace(tmp, dest)
-    except BaseException:
-        if os.path.exists(tmp):
-            os.unlink(tmp)
-        raise
 
 
 def list_docs(project_id, doc_type):

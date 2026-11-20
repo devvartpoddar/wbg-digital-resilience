@@ -15,6 +15,7 @@ import argparse, csv, hashlib, json, os, re, sys
 from collections import Counter, defaultdict
 
 from wbg_portfolio.paths import data_root, file_sha256, where  # noqa: E402
+from wbg_portfolio import common  # noqa: E402
 from wbg_portfolio.common import write_csv  # noqa: E402
 from wbg_portfolio.keys import (name_key, project_parts, project_at, number_key,  # noqa: E402
                                 normal_number, uses_roman, COMPONENT_PREFIX)
@@ -672,6 +673,41 @@ def number_by_name(rows):
             taken.add(r["number"])
 
 
+def _documents(data, docs, paras):
+    """For each document and each operation it covers (a combined document is split at its data
+    sheets, keys.project_parts): (doc id, document row, its paragraph rows, its cleaned text,
+    the parts, the row base, the operation's project ids, the pages holding a component table,
+    the cache key of that read, the PDF's path)."""
+    for did in sorted(docs):
+        doc = docs[did]
+        rows = paras.get(did, [])
+        clean_path = where(data, "text", f"{did}.txt")
+        if not rows or not os.path.exists(clean_path):
+            continue
+        with open(clean_path, encoding="utf-8") as fh:
+            text = fh.read()
+        base = {"doc_id": did, "doc_kind": doc["doc_kind"],
+                "disclosure_date": doc["disclosure_date"]}
+        parts = project_parts(text, doc["project_ids"], doc.get("doc_kind"))
+        # Pages holding a component table, found in the cleaned text so the PDF is opened
+        # only at those pages.
+        starts = sorted((int(r["char_start"]), int(r["page_from"] or 0)) for r in rows)
+        pages_by_part = defaultdict(set)
+        for m in re.finditer(r"component\s*name|current component", text, re.I):
+            before = [pg for s, pg in starts if s <= m.start()]
+            if before and before[-1]:
+                pages_by_part[project_at(parts, m.start())].add(before[-1])
+        pdf_path = where(data, "pdf", f"{did}.pdf")
+        sha = doc.get("pdf_sha256") or (file_sha256(pdf_path, remember=False)
+                                        if os.path.exists(pdf_path) else "")
+        for owners in dict.fromkeys(p[2] for p in parts):
+            pages = sorted(pages_by_part.get(owners, ()))
+            # Keyed on the PDF, the pages searched and this module's code, so a change to
+            # any of them reads the tables again.
+            key = ":".join([sha, ",".join(map(str, pages)), READER_VERSION])
+            yield did, doc, rows, text, parts, base, owners, pages, key, pdf_path
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--data", default=data_root())
@@ -692,63 +728,48 @@ def main():
     except (OSError, ValueError):
         cache = {}
 
-    out, stats, used = [], Counter(), {}
-    for did in sorted(docs):
-        doc = docs[did]
-        rows = paras.get(did, [])
-        clean_path = where(args.data, "text", f"{did}.txt")
-        if not rows or not os.path.exists(clean_path):
+    # The component tables to read from the PDFs, each in a child process with a time limit
+    # (common.limited); the cache is written as each is read, so a stop keeps them. A read that
+    # fails or runs out of time is reported, finds nothing this run and is tried again next run.
+    todo = {}
+    for did, *_, pages, key, pdf_path in _documents(args.data, docs, paras):
+        if pages and os.path.exists(pdf_path) and key not in cache:
+            todo.setdefault(key, (pdf_path, pages, did))
+    progress = common.Progress("components: PDF tables read", len(todo))
+    for key, found, err in common.limited(lambda k: read_table_pages(*todo[k][:2]), sorted(todo),
+                                          lambda k: common.pdf_seconds(todo[k][0])):
+        if err:
+            progress.skip(todo[key][2], err[:120])
             continue
-        with open(clean_path, encoding="utf-8") as fh:
-            text = fh.read()
-        base = {"doc_id": did, "doc_kind": doc["doc_kind"],
-                "disclosure_date": doc["disclosure_date"]}
-        # A combined appraisal document is split at its data sheets, each part belonging to
-        # its own operation (keys.project_parts); a document of one project is one part.
-        parts = project_parts(text, doc["project_ids"], doc.get("doc_kind"))
+        cache[key] = found
+        common.write_atomic(cache_path, json.dumps(cache, sort_keys=True))
+        progress.step()
+    progress.end()
 
-        # Pages holding a component table, found in the cleaned text so the PDF is opened
-        # only at those pages.
-        starts = sorted((int(r["char_start"]), int(r["page_from"] or 0)) for r in rows)
-        pages_by_part = defaultdict(set)
-        for m in re.finditer(r"component\s*name|current component", text, re.I):
-            before = [pg for s, pg in starts if s <= m.start()]
-            if before and before[-1]:
-                pages_by_part[project_at(parts, m.start())].add(before[-1])
-        pdf_path = where(args.data, "pdf", f"{did}.pdf")
-        for owners in dict.fromkeys(p[2] for p in parts):
-            pages = sorted(pages_by_part.get(owners, ()))
-            found = []
-            # Keyed on the PDF, the pages searched and this module's code, so a change to
-            # any of them reads the tables again.
-            sha = doc.get("pdf_sha256") or (file_sha256(pdf_path, remember=False)
-                                            if os.path.exists(pdf_path) else "")
-            key = ":".join([sha, ",".join(map(str, pages)), READER_VERSION])
-            if pages and os.path.exists(pdf_path):
-                if key in cache:
-                    found = cache[key]
-                else:
-                    found = read_table_pages(pdf_path, pages)
-                    cache[key] = found
+    out, stats, used = [], Counter(), {}
+    for did, doc, rows, text, parts, base, owners, pages, key, pdf_path in _documents(args.data, docs, paras):
+        found = []
+        if pages and os.path.exists(pdf_path):
+            found = cache.get(key, [])
+            if key in cache:
                 used[key] = found
-            for c in found:
-                c = dict(c, name=clean_name(c["name"]) or c["name"])
-                out.append(dict(base, project_ids=owners, level="component", **c))
-                stats[f"rows_{c['source']}"] += 1
-            if found:
-                stats[f"docs_{found[0]['source']}"] += 1
-            part_rows = [r for r in rows if project_at(parts, int(r["char_start"])) == owners]
-            heads = read_headings(part_rows, text)
-            heads = [dict(c, name=clean_name(c["name"])) for c in heads]
-            heads = [c for c in heads if c["name"]]
-            for c in heads:
-                out.append(dict(base, project_ids=owners, source="heading", **c))
-            if heads:
-                stats["docs_heading"] += 1
+        for c in found:
+            c = dict(c, name=clean_name(c["name"]) or c["name"])
+            out.append(dict(base, project_ids=owners, level="component", **c))
+            stats[f"rows_{c['source']}"] += 1
+        if found:
+            stats[f"docs_{found[0]['source']}"] += 1
+        part_rows = [r for r in rows if project_at(parts, int(r["char_start"])) == owners]
+        heads = read_headings(part_rows, text)
+        heads = [dict(c, name=clean_name(c["name"])) for c in heads]
+        heads = [c for c in heads if c["name"]]
+        for c in heads:
+            out.append(dict(base, project_ids=owners, source="heading", **c))
+        if heads:
+            stats["docs_heading"] += 1
 
-    with open(cache_path + ".part", "w", encoding="utf-8") as fh:
-        json.dump(used, fh, sort_keys=True)
-    os.replace(cache_path + ".part", cache_path)
+    # The cache keeps what this corpus uses, as before.
+    common.write_atomic(cache_path, json.dumps(used, sort_keys=True))
 
     for r in out:
         r["name_key"] = name_key(r["name"])
@@ -785,4 +806,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(common.exit_status(main()))

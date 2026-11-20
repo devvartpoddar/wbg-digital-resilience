@@ -1062,4 +1062,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(common.exit_status(main()))

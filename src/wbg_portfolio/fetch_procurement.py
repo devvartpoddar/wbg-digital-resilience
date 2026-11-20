@@ -22,6 +22,7 @@ from wbg_portfolio.paths import data_root, where, write_fetch_status  # noqa: E4
 from wbg_portfolio import plan_table                                     # noqa: E402
 from wbg_portfolio.fetch import (get, now_stamp, read_cohort, write_atomic,  # noqa: E402
                                  complete_pdf)
+from wbg_portfolio import common  # noqa: E402
 from wbg_portfolio.common import read_csv, sha_text, write_csv  # noqa: E402
 from wbg_portfolio.dates import iso_date                    # noqa: E402
 from wbg_portfolio.clean_procurement import (                        # noqa: E402
@@ -682,6 +683,7 @@ def fetch_plan_pdfs(tasks, data, log, refresh, delay, workers, referenced=None):
     if not jobs:
         return out
     os.makedirs(pdf_dir, exist_ok=True)
+    progress = common.Progress("  plan PDFs", len(jobs))
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {pool.submit(_fetch_plan_pdf, os.path.join(pdf_dir, f"{d['doc_id']}.pdf"),
                                d["pdfurl"], refresh, delay): (pid, d) for pid, d in jobs}
@@ -691,7 +693,9 @@ def fetch_plan_pdfs(tasks, data, log, refresh, delay, workers, referenced=None):
                 sha, new = fut.result()
             except Exception as exc:                   # noqa: BLE001
                 out["failed"].append((pid, d["doc_id"], str(exc)[:200]))
+                progress.skip(d["doc_id"], f"not downloaded: {str(exc)[:100]}")
                 continue
+            progress.step(f"{out['fetched'] + new} downloaded, {out['cached'] + (not new)} on disk")
             if new:
                 out["fetched"] += 1
                 log.record("plan_pdf", d["pdfurl"], f"doc={d['doc_id']}", 1, sha)
@@ -815,6 +819,7 @@ def _collect(projects, data, folder, refresh, delay, fetch, to_row):
     raw_dir = where(data, folder)
     os.makedirs(raw_dir, exist_ok=True)
     rows, failures = [], []
+    progress = common.Progress(f"  {folder}", len(projects))
     for proj in projects:
         pid = proj["project_id"]
         try:
@@ -822,8 +827,10 @@ def _collect(projects, data, folder, refresh, delay, fetch, to_row):
                                       lambda: fetch(pid))
         except Exception as exc:                       # noqa: BLE001
             failures.append((pid, str(exc)))
+            progress.skip(pid, str(exc)[:100])
             continue
         rows.extend(to_row(rec, pid) for rec in records)
+        progress.step(pid)
     return rows, failures
 
 

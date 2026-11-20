@@ -318,20 +318,24 @@ def test_reading_is_restricted_to_the_referenced_plan_documents(tmp_path, monkey
     pdf_dir.mkdir(parents=True)
     for doc in ("D1", "D2"):
         (pdf_dir / f"{doc}.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
-    read = []
 
     def fake_read_pdf(p):
-        read.append(os.path.basename(p))
         return ([{"ref_key": "AAX1", "component_cell": "", "amount": "",
                   "ref_printed": "AA-X-1", "page": 1, "has_amount_column": ""}], 0)
 
-    # The read runs in a child process, so the list of what was read is kept on this side.
-    monkeypatch.setattr(plan_pdf, "read_pdf_limited", fake_read_pdf)
-    got = plan_pdf.read_all(str(tmp_path), log=lambda *_: None, only={"D1"})
-    assert read == ["D1.pdf"] and set(got) == {"D1"}
+    # The read runs in a child process; what was read is told by the lines it logs.
+    monkeypatch.setattr(plan_pdf, "read_pdf", fake_read_pdf)
+    lines = []
+    got = plan_pdf.read_all(str(tmp_path), log=lines.append, only={"D1"})
+    assert set(got) == {"D1"} and any("D1 read" in x for x in lines)
+    assert not any("D2" in x for x in lines)
     # D2 is read when a later run asks for it; D1 comes from the cache, not the PDF again.
-    got = plan_pdf.read_all(str(tmp_path), log=lambda *_: None, only={"D2"})
-    assert read == ["D1.pdf", "D2.pdf"] and set(got) == {"D2"}
+    lines.clear()
+    got = plan_pdf.read_all(str(tmp_path), log=lines.append, only={"D2"})
+    assert set(got) == {"D2"} and any("D2 read" in x for x in lines)
+    assert not any("D1" in x for x in lines)
+    with open(tmp_path / "procurement" / "plan_pdf_rows.csv", newline="", encoding="utf-8") as fh:
+        assert {r["doc_id"] for r in csv.DictReader(fh)} == {"D1", "D2"}
 
 
 def test_the_cache_holds_each_plan_before_the_next_one_is_read(tmp_path, monkeypatch):
@@ -347,13 +351,15 @@ def test_the_cache_holds_each_plan_before_the_next_one_is_read(tmp_path, monkeyp
         return ([{"ref_key": "AAX1", "component_cell": "Comp 1", "amount": "1.00",
                   "ref_printed": "AA-X-1", "page": 1, "has_amount_column": "true"}], 0)
 
-    def sha_or_stop(path, remember=False):
-        if path.endswith("D2.pdf"):
+    real_cache_rows = plan_pdf.cache_rows
+
+    def stop_at_d2(write):
+        if "D2" in write:
             raise KeyboardInterrupt("the run was stopped here")
-        return "sha-of-" + os.path.basename(path)
+        return real_cache_rows(write)
 
     monkeypatch.setattr(plan_pdf, "read_pdf", fake_read_pdf)
-    monkeypatch.setattr(plan_pdf, "file_sha256", sha_or_stop)
+    monkeypatch.setattr(plan_pdf, "cache_rows", stop_at_d2)
     with pytest.raises(KeyboardInterrupt):
         plan_pdf.read_all(str(tmp_path), log=lambda *_: None)
 
@@ -377,11 +383,12 @@ def test_a_plan_that_never_finishes_is_skipped_and_the_rest_are_read(tmp_path, m
             _time.sleep(60)
         return [{"ref_printed": "A"}], 0
     monkeypatch.setattr(plan_pdf, "read_pdf", fake_read_pdf)
-    monkeypatch.setattr(plan_pdf, "READ_SECONDS", 1)
+    monkeypatch.setattr(plan_pdf.common, "pdf_seconds", lambda p: 1)
     lines = []
     started = _time.time()
     out = plan_pdf.read_all(str(tmp_path), log=lines.append)
     assert _time.time() - started < 20
     assert sorted(out) == ["1", "3"]
-    assert any("2 of 3: 2 could not be read: not read within 1 seconds" in x for x in lines)
-    assert any("3 of 3: 3 read, 1 rows" in x for x in lines)
+    assert any("2 of 3: 2 skipped: could not be read: not finished within 1 seconds" in x for x in lines)
+    assert any("3 of 3, 3 read, 1 rows" in x for x in lines)
+    assert any("1 of 3 skipped" in x and x.endswith(": 2") for x in lines)

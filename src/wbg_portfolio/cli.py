@@ -20,6 +20,7 @@ import argparse, csv, datetime, glob, hashlib, json, os, re, subprocess, sys
 from collections import Counter, defaultdict
 
 from wbg_portfolio.paths import REPO as ROOT, data_root, where
+from wbg_portfolio import common
 
 SRC = os.path.dirname(os.path.abspath(__file__))
 
@@ -232,26 +233,33 @@ def _stage_cmd(script):
 
 
 def _env(data):
-    """The stages' environment: the data folder, and src/ on the import path
-    so the box's worker Python finds the package without installing it."""
+    """The stages' environment: the data folder, src/ on the import path so the
+    box's worker Python finds the package without installing it, and unbuffered
+    output, so a stage's lines reach a log file or a service's journal as they are
+    printed (a watcher tells a working stage from a stuck one by them)."""
     path = [os.path.dirname(SRC)] + [p for p in os.environ.get("PYTHONPATH", "").split(os.pathsep) if p]
-    return dict(os.environ, WBG_DATA=data, PYTHONPATH=os.pathsep.join(path))
+    return dict(os.environ, WBG_DATA=data, PYTHONPATH=os.pathsep.join(path), PYTHONUNBUFFERED="1")
 
 
 def _run(script, *args, data, tail=0):
     """Run one stage. tail=N shows only the last N lines of its output (the
-    audits print their whole report; it is in data/reports/ anyway)."""
+    audits print their whole report; it is in data/reports/ anyway). Returns 0, or
+    common.PARTIAL when the stage finished but left items out; any other failure
+    raises CalledProcessError."""
     env = _env(data)
     cmd = [*_stage_cmd(script), *args]
     print(f"== {script} {' '.join(args)}".rstrip(), flush=True)
     if not tail:
-        subprocess.run(cmd, check=True, env=env, cwd=ROOT)
-        return
+        code = subprocess.run(cmd, env=env, cwd=ROOT).returncode
+        if code not in (0, common.PARTIAL):
+            raise subprocess.CalledProcessError(code, cmd)
+        return code
     done = subprocess.run(cmd, env=env, cwd=ROOT, capture_output=True, text=True)
     print("\n".join(done.stdout.rstrip().splitlines()[-tail:]), flush=True)
-    if done.returncode:
+    if done.returncode not in (0, common.PARTIAL):
         sys.stderr.write(done.stderr)
         raise subprocess.CalledProcessError(done.returncode, cmd)
+    return done.returncode
 
 def _fingerprint(data, code, inputs):
     """SHA-256 over the stage's code and the bytes of its input files. A PDF
@@ -434,9 +442,14 @@ def prepare(sel=None, update=False, data=None, fetch=True, refresh_projects=Fals
                 state["stages"][name] = {"in": fp, "out": out}
                 _save_state(data, state)
             continue
-        _run(script, data=data)
-        state.setdefault("stages", {})[name] = {"in": _fingerprint(data, code, inputs),
-                                                "out": _outputs(data, outputs)}
+        if _run(script, data=data) == common.PARTIAL:
+            # Finished, but left items out (each named in its output): the next run runs it
+            # again, which reads only those items (the rest come from its caches).
+            print(f"-- {name}: some items were left out; this stage runs again next time", flush=True)
+            state.setdefault("stages", {}).pop(name, None)
+        else:
+            state.setdefault("stages", {})[name] = {"in": _fingerprint(data, code, inputs),
+                                                    "out": _outputs(data, outputs)}
         _save_state(data, state)
         ran.append(name)
     if not ran:
@@ -728,13 +741,13 @@ def run(args, data):
     stages = stages_between(args.from_stage, args.to_stage, args.only)
     if args.dry_run:
         stages = [s for s in stages if s not in ("fetch", "prepare")]
+    every = [n for n in labels_mod.label_sets() if n != Q.ASSETS]
+    sets = args.measures or every
+    projects = sorted(_sel(args).ids) if _scope(args) else None
     if getattr(args, "max_spend", None) is not None:
         os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"
         os.environ["WBG_SPEND_SINCE"] = datetime.datetime.now(
             datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
-    every = [n for n in labels_mod.label_sets() if n != Q.ASSETS]
-    sets = args.measures or every
-    projects = sorted(_sel(args).ids) if _scope(args) else None
     dry = ["--dry-run"] if args.dry_run else []
     key = "" if args.dry_run else api.key()
     kw = dict(api_key=key, dry_run=args.dry_run, workers=args.workers, projects=projects)
@@ -745,17 +758,24 @@ def run(args, data):
         t0 = time.time()
         print(f"#### {stage}", flush=True)
         ok = True
-        if stage == "fetch":
-            prepare(_sel(args), update=args.update, data=data, fetch=True,
-                    refresh_projects=args.refresh_projects)
-        elif stage == "prepare":
-            prepare(_sel(args), data=data, fetch=False)
-        elif stage == "embed":
-            _run("embed.py", *dry, "--context", "none", data=data)
+        if stage in ("fetch", "prepare", "embed", "audit"):
+            try:
+                if stage == "fetch":
+                    prepare(_sel(args), update=args.update, data=data, fetch=True,
+                            refresh_projects=args.refresh_projects)
+                elif stage == "prepare":
+                    prepare(_sel(args), data=data, fetch=False)
+                elif stage == "embed":
+                    _run("embed.py", *dry, "--context", "none", data=data)
+                else:
+                    _run("audit.py", data=data, tail=2)
+            except subprocess.CalledProcessError as exc:
+                # The step's own output, above, says why; this names the step.
+                print(f"run: {exc.cmd[2] if len(exc.cmd) > 2 else exc.cmd} stopped with status "
+                      f"{exc.returncode}", flush=True)
+                ok = False
         elif stage == "search":
             ok = not _parallel(args.jobs, [Q.ASSETS, *sets], lambda n: [["search.py", n, *dry]], data)
-        elif stage == "audit":
-            _run("audit.py", data=data, tail=2)
         else:
             if conn is None:
                 conn = db.connect()
@@ -928,6 +948,10 @@ def main(argv=None):
     sub.add_parser("status", help="which code and which data release the store is at")
     sub.add_parser("release", help="record the store's current data as a release")
     args = ap.parse_args(argv)
+    # Every line reaches a log file or a service's journal as it is printed, not when a buffer
+    # fills: a watcher tells a working run from a stuck one by them.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(line_buffering=True)
     data = args.data or data_root()
     if args.cmd == "run":
         return run(args, data)

@@ -16,6 +16,7 @@ import argparse, hashlib, os, re, sys
 from collections import Counter
 
 from wbg_portfolio.paths import data_root, file_sha256, where  # noqa: E402
+from wbg_portfolio import common  # noqa: E402
 from wbg_portfolio.common import read_csv, sha_text, write_csv  # noqa: E402
 from wbg_portfolio.pdf_layout import SECTION_TITLE_MAX_CHARS  # noqa: E402
 from wbg_portfolio.text_rules import TOKEN, ROMAN, annex_match  # noqa: E402
@@ -117,25 +118,25 @@ def parser_version():
             f"/pdfminer-{pdfminer.__version__}")
 
 
-def _layout_job(args):
-    """Worker: read one PDF. Runs in a separate process."""
-    doc_id, path = args
+def _layout_job(path):
+    """Read one PDF by layout (run in a child process, common.limited)."""
     import pdfplumber
     from wbg_portfolio import pdf_layout
-    try:
-        raw = []
-        with pdfplumber.open(path) as pdf:
-            text, spans, stats = pdf_layout.extract(pdf, raw)
-        return doc_id, text, [list(s) for s in spans], dict(stats), raw[0], ""
-    except Exception as exc:                       # a broken PDF is a fallback, not a crash
-        return doc_id, "", [], {}, "", f"{type(exc).__name__}: {exc}"
+    raw = []
+    with pdfplumber.open(path) as pdf:
+        text, spans, stats = pdf_layout.extract(pdf, raw)
+    return text, [list(s) for s in spans], dict(stats), raw[0]
 
 
 def layout_cached(data, docs, workers):
     """{doc_id: (text, spans, stats, error, raw)} for every document with a PDF;
-    raw is the PDF's text as read, before cleaning."""
+    raw is the PDF's text as read, before cleaning.
+
+    Each PDF is read in a child process with a time limit (common.limited, common.pdf_seconds),
+    up to `workers` at once, and its read is cached as soon as it finishes, so a stop keeps
+    every PDF already read. A PDF that cannot be read or is not read in time is reported with
+    its error and tried again on the next run; a steady "n of total" line is logged."""
     import json
-    from concurrent.futures import ProcessPoolExecutor
     version = parser_version()
     out, todo = {}, []
     for doc in docs:
@@ -145,33 +146,33 @@ def layout_cached(data, docs, workers):
         sha = doc.get("pdf_sha256") or file_sha256(pdf, remember=False)
         cache = where(data, "cache", f"{doc['doc_id']}.layout.json")
         if os.path.exists(cache):
-            with open(cache, encoding="utf-8") as fh:
-                c = json.load(fh)
+            try:
+                with open(cache, encoding="utf-8") as fh:
+                    c = json.load(fh)
+            except ValueError:
+                c = {}                             # unreadable: read the PDF again
             if c.get("pdf_sha256") == sha and c.get("parser") == version:
                 out[doc["doc_id"]] = (c["text"], c["spans"], c["stats"], c.get("error", ""),
                                       c.get("raw", ""))
                 continue
         todo.append((doc["doc_id"], pdf, sha, cache))
     if todo:
-        print(f"  reading {len(todo)} PDFs with {workers} workers "
-              f"({len(out)} cached)", flush=True)
-        meta = {d: (sha, cache) for d, _, sha, cache in todo}
-        with ProcessPoolExecutor(max_workers=workers) as ex:
-            for n, (did, text, spans, stats, raw, err) in enumerate(
-                    ex.map(_layout_job, [(d, p) for d, p, _, _ in todo]), 1):
-                sha, cache = meta[did]
-                out[did] = (text, spans, stats, err, raw)
-                if err:
-                    # Not cached: a failed read may be the box, not the PDF (memory, a half-
-                    # written file), and is tried again.
-                    continue
-                tmp = cache + ".part"
-                with open(tmp, "w", encoding="utf-8") as fh:
-                    json.dump({"pdf_sha256": sha, "parser": version, "text": text,
-                               "spans": spans, "stats": stats, "raw": raw}, fh)
-                os.replace(tmp, cache)
-                if n % 10 == 0:
-                    print(f"    ...{n}/{len(todo)} PDFs read", flush=True)
+        common.say(f"  reading {len(todo)} PDFs with {workers} workers ({len(out)} cached)")
+        progress = common.Progress("  clean: PDFs read", len(todo))
+        for (did, pdf, sha, cache), got, err in common.limited(
+                lambda t: _layout_job(t[1]), todo, lambda t: common.pdf_seconds(t[1]), workers):
+            if err:
+                # Not cached: a failed read may be the box, not the PDF (memory, a half-
+                # written file), and is tried again.
+                out[did] = ("", [], {}, err, "")
+                progress.skip(did, err[:120])
+                continue
+            text, spans, stats, raw = got
+            out[did] = (text, spans, stats, "", raw)
+            common.write_atomic(cache, json.dumps({"pdf_sha256": sha, "parser": version, "text": text,
+                                                   "spans": spans, "stats": stats, "raw": raw}))
+            progress.step(did)
+        progress.end()
     return out
 
 
@@ -371,4 +372,4 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    sys.exit(common.exit_status(main()))

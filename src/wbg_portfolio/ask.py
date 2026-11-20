@@ -28,6 +28,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from threading import Lock
 
 from wbg_portfolio import api
+from wbg_portfolio import common
 from wbg_portfolio import db
 from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
@@ -121,8 +122,9 @@ def _store(conn, model, rows, states, qs):
 def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, workers, log, tail=lambda: ""):
     """The part every asker shares: check the cap against stats["estimate_usd"], run one(*job) for
     each job on a pool, count the requests that failed (api.Transport) in stats["failures"], stop
-    at the cap, log progress, and write the ledger row (api.Spend). Sets stats calls,
-    cost_usd and seconds. one(*job) returns what the request cost.
+    at the cap, log a steady "n of total" line (common.Progress), and write the ledger
+    row (written as the step ends). Sets stats calls, cost_usd and seconds. one(*job) returns
+    what the request cost.
 
     A refusal (api.Refused) stops the run when it is about the whole request (a bad key, no credit, or
     a refusal that does not say which item it is about). A refusal about one item (exc.items) is
@@ -132,6 +134,7 @@ def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, wo
     if not api_key:
         raise SystemExit(f"{stage}: no credential: set ${api.KEY_VAR}")
     t0 = time.time()
+    progress = common.Progress(f"  {stage}: requests", len(jobs), log)
     with api.Spend(conn, stage, label_set, model) as spend:
         spend.check(stats["estimate_usd"])
         with ThreadPoolExecutor(max_workers=workers) as pool:
@@ -153,9 +156,7 @@ def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, wo
                 except api.CapReached:
                     pool.shutdown(wait=True, cancel_futures=True)
                     raise
-                if n % 500 == 0 or n == len(jobs):
-                    log(f"  {n:,}/{len(jobs):,} asked, {len(stats['failures'])} failed{tail()}, "
-                        f"US${spend.cost:.3f}")
+                progress.step(f"{len(stats['failures'])} failed{tail()}, US${spend.cost:.3f}")
         if skipped and not spend.calls:
             raise skipped[0]
         stats["calls"], stats["cost_usd"] = spend.calls, spend.cost
