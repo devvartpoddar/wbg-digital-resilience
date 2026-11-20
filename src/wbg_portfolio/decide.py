@@ -9,7 +9,8 @@ the views only join and aggregate.
 
   publish(conn, data)   rewrite measure_findings, paragraph_grades, unit_assets,
                         unit_pair_checks, package_assets, commitment_packages,
-                        the label tables, then the views
+                        commitment_package_links, activities, the label tables,
+                        then the views
 """
 import re
 import time
@@ -213,17 +214,22 @@ def asset_map(conn, corpus):
     return out
 
 
-def sentence_assets(own, earlier, s=None):
+def sentence_assets(own, earlier, s=None, second=None):
     """([(asset, probability)] best first, level) for a sentence: its own
-    assets at asset.floor (level unit); else, with asset.decay on, the assets
-    whose decayed sum over the earlier sentences of the paragraph reaches
-    asset.paragraph_floor (level paragraph); else ([], none). Every asset at
-    the floor with asset.multiple, the best only without."""
+    assets at asset.floor (level unit); else the assets the chat model's
+    second look named (`second`, a list of asset ids; level second_look,
+    probability None: the second look gives no probability); else, with
+    asset.decay on, the assets whose decayed sum over the earlier sentences
+    of the paragraph reaches asset.paragraph_floor (level paragraph); else
+    ([], none). Every asset at the floor with asset.multiple, the best only
+    without."""
     s = s or asset_settings()
     rank = lambda d: sorted(d.items(), key=lambda x: (-x[1], x[0]))
     win = [(a, p) for a, p in rank(own) if p >= s["floor"]]
     if win:
         return (win if s["multiple"] else win[:1]), "unit"
+    if second:
+        return [(a, None) for a in (second if s["multiple"] else second[:1])], "second_look"
     if not s["decay"]:
         return [], "none"
     total = dict(own)
@@ -242,19 +248,120 @@ def asset_settings():
             "multiple": bool(setting("asset.multiple"))}
 
 
-def unit_assets(corpus, amap):
+def asset_second_looks(conn):
+    """{unit_id: [(asset_id, subtype_id)]} the chat model's second look named
+    (kind asset_second), only assets the asset file still has; a sentence it
+    named none for is absent."""
+    known = {a["id"] for a in labels.load_set(Q.ASSETS) if a["active"] == "true"}
+    out = {}
+    for _, _, uid, _, answer, *_ in scores(conn, "asset_second"):
+        pairs = [tuple(x.partition("/")[::2]) for x in (answer or {}).get("labels") or []]
+        pairs = [(a, st) for a, st in pairs if a in known]
+        if pairs:
+            out[uid] = pairs
+    return out
+
+
+def asset_kinds(conn):
+    """{(unit_id, asset_id): subtype_id} of the first-pass assets (kind
+    asset_subtype), '' where the question was not asked or answered."""
+    out = {}
+    for _, aid, uid, _, answer, *_ in scores(conn, "asset_subtype"):
+        labs = (answer or {}).get("labels") or []
+        if labs:
+            out[(uid, aid)] = labs[0]
+    return out
+
+
+def unit_assets(corpus, amap, second=None):
     """{unit_id: (own {asset: p}, winners [(asset, p)], level)} for every
-    indexed sentence, in reading order."""
+    indexed sentence, in reading order. `second` is asset_second_looks()."""
+    second = second or {}
     s = asset_settings()
     before, out = {}, {}
     for r in corpus.index:
         uid, pid = r["unit_id"], r["paragraph_id"]
         earlier = before.setdefault(pid, [])
         own = amap.get(uid, {})
-        win, level = sentence_assets(own, [amap.get(u, {}) for u in reversed(earlier)], s)
+        win, level = sentence_assets(own, [amap.get(u, {}) for u in reversed(earlier)], s,
+                                     [a for a, _ in second.get(uid, [])])
         earlier.append(uid)
         out[uid] = (own, win, level)
     return out
+
+
+def links_strengths():
+    """Whether the link strengths (strong, asset) replace the old link question."""
+    return bool(panel.get("links.strengths", False))
+
+
+def package_asset_posteriors(conn):
+    """{(package_id, asset_id): P(yes)} of the first-pass package-to-asset
+    question, through the asset's layer when one is fitted."""
+    pq = Q.package_asset_questions()
+    pa = posterior(conn, "package_asset", Q.ASSETS, {a: Q.sha(q) for a, q in pq.items()}, lambda i: None)
+    return {(pid, aid): pa(aid, pid, score)
+            for _, aid, pid, score, *_ in scores(conn, "package_asset")}
+
+
+def package_asset_sets(conn, only=None):
+    """{package_id: {asset_id}} the packages have. An asset counts at
+    link.asset_yes or more; with links.strengths also from link.asset_band_low
+    up to link.asset_yes when the chat model's second look (kind
+    package_asset_second) says yes. A missing second look is never a yes.
+    `only` limits the packages."""
+    yes = float(setting("link.asset_yes"))
+    low = float(panel.get("link.asset_band_low", yes))
+    strengths = links_strengths()
+    second = {(pid, aid): float(score) >= 1 for _, aid, pid, score, *_ in scores(conn, "package_asset_second")} \
+        if strengths else {}
+    out = defaultdict(set)
+    for (pid, aid), p in package_asset_posteriors(conn).items():
+        if only is not None and pid not in only:
+            continue
+        if p >= yes or (strengths and low <= p < yes and second.get((pid, aid))):
+            out[pid].add(aid)
+    return out
+
+
+def package_measure_scores(conn):
+    """{(label_set, package_id): P(yes)} of the package-alone question about a measure."""
+    return {(lset, pid): float(score) for lset, _, pid, score, *_ in scores(conn, "package_measure")}
+
+
+def link_strength_rows(conn, corpus, names, ua, packages):
+    """The commitment_package_links rows (nothing unless links.strengths). A
+    committed, digital sentence and a package of the same project are linked
+    'strong' when the package, asked alone, is about the sentence's measure at
+    link.strong_yes or more, and 'asset' when they share a top-level asset (the
+    sentence's, at the levels the panel counts, and the package's). A pair that
+    is both is one row, 'strong', its shared assets filled."""
+    if not links_strengths():
+        return []
+    strong_yes = float(setting("link.strong_yes"))
+    levels = link_levels()
+    has = package_asset_sets(conn)
+    asked = package_measure_scores(conn)
+    by_project = defaultdict(list)
+    for p in packages:
+        by_project[p["project_id"]].append(p)
+    out = []
+    for name in names:
+        for u in committed_digital_units(conn, corpus, [name]):
+            mine = linked_assets(ua.get(u, ({}, [], "none")), levels)
+            for pid in corpus.projects(u):
+                for p in by_project.get(pid, []):
+                    shared = mine & has.get(p["package_id"], set())
+                    sp = asked.get((name, p["package_id"]))
+                    strong = sp is not None and sp >= strong_yes
+                    if not strong and not shared:
+                        continue
+                    out.append({"project_id": pid, "label_set": name, "unit_id": u,
+                                "package_id": p["package_id"], "strength": "strong" if strong else "asset",
+                                "shared_asset_ids": "|".join(sorted(shared)),
+                                "strong_p": "" if sp is None else f"{sp:.4f}",
+                                "package_category": p.get("category", "")})
+    return sorted(out, key=lambda r: (r["label_set"], r["unit_id"], r["package_id"]))
 
 
 def link_levels():
@@ -357,7 +464,7 @@ def measure_rows(conn, corpus, names, ua, stats=None):
                 "asset_unit": best, "asset_p_unit": f"{own[best]:.4f}" if best else "",
                 "assets_yes": "|".join(a for a, _ in win) if level == "unit" else "",
                 "asset_link": win[0][0] if win else "", "asset_link_level": level,
-                "asset_link_p": f"{win[0][1]:.4f}" if win else "",
+                "asset_link_p": f"{win[0][1]:.4f}" if win and win[0][1] is not None else "",
                 "asset_links": "|".join(a for a, _ in win),
                 "template_projects": r.get("template_projects", ""),
                 "template_share": r.get("template_share", ""),
@@ -377,7 +484,11 @@ def measure_rows(conn, corpus, names, ua, stats=None):
     return fl_rows
 
 
-def asset_rows(conn, corpus, amap, ua):
+def asset_rows(conn, corpus, amap, ua, kinds=None, second=None):
+    """(paragraph_grades rows, unit_assets rows). `kinds` is asset_kinds()
+    and `second` asset_second_looks(): a row's subtype_id is the chat model's
+    kind of that asset for that sentence, '' where none was asked."""
+    kinds, second = kinds or {}, second or {}
     grades, assets = [], []
     qs, _ = Q.graded_questions(Q.ASSETS)
     for lset, lid, uid, score, answer, served, route, rnd, cos, rank in scores(conn, "asset"):
@@ -397,10 +508,13 @@ def asset_rows(conn, corpus, amap, ua):
         base = {"unit_id": uid, "paragraph_id": r["paragraph_id"], "project_ids": r.get("project_ids", ""),
                 "asset_level": level, "own_best_asset_id": best,
                 "own_best_probability": f"{own[best]:.4f}" if best else ""}
+        looked = dict(second.get(uid, []))
         for k, (a, p) in enumerate(win, 1):
-            assets.append(dict(base, asset_rank=k, asset_id=a, probability=f"{p:.4f}"))
+            kind = looked.get(a, "") if level == "second_look" else kinds.get((uid, a), "")
+            assets.append(dict(base, asset_rank=k, asset_id=a, subtype_id=kind,
+                               probability="" if p is None else f"{p:.4f}"))
         if not win:
-            assets.append(dict(base, asset_rank=0, asset_id="", probability=""))
+            assets.append(dict(base, asset_rank=0, asset_id="", subtype_id="", probability=""))
     return grades, assets
 
 
@@ -458,8 +572,9 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
     corpus = corpus or Q.Corpus(data)
     names = [n for n in labels.label_sets() if n != Q.ASSETS]
     amap = asset_map(conn, corpus)
-    ua = unit_assets(corpus, amap)
-    grades, assets = asset_rows(conn, corpus, amap, ua)
+    second = asset_second_looks(conn) if band()["on"] else {}
+    ua = unit_assets(corpus, amap, second)
+    grades, assets = asset_rows(conn, corpus, amap, ua, asset_kinds(conn), second)
     counts = {}
     findings = measure_rows(conn, corpus, names, ua, counts)
     if counts.get("waiting"):
@@ -469,6 +584,9 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
     pairs = pair_rows(conn, corpus)
     packages = checks.load_packages(data)
     pk_assets, links = package_rows(conn, corpus, ua, packages)
+    strengths = link_strength_rows(conn, corpus, names, ua, packages)
+    from wbg_portfolio import activities
+    acts = activities.rows(conn, data, corpus, names, log=log)
     written = {}
     with load_pg.transaction(conn):
         load_pg.prepare(conn)
@@ -482,7 +600,9 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
                                   ("unit_assets", load_pg.UNIT_ASSET_COLS, assets),
                                   ("unit_pair_checks", load_pg.PAIR_COLS, pairs),
                                   ("package_assets", load_pg.PACKAGE_ASSET_COLS, pk_assets),
-                                  ("commitment_packages", load_pg.LINK_COLS, links)):
+                                  ("commitment_packages", load_pg.LINK_COLS, links),
+                                  ("commitment_package_links", load_pg.STRENGTH_COLS, strengths),
+                                  ("activities", load_pg.ACTIVITY_COLS, acts)):
             written[table] = load_pg.load_rows(conn, table, cols, rows, "decide")[0]
         if views:
             load_pg.finish(conn, log=log)

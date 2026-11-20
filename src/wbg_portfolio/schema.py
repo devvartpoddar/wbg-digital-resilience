@@ -90,7 +90,8 @@ INTEGER = {"ordinal", "asset_rank", "text_start_offset", "text_end_offset", "pdf
            "units_hit_count", "most_likely_grade", "feedback_round", "second_grade",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
            "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
-           "graded_yes", "graded_no", "positives", "calls", "units_seen", "units_graded"}
+           "graded_yes", "graded_no", "positives", "calls", "units_seen", "units_graded",
+           "n_sentences"}
 NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "supplier_amount_usd",
            "cost_usd_millions", "cost_before_restructuring_usd_millions",
            "commitment_usd_millions", "commitment_v2_usd_millions", "commitment_v3_usd_millions",
@@ -103,7 +104,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "model_cost_usd", "precision", "recall", "measure_cosine",
            "paragraph_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
-           "template_wording_share", "score_first", "score_context", "digital_p",
+           "template_wording_share", "score_first", "score_context", "digital_p", "strong_p",
            "cosine", "probability", "p_only_a", "p_only_b", "p_both", "p_neither",
            "p_keep_a", "p_keep_b", "score_a", "score_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
@@ -405,7 +406,7 @@ TABLES = {
             "asset_ids_above_threshold": "The sentence's own assets at the control panel's asset.floor, best first (every one with asset.multiple, else the best).",
             "linked_asset_ids": "Every asset the finding is linked to at its level (asset.multiple), best first; linked_asset_id is the first.",
             "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the decayed sum over its paragraph's earlier sentences (level paragraph), at the control panel's asset.floor and asset.paragraph_floor.",
-            "linked_asset_level": "unit, paragraph or none.",
+            "linked_asset_level": "unit, second_look (the chat model's second look), paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
             "score_first": "The first-pass score the band rule reads: the posterior of grades 2 and 3 from the sentence asked alone.",
             "score_context": "The decision model's score for the same question asked with the paragraph beside the sentence; empty unless the pair's first-pass score is in the band (band.low to band.keep). Model-graded, not person-graded.",
@@ -552,14 +553,50 @@ TABLES = {
                 "control panel's asset.floor (level unit); else the assets whose sum of their "
                 "own score and the earlier sentences' scores in its paragraph, each weighted by "
                 "asset.decay per sentence back, reaches asset.paragraph_floor (level "
-                "paragraph); else none. Rebuilt at every publish from the current asset map "
+                "paragraph); else none. A committed, digital sentence with no asset at the floor is shown to the "
+                "chat model, which names up to two assets or none (level second_look, no probability). Rebuilt at every publish from the current asset map "
                 "and its probability layers.",
         columns={"asset_id": "The sentence's asset; empty at level none.",
                  "asset_rank": "1 for the sentence's best asset, 2 the next, and so on; 0 for a sentence with none.",
                  "probability": "The posterior (level unit) or the decayed sum (level paragraph).",
-                 "asset_level": "unit, paragraph or none.",
+                 "subtype_id": "The finer kind of the asset (assets_subtypes.csv), chosen by the chat model; empty where it was not asked or its answer was not one of the asset's kinds.",
+                 "asset_level": "unit (the first pass), second_look (the chat model's second look at a committed, digital sentence the first pass gave no asset), paragraph or none.",
                  "own_best_asset_id": "The sentence's own best asset, whatever its probability.",
                  "own_best_probability": "Its posterior probability."}),
+    "commitment_package_links": dict(
+        key=("label_set", "unit_id", "package_id"),
+        foreign=[("package_id", "packages", "package_id"),
+                 ("unit_id", "search_units", "unit_id"),
+                 ("project_id", "projects", "project_id")],
+        comment="Which procurement packages a committed, digital sentence is linked to, and how firmly: "
+                "one row per sentence, measure and package of the same project. strength strong: the "
+                "package, asked on its own, is about the sentence's measure (strong_p reaches "
+                "link.strong_yes). strength asset: the package and the sentence share a top-level asset, "
+                "which says only that both concern the same kind of asset, not that the package delivers "
+                "the commitment. A pair that is both is one row, strong, with its shared assets filled. "
+                "Built from the model readings at every publish (links.strengths); the old link question "
+                "is in commitment_packages. The models' reading, not a person's; documented is not done.",
+        columns={
+            "strength": "strong or asset: see the table comment.",
+            "shared_asset_ids": "The top-level assets the sentence and the package share (empty for a strong link with none).",
+            "strong_p": "The decision model's P(yes) that the measure applies to the package alone; empty when the package was not asked about this measure (it has no asset).",
+            "package_category": "The package's procurement category (Goods, Works, Consulting and so on).",
+        }),
+    "activities": dict(
+        key=("activity_id", "unit_id"),
+        foreign=[("unit_id", "search_units", "unit_id"), ("project_id", "projects", "project_id")],
+        comment="The distinct activities a project commits to for a measure: for every project and "
+                "measure with committed, digital sentences, the chat model groups the sentences that "
+                "describe the same investment, study or action (src/wbg_portfolio/activities.py). One "
+                "row per sentence of an activity; activity_id is the MD5 of project_id|label_set|the "
+                "activity's sorted unit ids. Every sentence is in exactly one activity of its project "
+                "and measure; a reply that dropped or repeated a sentence was repaired. A group not yet "
+                "read is absent. The model's reading, not a person's.",
+        columns={
+            "activity_label": "A short name the chat model gave the activity (the sentence's first words where the model gave none).",
+            "unit_id": "A committed, digital sentence of the activity.",
+            "n_sentences": "How many sentences the activity has.",
+        }),
     "sentence_vectors": dict(
         key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
         comment="Pipeline bookkeeping: one embedding per search unit (3,072 dimensions), used "

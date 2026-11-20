@@ -17,7 +17,11 @@ answers, and asked again at the next run. It is never read as a yes.
 
 Replies (reply["form"]): grade (0 to reply["max"]), yesno (yes or no), choice
 (one of reply["options"]), labels (any of reply["options"], at most
-reply["max"], none allowed). temperature 0; the spend ledger and --max-spend
+reply["max"], none allowed), assets (up to reply["max"] pairs of an asset and
+a kind of it, none allowed; the ids are read as text and checked against the
+files by the step, which discards and counts any it does not know), activities
+(a list of labelled groups of sentence numbers; the step validates and
+repairs them). temperature 0; the spend ledger and --max-spend
 work as in src/wbg_portfolio/ask.py. Tests replace api.post (tests/conftest.py fake_chat).
 """
 import json
@@ -35,7 +39,7 @@ from wbg_portfolio import questions as Q
 PATH = "/v1/chat/completions"
 PRICE_PER_MTOK = 0.30     # US$ per million prompt tokens, replies included: for estimates only
 REPLY_TOKENS = 40
-FORMS = ("grade", "yesno", "choice", "labels")
+FORMS = ("grade", "yesno", "choice", "labels", "assets", "activities")
 
 
 def model():
@@ -74,6 +78,12 @@ def reply_text(reply):
         return '{"answer": "yes"} or {"answer": "no"}'
     if f == "choice":
         return '{"answer": "<one of: ' + ", ".join(reply["options"]) + '>"}'
+    if f == "assets":
+        return ('{"assets": [{"asset": "<asset id from: ' + ", ".join(reply["options"]) + '>", "subtype": '
+                '"<kind id of that asset>"}]} with at most ' + str(reply["max"]) + ' assets, or {"assets": []} when none applies')
+    if f == "activities":
+        return ('{"activities": [{"label": "<a short name for the activity>", "sentences": [<the numbers of '
+                'its sentences>]}]}')
     return ('{"labels": [<ids from: ' + ", ".join(reply["options"]) + f'; at most {reply["max"]}; '
             'an empty list when none applies>]}')
 
@@ -109,6 +119,22 @@ def parse(text, reply):
             raise ValueError(f"answer {a!r} is not one of {allowed}")
         a = a.strip().lower()
         return {"grade": (1 if a == "yes" else 0) if form == "yesno" else None, "labels": [a]}
+    if form == "assets":
+        items = obj.get("assets")
+        if not isinstance(items, list) or len(items) > reply["max"] or not all(
+                isinstance(x, dict) and isinstance(x.get("asset"), str)
+                and isinstance(x.get("subtype", ""), str) for x in items):
+            raise ValueError(f"assets is not a list of at most {reply['max']} {{asset, subtype}} objects")
+        return {"grade": None, "labels": [f"{x['asset'].strip()}/{x.get('subtype', '').strip()}" for x in items]}
+    if form == "activities":
+        acts = obj.get("activities")
+        if not isinstance(acts, list) or not acts or not all(
+                isinstance(x, dict) and isinstance(x.get("label"), str) and isinstance(x.get("sentences"), list)
+                and all(isinstance(n, int) and not isinstance(n, bool) for n in x["sentences"]) for x in acts):
+            raise ValueError("activities is not a list of {label, sentences} objects")
+        return {"grade": None, "labels": None,
+                "activities": [{"label": " ".join(x["label"].split()), "sentences": list(x["sentences"])}
+                               for x in acts]}
     labs = obj.get("labels")
     if not isinstance(labs, list) or not all(isinstance(x, str) for x in labs):
         raise ValueError("labels is not a list of text")

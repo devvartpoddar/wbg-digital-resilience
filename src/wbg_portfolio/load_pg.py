@@ -51,7 +51,7 @@ FINDING_COLS = ["label_set", "label_id", "unit_id", "kind", "paragraph_id", "doc
 GRADE_COLS = ["label_set", "unit_id", "paragraph_id", "doc_id", "project_ids", "component_number",
               "label_id", "asked", "route", "round", "best_cosine", "confidence", "p0", "p1", "p2", "p3",
               "p_committed_calibrated", "model_served"]
-UNIT_ASSET_COLS = ["unit_id", "asset_rank", "paragraph_id", "project_ids", "asset_id", "probability",
+UNIT_ASSET_COLS = ["unit_id", "asset_rank", "paragraph_id", "project_ids", "asset_id", "subtype_id", "probability",
                    "asset_level", "own_best_asset_id", "own_best_probability"]
 PAIR_COLS = ["unit_id", "set_a", "set_b", "decision", "score_a", "score_b", "p_keep_a", "p_keep_b",
              "model_served"]
@@ -59,6 +59,9 @@ PACKAGE_ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_
                       "p_calibrated", "model_served"]
 LINK_COLS = ["label_set", "label_id", "unit_id", "package_id", "project_id", "shared_asset_ids", "route",
              "measure_rank", "measure_cosine", "probability", "p_calibrated", "model_served"]
+STRENGTH_COLS = ["project_id", "label_set", "unit_id", "package_id", "strength", "shared_asset_ids",
+                 "strong_p", "package_category"]
+ACTIVITY_COLS = ["activity_id", "project_id", "label_set", "activity_label", "unit_id", "n_sentences"]
 LABEL_COLS = ["label_set", "label_id", "name", "definition", "active", "version", "family", "folder"]
 TYPE_COLS = ["label_set", "label_id", "type_id", "type_name", "definition", "merged_from"]
 QUERY_COLS = ["label_set", "label_id", "query_id", "query", "active", "version", "file_sha256"]
@@ -69,6 +72,7 @@ QUALITY_COLS = ["label_set", "version", "question_sha256", "sheet", "graded_unit
 DECISION_TABLES = {"measure_findings": FINDING_COLS, "paragraph_grades": GRADE_COLS,
                    "unit_assets": UNIT_ASSET_COLS, "unit_pair_checks": PAIR_COLS,
                    "package_assets": PACKAGE_ASSET_COLS, "commitment_packages": LINK_COLS,
+                   "commitment_package_links": STRENGTH_COLS, "activities": ACTIVITY_COLS,
                    "labels": LABEL_COLS, "measure_types": TYPE_COLS, "label_queries": QUERY_COLS,
                    "label_patterns": PATTERN_COLS, "label_scale": SCALE_COLS,
                    "measure_quality": QUALITY_COLS}

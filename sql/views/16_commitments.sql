@@ -67,7 +67,8 @@ u AS (
          f.template_project_count, f.copy_unit_ids, f.linked_asset_level, f.component_key,
          f.component_number, f.subcomponent_number,
          CASE coalesce(f.linked_asset_level, 'none')
-           WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph' ELSE 'none' END
+           WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph'
+           WHEN 'second_look' THEN 'second_look' ELSE 'none' END
            AS asset_from,
          a.asset_id, t.type_id,
          -- the wording, for collapsing word-for-word copies

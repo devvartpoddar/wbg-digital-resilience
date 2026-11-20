@@ -17,7 +17,7 @@ COMMENT ON VIEW wbg.paragraph_grades_with_text IS
 DROP VIEW IF EXISTS wbg.asset_map;
 CREATE VIEW wbg.asset_map AS
 SELECT ua.unit_id, ua.paragraph_id, su.document_id, ua.project_ids, pa.component_number,
-       pa.component_name, ua.asset_id, l.label_name AS asset_name, ua.probability,
+       pa.component_name, ua.asset_id, l.label_name AS asset_name, ua.subtype_id, ua.probability,
        ua.asset_level, pa.section_title, pa.block, su.text AS sentence_text
 FROM wbg.unit_assets ua
 JOIN wbg.search_units su ON su.unit_id = ua.unit_id
@@ -25,4 +25,4 @@ LEFT JOIN wbg.labels l ON l.label_set = 'assets' AND l.label_id = ua.asset_id
 LEFT JOIN wbg.paragraphs pa ON pa.paragraph_id = ua.paragraph_id
 WHERE ua.asset_level <> 'none';
 COMMENT ON VIEW wbg.asset_map IS
-  'One row per sentence and asset the pipeline gives it: its own assets at the control panel''s asset.floor (asset_level unit), else the assets whose decayed sum over its paragraph''s earlier sentences reaches asset.paragraph_floor (asset_level paragraph); every such asset with asset.multiple. The model''s reading, not a person''s; documented is not done.';
+  'One row per sentence and asset the pipeline gives it: its own assets at the control panel''s asset.floor (asset_level unit), else the assets whose decayed sum over its paragraph''s earlier sentences reaches asset.paragraph_floor (asset_level paragraph); for a committed, digital sentence with no asset of its own, the up to two the chat model named (asset_level second_look, no probability); every such asset with asset.multiple. subtype_id is the finer kind of the asset the chat model chose (assets_subtypes.csv), empty when not asked. The model''s reading, not a person''s; documented is not done.';

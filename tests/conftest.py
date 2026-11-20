@@ -219,6 +219,13 @@ def corpus(tmp_path, monkeypatch):
     write_csv(str(lab / "assets_queries.csv"), ["asset_id", "query_id", "query", "active"],
               [{"asset_id": "towers", "query_id": "t1", "query": "towers", "active": "true"},
                {"asset_id": "fiber", "query_id": "f1", "query": "fibre", "active": "true"}])
+    write_csv(str(lab / "assets_subtypes.csv"),
+              ["asset_id", "subtype_id", "subtype_name", "definition", "active", "version"],
+              [{"asset_id": a, "subtype_id": st, "subtype_name": nm, "definition": d, "active": "true",
+                "version": "v1"} for a, st, nm, d in (
+                  ("towers", "mast", "Masts", "tall masts"), ("towers", "unspecified", "Not stated", "no kind stated"),
+                  ("fiber", "backbone", "Backbone", "long distance cable"),
+                  ("fiber", "unspecified", "Not stated", "no kind stated"))])
     import shutil
     shutil.copy(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
                              "inputs", "taxonomy", "flags.csv"), str(lab / "flags.csv"))
@@ -262,7 +269,11 @@ def fake_model(monkeypatch):
     holds 'hazard assessment' or 'tower' for a towers question, 'fibre' for a
     fibre one; no otherwise. Records every request body."""
     from wbg_portfolio import api
-    calls = []
+
+    class Calls(list):
+        also_yes = ()           # texts a test wants the measure question to say yes to as well
+
+    calls = Calls()
 
     def post(path, b, api_key, **kw):
         calls.append(b)
@@ -282,9 +293,11 @@ def fake_model(monkeypatch):
                 yes = (("site" in label and "site" in t) or ("route" in label and "corridor" in t)
                        or ("mobile" in label and "tower" in t) or ("fibre" in label and "fibre" in t)
                        or ("carrying out" in label and "tower" in t)
+                       or ("hazard" in label and "procurement package" in asked and "tower" in t)
                        or ("digital" in label and any(w in sentence for w in ("tower", "fibre"))))
             else:                                             # a graded question: relate to <label>
-                yes = (("hazard" in asked and "hazard assessment" in t) or ("mobile" in asked and "tower" in t)
+                yes = (("hazard" in asked and ("hazard assessment" in t or any(w in t for w in calls.also_yes)))
+                       or ("mobile" in asked and "tower" in t)
                        or ("fibre" in asked and "fibre" in t))
             n = len(q["criteria"])
             probs = {str(i): 0.0 for i in range(n)}
@@ -312,6 +325,14 @@ class _Chat:
             return '{"answer": "investment"}'
         if '"answer": "yes"' in prompt:
             return '{"answer": "yes"}'
+        m = re.search(r'"answer": "<one of: ([^>]*)>"', prompt)
+        if m:
+            return json.dumps({"answer": m.group(1).split(", ")[0]})
+        if '"assets": [{"asset"' in prompt:
+            return '{"assets": []}'
+        if '"activities": [{"label"' in prompt:
+            n = len(re.findall(r"^\d+\. \[", prompt, re.M))
+            return json.dumps({"activities": [{"label": "One activity", "sentences": list(range(1, n + 1))}]})
         return '{"labels": []}'
 
     def prompts(self):
@@ -333,3 +354,13 @@ def fake_chat(monkeypatch, fake_model):
                 "choices": [{"message": {"content": chat.reply(b["messages"][0]["content"])}}]}
     monkeypatch.setattr(api, "post", post)
     return chat
+
+
+@pytest.fixture
+def pipeline_on(monkeypatch):
+    """The band rule, the digital rule and the link strengths switched on, as on the live branch."""
+    from wbg_portfolio import panel
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.on": True, "digital.on": True,
+                                                    "links.strengths": True, "floor.ask": 0.99,
+                                                    "dashboard.commitment_link_levels": "unit|second_look|none"})

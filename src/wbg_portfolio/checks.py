@@ -10,7 +10,11 @@ no) through the one asker, each writing scores (docs/method/decisions.md):
                    by cosine: does the package buy, build or run it
   links            every committed unit x the packages of its project that
                    share an asset, plus the link.measure_top nearest the
-                   measure: would carrying out the package deliver it
+                   measure: would carrying out the package deliver it (the
+                   old link question; not asked while links.strengths is on)
+  package_measure  with links.strengths: every package that has an asset x each
+                   measure its project has a committed, digital sentence for:
+                   does the measure apply to the package alone (strong link)
 
 Sentence-level questions send the same state as the measures did
 (questions.Corpus.state). Nothing here decides; src/wbg_portfolio/decide.py reads the floors.
@@ -312,6 +316,7 @@ def load_packages(data, projects=None):
             if text:
                 out.append({"package_id": r["package_id"], "project_id": r["project_id"], "text": text,
                             "sha": hashlib.sha256(text.encode("utf-8")).hexdigest(),
+                            "category": (r.get("category") or "").strip(),
                             "component": " ".join(f"{r.get('component_number') or ''} {r.get('component') or ''}".split())})
     return out
 
@@ -335,11 +340,13 @@ def package_vectors(data, packages, api_key, log):
     return out
 
 
-def links(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
-          log=print, projects=None):
-    """Package to asset, then commitment to package. Writes kinds
-    'package_asset' (label_set assets, label the asset, item the package) and
-    'link' (label_set the measure, item 'unit|package')."""
+def package_assets(conn, data, corpus, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
+                   log=print, projects=None):
+    """Package to asset, first pass: every package x its best link.asset_top
+    assets by cosine, asked of the decision model. Writes kind 'package_asset'
+    (label_set assets, label the asset, item the package); with projects, only
+    those projects' packages are replaced. Returns (packages, {package: assets
+    at link.asset_yes}), or None on a dry run, a failed request or no package."""
     packages = load_packages(data, projects)
     if not packages:
         log("link: no package in scope")
@@ -376,8 +383,31 @@ def links(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
                              route="cosine", cosine=cos, rank=rank))
             if Q.score(g[a], fit=True) >= yes:
                 has[pid].add(a)
-    write_scores(conn, "package_asset", Q.ASSETS, rows)
-    # commitment to package
+    if projects:
+        write_scores(conn, "package_asset", Q.ASSETS, rows, "item_id = ANY(%s)", [sorted(by_pkg)])
+    else:
+        write_scores(conn, "package_asset", Q.ASSETS, rows)
+    return packages, has
+
+
+def links(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
+          log=print, projects=None):
+    """Package to asset, then commitment to package. Writes kinds
+    'package_asset' (label_set assets, label the asset, item the package) and
+    'link' (label_set the measure, item 'unit|package'). With links.strengths
+    the commitment-to-package question is not asked (the strengths replace
+    it: package_measure below and the asset-level links at publish); stored
+    link scores stay."""
+    first = package_assets(conn, data, corpus, model=model, api_key=api_key, dry_run=dry_run, workers=workers,
+                           log=log, projects=projects)
+    if first is None:
+        return None
+    packages, has = first
+    if decide.links_strengths():
+        log("link: the old commitment-to-package question is retired (links.strengths); nothing asked")
+        return len(has)
+    # commitment to package (the old question)
+    vecs = package_vectors(data, packages, api_key, log)
     amap = decide.asset_map(conn, corpus)
     ua = decide.unit_assets(corpus, amap)
     levels = decide.link_levels()
@@ -428,7 +458,68 @@ def links(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
                          cosine=cos, rank=rank))
     t = funnel.table(conn)
     with conn.transaction():
-        db.replace(conn, t, funnel.SCORE_COLS, rows, "kind = 'link'")
+        if projects:
+            db.replace(conn, t, funnel.SCORE_COLS, rows, "kind = 'link' AND split_part(item_id, '|', 2) = ANY(%s)",
+                       [sorted(p["package_id"] for p in packages)])
+        else:
+            db.replace(conn, t, funnel.SCORE_COLS, rows, "kind = 'link'")
     conn.commit()
     log(f"  {len(rows):,} link scores written")
     return len(rows)
+
+
+# ---------------------------------------------------------------- strong links
+
+def package_measure_question(lab):
+    """Does the measure apply to the package alone: it applies when what the
+    package procures is the measure, named or clearly implied in the package's
+    own description. Asked of the decision model as a fit question (yes,
+    unsure, no)."""
+    return Q.fit_question(lab, Q.PACKAGE, given=(
+        f"It applies when what the package procures is {lab['name']}, named or clearly implied in the "
+        f"package's own description. "))
+
+
+def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False,
+                    workers=ask.WORKERS, log=print, projects=None):
+    """The strong link: each package that has an asset (first pass, or the chat
+    model's second look) asked, on its own, about each measure its project has
+    at least one committed, digital sentence for. Writes kind
+    'package_measure' (label_set the measure, item the package). Not asked
+    while links.strengths is off."""
+    if not decide.links_strengths():
+        return 0
+    packages = load_packages(data, projects)
+    if not packages:
+        log("package_measure: no package in scope")
+        return 0
+    has = decide.package_asset_sets(conn, [p["package_id"] for p in packages])
+    by_pkg = {p["package_id"]: p for p in packages}
+    wanted = defaultdict(set)                              # measure -> projects with a committed digital sentence
+    for name in names:
+        for u in decide.committed_digital_units(conn, corpus, [name]):
+            wanted[name].update(corpus.projects(u))
+    log(f"package_measure: {sum(1 for p in packages if has.get(p['package_id']))} of {len(packages):,} packages "
+        f"have an asset")
+    asked = {}
+    for name in names:
+        lab = Q.load(name)[0][0]
+        q = {lab["id"]: package_measure_question(lab)}
+        items = [(p["package_id"], Q.package_state(p), q) for p in packages
+                 if has.get(p["package_id"]) and p["project_id"] in wanted[name]]
+        got = _ask(conn, model, items, f"package_measure:{name}", name, api_key, dry_run, workers, log, data)
+        if got is None:
+            if dry_run:
+                continue
+            return None
+        asked[name] = (lab, q, got)
+    if dry_run:
+        return None
+    n = 0
+    for name, (lab, q, got) in asked.items():
+        rows = [_row("package_measure", name, lab["id"], pid, Q.package_state(by_pkg[pid]), q[lab["id"]],
+                     g[lab["id"]]) for pid, g in got.items()]
+        write_scores(conn, "package_measure", name, rows, "item_id = ANY(%s)", [sorted(by_pkg)])
+        n += len(rows)
+    log(f"  {n:,} package-measure scores written")
+    return n

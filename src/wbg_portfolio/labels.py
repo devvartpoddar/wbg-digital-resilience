@@ -163,6 +163,31 @@ def load_flags(dirs=None):
     return out
 
 
+def load_subtypes(name="assets", dirs=None, taxonomy=None):
+    """{asset_id: [{id, name, definition, version}]} from <set>_subtypes.csv,
+    the finer kinds of each asset (assets_subtypes.csv), active ones in file
+    order. {} when the set has no such file. A subtype of an asset the set
+    does not have is an error. Kept by people beside the assets; read here,
+    never written."""
+    d = taxonomy or folder(name, dirs)
+    path = os.path.join(d, f"{name}_subtypes.csv")
+    if not os.path.exists(path):
+        return {}
+    known = {x["id"] for x in load_set(name, taxonomy=d)}
+    out = {}
+    for r in rows(path):
+        parent = (r.get("asset_id") or r.get("label_id") or "").strip()
+        if parent not in known:
+            raise SystemExit(f"labels: {path}: subtype {r.get('subtype_id')!r} belongs to {parent!r}, "
+                             f"which is not an asset of {name}.csv")
+        if not is_active(r):
+            continue
+        out.setdefault(parent, []).append({
+            "id": r["subtype_id"].strip(), "name": " ".join(r["subtype_name"].split()),
+            "definition": " ".join(r["definition"].split()), "version": (r.get("version") or "").strip()})
+    return out
+
+
 def flag(flag_id, dirs=None):
     """One flag of flags.csv, or a clear error."""
     flags = load_flags(dirs)
