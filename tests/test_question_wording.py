@@ -38,7 +38,7 @@ def questions_of(corpus):
 
 EXPECTED = {
     "activity": "58325e681f9b565b0e00cbe6a8ff8a30ff97abc9e98b74c12dfbb71dde87a6b7",
-    "asset_second": "a94286fdaafba85f418587d4af68f81439dafdc82dd8bed76828017d87fde631",
+    "asset_second": "97dfc0b7abd15cc2d2b9bdb2d3690f59a9e08513b9f5f012fb419d065c51bef3",
     "asset_subtype_fiber": "6c522ea529ab20629976529cce68a779c6d86bf7702613c8996b2ef8b3620224",
     "asset_subtype_towers": "5293b63cc0bb527948d00cd070b02a29c9d195780ece3b60b7014518808ddac4",
     "chat_state": "5546ece881662533110c3e26b36fe7211a1d65f11d3ec335de5e1fca9492b9bf",

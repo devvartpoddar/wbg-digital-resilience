@@ -262,7 +262,8 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
     proposed = None
     if str(panel.get("types.gaps", "off")).lower() in ("on", "true") and \
             len(none) >= int(panel.require("types.gap_min_units")):
-        existing = "\n".join(f"- {t['type_name']}: {t['definition']}" for t in labels.load_types(name))
+        existing = "\n".join(f"- {t['type_name']}: {t['definition']}"
+                             for t in sorted(labels.load_types(name), key=lambda t: t["type_id"]))
         rng = random.Random(f"{name}:gaps")
         chosen = sorted(rng.sample(none, MAX_UNITS)) if len(none) > MAX_UNITS else none
         body = {"model": GEN_MODEL, "temperature": 0, "messages": [{"role": "user", "content": GAP_PROMPT.format(

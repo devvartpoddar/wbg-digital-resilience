@@ -138,7 +138,10 @@ def asset_catalogue():
 
 
 def asset_second_question(assets, subtypes):
-    """Up to two of the four assets, or none, each with one of its kinds."""
+    """Up to two of the four assets, or none, each with one of its kinds. The list is in the order of the ids,
+    not of the file, so reordering rows of assets.csv or assets_subtypes.csv does not change the question."""
+    assets = sorted(assets, key=lambda a: a["id"])
+    subtypes = {k: sorted(v, key=lambda s: s["id"]) for k, v in subtypes.items()}
     listing = []
     for a in assets:
         listing.append(f"- {a['id']}: {a['name']}. {a['definition']}")
@@ -153,7 +156,8 @@ def asset_second_question(assets, subtypes):
 
 
 def asset_subtype_question(asset, kinds):
-    """Which kind of an asset a sentence already counted for it concerns."""
+    """Which kind of an asset a sentence already counted for it concerns (the kinds in the order of their ids)."""
+    kinds = sorted(kinds, key=lambda s: s["id"])
     return in_context(chat_question(
         f"{SENTENCE[:1].upper() + SENTENCE[1:]} is already counted as concerning {asset['name']}; this asks only which kind "
         f"of it. {asset['name']} means: {asset['definition']}\nKinds:\n" +

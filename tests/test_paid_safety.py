@@ -245,3 +245,19 @@ def test_the_default_pair_may_start_empty(pg, monkeypatch):
         def commit(self):
             pass
     assert db.check_store(Conn(), log=got.append) == 0 and "store wbg_store" in got[0]
+
+
+# ------------------------------------------------- B8 a list read from a file is asked in the order of its ids
+
+def test_reordering_the_rows_of_the_asset_files_does_not_change_the_questions():
+    import random
+    assets, subtypes = Q.asset_catalogue()
+    base = Q.sha(Q.asset_second_question(assets, subtypes))
+    base_sub = {a["id"]: Q.sha(Q.asset_subtype_question(a, subtypes[a["id"]])) for a in assets if subtypes.get(a["id"])}
+    rng = random.Random(7)
+    for _ in range(5):
+        shuffled = rng.sample(assets, len(assets))
+        shuffled_sub = {k: rng.sample(v, len(v)) for k, v in subtypes.items()}
+        assert Q.sha(Q.asset_second_question(shuffled, shuffled_sub)) == base
+        assert {a["id"]: Q.sha(Q.asset_subtype_question(a, shuffled_sub[a["id"]])) for a in assets
+                if subtypes.get(a["id"])} == base_sub
