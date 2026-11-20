@@ -4,7 +4,8 @@ no) through the one asker, each writing scores (docs/method/decisions.md):
   types            every unit committed at floor.ask x the measure's approved
                    types (and the OTH types the gap step proposed)
   pairs            every unit two measures both commit at floor.ask, each side
-                   asked with the other measure's boundary beside it
+                   asked with the other measure's boundary beside it (not
+                   asked while band.on: the band rule in src/wbg_portfolio/second.py replaces it)
   package_assets   every procurement package x its best link.asset_top assets
                    by cosine: does the package buy, build or run it
   links            every committed unit x the packages of its project that
@@ -263,7 +264,12 @@ def pairs(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
     for each side, whether the measure applies with the other's boundary
     beside it. Measures of different families are never paired, so a family's
     commitments do not move when another family's measures change. Writes
-    kind 'pair', label_set 'a|b', label_id keep_a / keep_b."""
+    kind 'pair', label_set 'a|b', label_id keep_a / keep_b. While band.on is
+    true the band rule replaces this check: nothing is asked and the stored
+    pair scores are left as they are (they still publish, for comparison)."""
+    if decide.band()["on"]:
+        log("pairs: replaced by the band rule (band.on); nothing asked, stored pair checks kept")
+        return 0
     by_unit = defaultdict(set)
     family = {name: labels.family(name) for name in names}
     for name in names:

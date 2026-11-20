@@ -49,6 +49,10 @@ WITH f AS (
     AND f.posterior_probability >= s.commitment_min_probability
     AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
     AND (i.is_ipf OR NOT s.ipf_only)
+    -- the digital rule: a committed sentence counts only when it is digital
+    -- (the rest are in wbg.not_digital_findings); with digital.on false every
+    -- sentence is digital
+    AND f.is_digital
     -- a pair check whose posterior that the unit is this measure, with the
     -- other beside it, falls short of the pair check's floor (floor.pair_check)
     AND NOT (s.apply_measure_pair_checks AND EXISTS (
@@ -86,7 +90,7 @@ CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. A unit two measures commit is dropped from a measure its pair check says it is not (src/wbg_portfolio/commit_checks.py).';
+  'Every committed unit that counts (its posterior at its measure''s floor; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. A unit two measures commit is dropped from a measure its pair check says it is not while dashboard_settings.apply_measure_pair_checks is true (it is false under the band rule). Only digital sentences count (measure_findings.is_digital); the committed sentences that are not digital are in wbg.not_digital_findings.';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$
@@ -143,7 +147,7 @@ WITH u AS (
   SELECT DISTINCT f.unit_id, pp.project_id, f.text
   FROM wbg.measure_findings f
   JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
-  WHERE f.was_sent_to_model AND f.is_committed
+  WHERE f.was_sent_to_model AND f.is_committed AND f.is_digital
 ),
 w AS (
   SELECT unit_id, project_id,

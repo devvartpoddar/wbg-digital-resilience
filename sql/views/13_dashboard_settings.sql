@@ -27,9 +27,30 @@ SELECT
   {{panel:dashboard.apply_measure_pair_checks}} AS apply_measure_pair_checks,
   -- when its side's posterior (p_keep_a or p_keep_b: the measure's graded
   -- question again, the other beside it) falls short of this (floor.pair_check).
-  {{panel:floor.pair_check}}::numeric AS pair_check_floor;
+  {{panel:floor.pair_check}}::numeric AS pair_check_floor,
+  -- The band rule (control panel band.*), which replaces the per-measure floors
+  -- and the pair check while band_on: a first-pass score of band_keep or more is
+  -- committed; one from band_low to band_keep is committed only when the
+  -- paragraph-aware score reaches band_context and the chat model's grade
+  -- reaches band_second_grade. Decided at publish (measure_findings.is_committed);
+  -- shown here so a reader sees the rule behind the counts.
+  {{panel:band.on}} AS band_on,
+  {{panel:band.low}}::numeric AS band_low,
+  {{panel:band.keep}}::numeric AS band_keep,
+  {{panel:band.context}}::numeric AS band_context,
+  {{panel:band.second_grade}}::numeric AS band_second_grade,
+  -- The digital rule: a committed sentence counts only when is_digital (digital_floor).
+  {{panel:digital.on}} AS digital_on,
+  {{panel:digital.floor}}::numeric AS digital_floor,
+  -- Package links: strengths replace the old link question when links_strengths.
+  {{panel:links.strengths}} AS links_strengths,
+  {{panel:link.strong_yes}}::numeric AS link_strong_yes,
+  {{panel:link.asset_band_low}}::numeric AS link_asset_band_low,
+  {{panel:link.asset_yes}}::numeric AS link_asset_yes,
+  {{panel:activities.max_sentences}}::integer AS activities_max_sentences,
+  {{panel:second.model}} AS second_model;
 COMMENT ON VIEW wbg.dashboard_settings IS
-  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, and the posterior each side needs to stay.';
+  'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package counts as linked, the share of six-word runs that makes another project''s wording a near copy, whether the measure pair checks drop units, the posterior each side needs to stay, the band rule''s thresholds and whether it is on, the digital rule and its floor, the package-link settings and the chat model of the second looks.';
 
 -- Country codes for a map: the projects interface gives regional
 -- operations a region code (3E, 3W, 6R, 7C, 3T: a digit first) and the

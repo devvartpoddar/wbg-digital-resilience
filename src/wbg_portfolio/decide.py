@@ -83,21 +83,121 @@ def posterior(conn, kind, label_set, qshas, vector_of):
     return p
 
 
+def band():
+    """The band rule's settings (band.*); only `on` is read while it is off."""
+    on = bool(panel.get("band.on", False))
+    if not on:
+        return {"on": False}
+    return {"on": True, "low": float(setting("band.low")), "keep": float(setting("band.keep")),
+            "context": float(setting("band.context")), "second_grade": float(setting("band.second_grade"))}
+
+
+def band_rule(post, ctx, second, b):
+    """(committed, decided_by, waiting) for a sentence x measure pair under the
+    band rule. A first-pass score of band.keep or more is committed on its own
+    ('score'). A score in [band.low, band.keep) is committed only when the
+    decision model, shown the paragraph, scores it band.context or more AND the
+    chat model grades it band.second_grade or more ('second_look'). A pair in
+    the band with either look missing is not committed and is waiting."""
+    if post >= b["keep"]:
+        return True, "score", False
+    if post < b["low"]:
+        return False, "", False
+    if ctx is None or second is None:
+        return False, "", True
+    if ctx >= b["context"] and second >= b["second_grade"]:
+        return True, "second_look", False
+    return False, "", False
+
+
+def in_band(post, b):
+    """True for a first-pass score the second look is asked about."""
+    return b["low"] <= post < b["keep"]
+
+
+def look_scores(conn, kind, name):
+    """{unit_id: score} of a second-look kind (measure_ctx, measure_second) of a measure."""
+    return {uid: float(score) for _, _, uid, score, *_ in scores(conn, kind, name)}
+
+
 def measure_units(conn, corpus, name):
-    """{unit_id: row} of a measure's scored units with posterior, committed
-    (at the measure's floor) and asked_yes (at floor.ask)."""
+    """{unit_id: row} of a measure's scored units with posterior, committed and
+    asked_yes. With band.on, committed is the band rule (band_rule) and
+    asked_yes is the same: the sentences the later stages ask about are the
+    committed ones. Without it, committed is the posterior at the measure's
+    floor and asked_yes the posterior at floor.ask. A row also says its first
+    score (score_first), the two looks (score_context, second_grade, None when
+    not asked), decided_by ('score', 'second_look' or '') and waiting (in the
+    band, a look missing)."""
     qs, _ = Q.graded_questions(name)
     qshas = {lid: Q.sha(q) for lid, q in qs.items()}
     p = posterior(conn, "measure", name, qshas, corpus.vector)
-    fl, ask_fl = floor(name), float(setting("floor.ask"))
+    b = band()
+    if b["on"]:
+        ctx, second = look_scores(conn, "measure_ctx", name), look_scores(conn, "measure_second", name)
+    else:
+        fl, ask_fl = floor(name), float(setting("floor.ask"))
     out = {}
     for lset, lid, uid, score, answer, served, route, rnd, cos, rank in scores(conn, "measure", name):
         if uid not in corpus.row_of:
             continue
         post = p(lid, uid, score)
-        out[uid] = {"label_id": lid, "score": float(score), "answer": answer, "served": served,
-                    "route": route, "round": rnd, "cosine": float(cos or 0), "posterior": post,
-                    "committed": post >= fl, "asked_yes": post >= ask_fl}
+        row = {"label_id": lid, "score": float(score), "answer": answer, "served": served,
+               "route": route, "round": rnd, "cosine": float(cos or 0), "posterior": post,
+               "score_first": post, "score_context": None, "second_grade": None, "waiting": False}
+        if b["on"]:
+            row["score_context"], row["second_grade"] = ctx.get(uid), second.get(uid)
+            row["committed"], row["decided_by"], row["waiting"] = band_rule(
+                post, row["score_context"], row["second_grade"], b)
+            row["asked_yes"] = row["committed"]
+            row["in_band"] = in_band(post, b)
+        else:
+            row["committed"], row["asked_yes"] = post >= fl, post >= ask_fl
+            row["decided_by"] = "score" if row["committed"] else ""
+            row["in_band"] = False
+        out[uid] = row
+    return out
+
+
+def committed_units(conn, corpus, names):
+    """[unit_id] committed to any of the measures, in order: the sentences the
+    digital and policy questions are asked about."""
+    return sorted({u for n in names for u, r in measure_units(conn, corpus, n).items() if r["committed"]})
+
+
+def digital_settings():
+    """(on, floor): whether the digital rule applies (digital.on) and the P(yes) a sentence needs."""
+    return bool(panel.get("digital.on", False)), float(panel.get("digital.floor", 0.5))
+
+
+def digital_scores(conn):
+    """{unit_id: P(yes)} of the digital question (kind digital)."""
+    return {uid: float(score) for _, _, uid, score, *_ in scores(conn, "digital")}
+
+
+def is_digital(p, on=None, fl=None):
+    """Whether a sentence with the digital question's P(yes) `p` (None when not
+    asked) counts as digital. With the rule off every sentence does; a sentence
+    not asked is not digital."""
+    on0, fl0 = digital_settings()
+    on, fl = on0 if on is None else on, fl0 if fl is None else fl
+    return True if not on else (p is not None and p >= fl)
+
+
+def committed_digital_units(conn, corpus, names):
+    """[unit_id] committed to any of the measures and digital: what every
+    later question (assets, activities, links) is asked about."""
+    dig, (on, fl) = digital_scores(conn), digital_settings()
+    return [u for u in committed_units(conn, corpus, names) if is_digital(dig.get(u), on, fl)]
+
+
+def instruments(conn):
+    """{unit_id: 'investment' | 'policy'} from the policy question (kind policy)."""
+    out = {}
+    for _, _, uid, _, answer, *_ in scores(conn, "policy"):
+        labs = (answer or {}).get("labels") or []
+        if labs:
+            out[uid] = labs[0]
     return out
 
 
@@ -220,8 +320,11 @@ def _probs(answer):
     return {f"p{i}": f"{pr.get(i, 0.0):.4f}" for i in range(4)}
 
 
-def measure_rows(conn, corpus, names, ua):
-    fl_rows = []
+def measure_rows(conn, corpus, names, ua, stats=None):
+    """One row per scored sentence x measure. stats, a dict, collects the count
+    of pairs waiting for a second look and of committed pairs with no digital answer."""
+    fl_rows, stats = [], {} if stats is None else stats
+    dig, (dig_on, dig_floor), instrument = digital_scores(conn), digital_settings(), instruments(conn)
     for name in names:
         units = measure_units(conn, corpus, name)
         tps = types_of(conn, corpus, name)
@@ -229,6 +332,9 @@ def measure_rows(conn, corpus, names, ua):
         mapping = labels.type_resolution(name)[0]
         for uid, u in units.items():
             r = corpus.row(uid)
+            stats["waiting"] = stats.get("waiting", 0) + u["waiting"]
+            stats["no_digital_answer"] = stats.get("no_digital_answer", 0) + (
+                dig_on and u["committed"] and uid not in dig)
             own, win, level = ua.get(uid, ({}, [], "none"))
             best = max(own, key=own.get) if own else ""
             probs = tps.get(uid, {})
@@ -260,6 +366,13 @@ def measure_rows(conn, corpus, names, ua):
                 **_probs(u["answer"]), "p_committed_calibrated": f"{u['posterior']:.4f}",
                 "types_yes": "|".join(shown), "best_type": shown[0] if shown else "",
                 "best_p": f"{probs[yes[0]]:.3f}" if yes else "",
+                "score_first": f"{u['score_first']:.4f}",
+                "score_context": "" if u["score_context"] is None else f"{u['score_context']:.4f}",
+                "second_grade": "" if u["second_grade"] is None else f"{u['second_grade']:g}",
+                "decided_by": u["decided_by"],
+                "is_digital": str(is_digital(dig.get(uid), dig_on, dig_floor)).lower(),
+                "digital_p": f"{dig[uid]:.4f}" if uid in dig else "",
+                "instrument": instrument.get(uid, ""),
                 "model_served": u["served"] or "", "text": text})
     return fl_rows
 
@@ -347,7 +460,12 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
     amap = asset_map(conn, corpus)
     ua = unit_assets(corpus, amap)
     grades, assets = asset_rows(conn, corpus, amap, ua)
-    findings = measure_rows(conn, corpus, names, ua)
+    counts = {}
+    findings = measure_rows(conn, corpus, names, ua, counts)
+    if counts.get("waiting"):
+        log(f"  {counts['waiting']:,} pair(s) in the band are waiting for a second look; not committed")
+    if counts.get("no_digital_answer"):
+        log(f"  {counts['no_digital_answer']:,} committed pair(s) have no digital answer yet; not digital")
     pairs = pair_rows(conn, corpus)
     packages = checks.load_packages(data)
     pk_assets, links = package_rows(conn, corpus, ua, packages)

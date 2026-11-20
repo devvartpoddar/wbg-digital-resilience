@@ -753,6 +753,7 @@ def run(args, data):
             from wbg_portfolio import checks
             from wbg_portfolio import decide
             from wbg_portfolio import funnel
+            from wbg_portfolio import second
             if stage == "classify":
                 ok = funnel.run(conn, data, Q.ASSETS, corpus=corpus, **kw) is not None or args.dry_run
             elif stage == "measure":
@@ -760,11 +761,20 @@ def run(args, data):
                     if funnel.run(conn, data, name, corpus=corpus, **kw) is None and not args.dry_run:
                         ok = False
                         continue
+                    if second.measure(conn, data, corpus, name, **kw) is None and not args.dry_run:
+                        ok = False
+                        continue
                     checks.propose(conn, data, corpus, name, api_key=key, dry_run=args.dry_run)
                     if checks.types(conn, data, corpus, name, **{k: v for k, v in kw.items()
                                                                   if k != "projects"}) is None \
                             and not args.dry_run:
                         ok = False
+                if ok:
+                    # once whatever the measure: the digital and policy questions of the
+                    # committed sentences of the sets this run was given
+                    for step in (second.digital, second.policy):
+                        if step(conn, data, corpus, sets, **kw) is None and not args.dry_run:
+                            ok = False
                 if ok:
                     # across every active measure, whatever subset this run was given:
                     # the pair and link stages replace their whole kind

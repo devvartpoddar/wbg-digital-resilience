@@ -87,7 +87,7 @@ INTEGER = {"ordinal", "asset_rank", "text_start_offset", "text_end_offset", "pdf
            "pdf_text_end_offset", "word_count", "character_count", "row_count", "page_from",
            "page_to", "page_number", "part_number", "approval_fiscal_year", "pdf_size_bytes",
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
-           "units_hit_count", "most_likely_grade", "feedback_round",
+           "units_hit_count", "most_likely_grade", "feedback_round", "second_grade",
            "paragraphs", "packages", "notices", "awards", "sentences_embedded",
            "template_project_count", "cosine_rank", "graded_units", "measure_rank", "grade",
            "graded_yes", "graded_no", "positives", "calls", "units_seen", "units_graded"}
@@ -103,12 +103,12 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "model_cost_usd", "precision", "recall", "measure_cosine",
            "paragraph_best_asset_probability",
            "unit_best_asset_probability", "linked_asset_probability",
-           "template_wording_share",
+           "template_wording_share", "score_first", "score_context", "digital_p",
            "cosine", "probability", "p_only_a", "p_only_b", "p_both", "p_neither",
            "p_keep_a", "p_keep_b", "score_a", "score_b"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
-           "was_sent_to_model", "was_asked", "is_committed"}
+           "was_sent_to_model", "was_asked", "is_committed", "is_digital"}
 # Pipe-joined lists in the CSV become arrays, which `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
          "matched_types", "asset_ids_above_threshold", "type_ids_above_threshold",
@@ -407,6 +407,13 @@ TABLES = {
             "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the decayed sum over its paragraph's earlier sentences (level paragraph), at the control panel's asset.floor and asset.paragraph_floor.",
             "linked_asset_level": "unit, paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
+            "score_first": "The first-pass score the band rule reads: the posterior of grades 2 and 3 from the sentence asked alone.",
+            "score_context": "The decision model's score for the same question asked with the paragraph beside the sentence; empty unless the pair's first-pass score is in the band (band.low to band.keep). Model-graded, not person-graded.",
+            "second_grade": "The chat model's grade 0 to 3 for the pair, asked in the band; empty otherwise. Reading is the model's: a missing second look never counts as yes.",
+            "decided_by": "score (first-pass score at band.keep or more), second_look (in the band, and both looks reach band.context and band.second_grade) or empty (not committed). With band.on false: score when the posterior reaches the measure's floor.",
+            "is_digital": "True when the digital question (the sentence with its paragraph beside it, asked once whatever the measure) scores digital.floor or more. The dashboards count a committed sentence only when this is true; with digital.on false every sentence is true.",
+            "digital_p": "P(yes) of the digital question; empty when not asked (it is asked of committed sentences only).",
+            "instrument": "investment or policy, the chat model's reading of the committed sentence (flags.csv, policy); empty when not asked.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
             "type_ids_above_threshold": "The unit's types (one fit question per type in analysis/labels/<set>_types.csv: yes, unsure or no): every type whose P(yes), through the types' layer once fitted, reaches the control panel's floor.types (the likeliest only without types.multiple); empty when none does or no list exists yet.",
             "best_type_id": "The likeliest type.",

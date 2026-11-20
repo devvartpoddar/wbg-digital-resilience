@@ -4,6 +4,7 @@ import os
 
 from wbg_portfolio import db
 from wbg_portfolio import labels
+from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 from wbg_portfolio.paths import main_checkout
 
@@ -27,10 +28,17 @@ def brief(data=None):
         sets = [n for n in labels.label_sets() if n != Q.ASSETS]
         off = [n for n in labels.label_sets(include_inactive=True) if n not in sets and n != Q.ASSETS]
         lines.append(f"measures: {len(sets)} active ({', '.join(sets)})" + (f"; off: {', '.join(off)}" if off else ""))
-        for kind in ("asset", "measure", "type", "pair", "package_asset", "link", "scratch"):
+        for kind in ("asset", "measure", "measure_ctx", "measure_second", "digital", "policy", "type", "pair",
+                     "package_asset", "link", "scratch"):
             r = _n(conn, f"SELECT count(*), count(DISTINCT label_set) FROM {S}.scores WHERE kind = %s", (kind,))
             if r and r[0]:
                 lines.append(f"scores:   {kind:<14} {r[0]:>9,} rows, {r[1]} set(s)")
+        r = _n(conn, f"SELECT count(*) FILTER (WHERE kind = 'measure_ctx' AND score >= %s), "
+                     f"count(*) FILTER (WHERE kind = 'measure_ctx') FROM {S}.scores",
+               (float(panel.get("band.context", 0.7)),))
+        if r and r[1]:
+            lines.append(f"band:     {r[1]:,} pair(s) given a second look, {r[0]:,} with a context score "
+                         f"at band.context or more")
         r = _n(conn, f"SELECT count(*), count(DISTINCT model) FROM {T}.answers")
         if r:
             lines.append(f"answers:  {r[0]:,} stored, {r[1]} model(s)")

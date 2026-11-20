@@ -9,7 +9,7 @@ asset.floor,0.8,asset map,A sentence has an asset of its own at this posterior o
 asset.ask_floor,0.8,asset map,What the asset map's feedback rounds count as a yes (in what is asked).
 asset.decay,0,asset map,"Paragraph rule: earlier sentences' asset scores summed, each multiplied by this per sentence back; 0 = off."
 asset.paragraph_floor,0.3,asset map,The decayed sum's own floor (level paragraph).
-asset.multiple,false,asset map,Every asset at the floor (true) or the best only (false).
+asset.multiple,true,asset map,Every asset at the floor (true) or the best only (false).
 measure.gate_cosine,0.3,measure pool (src/funnel.py),Starting gate for a measure until the skip rule fits one.
 measure.top,0,measure pool,Also ask a measure's best N sentences by cosine whatever their score; 0 = off.
 skip.max_loss,0.01,every graded question (src/skip.py),Share of the graded yes a fitted gate may leave below it.
@@ -32,9 +32,9 @@ posterior.fit_weight_power,0,evaluation (src/grading.py),"Fits weight each grade
 floor.default,0.8,commitment,A sentence counts for a measure at this posterior or above (read at publish). floor.<set> overrides it for one measure.
 floor.cyber_security,0.9,commitment,"Cybersecurity's own floor: at 0.8 to 0.9 about a third of a read sample was cyber (the rest citizen ID authentication, data protection reviews, generic secure services); 0.9 keeps 94 of 108 projects (2026-10-27, no graded set yet)."
 floor.public_institutions,0.95,commitment,"Public institutions' own floor: in a read sample the sentences at 0.95 and above were all on the measure, 0.90 to 0.95 mixed and 0.80 to 0.90 mostly off it (licensing reform, a digital ID platform, a bandwidth lease); 0.95 keeps 938 sentences in 119 of 146 projects before the pair checks (2026-11-14, Dev's choice, no graded set yet)."
-floor.ask,0.73,commitment,"What a measure's rounds count as a yes, and which sentences the types, pair checks and links ask about (in what is asked). Keep at or below every decision floor."
+floor.ask,0.73,commitment,"What a measure's rounds count as a yes, and which sentences the types, pair checks and links ask about (in what is asked); with band.on the later stages ask about the sentences committed under the band rule instead. Keep at or below every decision floor."
 floor.target_precision,0.85,evaluation report,The evaluation suggests the floor with the most recall at this precision.
-floor.types,0.7,types (src/checks.py),A type counts at this P(yes) or above.
+floor.types,0.6,types (src/checks.py),"A type counts at this P(yes) or above (0.6, lowered from 0.7 on 2026-11-20)."
 types.multiple,true,types (src/decide.py),Every type at floor.types (true) or the likeliest only.
 types.gaps,off,types (src/checks.py),on: re-propose OTH types from the sentences no approved type reaches; off: keep those already proposed.
 types.gap_min_units,5,types (src/checks.py),Fewest such sentences before OTH types are proposed.
@@ -43,9 +43,22 @@ link.asset_top,4,package links (src/checks.py),Assets asked of each package: its
 link.asset_yes,0.67,package links,A package has an asset at this P(yes) or above.
 link.measure_top,3,package links,Each committed sentence also paired with its project's nearest this many packages by the measure's phrases.
 dashboard.commitment_min_probability,0.0,dashboards (sql/views),A further floor on the posterior for a sentence to count on the dashboards.
-dashboard.commitment_link_levels,unit|none,dashboards,"Where a commitment's asset may come from: unit, paragraph, none."
+dashboard.commitment_link_levels,unit|second_look|none,dashboards,"Where a commitment's asset may come from: unit (the sentence, first pass), second_look (the chat model's second look), paragraph, none."
 dashboard.ipf_only,true,dashboards,Only Investment Project Financing operations count.
 dashboard.package_link_min_probability,0.7,dashboards,A package is linked to a commitment at this P(yes) or above.
 dashboard.near_copy_share,0.5,dashboards,Another project prints a sentence near-identically when its committed sentences hold this share of its word runs.
 text.shingle_words,6,units and dashboards (src/units.py; sql/views/16_commitments.sql),Words per run when comparing wording (template_share and the dashboards' near-copy test).
-dashboard.apply_measure_pair_checks,true,dashboards,Drop a sentence from a measure its pair check says it is not.
+dashboard.apply_measure_pair_checks,false,dashboards,"Drop a sentence from a measure its pair check says it is not. False while band.on is true: the band rule replaces the pair check (stored pair checks still publish, for comparison)."
+second.model,anthropic/claude-haiku-5.5,every second look (src/chat.py),"The chat model asked for every second look, one item a request, temperature 0. Pinned: another id is another model and re-asks every second look."
+second.context_chars,1800,context questions (src/questions.py),Characters of the paragraph a context question sends beside the sentence.
+band.on,true,"commitment (src/decide.py, src/second.py)","The band rule decides which sentences a measure commits (true), replacing the per-measure floors (floor.default, floor.<set>) and the pair check; false: the floors and the pair check decide as before."
+band.low,0.5,band rule,A first-pass score from this up to band.keep is in the band and gets a second look; below it the sentence is not committed.
+band.keep,0.9,band rule,A first-pass score at this or above is committed on its own.
+band.context,0.7,band rule,"In the band, the decision model asked again with the paragraph beside the sentence must score this or above."
+band.second_grade,2,band rule,"In the band, the chat model's grade (0 to 3) must be this or above, and the context score must also reach band.context. A missing second look is never a yes."
+digital.on,true,"digital question (src/decide.py, sql/views)",Apply the digital rule (true): a committed sentence counts on the dashboards only when the digital question says it is digital. false: no digital question is asked and every sentence counts.
+digital.floor,0.5,digital question (src/second.py),"A committed sentence is digital at this P(yes) or above (asked once per sentence, with its paragraph beside it)."
+link.asset_band_low,0.3,package to asset (src/checks.py),A package-to-asset first-pass P(yes) from here up to link.asset_yes gets the chat model's second look.
+link.strong_yes,0.7,package to measure (src/checks.py),"A package is strongly linked to a measure at this P(yes) or above, when asked directly about the measure."
+links.strengths,true,commitment to package (src/checks.py),"Link strengths (strong when the package is asked about the measure directly; asset when it shares a top-level asset) replace the old link question (true; the old question is not asked, stored scores stay); false: the old link question as before."
+activities.max_sentences,40,activities (src/activities.py),Most sentences of one project x measure group the chat model is shown at once; a larger group is split by document and each part merged separately.
