@@ -41,9 +41,22 @@ def _write(conn, kind, label_set, rows, scope):
         checks.write_scores(conn, kind, label_set, rows, "item_id = ANY(%s)", [sorted(scope)])
 
 
-def _in_scope(corpus, units, projects):
+def _partial(names, every):
+    """True when a run names only some of the active measures (--measures a b)."""
+    return every is not None and not set(every) <= set(names)
+
+
+def _in_scope(corpus, units, projects, universe=None, partial=False):
+    """(units to ask, scope of the rows to replace). The scope is the sentences this run
+    is responsible for (`universe`, default the units asked): those of the named projects,
+    or of the named measures when a subset of them is run; None (the whole kind) only for
+    a run over every measure and every project, so a subset never deletes the rows of
+    another measure's sentences."""
     units = [u for u in units if corpus.in_scope(u, projects)]
-    return units, (set(units) if projects else None)
+    if not projects and not partial:
+        return units, None
+    base = units if universe is None else universe
+    return units, {u for u in base if corpus.in_scope(u, projects)}
 
 
 def _chat(conn, items, stage, label_set, api_key, dry_run, workers, log):
@@ -93,12 +106,13 @@ def measure(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=Fals
 
 
 def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
-            log=print, projects=None):
+            log=print, projects=None, every=None):
     """Is each committed sentence a digital asset or the digital sector, asked
     once whatever its measure. Writes kind digital (label_set and label digital)."""
     if not decide.digital_settings()[0]:
         return 0
-    units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects)
+    units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects,
+                             partial=_partial(names, every))
     q = Q.flag_question("digital")
     log(f"digital: {len(units):,} committed sentence(s)")
     got = checks._ask(conn, model, [(u, corpus.context_state(u), {"digital": q}) for u in units],
@@ -121,13 +135,14 @@ def policy_question():
 
 
 def policy(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
-           projects=None, **_):
+           projects=None, every=None, **_):
     """Investment or policy for each committed sentence, by the chat model.
     Writes kind policy (label_set and label policy; score 1 policy, 0 investment).
     Nothing is asked while policy.on is false."""
     if not decide.policy_on():
         return 0
-    units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects)
+    units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects,
+                             partial=_partial(names, every))
     q = policy_question()
     log(f"policy: {len(units):,} committed sentence(s)")
     got, ok = _chat(conn, [(u, corpus.context_state(u), q) for u in units], "policy", "policy", api_key,
@@ -210,7 +225,7 @@ def first_pass_assets(conn, corpus):
 
 
 def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
-                 projects=None, **_):
+                 projects=None, every=None, **_):
     """The chat model's second look at the assets: every committed, digital
     sentence with no asset at asset.floor from the first pass is shown with its
     paragraph and the four assets, and names up to two (or none) with a kind
@@ -219,8 +234,9 @@ def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, worker
     if not decide.band()["on"]:
         return 0
     first = first_pass_assets(conn, corpus)
-    units, scope = _in_scope(corpus, [u for u in decide.committed_digital_units(conn, corpus, names)
-                                      if u not in first], projects)
+    digital_units = decide.committed_digital_units(conn, corpus, names)
+    units, scope = _in_scope(corpus, [u for u in digital_units if u not in first], projects,
+                             digital_units, _partial(names, every))
     q = asset_second_question()
     log(f"asset second look: {len(units):,} committed digital sentence(s) with no asset from the first pass")
     got, ok = _chat(conn, [(u, corpus.context_state(u), q) for u in units], "asset_second", Q.ASSETS, api_key,
@@ -243,7 +259,7 @@ def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, worker
 
 
 def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
-                  projects=None, **_):
+                  projects=None, every=None, **_):
     """The kind of each asset the first pass gave a committed, digital sentence,
     by the chat model, one question per sentence and asset. Writes kind
     asset_subtype (label_set assets, label the asset). A reply that is not one
@@ -252,8 +268,9 @@ def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, worke
     if not decide.band()["on"]:
         return 0
     first = first_pass_assets(conn, corpus)
-    units, scope = _in_scope(corpus, [u for u in decide.committed_digital_units(conn, corpus, names)
-                                      if u in first], projects)
+    digital_units = decide.committed_digital_units(conn, corpus, names)
+    units, scope = _in_scope(corpus, [u for u in digital_units if u in first], projects,
+                             digital_units, _partial(names, every))
     assets, subtypes = asset_catalogue()
     qs = {a: asset_subtype_question(a) for a in subtypes if subtypes[a]}
     items = [((u, a), corpus.context_state(u), qs[a]) for u in units for a in first[u] if a in qs]

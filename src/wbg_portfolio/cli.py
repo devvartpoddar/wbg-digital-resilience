@@ -774,7 +774,7 @@ def run(args, data):
                     # sentences of the sets this run was given, then the assets' second look and kinds
                     # (committed and digital sentences). The types need none of them, so they come after.
                     for step in (second.digital, second.policy, second.asset_second, second.asset_subtype):
-                        if step(conn, data, corpus, sets, **kw) is None and not args.dry_run:
+                        if step(conn, data, corpus, sets, every=every, **kw) is None and not args.dry_run:
                             ok = False
                 if ok:
                     for name in sets:

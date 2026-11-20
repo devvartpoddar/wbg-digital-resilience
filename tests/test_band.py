@@ -326,3 +326,21 @@ def test_publish_says_how_many_pairs_wait_for_a_second_look(pg, corpus, fake_mod
     decide.publish(pg, corpus, corpus=c, log=logged.append, views=False)
     assert any("waiting for a second look" in line for line in logged)
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.measure_findings WHERE is_committed")[0] == 0
+
+
+@pytest.mark.parametrize("step,kind", [("digital", "digital"), ("policy", "policy")])
+def test_a_run_of_some_measures_keeps_the_rows_of_the_other_measures_sentences(
+        pg, corpus, fake_chat, fake_model, band_on, step, kind):
+    c = first_pass(pg, corpus, 0.95, units=(0, 2))
+    other = "X:other-measures-sentence"
+    stale = second._row(kind, kind, kind, other, {"s": 1}, {"q": 1}, {"labels": ["policy"]}, 1)
+    checks.write_scores(pg, kind, kind, [stale])
+    pg.commit()
+    run = getattr(second, step)
+    # a subset run (cra of cra and another measure): the other measure's row stays
+    assert run(pg, corpus, c, ["cra"], every=["cra", "another"], api_key="k", **QUIET) == 2
+    items = {r[2] for r in decide.scores(pg, kind)}
+    assert other in items and len(items) == 3
+    # a run over every measure replaces the whole kind, as before
+    run(pg, corpus, c, ["cra"], every=["cra"], api_key="k", **QUIET)
+    assert other not in {r[2] for r in decide.scores(pg, kind)}
