@@ -185,11 +185,16 @@ def is_digital(p, on=None, fl=None):
     return True if not on else (p is not None and p >= fl)
 
 
+def only_digital(conn, units):
+    """The units the digital rule keeps (all of them while digital.on is false)."""
+    dig, (on, fl) = digital_scores(conn), digital_settings()
+    return [u for u in units if is_digital(dig.get(u), on, fl)]
+
+
 def committed_digital_units(conn, corpus, names):
     """[unit_id] committed to any of the measures and digital: what every
     later question (assets, activities, links) is asked about."""
-    dig, (on, fl) = digital_scores(conn), digital_settings()
-    return [u for u in committed_units(conn, corpus, names) if is_digital(dig.get(u), on, fl)]
+    return only_digital(conn, committed_units(conn, corpus, names))
 
 
 def instruments(conn):
