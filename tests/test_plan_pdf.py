@@ -325,7 +325,8 @@ def test_reading_is_restricted_to_the_referenced_plan_documents(tmp_path, monkey
         return ([{"ref_key": "AAX1", "component_cell": "", "amount": "",
                   "ref_printed": "AA-X-1", "page": 1, "has_amount_column": ""}], 0)
 
-    monkeypatch.setattr(plan_pdf, "read_pdf", fake_read_pdf)
+    # The read runs in a child process, so the list of what was read is kept on this side.
+    monkeypatch.setattr(plan_pdf, "read_pdf_limited", fake_read_pdf)
     got = plan_pdf.read_all(str(tmp_path), log=lambda *_: None, only={"D1"})
     assert read == ["D1.pdf"] and set(got) == {"D1"}
     # D2 is read when a later run asks for it; D1 comes from the cache, not the PDF again.
@@ -360,3 +361,27 @@ def test_the_cache_holds_each_plan_before_the_next_one_is_read(tmp_path, monkeyp
         rows = list(csv.DictReader(fh))
     assert [r["doc_id"] for r in rows] == ["D1", "D1"]
     assert [r["row_index"] for r in rows] == ["-1", "0"]
+
+
+def test_a_plan_that_never_finishes_is_skipped_and_the_rest_are_read(tmp_path, monkeypatch):
+    """One PDF that hangs must not hold up the others: it is stopped at the time limit, logged
+    and left out, and the plans after it are still read and cached."""
+    import time as _time
+    folder = tmp_path / "raw" / "plan_pdf"
+    folder.mkdir(parents=True)
+    for doc in ("1", "2", "3"):
+        (folder / f"{doc}.pdf").write_bytes(doc.encode())
+
+    def fake_read_pdf(p):
+        if p.endswith("2.pdf"):
+            _time.sleep(60)
+        return [{"ref_printed": "A"}], 0
+    monkeypatch.setattr(plan_pdf, "read_pdf", fake_read_pdf)
+    monkeypatch.setattr(plan_pdf, "READ_SECONDS", 1)
+    lines = []
+    started = _time.time()
+    out = plan_pdf.read_all(str(tmp_path), log=lines.append)
+    assert _time.time() - started < 20
+    assert sorted(out) == ["1", "3"]
+    assert any("2 of 3: 2 could not be read: not read within 1 seconds" in x for x in lines)
+    assert any("3 of 3: 3 read, 1 rows" in x for x in lines)

@@ -20,6 +20,7 @@ import glob
 import os
 import re
 import sys
+import time
 import unicodedata
 
 from wbg_portfolio import common
@@ -137,6 +138,49 @@ def read_pdf(path):
     return rows_from_tables(tables)
 
 
+# A plan PDF normally reads in seconds. A few never finish (a page drawn as tens of thousands of
+# lines), and one of those must not hold up every other plan, so each read gets this long.
+READ_SECONDS = 180
+
+
+def _read_child(path, conn):
+    try:
+        conn.send(("ok", read_pdf(path)))
+    except Exception as exc:                      # noqa: BLE001 - reported to the parent
+        conn.send(("error", str(exc)[:100]))
+    finally:
+        conn.close()
+
+
+def read_pdf_limited(path, seconds=None):
+    """read_pdf in a child process, stopped after `seconds`. Raises TimeoutError when it runs
+    over and RuntimeError when the PDF cannot be read."""
+    import multiprocessing as mp
+    seconds = READ_SECONDS if seconds is None else seconds
+    ctx = mp.get_context("fork")
+    parent, child = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_read_child, args=(path, child), daemon=True)
+    proc.start()
+    child.close()
+    try:
+        if not parent.poll(seconds):
+            raise TimeoutError(f"not read within {seconds} seconds")
+        try:
+            kind, value = parent.recv()
+        except EOFError:
+            raise RuntimeError("the reader stopped without an answer") from None
+    finally:
+        if proc.is_alive():
+            proc.terminate()
+        proc.join(5)
+        if proc.is_alive():
+            proc.kill()
+        parent.close()
+    if kind == "error":
+        raise RuntimeError(value)
+    return value
+
+
 def _cache_path(data):
     return where(data, "procurement", "plan_pdf_rows.csv")
 
@@ -172,7 +216,8 @@ def read_all(data, log=print, only=None):
     Returns {doc_id: {"rows": [...], "unread": n, "sha": ...}} for every PDF read; the
     cache file holds them and is rewritten as each plan is read, so a run that stops part way
     through — reading a few hundred plans takes about an hour — keeps every plan already read
-    and the next run reads only the rest. A PDF that cannot be read is logged and left out."""
+    and the next run reads only the rest. A PDF that cannot be read, or is not read within READ_SECONDS, is
+    logged and left out; one line is logged per plan read."""
     cache = {}
     path = _cache_path(data)
     if os.path.exists(path):
@@ -184,21 +229,24 @@ def read_all(data, log=print, only=None):
                 d["rows"].append(r)
     out, changed, failed = {}, False, []
     pdfs = sorted(glob.glob(where(data, "plan_pdf", "*.pdf")))
-    for p in pdfs:
+    if only is not None:
+        pdfs = [p for p in pdfs if os.path.splitext(os.path.basename(p))[0] in only]
+    for n, p in enumerate(pdfs, 1):
         doc = os.path.splitext(os.path.basename(p))[0]
-        if only is not None and doc not in only:
-            continue
         sha = file_sha256(p, remember=False)
         old = cache.get(doc)
         if old and old["sha"] == sha:
             out[doc] = old
             continue
+        started = time.time()
         try:
-            rows, unread = read_pdf(p)
+            rows, unread = read_pdf_limited(p)
         except Exception as exc:                  # noqa: BLE001 - a damaged PDF must not stop a run
             failed.append((doc, str(exc)[:100]))
-            log(f"plan_pdf: {doc} could not be read: {str(exc)[:100]}")
+            log(f"plan_pdf: {n} of {len(pdfs)}: {doc} could not be read: {str(exc)[:100]}")
             continue
+        log(f"plan_pdf: {n} of {len(pdfs)}: {doc} read, {len(rows)} rows, "
+            f"{time.time() - started:.0f} s")
         for i, r in enumerate(rows):
             r.update(doc_id=doc, pdf_sha256=sha, row_index=i)
         out[doc] = {"sha": sha, "rows": rows, "unread": unread}
