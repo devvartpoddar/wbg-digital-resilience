@@ -43,7 +43,8 @@ def _csv(path, header, rows):
 
 
 @pytest.fixture
-def store(tmp_path, monkeypatch):
+def store(tmp_path, monkeypatch, pg):
+    # pg: the query texts' embedding is paid, so it goes into a test store's ledger
     data = tmp_path / "data"
     (data / "embeddings").mkdir(parents=True)
     numpy.save(data / "embeddings" / "sentence_emb.npy",

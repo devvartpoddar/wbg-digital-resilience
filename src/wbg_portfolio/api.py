@@ -115,13 +115,16 @@ def post(path, body, api_key, timeout=60, tries=5):
 # ---------------------------------------------------------------- the ledger
 #
 # Every call that costs money goes through a Spend: it checks the cap before a
-# step, adds what each call paid, and writes one ledger row when the step ends
-# (in a finally, so a cap stop or a refusal still lands in the ledger). The cap
-# is $WBG_SPEND_CAP_USD less what the ledger records since $WBG_SPEND_SINCE
-# (both set by ./wbg_portfolio run --max-spend) less what this process has paid and not
-# yet recorded.
+# step and adds what each call paid. Its ledger row is written at the first call
+# and brought up to date (and committed) at every call, so a kill loses at most
+# the call in flight from the ledger, as from the answers, and a restarted run's
+# cap sees what the killed one spent. The cap is $WBG_SPEND_CAP_USD less what the
+# ledger records since $WBG_SPEND_SINCE (both set by ./wbg_portfolio run
+# --max-spend, the window kept across restarts by spend_window).
 
-_unrecorded = [0.0]
+import contextlib
+import datetime
+import json
 
 
 def cap_left(conn):
@@ -133,28 +136,50 @@ def cap_left(conn):
     from wbg_portfolio import db
     spent = db.one(conn, f"SELECT coalesce(sum(cost_usd), 0) FROM {db.STORE}.spend WHERE at >= %s",
                    (since,))[0]
-    return float(cap) - float(spent) - _unrecorded[0]
+    return float(cap) - float(spent)
 
 
 class Spend:
     """The ledger of one step: with Spend(conn, stage, label_set, model) as s:
-    s.check(estimate); ... s.add(cost) per call; the row is written on exit."""
+    s.check(estimate); ... s.add(cost) per call. `lock` is the lock the step's
+    workers hold while they write to the same connection: the ledger is written
+    under it, so it never lands inside a worker's transaction."""
 
-    def __init__(self, conn, stage, label_set, model):
+    def __init__(self, conn, stage, label_set, model, lock=None):
         self.conn, self.stage, self.label_set, self.model = conn, stage, label_set, model
-        self.calls, self.cost, self.t0 = 0, 0.0, time.time()
+        self.lock = lock or contextlib.nullcontext()
+        self.calls, self.cost, self.t0, self.at = 0, 0.0, time.time(), None
 
     def check(self, estimate):
-        left = cap_left(self.conn)
+        with self.lock:
+            left = cap_left(self.conn)
         if left is not None and estimate > left:
             raise CapReached(f"{self.stage}: --max-spend would be passed (about US${estimate:.3f} "
                              f"to ask, US${max(left, 0):.3f} left); nothing asked")
 
-    def add(self, cost):
-        self.calls += 1
-        self.cost += cost
-        _unrecorded[0] += cost
-        left = cap_left(self.conn)
+    def _write(self):
+        from wbg_portfolio import db
+        values = (self.calls, round(self.cost, 6), round(time.time() - self.t0, 1))
+        if self.at is None:
+            self.at = datetime.datetime.now(datetime.timezone.utc)
+            db.execute(self.conn, f"INSERT INTO {db.STORE}.spend (at, stage, label_set, model, calls, "
+                       f"cost_usd, seconds) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                       (self.at, self.stage, self.label_set, self.model, *values))
+        else:
+            db.execute(self.conn, f"UPDATE {db.STORE}.spend SET calls = %s, cost_usd = %s, seconds = %s "
+                       f"WHERE at = %s AND stage IS NOT DISTINCT FROM %s AND label_set IS NOT DISTINCT FROM %s "
+                       f"AND model IS NOT DISTINCT FROM %s",
+                       (*values, self.at, self.stage, self.label_set, self.model))
+        self.conn.commit()
+
+    def add(self, cost, calls=1):
+        """What one call (or `calls` calls) paid: into the ledger at once; CapReached when the cap
+        is passed."""
+        with self.lock:
+            self.calls += calls
+            self.cost += cost
+            self._write()
+            left = cap_left(self.conn)
         if left is not None and left < 0:
             raise CapReached(f"{self.stage}: --max-spend reached after {self.calls:,} calls; "
                              f"the answers so far are stored")
@@ -164,11 +189,57 @@ class Spend:
 
     def __exit__(self, *exc):
         if self.calls:
-            from wbg_portfolio import db
-            db.execute(self.conn, f"INSERT INTO {db.STORE}.spend (at, stage, label_set, model, calls, "
-                       f"cost_usd, seconds) VALUES (now(), %s, %s, %s, %s, %s, %s)",
-                       (self.stage, self.label_set, self.model, self.calls, round(self.cost, 6),
-                        round(time.time() - self.t0, 1)))
-            self.conn.commit()
-            _unrecorded[0] -= self.cost
+            with self.lock:
+                self._write()               # the step's last seconds
         return False
+
+
+# ----------------------------------------------------------- the cap's window
+#
+# --max-spend caps a run as a whole. A run that stops before it ends (a kill, a
+# failed request, the cap) and is started again with the same command keeps the
+# window it opened, so what the earlier attempts spent counts against the same
+# cap; the window closes when that command ends without error.
+
+def _windows_path(data):
+    from wbg_portfolio.paths import where
+    return where(data, "reports", "spend_windows.json")
+
+
+def _windows(data):
+    try:
+        with open(_windows_path(data), encoding="utf-8") as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return {}
+
+
+def open_window(data, command, cap):
+    """Set the cap for this process (and the stages it starts) and return a line saying so.
+    `command` names the run (its stages and selection, not the cap): the same command
+    started again before it ended keeps its window."""
+    from wbg_portfolio import common
+    from wbg_portfolio import db
+    key = json.dumps({"store": db.STORE, **command}, sort_keys=True)
+    windows = _windows(data)
+    since = windows.get(key)
+    if not since:
+        since = datetime.datetime.now(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        windows[key] = since
+        common.write_atomic(_windows_path(data), json.dumps(windows, indent=1, sort_keys=True))
+        note = ""
+    else:
+        note = " (the same command started then and did not end; what it spent counts)"
+    os.environ["WBG_SPEND_CAP_USD"] = f"{cap:.4f}"
+    os.environ["WBG_SPEND_SINCE"] = since
+    return f"spend cap US${cap:.2f}, counted from {since}{note}"
+
+
+def close_window(data, command):
+    """The command ended without error: its window closes."""
+    from wbg_portfolio import common
+    from wbg_portfolio import db
+    key = json.dumps({"store": db.STORE, **command}, sort_keys=True)
+    windows = _windows(data)
+    if windows.pop(key, None):
+        common.write_atomic(_windows_path(data), json.dumps(windows, indent=1, sort_keys=True))

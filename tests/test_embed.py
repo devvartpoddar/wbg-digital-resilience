@@ -124,6 +124,12 @@ class Stub:
                          "rate_limit": {"x-ratelimit-remaining-tokens": "999999"}}
 
 
+@pytest.fixture(autouse=True)
+def _ledger(pg):
+    """Embedding is paid: its ledger rows go into a test store, never the real one."""
+    return pg
+
+
 def run(tmp_path, stub, monkeypatch, *extra):
     data = os.path.join(str(tmp_path), "data")
     monkeypatch.setattr(E, "embed_texts", stub)
@@ -581,3 +587,19 @@ def test_a_list_item_is_embedded_with_its_lead_in(tmp_path):
     want = "The project will finance:\n(a) towers;"
     assert order == [("D:p00001:s002", hashlib.sha256(want.encode()).hexdigest())]
     assert list(unique.values()) == [want]
+
+
+def test_the_cap_stops_embedding_before_a_request_and_the_ledger_holds_what_was_paid(corpus, monkeypatch, _ledger):
+    """Embedding is paid like any question: under --max-spend nothing is asked when the estimate
+    would pass the cap, and what is asked is in the ledger as each request is paid."""
+    from wbg_portfolio import db
+    monkeypatch.setenv("WBG_SPEND_SINCE", "2000-01-01")
+    monkeypatch.setenv("WBG_SPEND_CAP_USD", "0.0000000001")
+    stub = Stub()
+    with pytest.raises(api.CapReached):
+        run(corpus, stub, monkeypatch)
+    assert stub.calls == []
+    monkeypatch.setenv("WBG_SPEND_CAP_USD", "1")
+    assert run(corpus, stub, monkeypatch) == 0
+    calls, cost = db.one(_ledger, f"SELECT sum(calls), sum(cost_usd) FROM {db.STORE}.spend WHERE stage = 'embed'")
+    assert calls == len(stub.calls) and float(cost) > 0

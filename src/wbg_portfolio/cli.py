@@ -712,6 +712,11 @@ RUN_STAGES = ("fetch", "prepare", "embed", "search", "classify", "measure", "lin
               "audit")
 
 
+# The stages that can call a model that is paid for (the embedding model included): a run of
+# any of them needs --max-spend.
+PAID_STAGES = ("embed", "search", "classify", "measure", "link", "activities")
+
+
 def stages_between(start=None, stop=None, only=None):
     if only:
         return [only]
@@ -744,10 +749,13 @@ def run(args, data):
     every = [n for n in labels_mod.label_sets() if n != Q.ASSETS]
     sets = args.measures or every
     projects = sorted(_sel(args).ids) if _scope(args) else None
-    if getattr(args, "max_spend", None) is not None:
-        os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"
-        os.environ["WBG_SPEND_SINCE"] = datetime.datetime.now(
-            datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    paid = [s for s in stages if s in PAID_STAGES]
+    command = {"stages": stages, "measures": sorted(sets), "projects": projects}
+    if paid and not args.dry_run:
+        if getattr(args, "max_spend", None) is None:
+            raise SystemExit(f"run: {', '.join(paid)} can call a paid model; give --max-spend <US$> "
+                             f"(what you expect it to cost), or --dry-run for the estimate")
+        print(api.open_window(data, command, args.max_spend), flush=True)
     dry = ["--dry-run"] if args.dry_run else []
     key = "" if args.dry_run else api.key()
     kw = dict(api_key=key, dry_run=args.dry_run, workers=args.workers, projects=projects)
@@ -842,6 +850,8 @@ def run(args, data):
           + f"; everything {time.time() - t_all:.0f}s", flush=True)
     if not args.dry_run:
         stage_times(data, t_all, timings)
+        if paid:
+            api.close_window(data, command)
     return 0
 
 

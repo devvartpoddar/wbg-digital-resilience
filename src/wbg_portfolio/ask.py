@@ -119,12 +119,13 @@ def _store(conn, model, rows, states, qs):
     conn.commit()
 
 
-def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, workers, log, tail=lambda: ""):
+def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, workers, log, tail=lambda: "",
+                 lock=None):
     """The part every asker shares: check the cap against stats["estimate_usd"], run one(*job) for
     each job on a pool, count the requests that failed (api.Transport) in stats["failures"], stop
-    at the cap, log a steady "n of total" line (common.Progress), and write the ledger
-    row (written as the step ends). Sets stats calls, cost_usd and seconds. one(*job) returns
-    what the request cost.
+    at the cap, log a steady "n of total" line (common.Progress), and keep the ledger row (api.Spend)
+    up to date as each request is paid. Sets stats calls, cost_usd and seconds. one(*job) returns
+    what the request cost; `lock` is the lock one() holds while it writes to conn.
 
     A refusal (api.Refused) stops the run when it is about the whole request (a bad key, no credit, or
     a refusal that does not say which item it is about). A refusal about one item (exc.items) is
@@ -135,7 +136,7 @@ def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, wo
         raise SystemExit(f"{stage}: no credential: set ${api.KEY_VAR}")
     t0 = time.time()
     progress = common.Progress(f"  {stage}: requests", len(jobs), log)
-    with api.Spend(conn, stage, label_set, model) as spend:
+    with api.Spend(conn, stage, label_set, model, lock=lock) as spend:
         spend.check(stats["estimate_usd"])
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(one, *job) for job in jobs]
@@ -383,7 +384,7 @@ def ask(conn, model, items, *, stage, label_set="", api_key="", dry_run=False, w
             return cost
 
         run_requests(conn, model, todo, one, stats, stage=stage, label_set=label_set, api_key=api_key,
-                     workers=workers, log=log)
+                     workers=workers, log=log, lock=lock)
         # the run had answers from this model, so what was refused was refused for itself: remember it
         skipped_now = sorted(set(stats["refused"]))
         if skipped_now:

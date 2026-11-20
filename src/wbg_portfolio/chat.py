@@ -306,7 +306,7 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
 
         asker.run_requests(conn, mdl, [(k,) for k in sorted(todo)], one, stats, stage=stage,
                            label_set=label_set, api_key=api_key, workers=workers, log=log,
-                           tail=lambda: f", {stats['unparsed']} unreadable")
+                           tail=lambda: f", {stats['unparsed']} unreadable", lock=lock)
     skipped = set(stats["refused"]) | set(known)
     if stats["refused"] and not dry_run:        # the run had answers from this model: it was refused for itself
         asker.record_refused(conn, mdl, sorted(set(stats["refused"])),

@@ -293,9 +293,10 @@ def _embed_batch(n, total, batch, unique, root, dim, *, model, api_key, base_url
 
 
 def fetch_missing(todo, unique, root, dim, *, model, api_key, base_url, log,
-                  workers=EMBED_WORKERS):
+                  workers=EMBED_WORKERS, spend=None):
     """Embed and cache every text in todo, several requests in flight at
-    once. Returns (stats, failures)."""
+    once; each request's cost goes into `spend` (an api.Spend) as it is paid.
+    Returns (stats, failures)."""
     from concurrent.futures import ThreadPoolExecutor, as_completed
     stats = {"requests": 0, "tokens": 0, "stored": 0, "retried_singly": 0}
     rate_limit, served = {}, ""
@@ -308,6 +309,12 @@ def fetch_missing(todo, unique, root, dim, *, model, api_key, base_url, log,
         progress = common.Progress("  embed: requests", len(batches), log)
         for f in as_completed(futures):
             r, t, st, sg, rl, sv, fl = f.result()
+            if spend is not None and r:
+                try:
+                    spend.add(t / 1e6 * PRICE_PER_MTOK, calls=r)
+                except api.CapReached:
+                    pool.shutdown(wait=True, cancel_futures=True)       # nothing more is asked
+                    raise
             stats["requests"] += r
             stats["tokens"] += t
             stats["stored"] += st
@@ -435,9 +442,16 @@ def main():
     started = time.time()
     if todo:
         log("")
-        stats, failures = fetch_missing(todo, unique, root, args.dim,
-                                        model=args.model, api_key=api_key,
-                                        base_url=args.base_url, log=log)
+        from wbg_portfolio import db
+        # Checked against --max-spend before the first request and counted in the ledger as each
+        # request is paid, so a stop keeps the record of what was spent.
+        with db.connect() as conn:
+            db.ensure(conn)
+            with api.Spend(conn, "embed", args.unit, args.model) as sp:
+                sp.check(hi / 1e6 * PRICE_PER_MTOK)
+                stats, failures = fetch_missing(todo, unique, root, args.dim,
+                                                model=args.model, api_key=api_key,
+                                                base_url=args.base_url, log=log, spend=sp)
     elapsed = time.time() - started
 
     # Rebuilt from disk rather than from what the run believes it stored, so a vector that
@@ -481,12 +495,6 @@ def main():
         os.replace(idx_path + ".part", idx_path)
 
     spend = stats["tokens"] / 1e6 * PRICE_PER_MTOK
-    if stats["requests"]:
-        from wbg_portfolio import db
-        with db.connect() as conn:
-            db.ensure(conn)
-            with api.Spend(conn, "embed", args.unit, args.model) as sp:
-                sp.calls, sp.cost = stats["requests"], spend
     manifest = {
         "model_requested": args.model,
         "model_served": stats["served_model"] or None,

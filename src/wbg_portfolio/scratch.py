@@ -24,7 +24,6 @@ import json
 import os
 import re
 import sys
-import time
 
 from wbg_portfolio import api
 from wbg_portfolio import db
@@ -151,6 +150,9 @@ def run(args, data):
     """The ./wbg_portfolio try command."""
     from wbg_portfolio import funnel
     from wbg_portfolio import search
+    if not args.list and not args.dry_run and args.max_spend is None:
+        raise SystemExit("try: it calls a paid model; give --max-spend <US$> (a scratch measure: "
+                         "under 0.50), or --dry-run for the estimate")
     conn = db.connect()
     db.ensure(conn)
     if args.list:
@@ -162,9 +164,9 @@ def run(args, data):
     slug = slug_of(args.slug)
     db.check_store(conn, fresh=getattr(args, "fresh_store", False))
     key = "" if args.dry_run else api.key()
-    if args.max_spend is not None:
-        os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"
-        os.environ["WBG_SPEND_SINCE"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    command = {"try": slug, "projects": sorted(args.projects) if args.projects else None}
+    if not args.dry_run:
+        print(api.open_window(data, command, args.max_spend), flush=True)
     name, definition, phrases, patterns = args.name or slug.replace("_", " "), args.definition, list(args.phrase or []), list(args.pattern or [])
     if args.expand:
         got = expand(conn, args.expand, key, dry_run=args.dry_run)
@@ -200,4 +202,5 @@ def run(args, data):
     if not args.dry_run:
         for line in summary(conn, corpus, slug, fl):
             print(line)
+        api.close_window(data, command)
     return 0

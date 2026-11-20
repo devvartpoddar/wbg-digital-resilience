@@ -162,8 +162,15 @@ def query_vectors(queries, data, model, dim, base_url, api_key, log=print):
         if not api_key:
             raise SystemExit(f"search: {len(todo)} query text(s) are not embedded yet and "
                              f"${api.KEY_VAR} is not set")
-        _stats, failures = embed.fetch_missing(todo, unique, root, dim, model=model,
-                                               api_key=api_key, base_url=base_url, log=log)
+        from wbg_portfolio import db
+        # Paid like the sentences' vectors: checked against --max-spend and in the ledger.
+        with db.connect() as conn:
+            db.ensure(conn)
+            with api.Spend(conn, "search", "", model) as sp:
+                sp.check(sum(len(unique[s]) for s in todo) / 1e6 * embed.PRICE_PER_MTOK)
+                _stats, failures = embed.fetch_missing(todo, unique, root, dim, model=model,
+                                                       api_key=api_key, base_url=base_url, log=log,
+                                                       spend=sp)
         if failures:
             raise SystemExit(f"search: {len(failures)} query text(s) failed to embed")
     out = numpy.zeros((len(queries), dim), dtype="float32")

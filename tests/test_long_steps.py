@@ -7,6 +7,7 @@ import time
 
 import pytest
 
+from wbg_portfolio import api
 from wbg_portfolio import cli
 from wbg_portfolio import common
 
@@ -172,6 +173,61 @@ def test_a_stage_that_left_items_out_runs_again_next_time(tmp_path, monkeypatch)
 
 def test_every_stage_runs_with_unbuffered_output(tmp_path):
     assert cli._env(str(tmp_path))["PYTHONUNBUFFERED"] == "1"
+
+
+# ------------------------------------------------------------ the spend guard
+
+def test_a_paid_stage_does_not_start_without_a_cap(tmp_path, capsys):
+    for stages in (["--from", "classify"], ["--only", "embed"], ["--only", "search"]):
+        with pytest.raises(SystemExit) as stop:
+            cli.main(["--data", str(tmp_path), "run", *stages])
+        assert "--max-spend" in str(stop.value)
+    with pytest.raises(SystemExit) as stop:
+        cli.main(["--data", str(tmp_path), "try", "x"])
+    assert "--max-spend" in str(stop.value)
+
+
+def test_the_cap_window_is_kept_across_a_restart_and_closes_when_the_run_ends(tmp_path, monkeypatch):
+    monkeypatch.delenv("WBG_SPEND_CAP_USD", raising=False)
+    monkeypatch.delenv("WBG_SPEND_SINCE", raising=False)
+    cmd = {"stages": ["classify"], "projects": None}
+    first = api.open_window(str(tmp_path), cmd, 5)
+    since = os.environ["WBG_SPEND_SINCE"]
+    assert "did not end" not in first
+    time.sleep(1.1)
+    again = api.open_window(str(tmp_path), cmd, 7)           # the restart, with a higher cap
+    assert os.environ["WBG_SPEND_SINCE"] == since and "did not end" in again
+    assert os.environ["WBG_SPEND_CAP_USD"] == "7.0000"
+    other = {"stages": ["link"], "projects": None}
+    api.open_window(str(tmp_path), other, 1)
+    assert os.environ["WBG_SPEND_SINCE"] >= since
+    api.close_window(str(tmp_path), cmd)
+    time.sleep(1.1)
+    api.open_window(str(tmp_path), cmd, 5)
+    assert os.environ["WBG_SPEND_SINCE"] > since               # a new run, a new window
+    with open(tmp_path / "reports" / "spend_windows.json") as fh:
+        assert len(json.load(fh)) == 2
+
+
+def test_the_ledger_holds_each_call_as_it_is_paid_so_a_kill_keeps_the_record(pg, monkeypatch):
+    """A step killed part way (no __exit__) has its calls in the ledger already, and a restarted
+    run's cap counts them."""
+    from wbg_portfolio import db
+    monkeypatch.setenv("WBG_SPEND_CAP_USD", "1")
+    monkeypatch.setenv("WBG_SPEND_SINCE", "2000-01-01")
+    s = api.Spend(pg, "measure", "cra", "m")
+    s.add(0.25)
+    s.add(0.25, calls=2)
+    # killed here: nothing more runs in this step
+    calls, cost = db.one(pg, f"SELECT calls, cost_usd FROM {db.STORE}.spend")
+    assert (calls, float(cost)) == (3, 0.5)
+    assert api.cap_left(pg) == pytest.approx(0.5)
+    with pytest.raises(api.CapReached):
+        api.Spend(pg, "measure", "cra", "m").check(0.6)
+    t = api.Spend(pg, "link", "", "m")
+    with pytest.raises(api.CapReached):
+        t.add(0.6)
+    assert float(db.one(pg, f"SELECT sum(cost_usd) FROM {db.STORE}.spend")[0]) == pytest.approx(1.1)
 
 
 def test_components_reads_each_table_with_a_limit_and_keeps_what_it_read(tmp_path, monkeypatch):
