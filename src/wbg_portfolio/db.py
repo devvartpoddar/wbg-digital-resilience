@@ -74,6 +74,24 @@ def connect(dsn=None, autocommit=False):
     return psycopg.connect(dsn or DSN, autocommit=autocommit)
 
 
+def check_store(conn, fresh=False, log=print):
+    """At the start of a paid stage: say which store the answers are read from and written to, and how many
+    it holds (per model), and refuse (SystemExit, a plain message) to go on when it is empty while the scores
+    schema and the store are not the default pair (wbg, wbg_store): that is a new WBG_SCHEMA without WBG_STORE,
+    which would pay again for everything the real store already holds. fresh=True (--fresh-store) says an
+    empty store is meant. Returns the number of answers."""
+    rows_ = conn.execute(f"SELECT model, count(*) FROM {STORE}.answers GROUP BY model ORDER BY model").fetchall()
+    total = sum(n for _, n in rows_)
+    conn.commit()
+    log(f"store {STORE} (scores in {SCHEMA}): {total:,} answers"
+        + (" (" + ", ".join(f"{m} {n:,}" for m, n in rows_) + ")" if rows_ else ""))
+    if total == 0 and not fresh and (SCHEMA, STORE) != ("wbg", "wbg_store"):
+        raise SystemExit(f"the store {STORE} holds no answers, and the scores go to {SCHEMA}: every question "
+                         f"would be asked and paid for again. Did you mean WBG_STORE=wbg_store? If this really "
+                         f"is a new store, say so with --fresh-store.")
+    return total
+
+
 def ensure(conn):
     """The store schema and its tables (idempotent)."""
     conn.execute(STORE_DDL.format(s=STORE))

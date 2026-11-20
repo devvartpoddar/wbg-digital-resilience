@@ -63,7 +63,7 @@ def wide(corpus, fake_model, fake_chat, monkeypatch):
 
 
 def run(corpus, *args):
-    return cli.main(["--data", corpus, "run", *args])
+    return cli.main(["--data", corpus, "run", "--fresh-store", *args])      # the test store starts empty
 
 
 def rows(conn, sql):

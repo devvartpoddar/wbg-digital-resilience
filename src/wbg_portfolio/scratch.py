@@ -160,6 +160,7 @@ def run(args, data):
     if not args.slug:
         raise SystemExit("try: a name is needed (./wbg_portfolio try e_waste ...), or --list")
     slug = slug_of(args.slug)
+    db.check_store(conn, fresh=getattr(args, "fresh_store", False))
     key = "" if args.dry_run else api.key()
     if args.max_spend is not None:
         os.environ["WBG_SPEND_CAP_USD"] = f"{args.max_spend:.4f}"

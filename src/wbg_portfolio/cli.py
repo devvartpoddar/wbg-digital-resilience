@@ -739,6 +739,7 @@ def run(args, data):
     key = "" if args.dry_run else api.key()
     kw = dict(api_key=key, dry_run=args.dry_run, workers=args.workers, projects=projects)
     conn = corpus = None
+    checked = False
     timings = []
     for stage in stages:
         t0 = time.time()
@@ -765,6 +766,9 @@ def run(args, data):
             from wbg_portfolio import decide
             from wbg_portfolio import funnel
             from wbg_portfolio import second
+            if stage in ("classify", "measure", "link", "activities") and not checked:
+                db.check_store(conn, fresh=getattr(args, "fresh_store", False))
+                checked = True
             if stage == "classify":
                 ok = funnel.run(conn, data, Q.ASSETS, corpus=corpus, **kw) is not None or args.dry_run
             elif stage == "measure":
@@ -877,6 +881,7 @@ def main(argv=None):
     p.add_argument("--refresh-projects", action="store_true", help="fetch every project record again")
     p.add_argument("--dry-run", action="store_true", help="estimates only; nothing asked or written")
     p.add_argument("--max-spend", type=float, default=None, help="US$ the run may spend on models")
+    p.add_argument("--fresh-store", action="store_true", help="the answer store is meant to be empty (a new store)")
     _filters(p)
     p = sub.add_parser("add", help="a measure from its files to Postgres (run --from search --to measure)")
     p.add_argument("label_set", nargs="+")
@@ -884,6 +889,7 @@ def main(argv=None):
     p.add_argument("--workers", type=int, default=10)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--max-spend", type=float, default=None)
+    p.add_argument("--fresh-store", action="store_true", help="the answer store is meant to be empty (a new store)")
     _filters(p)
     sub.add_parser("publish", help="every decision read again from the scores, then the views")
     p = sub.add_parser("try", help="a scratch measure against the corpus in minutes (src/wbg_portfolio/scratch.py)")
@@ -898,6 +904,7 @@ def main(argv=None):
     p.add_argument("--workers", type=int, default=10)
     p.add_argument("--dry-run", action="store_true")
     p.add_argument("--max-spend", type=float, default=None, help="US$ the try may spend on models")
+    p.add_argument("--fresh-store", action="store_true", help="the answer store is meant to be empty (a new store)")
     for k in ("project", "country", "region", "fy", "practice", "unit"):
         p.add_argument(f"--{k}", action="append")
     p.add_argument("--set", action="append", dest="cohort_set")

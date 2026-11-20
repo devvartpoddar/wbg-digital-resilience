@@ -215,3 +215,33 @@ def test_a_refused_sentence_does_not_stop_the_funnel_and_is_left_unscored(pg, co
     scored = {r[0] for r in db.rows(pg, f"SELECT item_id FROM {db.SCHEMA}.scores WHERE label_set = 'cra'")}
     road = next(r["unit_id"] for r in c.index if "road" in c.texts[r["unit_id"]])
     assert road not in scored and len(scored) == len(c.index) - 1
+
+
+# ------------------------------------------------- A6 the store check
+
+def test_a_paid_stage_prints_the_store_and_refuses_an_empty_one_under_a_new_schema(pg, corpus, fake_model,
+                                                                                    monkeypatch, capsys):
+    from wbg_portfolio import cli
+    monkeypatch.setattr(api, "key", lambda required=False: "k")
+    with pytest.raises(SystemExit) as e:                     # the test schema is not the default pair
+        cli.main(["--data", corpus, "run", "--only", "classify", "--dry-run"])
+    assert "holds no answers" in str(e.value) and "--fresh-store" in str(e.value)
+    assert f"store {db.STORE}" in capsys.readouterr().out
+    assert cli.main(["--data", corpus, "run", "--only", "classify", "--dry-run", "--fresh-store"]) == 0
+    ask.ask(pg, "m", items(2), stage="t", api_key="k", batch=10, **QUIET)
+    assert cli.main(["--data", corpus, "run", "--only", "classify", "--dry-run"]) == 0     # it holds answers now
+    assert "2 answers (m 2)" in capsys.readouterr().out
+
+
+def test_the_default_pair_may_start_empty(pg, monkeypatch):
+    monkeypatch.setattr(db, "SCHEMA", "wbg")
+    monkeypatch.setattr(db, "STORE", "wbg_store")
+    got = []
+
+    class Conn:
+        def execute(self, *a):
+            return type("R", (), {"fetchall": lambda self: []})()
+
+        def commit(self):
+            pass
+    assert db.check_store(Conn(), log=got.append) == 0 and "store wbg_store" in got[0]
