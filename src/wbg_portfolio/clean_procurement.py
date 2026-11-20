@@ -19,7 +19,7 @@ from wbg_portfolio import common  # noqa: E402
 from wbg_portfolio.paths import data_root, where  # noqa: E402
 
 from wbg_portfolio.text_rules import fold_chars                       # noqa: E402
-from wbg_portfolio.keys import name_key                                 # noqa: E402
+from wbg_portfolio.keys import name_key, normal_number, COMPONENT_PREFIX   # noqa: E402
 from wbg_portfolio.dates import iso_date                                # noqa: E402
 from wbg_portfolio import plan_table                                        # noqa: E402
 from wbg_portfolio import glue                                              # noqa: E402
@@ -117,8 +117,49 @@ CELL_HEAD = re.compile(
     rf"^\s*(?:(?:Single Stage\s*-\s*(?:One|Two)(?:\s*E(?:nvelope)?)?|{_APPROACH_WORDS}l?)\s*)+")
 COMP_NUMBER = re.compile(r"^(?:(?:Component|Composante|Componente|Comp\.?)\s*)?"
                          r"(\d{1,2}(?:\.\d{1,2})?)\s*[.:)\-–]?\s+(?=\S)", re.I)
+# A lettered number ('Component A', 'A.1 Name', 'A. Name'): a letter alone is a number only
+# after the word 'Component' or with a dot or colon, since 'A plan for ...' is not one.
+COMP_LETTER = re.compile(
+    r"^(?:(?:Component|Composante|Componente|Comp\.?)\s*"
+    r"((?-i:[A-Z](?:\.?\d{1,2})?|[IVX]{2,4}(?:\.\d{1,2})?))(?![A-Za-z\d])\s*[.:)\-–]?\s+(?=\S)"
+    r"|((?-i:[A-Z]\.\d{1,2}|[A-Z](?=[.:)])|[IVX]{2,4}(?=[.:)])))[.:)\-–]?\s+(?=\S))", re.I)
 COMP_NAMED = re.compile(r"\b(?:Component|Composante|Componente|Comp\.)\s*"
                         r"(\d{1,2}(?:\.\d{1,2})?)\b", re.I)
+COMP_NAMED_LETTER = re.compile(
+    r"\b(?:Component|Composante|Componente|Comp\.)\s*"
+    r"((?-i:[A-Z](?:\.?\d{1,2})?|[IVX]{2,4}(?:\.\d{1,2})?))(?![A-Za-z\d])", re.I)
+
+
+class _Num:
+    """A plan's component number found in text: what match.group(1) and .end() give."""
+
+    def __init__(self, m, group):
+        self.m, self._g = m, group
+
+    def group(self, _=1):
+        return normal_number(self.m.group(self._g))
+
+    def end(self):
+        return self.m.end()
+
+
+def comp_number(text):
+    """The component number a plan cell opens with ('Component 2', '2.1 Name', 'Component
+    A', 'A.1 Name', 'A. Name'), as an object with group(1) and end(), or None."""
+    m = COMP_NUMBER.match(text)
+    if m:
+        return _Num(m, 1)
+    m = COMP_LETTER.match(text)
+    return _Num(m, 1 if m.group(1) else 2) if m else None
+
+
+def comp_named(text):
+    """The first 'Component N' (N digits, a letter or a numeral) a text names."""
+    m = COMP_NAMED.search(text)
+    n = COMP_NAMED_LETTER.search(text)
+    if m and (not n or m.start() <= n.start()):
+        return _Num(m, 1)
+    return _Num(n, 1) if n else None
 
 
 def split_cells(desc):
@@ -159,8 +200,7 @@ class Components:
         self.by_project = defaultdict(list)
         seen = set()
         for r in sorted(rows, key=lambda r: (r.get("disclosure_date") or ""), reverse=True):
-            name = re.sub(r"^(?:Component|Sub-?component)\s*\d+(?:\.\d+)?\s*[.:\-\u2013]?\s*",
-                          "", r.get("name") or "", flags=re.I).strip()
+            name = COMPONENT_PREFIX.sub("", r.get("name") or "", count=1).strip()
             for pid in (r.get("project_ids") or "").split("|"):
                 key = (pid, name_key(name))
                 if not pid or len(key[1]) < 4 or key in seen:
@@ -197,7 +237,7 @@ class Components:
         starts = [m.start() for m in re.finditer(r"(?:(?<=\s)|^)\S", desc)]
         for p in starts[2:]:
             seg = desc[p:]
-            m = COMP_NUMBER.match(seg)
+            m = comp_number(seg)
             rest = seg[m.end():] if m else seg
             flat = _flat(rest)
             if len(flat) < 12:
@@ -215,7 +255,7 @@ class Components:
         hit = self._by_name(pid, _flat(cells), partial_ok=True)
         if hit:
             return hit[0], hit[1], "name_match", hit[2]
-        m = COMP_NAMED.search(cells) or COMP_NUMBER.match(cells)
+        m = comp_named(cells) or comp_number(cells)
         if not m:
             return None
         # The plan's own number.

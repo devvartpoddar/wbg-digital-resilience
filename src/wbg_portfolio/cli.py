@@ -593,7 +593,9 @@ def _latest_components(rows):
     pick = [r for r in tops if r["disclosure_date"] == latest]
     pref = [r for r in pick if r["source"] in ("datasheet", "restructuring")] or pick
     seen, out = set(), []
-    for r in sorted(pref, key=lambda r: [int(x) for x in r["number"].split(".") if x.isdigit()]):
+    from wbg_portfolio.keys import number_key, uses_roman
+    roman = uses_roman(r["number"] for r in pref)
+    for r in sorted(pref, key=lambda r: number_key(r["number"], roman)):
         if r["number"] not in seen:
             seen.add(r["number"])
             out.append((r["number"], r["name"], r["cost_usd_m"]))

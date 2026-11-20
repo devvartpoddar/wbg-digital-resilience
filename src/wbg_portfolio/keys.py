@@ -4,8 +4,52 @@ one does not change the PDF reader's version.
 import re
 import unicodedata
 
+# A component's number as a document prints it: 2, 2.1, or lettered (A, B.1, A1) or roman
+# (II, III). A lone capital letter or a run of I, V, X only: "Component ICT" has no number.
 _COMPONENT_PREFIX = re.compile(
-    r"^(?:Component|Sub-?component)\s*\d+(?:\.\d+)?\s*[.:\-–]?\s*", re.I)
+    r"^(?:Component|Sub-?component)\s*(?:\d+(?:\.\d+)?|(?-i:[A-Z]|[IVX]{2,4})(?:\.?\d+)?"
+    r"(?![A-Za-z]))\s*[.:\-–]?\s*", re.I)
+COMPONENT_PREFIX = _COMPONENT_PREFIX
+
+_ROMAN = re.compile(r"^X{0,3}(?:IX|IV|V?I{0,3})$")
+
+
+def normal_number(number):
+    """A component number in one spelling: 'A1' is 'A.1'; letters upper case."""
+    n = (number or "").strip().rstrip(".")
+    m = re.match(r"^([A-Za-z]{1,4})\.?(\d{1,2})$", n)
+    if m:
+        return f"{m.group(1).upper()}.{m.group(2)}"
+    return n.upper() if re.match(r"^[A-Za-z]{1,4}$", n) else n
+
+
+def uses_roman(numbers):
+    """Whether a document's component numbers are roman (II, III, IV...) rather than
+    letters (A, B, C...): decided by the document's own sequence. A lone I, V or X is
+    ambiguous by itself; a number of two or more such letters ('II', 'IV') is not."""
+    return any(len(p) > 1 and p.isalpha() and _ROMAN.match(p)
+               for n in numbers for p in (n or "").split("."))
+
+
+def _roman_value(s):
+    vals, total = {"I": 1, "V": 5, "X": 10}, 0
+    for a, b in zip(s, s[1:] + " "):
+        total += -vals[a] if vals.get(b, 0) > vals[a] else vals[a]
+    return total
+
+
+def number_key(number, roman=False):
+    """Sort key for a component number of any kind: numbers by value, roman numerals
+    by value when the document is roman, letters alphabetically after numbers."""
+    out = []
+    for part in (number or "").split("."):
+        if part.isdigit():
+            out.append((0, int(part), ""))
+        elif roman and part.isalpha() and _ROMAN.match(part):
+            out.append((0, _roman_value(part), ""))
+        else:
+            out.append((1, 0, part))
+    return out
 
 
 def name_key(name):
