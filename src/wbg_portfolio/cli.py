@@ -709,6 +709,12 @@ def stages_between(start=None, stop=None, only=None):
     return list(RUN_STAGES[i:j + 1])
 
 
+def _refused_report():
+    """At the end of a run: the items the provider refused and the run skipped, if any."""
+    from wbg_portfolio import ask
+    ask.refused_report(lambda line: print("  " + line, flush=True))
+
+
 def run(args, data):
     """The pipeline, or any stretch of it. The model stages share one
     process, one Postgres connection and one reading of the corpus; a
@@ -798,9 +804,11 @@ def run(args, data):
                     decide.publish(conn, data, corpus=corpus)
         timings.append((stage, time.time() - t0))
         if not ok:
+            _refused_report()
             print(f"run: {stage} failed; stopped. Run again to resume.")
             stage_times(data, t_all, timings, ended_early=True)
             return 1
+    _refused_report()
     print("run: " + ", ".join(f"{s} {t:.0f}s" for s, t in timings)
           + f"; everything {time.time() - t_all:.0f}s", flush=True)
     if not args.dry_run:

@@ -124,7 +124,8 @@ def _ask(conn, model, items, stage, name, api_key, dry_run, workers, log, data):
     log(ask.estimate_line(stage, st))
     if dry_run:
         return None
-    if st["failures"] or len(got) < len(items):
+    skipped = ask.refused_items(st)
+    if st["failures"] or len(got) + len(skipped) < len(items):
         log(f"  {len(st['failures'])} request(s) failed; nothing written. Run again to resume.")
         return None
     return got
@@ -254,6 +255,7 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
     got = _ask(conn, model, items, f"types:{name}", name, api_key, dry_run, workers, log, data)
     if got is None:
         return None
+    units = [u for u in units if u in got]               # an item the provider refused is left out
     fl = float(panel.require("floor.types"))
     none = [u for u in units if not any(Q.score(a, fit=True) >= fl for a in got[u].values())]
     oth = oth_types(data, name)

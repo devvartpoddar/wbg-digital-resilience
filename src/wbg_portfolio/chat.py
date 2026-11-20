@@ -50,6 +50,7 @@ from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 
 PATH = "/v1/chat/completions"
+EMPTY_TRIES = 3          # requests an empty reply (HTTP 200, no content) is tried in one run
 
 
 def model():
@@ -241,10 +242,13 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
     attempts = failure_counts(conn, mdl, keys)
     limit = int(panel.require("second.max_attempts"))
     todo, gave_up = {}, set()
+    known = asker.refused_stored(conn, mdl, [k for k in keys if k not in have or k in legacy])
     for item, state, s_sha, q, q_sha in keyed:
         k = (s_sha, q_sha)
         got = have.get(k)
         if got is not None and k not in legacy:
+            continue
+        if k in known:                                  # refused by the provider in an earlier run
             continue
         if attempts.get(k, 0) + (k in legacy) >= limit:
             gave_up.add(k)
@@ -253,19 +257,34 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
     sent = {k: prompt(state, q) for k, (state, q) in todo.items()}
     stats = {"stored": sum(1 for k, v in have.items() if k not in legacy), "to_ask": len(todo),
              "estimate_usd": sum(estimate(sent[k], todo[k][1]) for k in todo), "gave_up": len(gave_up),
-             "calls": 0, "cost_usd": 0.0, "failures": [], "unparsed": 0, "seconds": 0.0}
+             "calls": 0, "cost_usd": 0.0, "failures": [], "refused": [], "unparsed": 0, "seconds": 0.0}
     if todo and not dry_run:
         lock = Lock()
 
         def one(key):
             state, q = todo[key]
             body = request_body(mdl, q, sent[key])
-            r = api.post(PATH, body, api_key, timeout=120)
-            try:
-                text = r["choices"][0]["message"]["content"]
-            except (KeyError, IndexError, TypeError):
-                raise api.Transport(f"reply has no message: {str(r)[:200]}")
-            cost = cost_of(r, sent[key], text, q)
+            cost = 0.0
+            for _ in range(EMPTY_TRIES):
+                try:
+                    r = api.post(PATH, body, api_key, timeout=120)
+                except api.Refused as exc:
+                    exc.items = [key]
+                    raise
+                try:
+                    text = r["choices"][0]["message"]["content"]
+                except (KeyError, IndexError, TypeError):
+                    raise api.Transport(f"reply has no message: {str(r)[:200]}")
+                cost += cost_of(r, sent[key], text, q)
+                if isinstance(text, str) and text.strip():
+                    break
+            else:
+                # an empty reply (HTTP 200, no content) is a provider hiccup, not an unreadable
+                # answer: asked again here, and if it stays empty it is a failed request (not an
+                # attempt that counts toward second.max_attempts); the next run asks again
+                with lock:
+                    stats["failures"].append(f"empty reply {EMPTY_TRIES} times in a row: {str(r)[:120]}")
+                return cost
             served = r.get("model", "")
             try:
                 answer = dict(parse(text, q["reply"]), raw=text)
@@ -285,6 +304,13 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
         asker.run_requests(conn, mdl, [(k,) for k in sorted(todo)], one, stats, stage=stage,
                            label_set=label_set, api_key=api_key, workers=workers, log=log,
                            tail=lambda: f", {stats['unparsed']} unreadable")
+    skipped = set(stats["refused"]) | set(known)
+    if stats["refused"] and not dry_run:        # the run had answers from this model: it was refused for itself
+        asker.record_refused(conn, mdl, sorted(set(stats["refused"])),
+                             {k[0]: todo[k][0] for k in stats["refused"]},
+                             {k[1]: todo[k][1] for k in stats["refused"]}, "refused alone by the provider")
+    stats["refused"] = [item for item, _, s_sha, _, q_sha in keyed if (s_sha, q_sha) in skipped]
+    asker.REFUSED.extend((stage, item, "") for item in stats["refused"])
     out = {}
     for item, _, s_sha, _, q_sha in keyed:
         a = have.get((s_sha, q_sha))
@@ -296,6 +322,7 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
 def estimate_line(stage, stats):
     return (asker.estimate_line(stage, stats)
             + (f"; {stats['unparsed']} reply(ies) unreadable" if stats["unparsed"] else "")
+            + (f"; {len(stats['refused']):,} item(s) refused by the provider and skipped" if stats["refused"] else "")
             + (f"; gave up on {stats['gave_up']:,} question(s) unreadable second.max_attempts times "
                f"(not asked again, never a yes)" if stats.get("gave_up") else ""))
 

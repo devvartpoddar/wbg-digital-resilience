@@ -29,7 +29,29 @@ class Transport(RuntimeError):
 
 
 class Refused(RuntimeError):
-    """A failure retrying cannot cure (bad key, bad model, bad payload)."""
+    """A failure retrying cannot cure (bad key, bad model, bad payload).
+
+    status is the HTTP status; items says what the refused request was about (set by the asker that
+    knows: a request about one item only). A refusal may be skipped as "this item" only when it
+    is about one item, is not a key or payment failure, and the run has had an answer from the same
+    model (so the key and the model work); otherwise it stops the run (fatal)."""
+
+    def __init__(self, message, status=None, items=()):
+        super().__init__(message)
+        self.status, self.items = status, list(items)
+
+    @property
+    def hard(self):
+        """True when it cannot be about one item: a bad key, no credit, or a status we do not know."""
+        return self.status is None or self.status in FATAL_STATUS
+
+    @property
+    def fatal(self):
+        """True when the run must stop at once: hard, or not known to be about one item."""
+        return self.hard or not self.items
+
+
+FATAL_STATUS = frozenset({401, 402})
 
 
 class CapReached(SystemExit):
@@ -71,7 +93,7 @@ def request(method, url, *, timeout=60, tries=5, retry=RETRY, headers=None, **kw
                     time.sleep(min(int(wait), 120))
                     continue
             elif 400 <= r.status_code < 500:
-                raise Refused(f"HTTP {r.status_code} from {url}: {r.text[:500]}")
+                raise Refused(f"HTTP {r.status_code} from {url}: {r.text[:500]}", status=r.status_code)
             else:
                 r.raise_for_status()
                 return r

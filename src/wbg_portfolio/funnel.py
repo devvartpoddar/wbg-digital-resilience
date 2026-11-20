@@ -167,6 +167,9 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
         log(ask.estimate_line(name, st))
         for u, g in got.items():
             answers.setdefault(u, {}).update(g)
+        for u, lid in st["refused"]:                    # refused by the provider: skipped, not scored
+            batch.get(u, set()).discard(lid)
+            asked.get(u, set()).discard(lid)
         return st
 
     st = one_ask(asked)

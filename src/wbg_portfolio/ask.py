@@ -32,6 +32,7 @@ BATCH = int(os.environ.get("WBG_ASK_BATCH") or panel.get("ask.batch_items", 50))
 BATCH_MAX_CHARS = int(panel.get("ask.batch_max_chars", 80_000))
 MAX_REQUEST_CHARS = int(panel.get("ask.max_request_chars", 30_000))
 WORKERS = 10
+REFUSED = []                    # (stage, item, qid) the provider refused and the run skipped, this process
 HOW = ("Items i01, i02, ... are each one record. Field 'q <id>' states a question in full. "
        "Each short question '<id> on i..' asks question <id> about that item alone, reading "
        "any field the question names ('sentence', 'paragraph', 'package', 'commitment') as "
@@ -48,6 +49,27 @@ def stored(conn, model, keys):
     got = db.rows(conn, f"SELECT a.state_sha, a.question_sha, a.answer, a.served FROM {db.STORE}.answers a "
                   f"JOIN ask_keys k USING (state_sha, question_sha) WHERE a.model = %s", (model,))
     return {(s, q): dict(a, served=m) for s, q, a, m in got}
+
+
+def refused_stored(conn, model, keys):
+    """{(state_sha, question_sha): reason} for the keys the provider refused earlier (and the run skipped)."""
+    if not keys:
+        return {}
+    db.temp_keys(conn, "refused_keys", ["state_sha", "question_sha"], keys)
+    return {(s, q): r for s, q, r in db.rows(
+        conn, f"SELECT a.state_sha, a.question_sha, a.reason FROM {db.STORE}.refused a "
+              f"JOIN refused_keys k USING (state_sha, question_sha) WHERE a.model = %s", (model,))}
+
+
+def record_refused(conn, model, entries, states, qs, reason=""):
+    """Remember what the provider refused alone (entries [(state_sha, question_sha)]), so a rerun does not
+    ask it again and the report can list it. Delete its row from <store>.refused to ask it again."""
+    with conn.transaction():
+        for s_sha, q_sha in entries:
+            conn.execute(f"INSERT INTO {db.STORE}.refused (model, state_sha, question_sha, reason) "
+                         f"VALUES (%s, %s, %s, %s) ON CONFLICT DO NOTHING", (model, s_sha, q_sha, reason[:300]))
+        _insert_context(conn, states, qs)
+    conn.commit()
 
 
 def _legacy(data, model, state, question, aliases):
@@ -94,8 +116,14 @@ def _store(conn, model, rows, states, qs):
 def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, workers, log, tail=lambda: ""):
     """The part every asker shares: check the cap against stats["estimate_usd"], run one(*job) for
     each job on a pool, count the requests that failed (api.Transport) in stats["failures"], stop
-    at a refusal or the cap, log progress, and write the ledger row (api.Spend). Sets stats calls,
-    cost_usd and seconds. one(*job) returns what the request cost."""
+    at the cap, log progress, and write the ledger row (api.Spend). Sets stats calls,
+    cost_usd and seconds. one(*job) returns what the request cost.
+
+    A refusal (api.Refused) stops the run when it is about the whole request (a bad key, no credit, or
+    a refusal that does not say which item it is about). A refusal about one item (exc.items) is
+    recorded in stats["refused"] and skipped, but only when the run has had at least one answer from
+    the model, which shows the key and the model work; with none (three such refusals so far, or the
+    end of the run) the run stops with the refusal."""
     if not api_key:
         raise SystemExit(f"{stage}: no credential: set ${api.KEY_VAR}")
     t0 = time.time()
@@ -103,17 +131,28 @@ def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, wo
         spend.check(stats["estimate_usd"])
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(one, *job) for job in jobs]
+            skipped = []
             for n, f in enumerate(as_completed(futures), 1):
                 try:
                     spend.add(f.result())
                 except api.Transport as exc:
                     stats["failures"].append(str(exc)[:200])
-                except (api.Refused, api.CapReached):
+                except api.Refused as exc:
+                    if not exc.fatal:
+                        skipped.append(exc)
+                        stats.setdefault("refused", []).extend(exc.items)
+                        log(f"  refused, skipped: {str(exc)[:200]}")
+                    if exc.fatal or (spend.calls == 0 and len(skipped) >= 3):
+                        pool.shutdown(wait=True, cancel_futures=True)
+                        raise
+                except api.CapReached:
                     pool.shutdown(wait=True, cancel_futures=True)
                     raise
                 if n % 500 == 0 or n == len(jobs):
                     log(f"  {n:,}/{len(jobs):,} asked, {len(stats['failures'])} failed{tail()}, "
                         f"US${spend.cost:.3f}")
+        if skipped and not spend.calls:
+            raise skipped[0]
         stats["calls"], stats["cost_usd"] = spend.calls, spend.cost
     stats["seconds"] = time.time() - t0
 
@@ -209,14 +248,13 @@ def complete(answer, question):
 
 
 def split(response, b):
-    """{batch qid: answer} from one response, or api.Transport."""
+    """({batch qid: answer} for the complete answers, [batch qid] for the others) from one response;
+    api.Transport when the response is not an object at all."""
     if not isinstance(response, dict):
         raise api.Transport(f"response is not an object: {str(response)[:200]}")
     answers = response.get("answers") or {}
-    for qid, q in b["questions"].items():
-        if not complete(answers.get(qid), q):
-            raise api.Transport(f"answer for {qid!r} is incomplete: {str(answers.get(qid))[:200]}")
-    return answers
+    ok = {qid: answers[qid] for qid, q in b["questions"].items() if complete(answers.get(qid), q)}
+    return ok, [qid for qid in b["questions"] if qid not in ok]
 
 
 # ----------------------------------------------------------------- ask
@@ -235,10 +273,16 @@ def ask(conn, model, items, *, stage, label_set="", api_key="", dry_run=False, w
         keyed.append((item, state, s_sha, {qid: (q, qsha.setdefault(id(q), Q.sha(q)))
                                            for qid, q in qs.items()}))
     have = stored(conn, model, sorted({(s, q) for _, _, s, qs in keyed for _, q in qs.values()}))
-    missing, imported = {}, []
+    missing, imported = {}, []                  # missing: {s_sha: (state, {qid: question})}, once per state
+    known = refused_stored(conn, model, sorted({(s, q) for _, _, s, qs in keyed for _, q in qs.values()
+                                                if (s, q) not in have}))
+    prior = set()                               # (s_sha, qid) the provider refused in an earlier run
     for item, state, s_sha, qs in keyed:
         for qid, (q, q_sha) in qs.items():
             if (s_sha, q_sha) in have:
+                continue
+            if (s_sha, q_sha) in known:
+                prior.add((s_sha, qid))
                 continue
             old = _legacy(data, model, state, q, aliases) if data else None
             if old:
@@ -246,14 +290,15 @@ def ask(conn, model, items, *, stage, label_set="", api_key="", dry_run=False, w
                 imported.append((s_sha, q_sha, old["answer"], old.get("model", model),
                                  old.get("cost_usd"), old.get("call"), old.get("asked_at")))
                 continue
-            missing.setdefault((item, s_sha), (state, {}))[1][qid] = q
+            missing.setdefault(s_sha, (state, {}))[1][qid] = q
     if imported:
         _store(conn, model, imported, {s: st for _, st, s, _ in keyed},
                {q_sha: q for _, _, _, qs in keyed for q, q_sha in qs.values()})
-    # batches: items sharing a question set, ordered by the hash of their state
+    # batches: states sharing a question set, ordered by the hash of the state. Two items with the
+    # same state and question are one question (the answer is read back by key).
     groups = {}
-    for (item, s_sha), (state, qs) in sorted(missing.items(), key=lambda x: x[0][1]):
-        groups.setdefault(Q.sha(sorted(Q.sha(q) for q in qs.values())), []).append(((item, s_sha), state, qs))
+    for s_sha, (state, qs) in sorted(missing.items()):
+        groups.setdefault(Q.sha(sorted(Q.sha(q) for q in qs.values())), []).append((s_sha, state, qs))
     todo = []
     for _, members in sorted(groups.items()):
         for b, plan in batches(model, [(st, qs) for _, st, qs in members], batch):
@@ -261,32 +306,93 @@ def ask(conn, model, items, *, stage, label_set="", api_key="", dry_run=False, w
     chars = sum(_size(b) for b, _ in todo)
     stats = {"stored": len(have), "imported": len(imported), "to_ask": len(todo), "chars": chars,
              "estimate_usd": chars / 4 / 1e6 * Q.PRICE_PER_MTOK, "calls": 0, "cost_usd": 0.0,
-             "failures": [], "seconds": 0.0}
+             "failures": [], "refused": [], "seconds": 0.0}
+    skipped_now = []
     if todo and not dry_run:
         lock = Lock()
 
-        def one(b, plan):
+        def send(b, plan):
+            """One request. Its complete answers are stored and committed at once (and its cost counts
+            once) whatever the rest of the response holds; an incomplete answer is a failure of that
+            question alone, asked again next run."""
             response = api.post("/alpha/decisions", b, api_key)
-            answers = split(response, b)
+            answers, bad = split(response, b)
             cost = float((response.get("usage") or {}).get("cost") or 0)
             served = response.get("model", "")
             at = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             call = Q.sha(b)
             share = cost / max(len(plan), 1)
             rows, states, qs_ = [], {}, {}
-            for (item, s_sha), q, qid, bq in plan:
-                q_sha = Q.sha(q)
-                rows.append((s_sha, q_sha, answers[bq], served, share, call, at))
-                states[s_sha] = missing[(item, s_sha)][0]
-                qs_[q_sha] = q
+            for s_sha, q, qid, bq in plan:
+                if bq in answers:
+                    q_sha = Q.sha(q)
+                    rows.append((s_sha, q_sha, answers[bq], served, share, call, at))
+                    states[s_sha] = missing[s_sha][0]
+                    qs_[q_sha] = q
             with lock:
-                _store(conn, model, rows, states, qs_)
-                for s_sha, q_sha, a, *_ in rows:
-                    have[(s_sha, q_sha)] = dict(a, served=served)
+                if rows:
+                    _store(conn, model, rows, states, qs_)
+                    for s_sha, q_sha, a, *_ in rows:
+                        have[(s_sha, q_sha)] = dict(a, served=served)
+                if bad:
+                    stats["failures"].append(f"{len(bad)} answer(s) of {len(plan)} incomplete: "
+                                             f"{bad[0]!r} {str(response.get('answers', {}).get(bad[0]))[:120]}")
+            return cost
+
+        def one(b, plan):
+            try:
+                return send(b, plan)
+            except api.Refused as exc:
+                states_ = list(dict.fromkeys(p[0] for p in plan))
+                if exc.hard:
+                    raise
+                if len(states_) < 2:                 # about this one state: the run decides whether to skip it
+                    exc.items = [(p[0], p[2]) for p in plan]
+                    raise
+                return send_each(plan, exc)
+
+        def send_each(plan, exc):
+            """A batch was refused: ask each state alone. The ones the provider takes are stored; one it
+            refuses alone is recorded as refused and skipped (when every one is refused the batch's refusal
+            stands, and the run decides)."""
+            cost, taken, refused, last = 0.0, 0, [], exc
+            for s_sha in dict.fromkeys(p[0] for p in plan):
+                mine = [p for p in plan if p[0] == s_sha]
+                for sb in single(model, missing[s_sha][0], {p[2]: p[1] for p in mine}):
+                    sub = [(sk, q, qid, qid) for sk, q, qid, _ in mine if qid in sb["questions"]]
+                    try:
+                        cost += send(sb, sub)
+                        taken += 1
+                    except api.Refused as e:
+                        if e.hard:
+                            raise
+                        refused += [(p[0], p[2]) for p in sub]
+                        last = e
+            if not taken:
+                last.items = refused
+                raise last
+            with lock:
+                stats["refused"].extend(refused)
+            log(f"  {len(refused)} question(s) refused, skipped: {str(last)[:160]}")
             return cost
 
         run_requests(conn, model, todo, one, stats, stage=stage, label_set=label_set, api_key=api_key,
                      workers=workers, log=log)
+        # the run had answers from this model, so what was refused was refused for itself: remember it
+        skipped_now = sorted(set(stats["refused"]))
+        if skipped_now:
+            record_refused(conn, model, [(s, Q.sha(missing[s][1][qid])) for s, qid in skipped_now],
+                           {s: missing[s][0] for s, _ in skipped_now},
+                           {Q.sha(missing[s][1][qid]): missing[s][1][qid] for s, qid in skipped_now},
+                           "refused alone by the provider")
+    stats["refused"] = sorted(set(stats["refused"]) | prior)
+    by_state = {}
+    for item, _, s_sha, qs in keyed:
+        for qid in qs:
+            by_state.setdefault((s_sha, qid), []).append(item)
+    stats["refused"] = sorted({(item, qid) for k in stats["refused"] for item in by_state.get(k, ())},
+                              key=str)
+    REFUSED.extend((stage, item, qid) for item, qid in stats["refused"])
     out = {}
     for item, state, s_sha, qs in keyed:
         got = {qid: have.get((s_sha, q_sha)) for qid, (q, q_sha) in qs.items()}
@@ -295,7 +401,25 @@ def ask(conn, model, items, *, stage, label_set="", api_key="", dry_run=False, w
     return out, stats
 
 
+def refused_report(log=print):
+    """What the provider refused over this process, one line a stage; nothing when nothing was."""
+    by = {}
+    for stage, item, _ in REFUSED:
+        by.setdefault(stage, set()).add(str(item))
+    for stage, items_ in sorted(by.items()):
+        log(f"refused by the provider and skipped, {stage}: {len(items_):,} item(s), "
+            f"e.g. {', '.join(sorted(items_)[:5])}")
+    return bool(by)
+
+
+def refused_items(stats):
+    """The items (not their questions) a run was refused for and skipped."""
+    return {item for item, _ in stats.get("refused", ())}
+
+
 def estimate_line(stage, stats):
     return (f"  {stage}: {stats['stored']:,} answers stored"
             + (f" ({stats['imported']:,} read from the old file store)" if stats.get("imported") else "")
-            + f"; {stats['to_ask']:,} requests to make (about US${stats['estimate_usd']:.3f})")
+            + f"; {stats['to_ask']:,} requests to make (about US${stats['estimate_usd']:.3f})"
+            + (f"; {len(refused_items(stats)):,} item(s) refused by the provider and skipped"
+               if stats.get("refused") else ""))
