@@ -78,7 +78,8 @@ def _insert_context(conn, states, qs):
 
 
 def _store(conn, model, rows, states, qs):
-    """Write answers (and the states and questions they are about) once."""
+    """Write answers (and the states and questions they are about) once, and commit them at
+    once: an answer is paid for, so a crash, a kill or the spend cap right after it loses nothing."""
     with conn.transaction():
         for s_sha, q_sha, answer, served, cost, call, at in rows:
             conn.execute(f"INSERT INTO {db.STORE}.answers (model, state_sha, question_sha, answer, "
@@ -87,6 +88,7 @@ def _store(conn, model, rows, states, qs):
                          (model, s_sha, q_sha, json.dumps(answer, ensure_ascii=False), served, cost,
                           call, at))
         _insert_context(conn, states, qs)
+    conn.commit()
 
 
 def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, workers, log, tail=lambda: ""):

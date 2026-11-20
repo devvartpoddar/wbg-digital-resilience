@@ -211,6 +211,7 @@ def _store_failure(conn, mdl, s_sha, q_sha, raw, reason, state, q):
         conn.execute(f"INSERT INTO {db.STORE}.chat_failures (model, state_sha, question_sha, raw, reason, at) "
                      f"VALUES (%s, %s, %s, %s, %s, now())", (mdl, s_sha, q_sha, raw, reason))
         asker._insert_context(conn, {s_sha: state}, {q_sha: q})
+    conn.commit()
 
 
 def failure_counts(conn, mdl, keys):
