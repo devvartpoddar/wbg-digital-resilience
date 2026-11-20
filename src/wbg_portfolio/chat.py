@@ -9,7 +9,7 @@ asks only what the store lacks.
   ask(conn, items, stage=..., label_set=...) -> ({item: answer}, stats)
 
 items = [(item, state, question)]. A state is a dict of fields (what the model
-is shown); a question is built by question() and says how to reply. An answer
+is shown); a question is built by questions.chat_question() and says how to reply. An answer
 is {"grade": int|None, "labels": [..]|None, "raw": the reply, "failed": bool}.
 A reply that is not exactly the JSON asked for is never stored in answers
 (which only gains rows): each failed attempt is one insert-only row of
@@ -39,7 +39,6 @@ from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 
 PATH = "/v1/chat/completions"
-FORMS = ("grade", "yesno", "choice", "labels", "assets", "activities")
 
 
 def model():
@@ -74,29 +73,6 @@ def cost_of(response, prompt_text, text, q):
         return estimate(prompt_text, q)
     return ((t_in if t_in is not None else len(prompt_text) / 4) * p_in
             + (t_out if t_out is not None else len(text or "") / 4) * p_out) / 1e6
-
-
-# ----------------------------------------------------------------- questions
-
-def question(instructions, form, options=None, maximum=None):
-    """A chat question: what to judge, and how to reply."""
-    if form not in FORMS:
-        raise ValueError(f"chat: unknown reply form {form!r}")
-    reply = {"form": form}
-    if options is not None:
-        reply["options"] = list(options)
-    if maximum is not None:
-        reply["max"] = int(maximum)
-    return {"type": "chat", "instructions": instructions, "reply": reply}
-
-
-def grade_question(lab, scale):
-    """The 0-n grade of a measure on the shared scale (the measure's second look)."""
-    grades = "\n".join(f"{i}: {t.replace('{name}', lab['name'])}" for i, t in enumerate(scale))
-    return question(
-        f"Grade how the sentence in the 'sentence' field, from a World Bank project appraisal "
-        f"document, relates to {lab['name']}. {lab['name']} means: {lab['definition']}\nGrades:\n{grades}",
-        "grade", maximum=len(scale) - 1)
 
 
 def reply_text(reply):
@@ -274,3 +250,16 @@ def estimate_line(stage, stats):
             + (f"; {stats['unparsed']} reply(ies) unreadable" if stats["unparsed"] else "")
             + (f"; gave up on {stats['gave_up']:,} question(s) unreadable second.max_attempts times "
                f"(not asked again, never a yes)" if stats.get("gave_up") else ""))
+
+
+def asked(conn, items, stage, label_set, api_key, dry_run, workers, log):
+    """ask() as a step runs it: (answers, ok): ok is False when a request failed (run again to resume);
+    an unreadable reply is counted and the item left without an answer."""
+    got, st = ask(conn, items, stage=stage, label_set=label_set, api_key=api_key, dry_run=dry_run,
+                       workers=workers, log=log)
+    log(estimate_line(stage, st))
+    if dry_run:
+        return got, False
+    if st["failures"]:
+        log(f"  {len(st['failures'])} request(s) failed; run again to resume.")
+    return got, not st["failures"]

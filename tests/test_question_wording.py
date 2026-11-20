@@ -4,26 +4,14 @@ their hashes, so moving a builder from one module to another must not change one
 The three NEW kinds' wording is allowed to change only by a deliberate edit here (nothing has been
 asked of a real model for them yet); the old kinds (measure, asset, type, pair, package_asset, link) never.
 """
-from wbg_portfolio import activities
-from wbg_portfolio import chat
-from wbg_portfolio import checks
-from wbg_portfolio import labels
 from wbg_portfolio import questions as Q
-from wbg_portfolio import second
-
-
-def builder(name, *modules):
-    """A question builder wherever it lives now (so the test survives moving it)."""
-    for m in modules:
-        if hasattr(m, name):
-            return getattr(m, name)
-    raise AttributeError(name)
 
 
 def questions_of(corpus):
     lab = Q.load("cra")[0][0]
     scale = Q.load("cra")[1]
-    ast = {a["id"]: a for a in Q.load(Q.ASSETS)[0]}
+    assets, subtypes = Q.asset_catalogue()
+    ast = {a["id"]: a for a in assets}
     out = {
         "graded": Q.graded_question(lab, scale),
         "fit": Q.fit_question(lab),
@@ -33,16 +21,15 @@ def questions_of(corpus):
         "pair_a": Q.pair_questions("cra", "assets")["keep_a"],
         "package_asset": Q.package_asset_questions()["towers"],
         "link": Q.LINK_QUESTION,
-        "grade_second": builder("grade_question", Q, chat)(lab, scale),
-        "policy": builder("policy_question", Q, second)(),
-        "asset_second": builder("asset_second_question", Q, second)(),
-        "asset_subtype_towers": builder("asset_subtype_question", Q, second)("towers"),
-        "asset_subtype_fiber": builder("asset_subtype_question", Q, second)("fiber"),
-        "package_asset_second_towers": builder("package_asset_question", Q, second)(ast["towers"]),
-        "package_asset_second_fiber": builder("package_asset_question", Q, second)(ast["fiber"]),
-        "activity": builder("activities_question", Q, activities)(lab) if hasattr(Q, "activities_question")
-        else activities.question(lab),
-        "package_measure": builder("package_measure_question", Q, checks)(lab),
+        "grade_second": Q.second_grade_question(lab, scale),
+        "policy": Q.policy_question(),
+        "asset_second": Q.asset_second_question(assets, subtypes),
+        "asset_subtype_towers": Q.asset_subtype_question(ast["towers"], subtypes["towers"]),
+        "asset_subtype_fiber": Q.asset_subtype_question(ast["fiber"], subtypes["fiber"]),
+        "package_asset_second_towers": Q.package_asset_second_question(ast["towers"]),
+        "package_asset_second_fiber": Q.package_asset_second_question(ast["fiber"]),
+        "activity": Q.activity_question(lab),
+        "package_measure": Q.package_measure_question(lab),
     }
     u = Q.Corpus(corpus).index[0]["unit_id"]
     c = Q.Corpus(corpus)

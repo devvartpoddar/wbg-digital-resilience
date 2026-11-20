@@ -1,7 +1,6 @@
 """Package assets with a second look, the strong package-measure question, the
 asset-level links and the table they publish (src/wbg_portfolio/second.py,
 checks.py, decide.py). The fake decision and chat models only."""
-import pytest
 
 from helpers import QUIET, count, first_pass
 from wbg_portfolio import checks

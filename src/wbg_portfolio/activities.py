@@ -31,7 +31,6 @@ from wbg_portfolio import chat
 from wbg_portfolio import decide
 from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
-from wbg_portfolio import second
 from wbg_portfolio.paths import where
 
 KIND = "activity"
@@ -106,16 +105,6 @@ def state(corpus, kinds, units):
     return {"sentences": "\n\n".join(lines)}
 
 
-def question(lab):
-    return chat.question(
-        f"Each numbered sentence in the 'sentences' field comes from the World Bank documents of one project and "
-        f"commits the project to {lab['name']} ({lab['definition']}). Group the sentences into the distinct "
-        f"activities they describe: one activity is one investment, study or action, even when several "
-        f"sentences or documents say it again or describe it in different words; two different things are two "
-        f"activities. Every sentence belongs to exactly one activity. Give each activity a short label.",
-        "activities")
-
-
 def repair(acts, n):
     """(activities [{label, numbers}], counts) so that each of the sentences 1..n
     is in exactly one activity. counts: missing (put in an activity of their
@@ -178,9 +167,9 @@ def run(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WOR
                 todo.append((pid, name, tuple(part)))
             else:
                 one += 1
-    qs = {n: question(Q.load(n)[0][0]) for n in names}
+    qs = {n: Q.activity_question(Q.load(n)[0][0]) for n in names}
     log(f"activities: {len(todo):,} group(s) of two or more sentences to read, {one:,} of one (no call)")
-    got, ok = second._chat(conn, [(k, state(corpus, kinds, list(k[2])), qs[k[1]]) for k in todo],
+    got, ok = chat.asked(conn, [(k, state(corpus, kinds, list(k[2])), qs[k[1]]) for k in todo],
                            "activities", "activities", api_key, dry_run, workers, log)
     if dry_run:
         return None

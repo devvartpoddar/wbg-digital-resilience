@@ -106,6 +106,100 @@ def flag_question(flag_id):
     return in_context(fit_question({"id": f["id"], "name": f["name"], "definition": f["definition"]}))
 
 
+# ---------------------------------------------- the chat model's questions (second looks, activities)
+
+CHAT_FORMS = ("grade", "yesno", "choice", "labels", "assets", "activities")
+
+
+def chat_question(instructions, form, options=None, maximum=None):
+    """A chat question: what to judge, and how to reply (src/wbg_portfolio/chat.py asks it and
+    reads the reply)."""
+    if form not in CHAT_FORMS:
+        raise ValueError(f"chat: unknown reply form {form!r}")
+    reply = {"form": form}
+    if options is not None:
+        reply["options"] = list(options)
+    if maximum is not None:
+        reply["max"] = int(maximum)
+    return {"type": "chat", "instructions": instructions, "reply": reply}
+
+
+def second_grade_question(lab, scale):
+    """The 0-n grade of a measure on the shared scale (the measure's second look)."""
+    grades = "\n".join(f"{i}: {t.replace('{name}', lab['name'])}" for i, t in enumerate(scale))
+    return chat_question(
+        f"Grade how the sentence in the 'sentence' field, from a World Bank project appraisal "
+        f"document, relates to {lab['name']}. {lab['name']} means: {lab['definition']}\nGrades:\n{grades}",
+        "grade", maximum=len(scale) - 1)
+
+
+def policy_question():
+    """Investment or policy instrument, for a committed sentence (flag policy)."""
+    f = labels.flag("policy")
+    return in_context(chat_question(
+        f"Does the sentence commit the project to an investment or to a policy instrument? "
+        f"{f['name'][:1].upper() + f['name'][1:]} means: {f['definition']}", "choice", ["investment", "policy"]))
+
+
+def asset_catalogue():
+    """The four assets with their finer kinds, as the chat questions show them:
+    ([asset {id, name, definition}], {asset_id: [subtype {id, name, definition}]})."""
+    assets, _ = load(ASSETS)
+    return assets, labels.load_subtypes(ASSETS)
+
+
+def asset_second_question(assets, subtypes):
+    """Up to two of the four assets, or none, each with one of its kinds."""
+    listing = []
+    for a in assets:
+        listing.append(f"- {a['id']}: {a['name']}. {a['definition']}")
+        listing.extend(f"    kind {s['id']}: {s['name']}. {s['definition']}" for s in subtypes.get(a["id"], []))
+    return in_context(chat_question(
+        "Which digital asset or assets, if any, does the sentence commit the project to "
+        "financing, building, buying or running? Choose at most two assets from the list, and for each the "
+        "one kind of it that fits best; choose none when the sentence concerns no digital asset. "
+        "Assets, with their kinds:\n" + "\n".join(listing),
+        "assets", [a["id"] for a in assets], 2))
+
+
+def asset_subtype_question(asset, kinds):
+    """Which kind of an asset a sentence already counted for it concerns."""
+    return in_context(chat_question(
+        f"The sentence is already counted as concerning {asset['name']}; this asks only which kind "
+        f"of it. {asset['name']} means: {asset['definition']}\nKinds:\n" +
+        "\n".join(f"- {s['id']}: {s['name']}. {s['definition']}" for s in kinds),
+        "choice", [s["id"] for s in kinds]))
+
+
+def package_asset_second_question(asset):
+    """Does the package procure the asset, as the chat model's yes or no."""
+    return chat_question(
+        f"Does {PACKAGE} procure {asset['name']}, or equipment, works, "
+        f"systems or services for it, named or clearly implied in the package's own description? "
+        f"{asset['name']} means: {asset['definition']}", "yesno")
+
+
+def package_measure_question(lab):
+    """Does the measure apply to the package alone: it applies when what the
+    package procures is the measure, named or clearly implied in the package's
+    own description. Asked of the decision model as a fit question (yes,
+    unsure, no)."""
+    return fit_question(lab, PACKAGE, given=(
+        f"It applies when what the package procures is {lab['name']}, named or clearly implied in the "
+        f"package's own description. "))
+
+
+def activity_question(lab):
+    """Group the numbered sentences of one project and measure into distinct activities."""
+    return chat_question(
+        f"Each numbered sentence in the 'sentences' field comes from the World Bank documents of one project and "
+        f"commits the project to {lab['name']} ({lab['definition']}). Group the sentences into the distinct "
+        f"activities they describe: one activity is one investment, study or action, even when several "
+        f"sentences or documents say it again or describe it in different words; two different things are two "
+        f"activities. Every sentence belongs to exactly one activity. Give each activity a short label.",
+        "activities")
+
+
 def graded_questions(name):
     """{label_id: graded question} of a set, and its scale."""
     labs, scale = load(name)

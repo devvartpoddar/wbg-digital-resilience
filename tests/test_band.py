@@ -16,8 +16,8 @@ from wbg_portfolio import questions as Q
 from wbg_portfolio import second
 
 QUIET = dict(log=lambda *_: None)
-GRADE = chat.question("Grade it.", "grade", maximum=3)
-CHOICE = chat.question("Which?", "choice", ["investment", "policy"])
+GRADE = Q.chat_question("Grade it.", "grade", maximum=3)
+CHOICE = Q.chat_question("Which?", "choice", ["investment", "policy"])
 
 
 @pytest.fixture
@@ -390,7 +390,7 @@ def test_a_run_of_some_measures_keeps_the_rows_of_the_other_measures_sentences(
 def test_every_chat_request_carries_max_tokens_and_activities_get_more(pg, fake_chat):
     chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
     assert fake_chat.calls[-1]["max_tokens"] == panel.require("second.max_tokens") == 300
-    q = chat.question("Group.", "activities")
+    q = Q.chat_question("Group.", "activities")
     fake_chat.reply = lambda prompt: '{"activities": [{"label": "x", "sentences": [1]}]}'
     chat.ask(pg, [("a", {"sentences": "1. one"}, q)], stage="t", api_key="k", **QUIET)
     assert fake_chat.calls[-1]["max_tokens"] == panel.require("activities.max_tokens") == 1500

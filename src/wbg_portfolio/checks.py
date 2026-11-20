@@ -496,16 +496,6 @@ def links(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False
 
 # ---------------------------------------------------------------- strong links
 
-def package_measure_question(lab):
-    """Does the measure apply to the package alone: it applies when what the
-    package procures is the measure, named or clearly implied in the package's
-    own description. Asked of the decision model as a fit question (yes,
-    unsure, no)."""
-    return Q.fit_question(lab, Q.PACKAGE, given=(
-        f"It applies when what the package procures is {lab['name']}, named or clearly implied in the "
-        f"package's own description. "))
-
-
 def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False,
                     workers=ask.WORKERS, log=print, projects=None):
     """The strong link: each package that has an asset (first pass, or the chat
@@ -532,7 +522,7 @@ def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry
     asked = {}
     for name in names:
         lab = Q.load(name)[0][0]
-        q = {lab["id"]: package_measure_question(lab)}
+        q = {lab["id"]: Q.package_measure_question(lab)}
         items = [(p["package_id"], Q.package_state(p), q) for p in packages
                  if has.get(p["package_id"]) and p["project_id"] in wanted[name]]
         got = _ask(conn, model, items, f"package_measure:{name}", name, api_key, dry_run, workers, log, data)

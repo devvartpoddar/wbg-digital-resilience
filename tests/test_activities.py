@@ -14,7 +14,6 @@ from wbg_portfolio import db
 from wbg_portfolio import decide
 from wbg_portfolio import funnel
 from wbg_portfolio import load_pg
-from wbg_portfolio import panel
 from wbg_portfolio import second
 
 NAMES = ["cra"]

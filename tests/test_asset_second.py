@@ -3,7 +3,6 @@ asset_second for a committed, digital sentence the first pass gave no asset,
 asset_subtype for one it did. No model is called: the fake decision and chat models."""
 import json
 
-import pytest
 
 from helpers import QUIET, count, first_pass
 from wbg_portfolio import db
@@ -11,6 +10,7 @@ from wbg_portfolio import decide
 from wbg_portfolio import funnel
 from wbg_portfolio import labels
 from wbg_portfolio import load_pg
+from wbg_portfolio import questions as Q
 from wbg_portfolio import second
 
 NAMES = ["cra"]
@@ -83,7 +83,7 @@ def test_an_asset_or_kind_the_files_do_not_have_is_discarded_and_counted(pg, cor
 
 def test_a_repeated_asset_counts_once_and_none_is_a_valid_answer(pg, corpus, fake_chat, pipeline_on):
     kept, la, lk = second.valid_assets(["fiber/backbone", "fiber/unspecified", "towers/mast"],
-                                       *second.asset_catalogue())
+                                       *Q.asset_catalogue())
     assert kept == [("fiber", "backbone"), ("towers", "mast")] and (la, lk) == (1, 0)
     c, u0, u1 = ready(pg, corpus, fake_chat)
     fake_chat.reply = lambda p: '{"assets": []}'
