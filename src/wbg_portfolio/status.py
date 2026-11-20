@@ -27,6 +27,11 @@ def brief(data=None):
         S, T = db.SCHEMA, db.STORE
         sets = [n for n in labels.label_sets() if n != Q.ASSETS]
         off = [n for n in labels.label_sets(include_inactive=True) if n not in sets and n != Q.ASSETS]
+        try:
+            lines.append(f"cohort:   {len(Q.included_projects()):,} included project(s) (inputs/config/cohort.csv), "
+                         f"the scope of fetching and of every paid question")
+        except OSError:
+            lines.append("cohort:   file not found")
         lines.append(f"measures: {len(sets)} active ({', '.join(sets)})" + (f"; off: {', '.join(off)}" if off else ""))
         for kind in ("asset", "asset_second", "asset_subtype", "measure", "measure_ctx", "measure_second",
                      "digital", "policy", "type", "package_asset", "package_asset_second",

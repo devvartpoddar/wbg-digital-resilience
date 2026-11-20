@@ -323,10 +323,10 @@ def load_packages(data, projects=None):
     path = where(data, "procurement", "packages.csv")
     if not os.path.exists(path):
         return []
-    out = []
+    out, included = [], Q.included_projects()
     with open(path, newline="", encoding="utf-8") as fh:
         for r in csv.DictReader(fh):
-            if projects and r["project_id"] not in projects or (r.get("is_placeholder") or "").lower() == "true":
+            if r["project_id"] not in included or projects and r["project_id"] not in projects or (r.get("is_placeholder") or "").lower() == "true":
                 continue
             text = " ".join((r.get("description_clean") or "").split())
             if text:

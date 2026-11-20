@@ -243,15 +243,24 @@ def package_state(p):
     return state
 
 
+def included_projects(path=None):
+    """The project ids of the cohort file's `included = true` rows: the one scope of
+    every paid question (Corpus.in_scope, checks.load_packages)."""
+    from wbg_portfolio.paths import cohort_path
+    with open(path or cohort_path(), newline="", encoding="utf-8") as fh:
+        return {r["project_id"].strip() for r in csv.DictReader(fh) if r["included"].strip().lower() == "true"}
+
+
 class Corpus:
     """The embedded sentences, read once per process: the index, the texts
     as embedded (lead-in included), the paragraphs, the component names and
     the vectors. state(unit_id) is the one state every sentence-level
     question sends (ask.context: sentence | paragraph)."""
 
-    def __init__(self, data, vectors=True):
+    def __init__(self, data, vectors=True, included=None):
         from wbg_portfolio import units
         self.data = data
+        self.included = set(included) if included is not None else included_projects()
         self.context = str(panel.get("ask.context", "sentence"))
         with open(where(data, "embeddings", "sentence_index.csv"), newline="", encoding="utf-8") as fh:
             self.index = list(csv.DictReader(fh))
@@ -343,4 +352,14 @@ class Corpus:
         return None if i is None or self.matrix is None else numpy.asarray(self.matrix[i], dtype="float64")
 
     def in_scope(self, unit_id, projects):
-        return not projects or bool(set(self.projects(unit_id)) & set(projects))
+        """A sentence is asked about when at least one of its projects is an included
+        row of the cohort file (and, in a run over named projects, one of those).
+        projects None or empty: every included project."""
+        ids = set(self.projects(unit_id))
+        return bool(ids & self.included) and (not projects or bool(ids & set(projects)))
+
+    def scope_note(self):
+        """One line for the start of a paid stage: sentences in scope and left out."""
+        n = sum(1 for r in self.index if self.in_scope(r["unit_id"], None))
+        return (f"scope: {n:,} sentence(s) in scope (a project of the cohort file, included = true); "
+                f"{len(self.index) - n:,} left out because none of their projects is included")

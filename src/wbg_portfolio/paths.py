@@ -23,6 +23,12 @@ def main_checkout(repo=REPO):
     return os.path.dirname(out)
 
 
+def cohort_path():
+    """The hand-kept cohort file: the scope of fetching and of every paid question
+    ($WBG_COHORT overrides it, for tests)."""
+    return os.environ.get("WBG_COHORT", "").strip() or os.path.join(REPO, "inputs", "config", "cohort.csv")
+
+
 def data_root():
     env = os.environ.get("WBG_DATA", "").strip()
     if env:

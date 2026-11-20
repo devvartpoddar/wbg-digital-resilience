@@ -766,6 +766,8 @@ def run(args, data):
             from wbg_portfolio import decide
             from wbg_portfolio import funnel
             from wbg_portfolio import second
+            if stage in ("classify", "measure", "link", "activities"):
+                print(corpus.scope_note())
             if stage in ("classify", "measure", "link", "activities") and not checked:
                 db.check_store(conn, fresh=getattr(args, "fresh_store", False))
                 checked = True

@@ -45,6 +45,19 @@ from wbg_portfolio import panel as _panel
 _panel.PATH = _test_panel()
 
 
+@pytest.fixture(autouse=True)
+def cohort_file(tmp_path_factory, monkeypatch):
+    """A cohort file that includes the invented projects (the scope of every paid question
+    is the real file's included rows, and the invented ids are not in it)."""
+    path = tmp_path_factory.mktemp("cohort") / "cohort.csv"
+    ids = ["P1", "P2", "P3", "P5", "P9"] + [f"P{n:06d}" for n in range(1, 10)]
+    path.write_text("project_id,country_code,region,approval_fy,practice,included,exclusion_reason,"
+                    "cohort_set,cohort_version\n" +
+                    "".join(f"{i},KE,Africa,2023,,true,,digital,t\n" for i in ids), encoding="utf-8")
+    monkeypatch.setenv("WBG_COHORT", str(path))
+    return path
+
+
 def write_csv(path, cols, rows):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", newline="", encoding="utf-8") as fh:

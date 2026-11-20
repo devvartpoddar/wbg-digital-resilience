@@ -58,7 +58,7 @@ def groups(conn, corpus, names, projects=None):
         by_project = {}
         for u in decide.committed_digital_units(conn, corpus, [name]):
             for pid in corpus.projects(u):
-                if not projects or pid in projects:
+                if pid in corpus.included and (not projects or pid in projects):
                     by_project.setdefault(pid, []).append(u)
         for pid in sorted(by_project):
             out.append((pid, name, sorted(by_project[pid], key=corpus.row_of.get)))

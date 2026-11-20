@@ -6,10 +6,10 @@ P167183,NG,Western and Central Africa,2020,,true,,digital,2026-09-15
 P167543,NE,Western and Central Africa,2020,,true,,digital,2026-09-15
 P167588,GD,Latin America and Caribbean,2020,,true,,digital,2026-09-15
 P169698,GE,Europe and Central Asia,2021,,true,,digital,2026-09-15
-P169945,,,,,true,,digital,2026-09-15
+P169945,,,,,false,no_project_record,digital,2026-09-15
 P170658,PE,Latin America and Caribbean,2020,,true,,digital,2026-09-15
 P170718,FM,East Asia and Pacific,2020,,true,,digital,2026-09-15
-P170910,,,,,true,,digital,2026-09-15
+P170910,,,,,false,no_project_record,digital,2026-09-15
 P170941,KE,Eastern and Southern Africa,2023,,true,,digital,2026-09-15
 P171034,ET,Eastern and Southern Africa,2021,,true,,digital,2026-09-15
 P171099,CV,Western and Central Africa,2021,,true,,digital,2026-09-15
@@ -94,8 +94,8 @@ P161305,KE,Eastern and Southern Africa,2021,,true,,digital_contributor,2026-10-1
 P161877,ZR,Eastern and Southern Africa,2022,,true,,digital_contributor,2026-10-19
 P164435,BI,Eastern and Southern Africa,2020,,true,,digital_contributor,2026-10-19
 P167790,MD,Europe and Central Asia,2020,,true,,digital_contributor,2026-10-19
-P168634,BR,Latin America and Caribbean,2022,,true,,digital_contributor,2026-10-19
-P169330,MA,Middle East and North Africa,2022,,true,,digital_contributor,2026-10-19
+P168634,BR,Latin America and Caribbean,2022,,false,instrument_pforr,digital_contributor,2026-10-19
+P169330,MA,Middle East and North Africa,2022,,false,instrument_pforr,digital_contributor,2026-10-19
 P169594,3W,Western and Central Africa,2020,,true,,digital_contributor,2026-10-19
 P171238,MR,Western and Central Africa,2021,,true,,digital_contributor,2026-10-19
 P171997,LR,Western and Central Africa,2022,,true,,digital_contributor,2026-10-19
@@ -104,7 +104,7 @@ P172800,CI,Western and Central Africa,2022,,true,,digital_contributor,2026-10-19
 P173019,BD,South Asia,2022,,true,,digital_contributor,2026-10-19
 P173119,SO,Eastern and Southern Africa,2023,,true,,digital_contributor,2026-10-19
 P173150,GM,Western and Central Africa,2022,,true,,digital_contributor,2026-10-19
-P173399,PK,South Asia,2020,,true,,digital_contributor,2026-10-19
+P173399,PK,South Asia,2020,,false,instrument_pforr,digital_contributor,2026-10-19
 P173640,MZ,Eastern and Southern Africa,2022,,true,,digital_contributor,2026-10-19
 P174171,LS,Eastern and Southern Africa,2024,,true,,digital_contributor,2026-10-19
 P174246,ZA,Eastern and Southern Africa,2022,,true,,digital_contributor,2026-10-19
@@ -117,10 +117,10 @@ P175801,CO,Latin America and Caribbean,2022,,true,,digital_contributor,2026-10-1
 P176303,ET,Eastern and Southern Africa,2024,,true,,digital_contributor,2026-10-19
 P176776,CI,Western and Central Africa,2023,,true,,digital_contributor,2026-10-19
 P176803,AM,Europe and Central Asia,2022,,true,,digital_contributor,2026-10-19
-P176867,KE,Eastern and Southern Africa,2022,,true,,digital_contributor,2026-10-19
+P176867,KE,Eastern and Southern Africa,2022,,false,instrument_pforr,digital_contributor,2026-10-19
 P176935,NG,Western and Central Africa,2022,,true,,digital_contributor,2026-10-19
 P176956,SO,Eastern and Southern Africa,2022,,true,,digital_contributor,2026-10-19
-P177442,NG,Western and Central Africa,2023,,true,,digital_contributor,2026-10-19
+P177442,NG,Western and Central Africa,2023,,false,instrument_pforr,digital_contributor,2026-10-19
 P177492,RW,Eastern and Southern Africa,2023,,true,,digital_contributor,2026-10-19
 P177807,DM,Latin America and Caribbean,2022,,true,,digital_contributor,2026-10-19
 P177825,UZ,Europe and Central Asia,2023,,true,,digital_contributor,2026-10-19
@@ -129,7 +129,7 @@ P178018,ST,Eastern and Southern Africa,2022,,true,,digital_contributor,2026-10-1
 P178040,AO,Eastern and Southern Africa,2023,,true,,digital_contributor,2026-10-19
 P178303,KZ,Europe and Central Asia,2024,,true,,digital_contributor,2026-10-19
 P178362,CI,Western and Central Africa,2023,,true,,digital_contributor,2026-10-19
-P178517,ID,East Asia and Pacific,2023,,true,,digital_contributor,2026-10-19
+P178517,ID,East Asia and Pacific,2023,,false,instrument_pforr,digital_contributor,2026-10-19
 P178599,RO,Europe and Central Asia,2023,,true,,digital_contributor,2026-10-19
 P178658,MZ,Eastern and Southern Africa,2023,,true,,digital_contributor,2026-10-19
 P178684,ZR,Eastern and Southern Africa,2023,,true,,digital_contributor,2026-10-19
@@ -144,7 +144,7 @@ P179357,IN,South Asia,2024,,true,,digital_contributor,2026-10-19
 P179361,PH,East Asia and Pacific,2024,,true,,digital_contributor,2026-10-19
 P179534,AR,Latin America and Caribbean,2023,,true,,digital_contributor,2026-10-19
 P179543,,,,,true,,digital_contributor,2026-10-19
-P179595,AR,Latin America and Caribbean,2023,,true,,digital_contributor,2026-10-19
+P179595,AR,Latin America and Caribbean,2023,,false,instrument_pforr,digital_contributor,2026-10-19
 P179670,KE,Eastern and Southern Africa,,,true,,digital_contributor,2026-10-19
 P179786,RO,Europe and Central Asia,2023,,true,,digital_contributor,2026-10-19
 P179808,LK,South Asia,2023,,true,,digital_contributor,2026-10-19
@@ -155,7 +155,7 @@ P180234,CI,Western and Central Africa,2025,,true,,digital_contributor,2026-10-19
 P180260,3W,Western and Central Africa,,,true,,digital_contributor,2026-10-19
 P180288,MG,Eastern and Southern Africa,2023,,true,,digital_contributor,2026-10-19
 P180302,DO,Latin America and Caribbean,2024,,true,,digital_contributor,2026-10-19
-P180534,CO,Latin America and Caribbean,2024,,true,,digital_contributor,2026-10-19
+P180534,CO,Latin America and Caribbean,2024,,false,instrument_pforr,digital_contributor,2026-10-19
 P180549,LK,South Asia,2025,,true,,digital_contributor,2026-10-19
 P180696,DJ,Middle East and North Africa,,,true,,digital_contributor,2026-10-19
 P180801,ZM,Eastern and Southern Africa,2024,,true,,digital_contributor,2026-10-19
@@ -165,7 +165,7 @@ P181127,PH,East Asia and Pacific,2025,,true,,digital_contributor,2026-10-19
 P181278,BT,South Asia,,,true,,digital_contributor,2026-10-19
 P181310,CV,Western and Central Africa,2025,,true,,digital_contributor,2026-10-19
 P181456,WS,East Asia and Pacific,2025,,true,,digital_contributor,2026-10-19
-P181679,MA,Middle East and North Africa,2024,,true,,digital_contributor,2026-10-19
+P181679,MA,Middle East and North Africa,2024,,false,instrument_pforr,digital_contributor,2026-10-19
 P500469,BR,Latin America and Caribbean,,,true,,digital_contributor,2026-10-19
 P500567,GW,Western and Central Africa,,,true,,digital_contributor,2026-10-19
 P500764,ID,East Asia and Pacific,2025,,true,,digital_contributor,2026-10-19
@@ -179,7 +179,7 @@ P502471,MZ,Eastern and Southern Africa,2024,,true,,digital_contributor,2026-10-1
 P502472,BF,Western and Central Africa,,,true,,digital_contributor,2026-10-19
 P503369,JO,Middle East and North Africa,2024,,true,,digital_contributor,2026-10-19
 P503941,ZM,Eastern and Southern Africa,2025,,true,,digital_contributor,2026-10-19
-P504171,UA,Europe and Central Asia,2025,,true,,digital_contributor,2026-10-19
+P504171,UA,Europe and Central Asia,2025,,false,instrument_pforr,digital_contributor,2026-10-19
 P504281,ET,Eastern and Southern Africa,,,true,,digital_contributor,2026-10-19
 P505158,AO,Eastern and Southern Africa,,,true,,digital_contributor,2026-10-19
 P505187,MW,Eastern and Southern Africa,2024,,true,,digital_contributor,2026-10-19
@@ -187,9 +187,9 @@ P506072,GN,Western and Central Africa,2025,,true,,digital_contributor,2026-10-19
 P506476,UA,Europe and Central Asia,2025,,true,,digital_contributor,2026-10-19
 P506551,TN,Middle East and North Africa,,,true,,digital_contributor,2026-10-19
 P506815,ZR,Eastern and Southern Africa,,,true,,digital_contributor,2026-10-19
-P507001,NG,Western and Central Africa,,,true,,digital_contributor,2026-10-19
+P507001,NG,Western and Central Africa,,,false,instrument_pforr,digital_contributor,2026-10-19
 P507209,TN,Middle East and North Africa,,,true,,digital_contributor,2026-10-19
-P507220,3E,Eastern and Southern Africa,,,true,,digital_contributor,2026-10-19
+P507220,3E,Eastern and Southern Africa,,,false,instrument_pforr,digital_contributor,2026-10-19
 P507279,SX,Latin America and Caribbean,,,true,,digital_contributor,2026-10-19
 P507938,,,,,true,,digital_contributor,2026-10-19
 P507944,,,,,true,,digital_contributor,2026-10-19
@@ -204,7 +204,7 @@ P508695,,,,,true,,digital_contributor,2026-10-19
 P508911,,,,,true,,digital_contributor,2026-10-19
 P508960,SZ,Eastern and Southern Africa,,,true,,digital_contributor,2026-10-19
 P509079,,,,,true,,digital_contributor,2026-10-19
-P509243,MR,Western and Central Africa,,,true,,digital_contributor,2026-10-19
+P509243,MR,Western and Central Africa,,,false,instrument_pforr,digital_contributor,2026-10-19
 P509487,,,,,true,,digital_contributor,2026-10-19
 P509855,,,,,true,,digital_contributor,2026-10-19
 P509925,,,,,true,,digital_contributor,2026-10-19
@@ -215,7 +215,7 @@ P510547,,,,,true,,digital_contributor,2026-10-19
 P510575,,,,,true,,digital_contributor,2026-10-19
 P510576,,,,,true,,digital_contributor,2026-10-19
 P510605,,,,,true,,digital_contributor,2026-10-19
-P510613,,,,,true,,digital_contributor,2026-10-19
+P510613,,,,,false,no_project_record,digital_contributor,2026-10-19
 P510637,,,,,true,,digital_contributor,2026-10-19
 P511558,,,,,true,,digital_contributor,2026-10-19
 P511651,,,,,true,,digital_contributor,2026-10-19
@@ -255,7 +255,7 @@ P516983,,,,,true,,digital_contributor,2026-10-19
 P517069,,,,,true,,digital_contributor,2026-10-19
 P517246,,,,,true,,digital_contributor,2026-10-19
 P517267,,,,,true,,digital_contributor,2026-10-19
-P517399,,,,,true,,digital_contributor,2026-10-19
+P517399,,,,,false,no_project_record,digital_contributor,2026-10-19
 P517479,,,,,true,,digital_contributor,2026-10-19
 P517511,,,,,true,,digital_contributor,2026-10-19
 P517871,,,,,true,,digital_contributor,2026-10-19
