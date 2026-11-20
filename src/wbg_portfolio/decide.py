@@ -182,6 +182,16 @@ def committed_units(conn, corpus, names):
     return sorted({u for n in names for u, r in measure_units(conn, corpus, n).items() if r["committed"]})
 
 
+def digital_asked_units(conn, corpus, names):
+    """[unit_id] the digital question is asked about: every sentence with a first-pass score
+    in the asked band [band.ask_low, band.ask_high) for at least one of the measures (the range the
+    measure second look is asked for), so a threshold loosened at publish finds the newly committed
+    sentences already scored. Committed sentences outside that range are added; with the band rule
+    off, the committed ones."""
+    asked = {u for n in names for u, r in measure_units(conn, corpus, n).items() if r.get("asked")}
+    return sorted(asked | set(committed_units(conn, corpus, names)))
+
+
 def digital_settings():
     """(on, floor): whether the digital rule applies (digital.on) and the P(yes) a sentence needs."""
     return bool(setting("digital.on")), float(setting("digital.floor"))

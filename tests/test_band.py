@@ -332,6 +332,28 @@ def test_digital_is_asked_once_per_committed_sentence_and_a_rerun_asks_nothing(p
     assert len(fake_model) == n
 
 
+def test_loosening_band_context_counts_the_newly_committed_sentences_with_no_model_call(
+        pg, corpus, fake_chat, fake_model, band_on, monkeypatch):
+    c = first_pass(pg, corpus, 0.6, units=(0,))
+    u0 = c.index[0]["unit_id"]
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.context": 1.01})   # nothing passes the look
+    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
+    assert second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 1           # asked though not committed
+    assert committed(pg, c)[u0] == (False, "", False)
+    assert decide.committed_digital_units(pg, c, ["cra"]) == []
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.context": 0.6})    # loosened at publish
+    n_model, n_chat = len(fake_model), len(fake_chat.calls)
+    assert committed(pg, c)[u0] == (True, "second_look", False)
+    assert decide.committed_digital_units(pg, c, ["cra"]) == [u0]
+    with load_pg.transaction(pg):
+        load_pg.load(pg, corpus, log=lambda *_: None)
+    decide.publish(pg, corpus, corpus=c, log=lambda *_: None)
+    assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.measure_findings WHERE is_committed AND is_digital")[0] == 1
+    assert second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 1                      # all from the store
+    assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat)
+
+
 def test_policy_is_asked_of_committed_digital_sentences_only_and_a_rerun_asks_nothing(pg, corpus, fake_chat, band_on):
     c = first_pass(pg, corpus, 0.95, units=(0, 2))
     u0, u1 = c.index[0]["unit_id"], c.index[2]["unit_id"]            # u1 (the road) is committed but not digital

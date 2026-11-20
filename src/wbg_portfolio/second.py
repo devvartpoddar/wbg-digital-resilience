@@ -8,8 +8,9 @@ scores, and src/wbg_portfolio/decide.py reads them.
             [band.ask_low, band.ask_high): the decision model again with the
             paragraph beside the sentence (kind measure_ctx, P(grades 2, 3)),
             and the chat model's grade 0 to 3 (kind measure_second)
-  digital   every committed sentence, once whatever its measure: is it a
-            digital asset or the digital sector (kind digital, P(yes))
+  digital   every sentence with a first-pass score in [band.ask_low, band.ask_high)
+            for some measure, once whatever its measure: is it a digital asset or
+            the digital sector (kind digital, P(yes)); only committed ones are published
   policy    every committed sentence: investment or policy instrument, by the
             chat model (kind policy, score 1 for policy, 0 for investment)
   asset_second, asset_subtype   the chat model's assets, and the kind of each,
@@ -93,16 +94,17 @@ def measure_second(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_r
 
 def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
             log=print, projects=None, every=None):
-    """Is each committed sentence a digital asset or the digital sector, asked
-    once whatever its measure. Writes kind digital (label_set and label digital)."""
+    """Is each sentence in the asked band of some measure a digital asset or the digital sector, asked
+    once whatever its measure (the decision stays with the committed ones). Writes kind digital (label_set and label digital)."""
     if not decide.digital_settings()[0]:
         return 0
     if checks.cannot_estimate(conn, dry_run, log, "digital", ("measure", "measure")):
         return None
-    units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects,
+    units, scope = _in_scope(corpus, decide.digital_asked_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
     q = Q.flag_question("digital")
-    log(f"digital: {len(units):,} committed sentence(s)")
+    b = decide.band()
+    log(f"digital: {len(units):,} sentence(s)" + (f" with a first score in [{b['ask_low']}, {b['ask_high']})" if b["on"] else " committed"))
     got = checks._ask(conn, model, [(u, corpus.context_state(u), {"digital": q}) for u in units],
                       "digital", "digital", api_key, dry_run, workers, log, data)
     if got is None:
