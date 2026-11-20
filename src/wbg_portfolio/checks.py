@@ -489,6 +489,10 @@ def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry
     while links.strengths is off."""
     if not decide.links_strengths():
         return 0
+    from wbg_portfolio import second
+    if second.cannot_estimate(conn, dry_run, log, "package_measure", ("package_asset", "link"),
+                              *([("digital", "digital")] if decide.digital_settings()[0] else [])):
+        return None
     packages = load_packages(data, projects)
     if not packages:
         log("package_measure: no package in scope")

@@ -168,6 +168,9 @@ def run(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WOR
     from wbg_portfolio import checks
     if not decide.activities_on():
         return 0
+    if second.cannot_estimate(conn, dry_run, log, "activities", ("measure", "measure"),
+                              *([("digital", "digital")] if decide.digital_settings()[0] else [])):
+        return None
     kinds, cap = document_kinds(data), max_sentences()
     todo, one = [], 0
     for pid, name, units in groups(conn, corpus, names, projects):

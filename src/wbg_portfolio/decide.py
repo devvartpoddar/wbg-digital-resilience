@@ -290,6 +290,12 @@ def unit_assets(corpus, amap, second=None):
     return out
 
 
+def has_scores(conn, kind):
+    """Whether any score of this kind is stored (what a dry run needs of the step before)."""
+    t = f"{db.SCHEMA}.scores"
+    return db.exists(conn, t) and bool(db.one(conn, f"SELECT count(*) FROM {t} WHERE kind = %s", (kind,))[0])
+
+
 def policy_on():
     """Whether the policy question is asked (policy.on)."""
     return bool(panel.require("policy.on"))

@@ -108,6 +108,11 @@ def test_a_dry_run_asks_nothing_prints_estimates_and_writes_nothing(v2, wide, fa
     out = capsys.readouterr().out
     assert not fake_model and not fake_chat.calls
     assert "requests to make" in out and "about US$" in out
+    # on a fresh schema the steps after the first cannot be estimated, and say so instead of a quiet 0
+    for step, until in (("digital", "measure"), ("policy", "measure"), ("asset second look", "digital"),
+                        ("asset kinds", "digital"), ("package asset second look", "link"),
+                        ("package_measure", "link"), ("activities", "digital")):
+        assert f"{step}: cannot estimate until {until} has run" in out, step
     for stage in ("classify", "measure", "link", "activities"):
         assert f"#### {stage}" in out
     assert "#### publish" in out and db.one(v2, f"SELECT count(*) FROM {db.STORE}.answers")[0] == 0

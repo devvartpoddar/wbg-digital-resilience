@@ -41,6 +41,17 @@ def _write(conn, kind, label_set, rows, scope):
         checks.write_scores(conn, kind, label_set, rows, "item_id = ANY(%s)", [sorted(scope)])
 
 
+def cannot_estimate(conn, dry_run, log, step, *needs):
+    """On a dry run, say so when a step this one reads has not run: (kind, step name) pairs.
+    True when it said so, so the caller returns before printing a number (0) that is not an estimate."""
+    if not dry_run:
+        return False
+    missing = [name for kind, name in needs if not decide.has_scores(conn, kind)]
+    for name in missing:
+        log(f"  {step}: cannot estimate until {name} has run")
+    return bool(missing)
+
+
 def _partial(names, every):
     """True when a run names only some of the active measures (--measures a b)."""
     return every is not None and not set(every) <= set(names)
@@ -111,6 +122,8 @@ def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=Fal
     once whatever its measure. Writes kind digital (label_set and label digital)."""
     if not decide.digital_settings()[0]:
         return 0
+    if cannot_estimate(conn, dry_run, log, "digital", ("measure", "measure")):
+        return None
     units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
     q = Q.flag_question("digital")
@@ -141,6 +154,8 @@ def policy(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.
     Nothing is asked while policy.on is false."""
     if not decide.policy_on():
         return 0
+    if cannot_estimate(conn, dry_run, log, "policy", ("measure", "measure")):
+        return None
     units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
     q = policy_question()
@@ -233,6 +248,9 @@ def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, worker
     labels are the valid "asset/subtype" pairs). While band.on is off nothing is asked."""
     if not decide.band()["on"]:
         return 0
+    if cannot_estimate(conn, dry_run, log, "asset second look", ("asset", "classify"),
+                       *([("digital", "digital")] if decide.digital_settings()[0] else [])):
+        return None
     first = first_pass_assets(conn, corpus)
     digital_units = decide.committed_digital_units(conn, corpus, names)
     units, scope = _in_scope(corpus, [u for u in digital_units if u not in first], projects,
@@ -267,6 +285,9 @@ def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, worke
     While band.on is off nothing is asked."""
     if not decide.band()["on"]:
         return 0
+    if cannot_estimate(conn, dry_run, log, "asset kinds", ("asset", "classify"),
+                       *([("digital", "digital")] if decide.digital_settings()[0] else [])):
+        return None
     first = first_pass_assets(conn, corpus)
     digital_units = decide.committed_digital_units(conn, corpus, names)
     units, scope = _in_scope(corpus, [u for u in digital_units if u in first], projects,
@@ -304,6 +325,8 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
     asset, item the package; score 1 yes, 0 no). Not asked while links.strengths is off."""
     if not decide.links_strengths():
         return 0
+    if cannot_estimate(conn, dry_run, log, "package asset second look", ("package_asset", "link")):
+        return None
     low, yes = float(panel.require("link.asset_band_low")), float(panel.require("link.asset_yes"))
     packages = {p["package_id"]: p for p in checks.load_packages(data, projects)}
     assets = {a["id"]: a for a in Q.load(Q.ASSETS)[0]}
