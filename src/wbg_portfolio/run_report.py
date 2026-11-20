@@ -4,7 +4,7 @@
 Reads  data/reports/{fetch,clean,audit,fetch_procurement,clean_procurement,
        audit_procurement}.txt, the last run's stage times (run_stages.jsonl, as
        ./wbg_portfolio run writes them), and from Postgres the spend of that run's window
-       (wbg_store.spend) and the evaluation's precision and recall per measure
+       (<store>.spend) and the evaluation's precision and recall per measure
        (wbg.measure_quality). A missing database leaves those sections empty
        rather than failing the note.
 Writes data/reports/{date} {topic}.md
@@ -109,8 +109,9 @@ def spend_by_stage(run):
     folded into the pipeline stage that asked it."""
     if not run:
         return []
+    from wbg_portfolio import db
     sql = ("SELECT stage, coalesce(count(*), 0), coalesce(sum(calls), 0), coalesce(sum(cost_usd), 0) "
-           "FROM wbg_store.spend WHERE at >= %s AND at <= %s GROUP BY stage")
+           f"FROM {db.STORE}.spend WHERE at >= %s AND at <= %s GROUP BY stage")
     rows = _query(sql, (run["started"], run["ended"]))
     got = {}
     for stage, _steps, calls, cost in rows or []:

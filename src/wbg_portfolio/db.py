@@ -3,7 +3,10 @@
 (schema wbg, rebuilt from the record and the corpus by src/wbg_portfolio/decide.py).
 
   $WBG_PG       the connection string (default postgresql:///work)
-  $WBG_SCHEMA   the presentation schema (default wbg); the store is <schema>_store
+  $WBG_SCHEMA   the presentation schema (default wbg)
+  $WBG_STORE    the store schema (default <schema>_store). A run with WBG_SCHEMA=wbg_v2
+                WBG_STORE=wbg_store reuses every stored answer and writes its scores,
+                decision tables and views into wbg_v2 alone.
 """
 import json
 import os
@@ -12,7 +15,7 @@ import psycopg
 
 DSN = os.environ.get("WBG_PG") or "postgresql:///work"
 SCHEMA = os.environ.get("WBG_SCHEMA") or "wbg"
-STORE = SCHEMA + "_store"
+STORE = os.environ.get("WBG_STORE") or SCHEMA + "_store"
 
 STORE_DDL = """
 CREATE SCHEMA IF NOT EXISTS {s};
