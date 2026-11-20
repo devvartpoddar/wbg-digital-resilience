@@ -102,6 +102,17 @@ def summary_from_scores(conn, kind, name, qs, ask_floor):
     return {lid: {"asked": got.get(lid, (0, 0))[0], "yes": got.get(lid, (0, 0))[1], "rounds": []} for lid in qs}
 
 
+def _record_round(conn, kind, name, this_run, picks, rnd, cosine):
+    """Before a feedback round is asked, what it picked (and, as round 0, whether the rounds run),
+    committed, so a run stopped part way can be started again and replay the same rounds."""
+    with conn.transaction():
+        for (u, lid), route in picks.items():
+            conn.execute(f"INSERT INTO {db.SCHEMA}.funnel_rounds (kind, label_set, run, item_id, label_id, "
+                         f"round, route, cosine) VALUES (%s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT DO NOTHING",
+                         (kind, name, this_run, u, lid, rnd, route, cosine.get((u, lid), 0.0)))
+    conn.commit()
+
+
 def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
         log=print, projects=None):
     """The set through the funnel; writes its scores. Returns a summary dict
@@ -128,6 +139,19 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
     scope = [r["unit_id"] for r in corpus.index if corpus.in_scope(r["unit_id"], projects)]
     states = {u: Q.sha(corpus.state(u)) for u in scope}
     stored = stored_units(conn, model, corpus, qshas, states)
+    # A run of this set with these settings that was stopped before it wrote its scores left the
+    # record of its rounds (funnel_rounds): what each feedback round picked, and whether the rounds
+    # ran. Started again, the run replays the same rounds from it (the answers come from the store)
+    # instead of taking that round's answers into round 0, so it asks and writes what the
+    # uninterrupted run would have.
+    this_run = Q.sha({"fingerprint": print_, "projects": sorted(projects) if projects else None})
+    picked_before = {} if dry_run else {
+        (u, lid): (r, rt) for u, lid, r, rt in db.rows(
+            conn, f"SELECT item_id, label_id, round, route FROM {db.SCHEMA}.funnel_rounds "
+                  f"WHERE kind = %s AND label_set = %s AND run = %s", (kind, name, this_run))}
+    for (u, lid), (r, _) in picked_before.items():
+        if r and u in stored.get(lid, ()):
+            stored[lid].discard(u)
     # round 0
     asked, route, rnd_of, cosine = {}, {}, {}, {}
     for lid in qs:
@@ -192,8 +216,13 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
     earlier = {(u, lid): (r, k) for u, lid, r, k in db.rows(
         conn, f"SELECT item_id, label_id, route, round FROM {t} WHERE kind = %s AND label_set = %s",
         (kind, name))}
-    if earlier and st["to_ask"] == 0:
-        going = set()
+    if ("", "") in picked_before:                       # this run, started before: as it decided then
+        if picked_before[("", "")][1] != "rounds":
+            going = set()
+    else:
+        if earlier and st["to_ask"] == 0:
+            going = set()
+        _record_round(conn, kind, name, this_run, {("", ""): "rounds" if going else "none"}, 0, {})
     for rnd in range(1, s["max_rounds"] + 1):
         lids, queries = [], []
         for lid in sorted(going):
@@ -219,6 +248,8 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
                 cosine[(u, lid)] = float(sims[i])
         if not new:
             break
+        _record_round(conn, kind, name, this_run, {(u, lid): "feedback" for u, ls in new.items() for lid in ls},
+                      rnd, cosine)
         one_ask(new)
         if total["failures"]:
             log("  a feedback round failed; nothing written. Run again to resume.")
@@ -257,6 +288,8 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
             where += " AND item_id = ANY(%s)"
             params.append(scope)
         db.replace(conn, t, SCORE_COLS, rows, where, params)
+        conn.execute(f"DELETE FROM {db.SCHEMA}.funnel_rounds WHERE kind = %s AND label_set = %s AND run = %s",
+                     (kind, name, this_run))
         if projects is None:
             conn.execute(f"INSERT INTO {db.SCHEMA}.funnel_state (kind, label_set, fingerprint, finished_at) "
                          f"VALUES (%s, %s, %s, now()) ON CONFLICT (kind, label_set) DO UPDATE SET "

@@ -57,6 +57,10 @@ CREATE INDEX IF NOT EXISTS scores_item ON {s}.scores (item_id);
 CREATE TABLE IF NOT EXISTS {s}.funnel_state (
   kind text NOT NULL, label_set text NOT NULL, fingerprint text NOT NULL, finished_at timestamptz,
   PRIMARY KEY (kind, label_set));
+CREATE TABLE IF NOT EXISTS {s}.funnel_rounds (
+  kind text NOT NULL, label_set text NOT NULL, run text NOT NULL, item_id text NOT NULL,
+  label_id text NOT NULL, round integer, route text, cosine numeric,
+  PRIMARY KEY (kind, label_set, run, item_id, label_id));
 CREATE TABLE IF NOT EXISTS {s}.scratch_sets (
   label_set text PRIMARY KEY, label_name text, definition text, phrases text[], patterns text[],
   asked_by text, written_at timestamptz, floor numeric, note text);"""

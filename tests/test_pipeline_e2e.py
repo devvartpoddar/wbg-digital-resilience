@@ -230,3 +230,152 @@ def test_a_run_into_another_schema_over_the_live_store_leaves_the_live_schema_un
             conn.execute(f"DROP SCHEMA IF EXISTS {schema} CASCADE")
         conn.commit()
         conn.close()
+
+
+# ------------------------------------------------------------ killed and started again
+
+def published(conn, schema):
+    """Every table of a schema as sorted rows of text, without the columns that hold a time: what
+    a reader of the published schema sees."""
+    out = {}
+    for (name,) in conn.execute("SELECT c.relname FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                                "WHERE n.nspname = %s AND c.relkind = 'r' ORDER BY 1", (schema,)).fetchall():
+        cols = [c for (c,) in conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_schema = %s AND table_name = %s "
+            "AND data_type NOT LIKE 'timestamp%%' AND data_type <> 'date' ORDER BY ordinal_position",
+            (schema, name)).fetchall()]
+        sel = ", ".join(f'"{c}"' for c in cols)
+        out[name] = sorted(str(r) for r in conn.execute(f'SELECT {sel} FROM {schema}."{name}"').fetchall())
+    return out
+
+
+class Killer:
+    """Stands between the run and the fake models: counts the requests that were answered and
+    which stage asked them, and at request `at` the process 'dies': that request and every one
+    after it raise KeyboardInterrupt, as a kill would stop them, until the run is started again."""
+
+    def __init__(self, inner):
+        self.inner, self.at, self.dead, self.answered, self.stage = inner, None, False, [], None
+        self.conns = []
+
+    def __call__(self, path, body, key, **kw):
+        if self.dead or (self.at is not None and len(self.answered) + 1 >= self.at):
+            self.dead = True
+            raise KeyboardInterrupt("killed")
+        got = self.inner(path, body, key, **kw)
+        self.answered.append(self.stage)
+        return got
+
+    def restart(self):
+        """The process died: Postgres rolls back and closes what its connections held. Then the
+        same command is started again."""
+        for c in self.conns:
+            c.close()
+        self.conns.clear()
+        self.at, self.dead = None, False
+
+
+@pytest.fixture
+def killable(wide, fake_model, fake_chat, monkeypatch):
+    """The wide corpus with a Killer in front of both fake models, told the stage by the run's
+    '#### <stage>' line."""
+    import builtins
+    k = Killer(api.post)
+    monkeypatch.setattr(api, "post", k)
+    connect = db.connect
+
+    def tracked(*a, **kw):
+        c = connect(*a, **kw)
+        k.conns.append(c)
+        return c
+    monkeypatch.setattr(db, "connect", tracked)
+
+    def say(*a, **kw):
+        if a and isinstance(a[0], str) and a[0].startswith("#### "):
+            k.stage = a[0][5:]
+        builtins.print(*a, **kw)
+    monkeypatch.setattr(cli, "print", say, raising=False)
+    return wide, k
+
+
+def _fresh(conn, monkeypatch, corpus):
+    name = "t_" + uuid.uuid4().hex[:10]
+    monkeypatch.setattr(db, "SCHEMA", name)
+    monkeypatch.setattr(db, "STORE", name + "_store")
+    monkeypatch.setenv("WBG_SCHEMA", name)
+    monkeypatch.setenv("WBG_STORE", name + "_store")
+    db.ensure(conn)
+    conn.execute(f"CREATE SCHEMA IF NOT EXISTS {name}")
+    conn.commit()
+    with load_pg.transaction(conn):
+        load_pg.load(conn, corpus, log=lambda *_: None)
+    conn.commit()
+    return name
+
+
+def test_a_run_killed_in_any_stage_and_started_again_asks_nothing_twice_and_publishes_the_same(
+        schema, killable, monkeypatch, capsys):
+    """The real ./wbg_portfolio run from classify to publish, killed before each of its requests in
+    turn (so in every paid stage and every step of it) and in the middle of the publish, then started
+    again with the same command: the second start finishes, the two starts together make exactly the
+    requests the uninterrupted run made (nothing paid twice), and the published schema is the same as
+    the uninterrupted run's."""
+    corpus, k = killable
+    conn = schema
+    args = ("--from", "classify", "--to", "publish", "--max-spend", "1")
+    made = []
+    try:
+        whole = _fresh(conn, monkeypatch, corpus)
+        made.append(whole)
+        assert run(corpus, *args) == 0
+        conn.commit()
+        expected, asked = published(conn, whole), list(k.answered)
+        assert {"classify", "measure", "link", "activities"} <= set(asked)
+        for at in range(1, len(asked) + 1):                    # before each request in turn
+            stage = asked[at - 1]
+            name = _fresh(conn, monkeypatch, corpus)
+            made.append(name)
+            k.answered.clear()
+            k.at = at
+            with pytest.raises(KeyboardInterrupt):
+                run(corpus, *args)
+            conn.rollback()
+            assert len(k.answered) == at - 1
+            k.restart()
+            assert run(corpus, *args) == 0, stage
+            conn.commit()
+            assert sorted(k.answered, key=str) == sorted(asked, key=str), \
+                f"killed before request {at} ({stage}): asked again or asked otherwise"
+            assert published(conn, name) == expected, f"killed before request {at} ({stage}): published differently"
+            conn.execute(f"DROP SCHEMA {name} CASCADE")
+            conn.execute(f"DROP SCHEMA {name}_store CASCADE")
+            conn.commit()
+            made.remove(name)
+        # killed in the publish, part way through writing its tables
+        name = _fresh(conn, monkeypatch, corpus)
+        made.append(name)
+        assert run(corpus, *args[:-2], "--to", "activities", *args[-2:]) == 0
+        conn.commit()
+        real, calls = load_pg.load_rows, []
+
+        def dies_on_the_third_table(*a, **kw):
+            calls.append(1)
+            if len(calls) == 3:
+                raise KeyboardInterrupt("killed")
+            return real(*a, **kw)
+        monkeypatch.setattr(load_pg, "load_rows", dies_on_the_third_table)
+        with pytest.raises(KeyboardInterrupt):
+            run(corpus, *args)
+        conn.rollback()
+        k.restart()
+        monkeypatch.setattr(load_pg, "load_rows", real)
+        k.answered.clear()
+        assert run(corpus, *args) == 0 and k.answered == []
+        conn.commit()
+        assert published(conn, name) == expected, "killed in publish: published differently"
+    finally:
+        conn.rollback()
+        for name in made:
+            conn.execute(f"DROP SCHEMA IF EXISTS {name} CASCADE")
+            conn.execute(f"DROP SCHEMA IF EXISTS {name}_store CASCADE")
+        conn.commit()
