@@ -79,8 +79,12 @@ Sentences:
 # ---------------------------------------------------------------- shared
 
 def committed_at_ask(conn, corpus, name):
-    """[unit_id] a measure counts at floor.ask: the units the checks ask about."""
-    return sorted(u for u, r in decide.measure_units(conn, corpus, name).items() if r["asked_yes"])
+    """[unit_id] a measure counts at floor.ask: the units the checks ask about. With digital.on only
+    those the digital question says are digital (the types, pair checks and links are not asked
+    about the rest)."""
+    dig, (on, fl) = decide.digital_scores(conn), decide.digital_settings()
+    return sorted(u for u, r in decide.measure_units(conn, corpus, name).items()
+                  if r["asked_yes"] and decide.is_digital(dig.get(u), on, fl))
 
 
 def write_scores(conn, kind, label_set, rows, replace_where=None, params=()):

@@ -149,17 +149,17 @@ def policy_question():
 
 def policy(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
            projects=None, every=None, **_):
-    """Investment or policy for each committed sentence, by the chat model.
+    """Investment or policy for each committed sentence (with digital.on, each committed digital one), by the chat model.
     Writes kind policy (label_set and label policy; score 1 policy, 0 investment).
     Nothing is asked while policy.on is false."""
     if not decide.policy_on():
         return 0
     if cannot_estimate(conn, dry_run, log, "policy", ("measure", "measure")):
         return None
-    units, scope = _in_scope(corpus, decide.committed_units(conn, corpus, names), projects,
+    units, scope = _in_scope(corpus, decide.committed_digital_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
     q = policy_question()
-    log(f"policy: {len(units):,} committed sentence(s)")
+    log(f"policy: {len(units):,} committed sentence(s)" + (" that are digital" if decide.digital_settings()[0] else ""))
     got, ok = _chat(conn, [(u, corpus.context_state(u), q) for u in units], "policy", "policy", api_key,
                     dry_run, workers, log)
     if dry_run:

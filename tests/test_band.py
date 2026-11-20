@@ -279,6 +279,8 @@ def test_later_stages_ask_about_the_sentences_committed_under_the_band_rule(pg, 
     c = first_pass(pg, corpus, 0.6)
     assert checks.committed_at_ask(pg, c, "cra") == []                # in the band, no second look: not asked
     second.measure(pg, corpus, c, "cra", api_key="k", **QUIET)
+    assert checks.committed_at_ask(pg, c, "cra") == []                # committed, but not yet known to be digital
+    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
     assert checks.committed_at_ask(pg, c, "cra") == [c.index[0]["unit_id"]]
     assert checks.types(pg, corpus, c, "cra", api_key="k", **QUIET) == 2
     # the same sentence below the band is not asked: floor.ask no longer decides
@@ -305,16 +307,24 @@ def test_digital_is_asked_once_per_committed_sentence_and_a_rerun_asks_nothing(p
     assert len(fake_model) == n
 
 
-def test_policy_is_the_chat_models_reading_and_a_rerun_asks_nothing(pg, corpus, fake_chat, band_on):
+def test_policy_is_asked_of_committed_digital_sentences_only_and_a_rerun_asks_nothing(pg, corpus, fake_chat, band_on):
     c = first_pass(pg, corpus, 0.95, units=(0, 2))
-    u0, u1 = c.index[0]["unit_id"], c.index[2]["unit_id"]
+    u0, u1 = c.index[0]["unit_id"], c.index[2]["unit_id"]            # u1 (the road) is committed but not digital
     fake_chat.reply = lambda prompt: ('{"answer": "policy"}' if "road" in prompt else '{"answer": "investment"}')
-    assert second.policy(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 2
-    assert decide.instruments(pg) == {u0: "investment", u1: "policy"}
-    assert "[context]" in fake_chat.prompts()[0] and "technical assistance to draft a regulation" in fake_chat.prompts()[0]
+    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
     n = len(fake_chat.calls)
+    assert second.policy(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 1
+    assert len(fake_chat.calls) - n == 1 and decide.instruments(pg) == {u0: "investment"}
+    assert "[context]" in fake_chat.prompts()[-1] and "technical assistance to draft a regulation" in fake_chat.prompts()[-1]
     second.policy(pg, corpus, c, ["cra"], api_key="k", **QUIET)
-    assert len(fake_chat.calls) == n
+    assert len(fake_chat.calls) - n == 1
+
+
+def test_with_the_digital_rule_off_policy_is_asked_of_every_committed_sentence(pg, corpus, fake_chat, band_on, monkeypatch):
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "digital.on": False})
+    c = first_pass(pg, corpus, 0.95, units=(0, 2))
+    assert second.policy(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 2
 
 
 def test_publish_carries_the_new_columns_and_keeps_the_not_digital_out_of_the_commitments(
@@ -362,14 +372,16 @@ def test_a_run_of_some_measures_keeps_the_rows_of_the_other_measures_sentences(
         pg, corpus, fake_chat, fake_model, band_on, step, kind):
     c = first_pass(pg, corpus, 0.95, units=(0, 2))
     other = "X:other-measures-sentence"
-    stale = second._row(kind, kind, kind, other, {"s": 1}, {"q": 1}, {"labels": ["policy"]}, 1)
-    checks.write_scores(pg, kind, kind, [stale])
-    pg.commit()
     run = getattr(second, step)
+    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)           # policy asks only digital sentences
+    checks.write_scores(pg, kind, kind, [second._row(kind, kind, kind, other, {"s": 1}, {"q": 1},
+                                                      {"labels": ["policy"]}, 1)])
+    pg.commit()
     # a subset run (cra of cra and another measure): the other measure's row stays
-    assert run(pg, corpus, c, ["cra"], every=["cra", "another"], api_key="k", **QUIET) == 2
+    kept = run(pg, corpus, c, ["cra"], every=["cra", "another"], api_key="k", **QUIET)
+    assert kept == (2 if step == "digital" else 1)
     items = {r[2] for r in decide.scores(pg, kind)}
-    assert other in items and len(items) == 3
+    assert other in items and len(items) == kept + 1
     # a run over every measure replaces the whole kind, as before
     run(pg, corpus, c, ["cra"], every=["cra"], api_key="k", **QUIET)
     assert other not in {r[2] for r in decide.scores(pg, kind)}
