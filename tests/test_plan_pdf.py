@@ -272,3 +272,91 @@ def test_a_plan_whose_pdf_fails_is_listed_and_skipped_not_fatal(tmp_path, monkey
     assert out["fetched"] == 1 and out["no_pdf"] == ["3"]
     assert [(p, d) for p, d, _ in out["failed"]] == [("P1", "2")]
     assert len(log.rows) == 1 and log.rows[0][0] == "plan_pdf"
+
+
+# ---------------------------------------------------- only the plans packages reference
+
+def test_only_the_plan_documents_packages_reference_are_downloaded(tmp_path, monkeypatch):
+    """A listed plan rendition no package draws on is not downloaded: the corpus lists about
+    thirteen thousand renditions against a few hundred plan documents the published table
+    keeps, and only the latter can fill a component or an amount."""
+    seen = []
+    monkeypatch.setattr(FP, "_fetch_plan_pdf",
+                        lambda path, url, refresh, delay: seen.append(url) or ("abc", True))
+
+    class Log:
+        def record(self, *a):
+            pass
+    tasks = [("P1", {"doc_id": "1", "pdfurl": "https://a/1.pdf"}),
+             ("P1", {"doc_id": "2", "pdfurl": "https://a/2.pdf"}),
+             ("P2", {"doc_id": "3", "pdfurl": "https://a/3.pdf"})]
+    out = FP.fetch_plan_pdfs(tasks, str(tmp_path), Log(), False, 0, 2, referenced={"1", "3"})
+    assert out["fetched"] == 2 and out["not_referenced"] == ["2"]
+    assert sorted(seen) == ["https://a/1.pdf", "https://a/3.pdf"]
+    # No referenced set: every plan with a PDF address, as before.
+    out = FP.fetch_plan_pdfs(tasks, str(tmp_path), Log(), False, 0, 2)
+    assert out["fetched"] == 3 and out["not_referenced"] == []
+
+
+def test_the_referenced_plan_documents_are_the_published_tables_plan_versions(tmp_path):
+    """referenced_plan_docs reads the cleaned packages table; the plan documents a package
+    was not kept under are not in it. No table yet: nothing is referenced."""
+    assert FP.referenced_plan_docs(str(tmp_path)) == set()
+    proc = tmp_path / "procurement"
+    proc.mkdir()
+    (proc / "packages.csv").write_text(
+        "package_id,plan_version\nP1:a,100\nP1:b,100\nP1:c,200\n",
+        encoding="utf-8")
+    assert FP.referenced_plan_docs(str(tmp_path)) == {"100", "200"}
+
+
+def test_reading_is_restricted_to_the_referenced_plan_documents(tmp_path, monkeypatch):
+    """read_all(only=...) reads the documents named and leaves the others to the cache: a PDF
+    on disk that no package draws on is not read, and its rows are not dropped from the
+    cache."""
+    pdf_dir = tmp_path / "raw" / "plan_pdf"
+    pdf_dir.mkdir(parents=True)
+    for doc in ("D1", "D2"):
+        (pdf_dir / f"{doc}.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+    read = []
+
+    def fake_read_pdf(p):
+        read.append(os.path.basename(p))
+        return ([{"ref_key": "AAX1", "component_cell": "", "amount": "",
+                  "ref_printed": "AA-X-1", "page": 1, "has_amount_column": ""}], 0)
+
+    monkeypatch.setattr(plan_pdf, "read_pdf", fake_read_pdf)
+    got = plan_pdf.read_all(str(tmp_path), log=lambda *_: None, only={"D1"})
+    assert read == ["D1.pdf"] and set(got) == {"D1"}
+    # D2 is read when a later run asks for it; D1 comes from the cache, not the PDF again.
+    got = plan_pdf.read_all(str(tmp_path), log=lambda *_: None, only={"D2"})
+    assert read == ["D1.pdf", "D2.pdf"] and set(got) == {"D2"}
+
+
+def test_the_cache_holds_each_plan_before_the_next_one_is_read(tmp_path, monkeypatch):
+    """Reading a few hundred plans takes about an hour, so the cache is written as each plan is
+    read, not once at the end: a run stopped part way through keeps the plans already read and
+    the next run reads only the rest."""
+    pdf_dir = tmp_path / "raw" / "plan_pdf"
+    pdf_dir.mkdir(parents=True)
+    for doc in ("D1", "D2"):
+        (pdf_dir / f"{doc}.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    def fake_read_pdf(p):
+        return ([{"ref_key": "AAX1", "component_cell": "Comp 1", "amount": "1.00",
+                  "ref_printed": "AA-X-1", "page": 1, "has_amount_column": "true"}], 0)
+
+    def sha_or_stop(path, remember=False):
+        if path.endswith("D2.pdf"):
+            raise KeyboardInterrupt("the run was stopped here")
+        return "sha-of-" + os.path.basename(path)
+
+    monkeypatch.setattr(plan_pdf, "read_pdf", fake_read_pdf)
+    monkeypatch.setattr(plan_pdf, "file_sha256", sha_or_stop)
+    with pytest.raises(KeyboardInterrupt):
+        plan_pdf.read_all(str(tmp_path), log=lambda *_: None)
+
+    with open(tmp_path / "procurement" / "plan_pdf_rows.csv", newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    assert [r["doc_id"] for r in rows] == ["D1", "D1"]
+    assert [r["row_index"] for r in rows] == ["-1", "0"]

@@ -996,8 +996,13 @@ def main():
         + [r["description"] for r in awards_raw], args.data)
     comps = read_components(args.data)
     packages = clean_packages(pkg_raw, counters, vocab, names, comps)
+    # The plan PDFs worth reading: the plan documents the published table draws on, one row
+    # per package. A plan version the table never keeps can fill nothing. Found with the
+    # dedupe's own grouping, on a copy, so this run's rows and counters are untouched.
+    docs = {r["plan_version"] for r in
+            dedupe_packages([dict(r) for r in packages], Counter())[0]}
     # The plan PDF's own columns fill what the text reading left blank (never overwrite).
-    merge_plan_pdf(packages, plan_pdf.read_all(args.data), comps,
+    merge_plan_pdf(packages, plan_pdf.read_all(args.data, only=docs), comps,
                    float(panel.require("plan_pdf.min_match_share")), counters)
     kept, superseded = dedupe_packages(packages, counters)
     for r in kept:
