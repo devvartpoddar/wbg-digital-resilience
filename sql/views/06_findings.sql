@@ -20,4 +20,4 @@ LEFT JOIN wbg.paragraph_projects pp ON pp.paragraph_id = m.paragraph_id
 LEFT JOIN wbg.projects pr ON pr.project_id = pp.project_id
 WHERE m.was_sent_to_model;
 COMMENT ON VIEW wbg.measure_findings_in_context IS
-  'Every unit a measure run graded, with the measure''s name, its project (a paragraph in two projects gives two rows), document, component, whether it counts (is_committed: posterior_probability at the measure''s floor), the linked asset, its type (the measure''s cluster), the unit''s text and its paragraph. Filter is_committed for commitments.';
+  'Every unit a measure run graded, with the measure''s name, its project (a paragraph in two projects gives two rows), document, component, whether it counts (is_committed: the band rule), the linked asset, its type (the measure''s cluster), the unit''s text and its paragraph. Filter is_committed for commitments.';

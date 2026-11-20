@@ -18,7 +18,7 @@ Two tiers, cheapest first. Say which tier you used and what it cost.
 | Tier | Command | Time, cost | Gives |
 |---|---|---|---|
 | 1. Scratch measure | `./wbg_portfolio try <slug> --expand "<what to look for>" --max-spend 0.50` | minutes, cents | a definition, phrases and patterns written by one cheap generative call, then the real funnel: embeddings, gate, patterns, the decision model's grade per sentence, feedback rounds. Scores in `wbg.scores` kind `scratch`; the command prints what it found. The commitments do not move. |
-| 2. Measure | three files in `analysis/labels/` by pull request, then `./wbg_portfolio add <slug>` | an hour, up to US$1 | a real measure with types, pair checks, links and a place in the app |
+| 2. Measure | three files in `analysis/labels/` by pull request, then `./wbg_portfolio add <slug>` | an hour, up to US$1 | a real measure with types, links and a place in the app |
 
 Tier 1 is the default when Dev asks to "check what is there on X". Write the definition yourself when he gives one (`--definition ... --phrase ... --phrase ...`); use `--expand` when he gives a topic. Re-running `./wbg_portfolio try` with a sharper definition re-asks only the sentences whose question changed. `./wbg_portfolio try --list` shows what has been tried. Report: sentences asked, sentences at the floor, projects, the five strongest sentences, the spend.
 

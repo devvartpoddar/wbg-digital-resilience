@@ -58,4 +58,4 @@ JOIN n na ON na.label_set = a.label_set
 JOIN n nb ON nb.label_set = b.label_set
 GROUP BY a.label_set, b.label_set, na.committed_units, nb.committed_units;
 COMMENT ON VIEW wbg.measure_overlap IS
-  'For each pair of measures, how many committed units (the posterior at each measure''s floor, any asset link) both count, and that as a share of the smaller measure. A report only: nothing is deduplicated, and a unit committed to two measures counts under each everywhere else.';
+  'For each pair of measures, how many committed units (committed by the band rule, any asset link) both count, and that as a share of the smaller measure. A report only: nothing is deduplicated, and a unit committed to two measures counts under each everywhere else.';

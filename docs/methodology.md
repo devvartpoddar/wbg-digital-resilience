@@ -41,12 +41,12 @@ From those two, every run derives the same things: a `scores` table (the model's
 | Clean procurement packages, notices and awards; link notices and awards to their package | Built |
 | Embed the search units; score every label set's phrases (sections 5, 5a) | Built |
 | The funnel, the same for the asset map and every measure: gate, word patterns, stored answers, feedback rounds (5b, 5c) | Built, rewritten 2026-10-24; not yet run on the box in this form |
-| The checks: types, pair checks, package assets, commitment links (5d, 5e) | Built, rewritten 2026-10-24 |
+| The checks: types, package assets, package-to-measure links (5d, 5e) | Built, rewritten 2026-10-24 |
 | One decision function and the dashboards' views (5f, 5g) | Built, rewritten 2026-10-24 |
 | Grading as self-contained tasks a person or an agent fills; one evaluation for every decision kind (5g) | Built 2026-10-24; the file-based grades import once |
 | Release v1.0 (provisional, 2026-10-23): decisions on the raw score, the layer off, floors read off the seed-7 grades | Settings unchanged; figures are upper estimates until an evaluation draw is graded |
 
-**Next on the box:** `./wbg_portfolio check import` (the grades of the file sheets into the store), then a run from `classify` (every stored answer is reused; the types and pair checks are re-asked because their state now carries the section and component), then `./wbg_portfolio check evaluate`. `docs/method/running.md` has the order and the costs.
+**Next on the box:** `./wbg_portfolio check import` (the grades of the file sheets into the store), then a run from `classify` (every stored answer is reused; a question is asked again only where its wording or state changed), then `./wbg_portfolio check evaluate`. `docs/method/running.md` has the order and the costs.
 
 ## Where each part is described
 
@@ -61,8 +61,8 @@ The method is split by stage so a change reads only its part. **When you change 
 | 4 | `docs/method/postgres.md` | the two stores, the loader, the tables, the views (`db.py`, `load_pg.py`, `schema.py`, `sql/views/`) |
 | 5, 5a | `docs/method/search.md` | search units, embedding, label sets, scoring (`units.py`, `embed.py`, `search.py`, `labels.py`) |
 | 5b | `docs/method/asset-map.md` | the asset map and how a sentence gets its asset |
-| 5c, 5d | `docs/method/measures.md` | a measure through the funnel, types, pair checks (`checks.py`) |
-| 5e | `docs/method/links.md` | packages to assets and to commitments |
+| 5c, 5d | `docs/method/measures.md` | a measure through the funnel, the band rule's second look, types (`second.py`, `checks.py`) |
+| 5e | `docs/method/links.md` | packages to assets and to measures; the links a commitment has |
 | 5f | `docs/method/dashboards.md` | the views the app reads, package status, the app's pages and what they compute (`sql/views/13-18`, `app.py`) |
 | 5g | `docs/method/decisions.md` | one decision system: the asker, the funnel, the floors, the probability layer, the skip rule, grading and evaluation, the control panel (`api.py`, `ask.py`, `questions.py`, `funnel.py`, `decide.py`, `grading.py`, `posterior.py`, `skip.py`, `fits.py`, `panel.py`) |
 | 6 | `docs/method/storage.md` | `data/` layout, joins, the cohort (`paths.py`, `cohort_build.py`) |

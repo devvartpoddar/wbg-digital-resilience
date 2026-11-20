@@ -13,18 +13,18 @@ Settings with no row were set by judgement, not grades (round sizes, minimum cou
 | `asset.gate_cosine` 0.3 | Set to the measures' value on 2026-10-22 once the asset map had the measures' second look (patterns, rounds). On the paragraph map a 0.30 gate had lost 9 per cent of asset links at 0.5, 0.25 lost 5.8 per cent. |
 | `asset.floor` 0.8, `asset.multiple` false, `asset.decay` 0 | v1.0: of right commitments, 47 per cent carry the right asset, 0 per cent a wrong one, 53 per cent none; 0.5 gave 14 per cent wrong. The paragraph rule (decay 0.4, floor 0.3) moved agreement with the person's asset from 0.64 to 0.66 on 615 sentences, so it is off. Several assets at 0.8 were not tested. |
 | `asset.ask_floor` 0.8, `floor.ask` 0.73 | The floors the v1.0 run asked at. Keep at or below the decision floors. |
-| `floor.default` 0.80 | 2026-10-24, first evaluation on the full store (700 graded sentences, training draw, raw score): 0.73 gave precision 0.77 and recall 0.85; 0.80 gives 0.79 and 0.78; 0.88 would reach 0.85 at recall 0.62. Dev chose 0.80: fewer, firmer commitments. v1.0 had read 0.73 off the seed-7 grades (85 per cent precision, 59 per cent recall). |
+| `floor.default` 0.80 (until 2026-11-20 the commitment floor; now the cut the evaluation and scratch tallies read) | 2026-10-24, first evaluation on the full store (700 graded sentences, training draw, raw score): 0.73 gave precision 0.77 and recall 0.85; 0.80 gives 0.79 and 0.78; 0.88 would reach 0.85 at recall 0.62. Dev chose 0.80: fewer, firmer commitments. v1.0 had read 0.73 off the seed-7 grades (85 per cent precision, 59 per cent recall). |
 | `floor.types` 0.7, `types.multiple` true | v1.0: 85 per cent precision, 42 per cent recall (0.5 gave 82 and 54). On the commitment scale types gave 6.1 a sentence at 0.5; the fit question told the sentence is already committed gave 1.8 at 0.5 and 1.3 at 0.7. |
-| `floor.pair_check` 0.58 | v1.0: 85 per cent precision keeping 74 per cent of the right sides (58 per cent precision with no check). On 249 sentences the pair answer raised recall at 0.90 precision from 0.78 to 0.87. |
+| `floor.pair_check` 0.58 (removed 2026-11-20) | v1.0: 85 per cent precision keeping 74 per cent of the right sides (58 per cent precision with no check). On 249 sentences the pair answer raised recall at 0.90 precision from 0.78 to 0.87. |
 | `link.asset_yes` 0.67, `link.asset_top` 4 | v1.0: 85 per cent precision, 73 per cent recall on 65 graded package lines. On the first full run 479 yes answers fell at rank 4, the last asked. |
-| `dashboard.package_link_min_probability` 0.7 | Links never reached 85 per cent precision on seed 7 (AUC 0.66, 13 yes of 60): low confidence (issue #76). |
+| `dashboard.package_link_min_probability` 0.7 (removed 2026-11-20; the strong link's `link.strong_yes` is the same 0.7) | Links never reached 85 per cent precision on seed 7 (AUC 0.66, 13 yes of 60): low confidence (issue #76). |
 | `dashboard.commitment_link_levels` unit\|none | With `asset.floor` 0.8 about half the right commitments name no asset, so `none` counts them as `(no asset)`. |
 | `posterior.on` false | Every layer tried scored below the raw score at 85 per cent precision out of fold (issue #79: the layers had been fitted on band-drawn sheets without weights). On earlier held-out halves, score + vote + centroid ranked 0.885 against 0.874 for the score alone, and recall at 0.85 precision 0.81 against 0.78; a prior alone ranked 0.765. |
 | `posterior.sharpness` 20, `ridge` 1.0, `pool` true | Sharpness 10 to 20 best of 2 to 160 on an earlier sheet. Ridge 1 is a normal prior of standard deviation 1 on each standardised weight. Pooled because a measure has about 40 graded rows, a type or pair side fewer. |
 | `posterior.near_copy` off | Only 6 of 1,383 committed governance sentences had a neighbour in another project above 0.95 cosine. |
 | `feedback.negative_weight` 0.5 | The first run's plain centroid pulled in the measure's general neighbourhood. Not set from grades; the elusion draw shows what the rounds miss. |
 | `skip.max_loss` 0.01 | A 1 per cent loss cannot be vouched for with tens of graded yes: the rule of three gives 30 yes a 10 per cent bound. The report prints the bound. |
-| `types.gaps` off | Re-proposing on every run cost new calls and new wording whenever a floor moved. |
+| `types.gaps` on | It was off while the first runs were tuned: re-proposing on every run cost new calls and new wording whenever a floor moved. It is on now: the proposals are capped, counted and stored, and a reply that cannot be read proposes nothing. |
 
 ## Trials not adopted
 
@@ -41,13 +41,16 @@ Settings with no row were set by judgement, not grades (round sizes, minimum cou
 
 Graded by models, not checked by people: read each figure as a measurement of agreement with the graders used, not as a verified precision. The thresholds of the band rule were chosen on the same 360 items they were measured on.
 
-- **First-pass scores.** Kept sentence x measure pairs scoring 0.90 or more are 96 per cent right; those from 0.80 to 0.90 are 76 to 82 per cent right. The pair check removes about 3,000 above-floor pairs, of which about 80 per cent are right; about 550 sentences lose every measure.
+- **First-pass scores.** Kept sentence x measure pairs scoring 0.90 or more are 96 per cent right; those from 0.80 to 0.90 are 76 to 82 per cent right. 
 - **Band rule** (held-out sample of 360 pairs): precision 0.92 to 0.96 and recall 0.41 to 0.61 by a three-grader majority; 0.86 to 0.92 and 0.48 to 0.74 under the strictest grader.
 - **"Is this digital"**, asked with the paragraph as context: 96 per cent precision and 90 per cent recall on "not digital"; 2 to 3 per cent of truly digital sentences wrongly excluded. Asked of the sentence alone it wrongly excludes 10 to 12 per cent.
+- **Per-measure floors** (removed 2026-11-20 with the band rule). `floor.cyber_security` 0.9: at 0.8 to 0.9 about a third of a read sample was cybersecurity (the rest citizen ID authentication, data protection reviews, generic secure services); 0.9 kept 94 of 108 projects (2026-10-27). `floor.public_institutions` 0.95: in a read sample the sentences at 0.95 and above were all on the measure, 0.90 to 0.95 mixed, 0.80 to 0.90 mostly off it; 0.95 kept 938 sentences in 119 of 146 projects before the pair checks (2026-11-14).
 - **Noise in one stored score.** A stored score is one noisy draw (batches of 50): agreement between two batches is 0.96 for measures.
 - **Package to asset:** precision 0.96, recall 0.71; with a second look on the band, recall 0.93.
 - **Strong link** (the package asked directly about the measure): precision 0.87, recall 0.88, against 0.33 and 0.19 for the old link question read as "names the measure". The old question read as "delivers" gave links by a shared asset that were right about 15 per cent of the time, so the label for a shared-asset link is "same asset".
 - **Activities** (a chat model shown a whole project x measure group): pairwise precision 0.93 for groups up to 8 sentences, 0.97 for 12 to 20, 0.78 above 20.
+
+- **Retired (2026-11-20, one pipeline).** The pair check is gone: it removed about 3,000 above-floor pairs, of which about 80 per cent were right, and about 550 sentences lost every measure. The old commitment-to-package question is gone: read as "delivers" it was right about 15 per cent of the time. The band rule, the digital rule, the policy flag, the link strengths and the activities are the pipeline, with no switch; the per-measure floors went with them.
 
 ## Definitions
 
