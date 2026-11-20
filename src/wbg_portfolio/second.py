@@ -5,10 +5,12 @@ second look; both must agree. Nothing here decides: each step asks and writes
 scores, and src/wbg_portfolio/decide.py reads them.
 
   measure_second  every sentence x measure whose first-pass posterior is in
-            [band.ask_low, band.ask_high): the decision model again with the
+            [band.ask_low, band.ask_high) and whose digital P(yes) is digital.ask_low or more
+            (so it runs after digital; a sentence with no digital answer yet waits, one under
+            digital.ask_low is left out): the decision model again with the
             paragraph beside the sentence (kind measure_ctx, P(grades 2, 3)),
             and the chat model's grade 0 to 3 (kind measure_second)
-  digital   every sentence with a first-pass score in [band.ask_low, band.ask_high)
+  digital   (before measure_second) every sentence with a first-pass score in [band.ask_low, band.ask_high)
             for some measure, once whatever its measure: is it a digital asset or
             the digital sector (kind digital, P(yes)); only committed ones are published
   policy    every committed sentence: investment or policy instrument, by the
@@ -66,13 +68,20 @@ def measure_second(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_r
     measure_second (label_set the measure). Returns the pairs looked at, or
     None when a request failed or on a dry run."""
     b = decide.band()
-    units, scope = _in_scope(corpus, [u for u, r in decide.measure_units(conn, corpus, name).items()
-                                      if r["asked"]], projects)
+    if checks.cannot_estimate(conn, dry_run, log, f"second look {name}", ("digital", "digital")):
+        return None
+    dig, low = decide.digital_scores(conn), decide.digital_ask_low()
+    in_band = [u for u, r in decide.measure_units(conn, corpus, name).items() if r["asked"]]
+    waiting_dig = [u for u in in_band if u not in dig]
+    skipped = [u for u in in_band if u in dig and dig[u] < low]
+    units, scope = _in_scope(corpus, [u for u in in_band if u in dig and dig[u] >= low], projects, universe=in_band)
     labs, scale = Q.load(name)
     lab = labs[0]
     gq = Q.graded_questions(name)[0][lab["id"]]
     cq, sq = Q.in_context(gq), Q.second_grade_question(lab, scale)
-    log(f"second look {name}: {len(units):,} sentence(s) with a first score in [{b['ask_low']}, {b['ask_high']})")
+    log(f"second look {name}: {len(units):,} sentence(s) with a first score in [{b['ask_low']}, {b['ask_high']}) "
+        f"and a digital score of {low} or more; {len(skipped):,} left out as not digital, "
+        f"{len(waiting_dig):,} waiting for the digital question")
     ctx = checks._ask(conn, model, [(u, corpus.context_state(u), {lab["id"]: cq}) for u in units],
                       f"second:{name}:context", name, api_key, dry_run, workers, log, data)
     second, ok = chat.asked(conn, [(u, corpus.chat_state(u), sq) for u in units], f"second:{name}:chat", name,

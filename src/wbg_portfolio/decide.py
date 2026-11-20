@@ -141,6 +141,7 @@ def measure_units(conn, corpus, name):
     p = posterior(conn, "measure", name, qshas, corpus.vector)
     b = band()
     ctx, second = look_scores(conn, "measure_ctx", name), look_scores(conn, "measure_second", name)
+    dig, dig_low = digital_scores(conn), digital_ask_low()
     out = {}
     for lset, lid, uid, score, answer, served, route, rnd, cos, rank in scores(conn, "measure", name):
         if uid not in corpus.row_of:
@@ -153,6 +154,8 @@ def measure_units(conn, corpus, name):
         row["committed"], row["decided_by"], row["waiting"] = band_rule(
             post, row["score_context"], row["second_grade"], b)
         row["asked"] = asked_band(post, b)
+        if row["waiting"] and dig.get(uid, 1.0) < dig_low:
+            row["waiting"] = False                  # not digital, so never asked its second looks: not waiting
         out[uid] = row
     return out
 
@@ -173,7 +176,21 @@ def digital_asked_units(conn, corpus, names):
 
 def digital_floor():
     """The P(yes) the digital question needs for a sentence to count as digital (digital.floor)."""
-    return float(setting("digital.floor"))
+    fl = float(setting("digital.floor"))
+    digital_ask_low(fl)
+    return fl
+
+
+def digital_ask_low(floor=None):
+    """The P(yes) from which a sentence is asked its measure second looks (digital.ask_low); fails loudly when
+    it is above digital.floor, because a sentence counted as digital would then have no second look."""
+    low = float(setting("digital.ask_low"))
+    fl = float(setting("digital.floor")) if floor is None else floor
+    if low > fl:
+        raise SystemExit(f"panel: digital.ask_low ({low}) is above digital.floor ({fl}); lower digital.ask_low "
+                         f"to {fl} or less, else sentences counted as digital would never be asked their "
+                         f"second looks")
+    return low
 
 
 def digital_scores(conn):

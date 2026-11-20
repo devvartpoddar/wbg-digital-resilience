@@ -773,18 +773,21 @@ def run(args, data):
                 ok = funnel.run(conn, data, Q.ASSETS, corpus=corpus, **kw) is not None or args.dry_run
             elif stage == "measure":
                 no_projects = {k: v for k, v in kw.items() if k != "projects"}
-                # first pass and the band's second look, measure by measure
+                # every first pass, then the digital question (a sentence the first pass is unsure of or sure
+                # of, for any measure), then the measures' second looks only for sentences that may be digital,
+                # then the policy flag and the assets' second look and kinds (committed and digital sentences).
+                # The types need none of them, so they come after.
                 for name in sets:
                     if funnel.run(conn, data, name, corpus=corpus, **kw) is None and not args.dry_run:
                         ok = False
-                        continue
-                    if second.measure_second(conn, data, corpus, name, **kw) is None and not args.dry_run:
-                        ok = False
+                if ok and second.digital(conn, data, corpus, sets, every=every, **kw) is None and not args.dry_run:
+                    ok = False
                 if ok:
-                    # once whatever the measure: the digital and policy questions of the committed
-                    # sentences of the sets this run was given, then the assets' second look and kinds
-                    # (committed and digital sentences). The types need none of them, so they come after.
-                    for step in (second.digital, second.policy, second.asset_second, second.asset_subtype):
+                    for name in sets:
+                        if second.measure_second(conn, data, corpus, name, **kw) is None and not args.dry_run:
+                            ok = False
+                if ok:
+                    for step in (second.policy, second.asset_second, second.asset_subtype):
                         if step(conn, data, corpus, sets, every=every, **kw) is None and not args.dry_run:
                             ok = False
                 if ok:

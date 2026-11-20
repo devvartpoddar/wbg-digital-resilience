@@ -16,6 +16,13 @@ from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 from wbg_portfolio import second
 
+
+def look(pg, corpus, c, name, **kw):
+    """The measure's second look, after the digital question (which decides which sentences are asked)."""
+    if not kw.get("dry_run"):
+        second.digital(pg, corpus, c, [name], api_key="k", **QUIET)
+    return second.measure_second(pg, corpus, c, name, **{"api_key": "k", **QUIET, **kw})
+
 GRADE = Q.chat_question("Grade it.", "grade", maximum=3)
 CHOICE = Q.chat_question("Which?", "choice", ["investment", "policy"])
 
@@ -225,7 +232,7 @@ def test_a_pair_in_the_band_is_committed_only_when_both_looks_agree(pg, corpus, 
     c = first_pass(pg, corpus, 0.6)
     u0 = c.index[0]["unit_id"]
     assert committed(pg, c)[u0] == (False, "", True)          # no second look yet: waiting, not committed
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 1
+    assert look(pg, corpus, c, "cra") == 1
     assert committed(pg, c)[u0] == (True, "second_look", False)
     row = decide.measure_units(pg, c, "cra")[u0]
     assert row["score_first"] == pytest.approx(0.6) and row["score_context"] >= 0.7 and row["second_grade"] == 3
@@ -236,14 +243,14 @@ def test_a_pair_in_the_band_is_committed_only_when_both_looks_agree(pg, corpus, 
 def test_the_chat_model_saying_no_keeps_the_pair_out(pg, corpus, fake_chat):
     c = first_pass(pg, corpus, 0.6)
     fake_chat.reply = lambda prompt: '{"grade": 1}'
-    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
+    look(pg, corpus, c, "cra")
     assert committed(pg, c)[c.index[0]["unit_id"]] == (False, "", False)
 
 
 def test_an_unreadable_second_look_is_never_a_yes(pg, corpus, fake_chat):
     c = first_pass(pg, corpus, 0.6)
     fake_chat.reply = lambda prompt: "grade 3"
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) is not None
+    assert look(pg, corpus, c, "cra") is not None
     assert committed(pg, c)[c.index[0]["unit_id"]] == (False, "", True)
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_second'")[0] == 0
 
@@ -254,27 +261,29 @@ def test_with_the_asked_band_narrowed_a_score_at_the_keep_level_needs_no_second_
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.ask_low": live()["band.low"],
                                                     "band.ask_high": live()["band.keep"]})
     c = first_pass(pg, corpus, 0.95)
+    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
     n = len(fake_model)
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0
+    assert look(pg, corpus, c, "cra") == 0
     assert len(fake_model) == n and not fake_chat.calls
     assert committed(pg, c)[c.index[0]["unit_id"]] == (True, "score", False)
 
 
 def test_a_rerun_with_everything_stored_asks_nothing(pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.6, units=(0, 1))
-    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
+    look(pg, corpus, c, "cra")
     n_model, n_chat = len(fake_model), len(fake_chat.calls)
     assert n_chat == 2
-    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
+    look(pg, corpus, c, "cra")
     assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat)
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_ctx'")[0] == 2
 
 
 def test_a_dry_run_and_a_scope_with_no_such_project_ask_nothing(pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.6)
+    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
     n = len(fake_model)
-    assert second.measure_second(pg, corpus, c, "cra", dry_run=True, **QUIET) is None
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", projects=["P9"], **QUIET) == 0
+    assert look(pg, corpus, c, "cra", dry_run=True) is None
+    assert look(pg, corpus, c, "cra", projects=["P9"]) == 0
     assert len(fake_model) == n and not fake_chat.calls
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = 'measure_ctx'")[0] == 0
 
@@ -282,9 +291,9 @@ def test_a_dry_run_and_a_scope_with_no_such_project_ask_nothing(pg, corpus, fake
 def test_later_stages_ask_about_the_sentences_committed_under_the_band_rule(pg, corpus, fake_chat, fake_model):
     c = first_pass(pg, corpus, 0.6)
     assert checks.committed_at_ask(pg, c, "cra") == []                # in the band, no second look: not asked
-    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
-    assert checks.committed_at_ask(pg, c, "cra") == []                # committed, but not yet known to be digital
-    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0   # no digital answer yet: waiting
+    assert checks.committed_at_ask(pg, c, "cra") == []                # nothing asked, nothing committed
+    look(pg, corpus, c, "cra")
     assert checks.committed_at_ask(pg, c, "cra") == [c.index[0]["unit_id"]]
     assert checks.types(pg, corpus, c, "cra", api_key="k", **QUIET) == 2
     # the same sentence below the band is not asked: floor.ask no longer decides
@@ -317,7 +326,7 @@ def test_loosening_band_context_counts_the_newly_committed_sentences_with_no_mod
     u0 = c.index[0]["unit_id"]
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.context": 1.01})   # nothing passes the look
-    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
+    look(pg, corpus, c, "cra")
     assert second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 1           # asked though not committed
     assert committed(pg, c)[u0] == (False, "", False)
     assert decide.committed_digital_units(pg, c, ["cra"]) == []
@@ -355,7 +364,7 @@ def test_publish_carries_the_new_columns_and_keeps_the_not_digital_out_of_the_co
     u0, u1 = c.index[0]["unit_id"], c.index[2]["unit_id"]
     funnel_assets = funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
     assert funnel_assets is not None
-    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
+    look(pg, corpus, c, "cra")
     checks.types(pg, corpus, c, "cra", api_key="k", **QUIET)
     second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
     second.policy(pg, corpus, c, ["cra"], api_key="k", **QUIET)
@@ -369,7 +378,7 @@ def test_publish_carries_the_new_columns_and_keeps_the_not_digital_out_of_the_co
     r0, r1 = rows[u0], rows[u1]
     assert r0[1:3] == (True, "second_look") and float(r0[3]) == 0.6 and float(r0[4]) >= 0.7 and r0[5] == 3
     assert r0[6] is True and r0[8] == "investment"
-    assert r1[1:3] == (True, "score") and r1[4] is not None and r1[5] is not None and r1[6] is False and float(r1[7]) < 0.5
+    assert r1[1:3] == (True, "score") and r1[4] is None and r1[5] is None and r1[6] is False and float(r1[7]) < 0.5
     nd = db.rows(pg, f"SELECT unit_id, project_id, digital_p FROM {db.SCHEMA}.not_digital_findings")
     assert [(u, p) for u, p, _ in nd] == [(u1, "P1")]
     assert u1 not in {u for (u,) in db.rows(pg, f"SELECT unit_id FROM {db.SCHEMA}.commitment_units")}
@@ -456,7 +465,7 @@ def test_a_pair_above_the_keep_line_gets_a_second_look_and_stays_committed_whate
     c = first_pass(pg, corpus, 0.95)
     u0 = c.index[0]["unit_id"]
     fake_chat.reply = lambda prompt: '{"grade": 0}'
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 1
+    assert look(pg, corpus, c, "cra") == 1
     row = decide.measure_units(pg, c, "cra")[u0]
     assert (row["committed"], row["decided_by"], row["waiting"]) == (True, "score", False)
     assert row["second_grade"] == 0 and row["score_context"] is not None      # stored, and readable
@@ -467,7 +476,7 @@ def test_moving_the_keep_line_up_changes_the_decision_with_no_model_call(pg, cor
     c = first_pass(pg, corpus, 0.95)
     u0 = c.index[0]["unit_id"]
     fake_chat.reply = lambda prompt: '{"grade": 1}'
-    second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
+    look(pg, corpus, c, "cra")
     calls = (len(fake_model), len(fake_chat.calls))
     assert committed(pg, c)[u0] == (True, "score", False)
     pin(monkeypatch, **{"band.keep": 0.97})                        # the 0.95 pair is now in the band
@@ -475,15 +484,15 @@ def test_moving_the_keep_line_up_changes_the_decision_with_no_model_call(pg, cor
     fake_chat.reply = lambda prompt: '{"grade": 3}'
     pin(monkeypatch, **{"band.keep": 0.97, "band.second_grade": 1})
     assert committed(pg, c)[u0] == (True, "second_look", False)
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 1       # nothing new to ask
+    assert look(pg, corpus, c, "cra") == 1       # nothing new to ask
     assert (len(fake_model), len(fake_chat.calls)) == calls
 
 
 def test_the_asked_band_is_what_is_asked_and_never_below_it(pg, corpus, fake_chat, monkeypatch):
     c = first_pass(pg, corpus, 0.45, units=(0, 1))
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 0       # under band.ask_low
+    assert look(pg, corpus, c, "cra") == 0       # under band.ask_low
     pin(monkeypatch, **{"band.ask_low": 0.4, "band.low": 0.4})
-    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 2
+    assert look(pg, corpus, c, "cra") == 2
     pin(monkeypatch, **{"band.ask_high": 0.95})
     c2 = first_pass(pg, corpus, 0.95, units=(0,))
     assert decide.measure_units(pg, c2, "cra")[c2.index[0]["unit_id"]]["asked"] is False
@@ -508,3 +517,39 @@ def test_the_asset_ask_line_cannot_be_under_the_asset_floor(monkeypatch):
     with pytest.raises(SystemExit) as e:
         decide.asset_ask_high()
     assert "asset.ask_high (0.1) is below asset.floor" in str(e.value)
+
+
+# ----------------------------------------------- the digital question comes first and gates the looks
+
+def test_the_second_look_is_asked_only_for_sentences_the_digital_question_does_not_rule_out(
+        pg, corpus, fake_chat, fake_model):
+    c = first_pass(pg, corpus, 0.6, units=(0, 2))                  # a tower sentence and a road sentence
+    u0, u1 = c.index[0]["unit_id"], c.index[2]["unit_id"]
+    lines = []
+    # no digital answer yet: both wait, nothing is asked, and a dry run says it cannot estimate
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", log=lines.append) == 0
+    assert "2 waiting for the digital question" in lines[0] and not fake_chat.calls
+    assert second.measure_second(pg, corpus, c, "cra", dry_run=True, log=lines.append) is None
+    assert any("cannot estimate until digital has run" in x for x in lines)
+    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)       # tower 0.9, road 0.1 (under 0.2)
+    lines.clear()
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", log=lines.append) == 1
+    assert "1 left out as not digital" in lines[0] and "0 waiting" in lines[0]
+    asked = {r[0] for r in db.rows(pg, f"SELECT item_id FROM {db.SCHEMA}.scores WHERE kind = 'measure_ctx'")}
+    assert asked == {u0}
+    # the left-out pair is decided (not committed) and is not reported as waiting
+    assert committed(pg, c)[u1] == (False, "", False)
+
+
+def test_lowering_ask_low_asks_the_newly_included_and_an_ask_low_above_the_floor_fails_loudly(pg, corpus, fake_chat, fake_model,
+                                                                             monkeypatch):
+    live = panel.settings
+    c = first_pass(pg, corpus, 0.6, units=(0, 2))
+    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "digital.ask_low": 0.0})
+    assert second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET) == 2     # the road is asked too
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "digital.ask_low": 0.3, "digital.floor": 0.2})
+    with pytest.raises(SystemExit, match="digital.ask_low"):
+        decide.digital_floor()
+    with pytest.raises(SystemExit, match="digital.ask_low"):
+        second.measure_second(pg, corpus, c, "cra", api_key="k", **QUIET)
