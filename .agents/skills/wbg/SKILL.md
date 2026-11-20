@@ -28,7 +28,7 @@ Every stage that calls a model takes `--max-spend <US$>`; set it to what you exp
 
 ## What the pieces are
 
-- `src/`: the pipeline (`./wbg_portfolio run`: fetch > prepare > embed > search > classify > measure > link > publish). Holds no measure's definition.
+- `src/`: the pipeline (`./wbg_portfolio run`: fetch > prepare > embed > search > classify > measure > link > activities > publish). Holds no measure's definition.
 - `inputs/taxonomy/`: the assets (changed rarely; a changed definition is a new question and invalidates grades under it: stop and ask).
 - `analysis/labels/`: the measures, the shared grade scale, any set being tried. `analysis/sql/`: questions over Postgres.
 - `sql/views/`: what the app reads, through `src/wbg_portfolio/app.py`. `inputs/config/control_panel.csv`: every threshold, one line each; never a number in code.

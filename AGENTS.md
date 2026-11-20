@@ -4,7 +4,7 @@
 
 The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement records, finds which digital assets a project finances and which climate resilience measures it commits to for them, and links that to upcoming procurement, so an advisor knows which Task Team Leaders (TTLs) to talk to, and when. Anything outside the four questions at the top of `docs/methodology.md` does not belong here.
 
-`src/wbg_portfolio/` is the pipeline, a Python package (`pyproject.toml`; `./wbg_portfolio run`: fetch > prepare > embed > search > classify > measure > link > publish), and `app.py` in it is what the Shiny app (repository `devvartpoddar/shiny`, `apps/wbg`) reads the results through; it takes any label set by name and holds no measure's definition. `inputs/taxonomy/` holds the assets, `analysis/labels/` the measures, `analysis/sql/` questions over Postgres, `sql/views/` the views the dashboards read. Keep analysis assumptions out of `src/` and pipeline mechanics out of `analysis/`.
+`src/wbg_portfolio/` is the pipeline, a Python package (`pyproject.toml`; `./wbg_portfolio run`: fetch > prepare > embed > search > classify > measure > link > activities > publish), and `app.py` in it is what the Shiny app (repository `devvartpoddar/shiny`, `apps/wbg`) reads the results through; it takes any label set by name and holds no measure's definition. `inputs/taxonomy/` holds the assets, `analysis/labels/` the measures, `analysis/sql/` questions over Postgres, `sql/views/` the views the dashboards read. Keep analysis assumptions out of `src/` and pipeline mechanics out of `analysis/`.
 
 ## Read little, spend little
 
