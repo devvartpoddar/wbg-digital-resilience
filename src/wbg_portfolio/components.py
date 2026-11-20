@@ -237,7 +237,8 @@ class Tagger:
             head = RUN_IN_NUMBER.sub("", text, count=1)
             m = self._allowed(sub_word_match(head[:200]))
             # A run-in title ends at its first full stop.
-            title = re.split(r"\.\s+", head[:200])[0]
+            # (after the number: 'Component 1. Title. ...' has its first stop behind 'Component 1').
+            title = re.split(r"\.\s+", COMPONENT_PREFIX.sub("", head[:200], count=1))[0]
             if m:
                 return self._open_sub(m, title, path)
             m = self._allowed(_ok(run_in_match(head)))

@@ -48,7 +48,7 @@ MODEL_BLOCKS = {"narrative", "annex", "footnote"}
 CITATION_MAX_WORDS = 15
 # The PDF reader's own version: bump it when pdf_layout.py or text_rules.py change how a PDF
 # is read in a way their constants do not show.
-PARSER = "pdf-layout-2"
+PARSER = "pdf-layout-3"
 
 
 def citation_only(text, block):

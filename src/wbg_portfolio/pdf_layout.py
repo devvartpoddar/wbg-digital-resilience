@@ -87,6 +87,10 @@ def strip_inline_marks(text, defined, stats):
 # ('https://www.example.org/en/ country/report.pdf').
 URL = re.compile(r"(?:https?://|www\.)\S+(?:\s(?=[\w.\-]*[/=])[\w./?=&%#~:+\-]+)*", re.I)
 TITLE_LINE = re.compile(r"^(?:Sub-?component|Component|Figure|Table|Box|Map|Chart)\s*[\dA-Z]")
+# 'Component 5: Contingent Emergency Response Component, CERC (US$0).': a bold component title
+# some documents end with a full stop. Only with the colon after the number, so a bold sentence
+# ('Component 1 will finance ...') is not one.
+STOPPED_TITLE = re.compile(r"^(?:Sub-?component|Component)\s*(?:\d{1,2}(?:\.\d{1,2})?|[A-Z](?:\.?\d{1,2})?)\s*:\s*\S")
 BULLET_OPEN = re.compile(r"^\s*(?:[•●▪■◦\-–]|\(?[ivxlc]{1,5}[\).]|\(?[a-z][\).]|\d{1,2}\))\s+\S")
 
 
@@ -559,6 +563,40 @@ def _title_line(text):
         and not re.search(r"[.;]$", text) and "\n" not in text
 
 
+SECTION_TITLE_MAX_WORDS = 12   # an unmarked lettered section title has at most this many words
+
+
+def _section_title(line, state, measure, observe_only=False):
+    """Is this line a section title that the font does not show: a capitalised "II. PROJECT
+    DESCRIPTION", or the next letter in order after it ("A. Project Development Objective",
+    then "B. ...")? state["letter"] is the letter last read ('' after a numeral title, None
+    before the first). A line that is a title by its font only moves the sequence on."""
+    text = line["text"]
+    m = C.ROMAN.match(text)
+    if m and m.group(2).isupper() and len(text.split()) <= SECTION_TITLE_MAX_WORDS:
+        state["letter"] = ""
+        return not observe_only and not re.search(r"[.;,:]$", text) \
+            and (line["x1"] - line["x0"]) < HEADING_MAX_MEASURE * measure
+    m = C.LETTER.match(text)
+    if not m or state["letter"] is None:
+        return False
+    expect = "A" if state["letter"] == "" else chr(ord(state["letter"]) + 1)
+    if m.group(1) != expect:
+        return False
+    ok = len(text.split()) <= SECTION_TITLE_MAX_WORDS and not re.search(r"[.;,:]$", text) \
+        and (line["x1"] - line["x0"]) < HEADING_MAX_MEASURE * measure \
+        and re.match(r"[A-Z]", m.group(2))
+    if ok or observe_only:
+        state["letter"] = m.group(1)
+    return bool(ok) and not observe_only
+
+
+def _stopped_title(line):
+    """A bold 'Component 5: Title (US$0).' line: a heading although it ends in a full stop."""
+    return bool(line["bold"] and STOPPED_TITLE.match(line["text"])
+                and len(line["text"].split()) <= TITLE_MAX_WORDS and line["text"].endswith("."))
+
+
 def _opens_block(line, before):
     """Does this line start a new paragraph or list item, rather than continue
     the one above? A bullet glyph always does. A number or enumerator only does
@@ -621,6 +659,7 @@ def extract(pdf, raw_out=None):
     # 1. Label every line: furniture, footnote, table, heading or body.
     items = []          # (kind, page_no, line or table-row text, line dict)
     pitches = []
+    text_state = {"letter": None}   # the last lettered section title read (see _section_title)
     # Pass 1, per page: drop furniture, find where the footnotes start, and note which
     # footnote numbers the page defines.
     kept_pages, fn_starts, defined_by_page = [], [], []
@@ -705,6 +744,16 @@ def extract(pdf, raw_out=None):
                 and len(l["text"].split()) <= HEADING_MAX_WORDS \
                 and not re.search(r"[.;,:]$", l["text"]) \
                 and (l["x1"] - l["x0"]) < HEADING_MAX_MEASURE * page_measure[pno - 1]
+            # A section title in a font the file does not mark as bold ('CIDFont+F3'): the
+            # lettered titles after a capitalised "II. PROJECT DESCRIPTION" run A, B, C in
+            # order, and that order, not the font, says it is a heading.
+            if not heading:
+                heading = _section_title(l, text_state, page_measure[pno - 1])
+            else:
+                _section_title(l, text_state, page_measure[pno - 1], observe_only=True)
+            # A bold 'Component 5: Title (US$0).' ends in a full stop and is still a heading;
+            # read as body it ran into the paragraph above (and its component was missed).
+            heading = heading or _stopped_title(l)
             text = unmark(l["text"])
             if heading or TITLE_LINE.match(text):
                 last_caption[0], last_caption[1] = text, pno
