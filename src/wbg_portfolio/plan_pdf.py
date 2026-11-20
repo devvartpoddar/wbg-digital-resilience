@@ -141,6 +141,27 @@ def _cache_path(data):
     return where(data, "procurement", "plan_pdf_rows.csv")
 
 
+def cache_rows(write):
+    """The cache file's rows: one summary row per PDF (row_index -1, carrying the unread
+    count), then that PDF's table rows."""
+    flat = []
+    for doc in sorted(write):
+        d = write[doc]
+        flat.append({"doc_id": doc, "pdf_sha256": d["sha"], "row_index": -1,
+                     "ref_printed": d["unread"]})
+        flat.extend(dict(r, doc_id=doc, pdf_sha256=d["sha"]) for r in d["rows"])
+    return flat
+
+
+def cache_kept(out, cache):
+    """What the cache file holds: the documents this run read, plus the ones it was not
+    asked for (which keep their rows)."""
+    write = dict(out)
+    for doc, d in cache.items():
+        write.setdefault(doc, d)
+    return write
+
+
 def read_all(data, log=print, only=None):
     """Rows of every plan PDF in the data folder, read once per PDF checksum.
 
@@ -149,9 +170,9 @@ def read_all(data, log=print, only=None):
     out keeps the cache rows it already has, and is read again when a later run asks for it.
 
     Returns {doc_id: {"rows": [...], "unread": n, "sha": ...}} for every PDF read; the
-    cache file holds them (one summary row per PDF, row_index -1, carries the unread count)
-    and is rewritten only when a PDF is new or changed. A PDF that cannot be read is logged
-    and left out."""
+    cache file holds them and is rewritten as each plan is read, so a run that stops part way
+    through — reading a few hundred plans takes about an hour — keeps every plan already read
+    and the next run reads only the rest. A PDF that cannot be read is logged and left out."""
     cache = {}
     path = _cache_path(data)
     if os.path.exists(path):
@@ -182,18 +203,11 @@ def read_all(data, log=print, only=None):
             r.update(doc_id=doc, pdf_sha256=sha, row_index=i)
         out[doc] = {"sha": sha, "rows": rows, "unread": unread}
         changed = True
+        common.write_csv(path, ROW_COLS, cache_rows(cache_kept(out, cache)))
     # The rows the cache keeps: what this run read, plus the documents it was not asked for.
-    write = dict(out)
-    for doc, d in cache.items():
-        write.setdefault(doc, d)
+    write = cache_kept(out, cache)
     if changed or set(cache) != set(write) or not os.path.exists(path):
-        flat = []
-        for doc in sorted(write):
-            d = write[doc]
-            flat.append({"doc_id": doc, "pdf_sha256": d["sha"], "row_index": -1,
-                         "ref_printed": d["unread"]})
-            flat.extend(dict(r, doc_id=doc, pdf_sha256=d["sha"]) for r in d["rows"])
-        common.write_csv(path, ROW_COLS, flat)
+        common.write_csv(path, ROW_COLS, cache_rows(write))
     return out
 
 

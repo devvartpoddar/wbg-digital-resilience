@@ -331,3 +331,32 @@ def test_reading_is_restricted_to_the_referenced_plan_documents(tmp_path, monkey
     # D2 is read when a later run asks for it; D1 comes from the cache, not the PDF again.
     got = plan_pdf.read_all(str(tmp_path), log=lambda *_: None, only={"D2"})
     assert read == ["D1.pdf", "D2.pdf"] and set(got) == {"D2"}
+
+
+def test_the_cache_holds_each_plan_before_the_next_one_is_read(tmp_path, monkeypatch):
+    """Reading a few hundred plans takes about an hour, so the cache is written as each plan is
+    read, not once at the end: a run stopped part way through keeps the plans already read and
+    the next run reads only the rest."""
+    pdf_dir = tmp_path / "raw" / "plan_pdf"
+    pdf_dir.mkdir(parents=True)
+    for doc in ("D1", "D2"):
+        (pdf_dir / f"{doc}.pdf").write_bytes(b"%PDF-1.4\n%%EOF\n")
+
+    def fake_read_pdf(p):
+        return ([{"ref_key": "AAX1", "component_cell": "Comp 1", "amount": "1.00",
+                  "ref_printed": "AA-X-1", "page": 1, "has_amount_column": "true"}], 0)
+
+    def sha_or_stop(path, remember=False):
+        if path.endswith("D2.pdf"):
+            raise KeyboardInterrupt("the run was stopped here")
+        return "sha-of-" + os.path.basename(path)
+
+    monkeypatch.setattr(plan_pdf, "read_pdf", fake_read_pdf)
+    monkeypatch.setattr(plan_pdf, "file_sha256", sha_or_stop)
+    with pytest.raises(KeyboardInterrupt):
+        plan_pdf.read_all(str(tmp_path), log=lambda *_: None)
+
+    with open(tmp_path / "procurement" / "plan_pdf_rows.csv", newline="", encoding="utf-8") as fh:
+        rows = list(csv.DictReader(fh))
+    assert [r["doc_id"] for r in rows] == ["D1", "D1"]
+    assert [r["row_index"] for r in rows] == ["-1", "0"]
