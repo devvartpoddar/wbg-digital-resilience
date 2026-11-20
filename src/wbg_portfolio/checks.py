@@ -142,18 +142,30 @@ def _ask(conn, model, items, stage, name, api_key, dry_run, workers, log, data):
 
 def generate(conn, body, api_key, dry_run):
     """A generative completion, stored in the answer store under its prompt
-    (model GEN_MODEL); None on a dry run with nothing stored."""
-    state = {"prompt": body["messages"][0]["content"]}
+    (model GEN_MODEL); None on a dry run with nothing stored. The request
+    goes out as the chat model's questions do (chat.request_body: temperature 0,
+    max_tokens second.max_tokens, reasoning as second.reasoning says) and is
+    checked against and counted in the spend ledger through api.Spend, with
+    the cost chat.cost_of reads, so --max-spend stops it like any question."""
+    from wbg_portfolio import chat
+    prompt = body["messages"][0]["content"]
+    state = {"prompt": prompt}
     q = {"type": "generate", "model": body["model"]}
     have = ask.stored(conn, GEN_MODEL, [(Q.sha(state), Q.sha(q))])
     if have:
         return next(iter(have.values()))["text"]
     if dry_run:
         return None
+    form = {"reply": {"form": "generate"}}
+    body = chat.request_body(GEN_MODEL, form, prompt)
     with api.Spend(conn, "types:generate", "", GEN_MODEL) as spend:
-        r = api.post("/v1/chat/completions", body, api.key(True) if not api_key else api_key, timeout=180)
-        text = r["choices"][0]["message"]["content"]
-        spend.add(float((r.get("usage") or {}).get("cost") or 0))
+        spend.check(chat.estimate(prompt, form))
+        r = api.post(chat.PATH, body, api_key or api.key(True), timeout=180)
+        try:
+            text = r["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError):
+            raise api.Transport(f"reply has no message: {str(r)[:200]}")
+        spend.add(chat.cost_of(r, prompt, text, form))
     ask._store(conn, GEN_MODEL, [(Q.sha(state), Q.sha(q), {"type": "generate", "text": text},
                                    r.get("model", ""), spend.cost, Q.sha(body), None)], {Q.sha(state): state},
                {Q.sha(q): q})
@@ -206,12 +218,21 @@ def propose(conn, data, corpus, name, *, api_key="", dry_run=False, log=print, m
     listing = "\n".join(f"{i}. {' '.join(corpus.texts[u].split())}" for i, u in enumerate(chosen, 1))
     body = {"model": GEN_MODEL, "temperature": 0, "messages": [{"role": "user", "content": PROPOSE_PROMPT.format(
         name=labs[0]["name"], definition=labs[0]["definition"], max_types=max_types, units=listing)}]}
-    text = generate(conn, body, api_key, dry_run)
+    try:
+        text = generate(conn, body, api_key, dry_run)
+    except api.Transport as exc:
+        log(f"{name}: proposal request failed ({str(exc)[:120]}); no types proposed")
+        return None
     if text is None:
         log(f"{name}: one proposal call to {GEN_MODEL} to make; --dry-run: nothing asked")
         return None
+    try:
+        found = parse_types(text)
+    except api.Transport as exc:
+        log(f"{name}: the proposal is not usable ({str(exc)[:120]}); no types proposed")
+        return None
     rows = [{"measure_id": name, "type_id": t["type_id"], "type_name": t["type_name"],
-             "definition": t["definition"], "active": "true", "source": "proposed"} for t in parse_types(text)]
+             "definition": t["definition"], "active": "true", "source": "proposed"} for t in found]
     path = where(data, "types", f"{name}_types.csv")
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
@@ -244,6 +265,7 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
     fl = float(panel.require("floor.types"))
     none = [u for u in units if not any(Q.score(a, fit=True) >= fl for a in got[u].values())]
     oth = oth_types(data, name)
+    proposed = None
     if str(panel.get("types.gaps", "off")).lower() in ("on", "true") and \
             len(none) >= int(panel.require("types.gap_min_units")):
         existing = "\n".join(f"- {t['type_name']}: {t['definition']}" for t in labels.load_types(name))
@@ -253,19 +275,28 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
             name=lab["name"], definition=lab["definition"], existing=existing,
             min_units=panel.require("types.gap_min_units"), max_types=5,
             units="\n".join(f"{i}. {' '.join(corpus.texts[u].split())}" for i, u in enumerate(chosen, 1)))}]}
-        text = generate(conn, body, api_key, False)
-        taken = {t["type_id"] for t in labels.load_types(name)}
-        oth = [{"measure_id": name, "label_id": lab["id"], "type_id": OTH + t["type_id"],
-                "type_name": f"{OTH} {t['type_name']}", "definition": t["definition"], "active": "true",
-                "source": "gap"} for t in parse_types(text, allow_empty=True) if t["type_id"] not in taken]
-        path = oth_path(data, name)
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
-            w = csv.DictWriter(fh, fieldnames=["measure_id", "label_id", "type_id", "type_name",
-                                               "definition", "active", "source"], lineterminator="\n")
-            w.writeheader()
-            w.writerows(oth)
-        os.replace(path + ".part", path)
+        try:
+            text = generate(conn, body, api_key, False)
+            found = parse_types(text, allow_empty=True)
+        except api.Transport as exc:
+            # a request that failed or a reply that is not the JSON asked for proposes nothing: the
+            # proposals already written stay, and the stage goes on
+            log(f"  {name}: gap proposal not usable ({str(exc)[:120]}); no OTH types proposed this run")
+            found = None
+        if found is not None:
+            taken = {t["type_id"] for t in labels.load_types(name)}
+            oth = [{"measure_id": name, "label_id": lab["id"], "type_id": OTH + t["type_id"],
+                    "type_name": f"{OTH} {t['type_name']}", "definition": t["definition"], "active": "true",
+                    "source": "gap"} for t in found if t["type_id"] not in taken]
+            proposed = len(oth)
+            path = oth_path(data, name)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path + ".part", "w", newline="", encoding="utf-8") as fh:
+                w = csv.DictWriter(fh, fieldnames=["measure_id", "label_id", "type_id", "type_name",
+                                                   "definition", "active", "source"], lineterminator="\n")
+                w.writeheader()
+                w.writerows(oth)
+            os.replace(path + ".part", path)
     oth_q = {t["type_id"]: Q.fit_question({"id": t["type_id"], "name": t["type_name"],
                                            "definition": t["definition"]},
                                           given=(f"The sentence is already counted as a commitment to "
@@ -284,7 +315,9 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
         for tid, a in got2.get(u, {}).items():
             rows.append(_row("type", name, tid, u, corpus.state(u), oth_q[tid], a))
     write_scores(conn, "type", name, rows)
-    log(f"  {len(rows):,} type scores written; {len(none):,} units no approved type reaches")
+    log(f"  {len(rows):,} type scores written; {len(none):,} units no approved type reaches"
+        + (f"; {proposed} OTH type(s) proposed" if proposed is not None else
+           f"; {len(oth)} OTH type(s) kept from earlier"))
     return len(rows)
 
 

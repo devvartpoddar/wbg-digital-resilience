@@ -37,7 +37,7 @@ floor.ask,0.73,commitment,"What a measure's rounds count as a yes, and which sen
 floor.target_precision,0.85,evaluation report,The evaluation suggests the floor with the most recall at this precision.
 floor.types,0.6,types (src/checks.py),"A type counts at this P(yes) or above (the v2 panel file uses 0.6)."
 types.multiple,true,types (src/decide.py),Every type at floor.types (true) or the likeliest only.
-types.gaps,off,types (src/checks.py),on: re-propose OTH types from the sentences no approved type reaches; off: keep those already proposed.
+types.gaps,on,types (src/checks.py),on: re-propose OTH types from the sentences no approved type reaches; off: keep those already proposed.
 types.gap_min_units,5,types (src/checks.py),Fewest such sentences before OTH types are proposed.
 floor.pair_check,0.58,pair check (src/decide.py; sql/views),A sentence two measures both commit stays in a measure at this P(keep) or above.
 link.asset_top,4,package links (src/checks.py),Assets asked of each package: its best this many by cosine.

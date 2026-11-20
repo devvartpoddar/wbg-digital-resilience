@@ -12,6 +12,7 @@ DIFFERENCES = {
     "policy.on": ("false", "true"), "activities.on": ("false", "true"), "floor.types": ("0.7", "0.6"),
     "asset.multiple": ("false", "true"), "dashboard.apply_measure_pair_checks": ("true", "false"),
     "dashboard.commitment_link_levels": ("unit|none", "unit|second_look|none"),
+    "types.gaps": ("off", "on"),
 }
 
 
