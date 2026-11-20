@@ -88,6 +88,24 @@ def fit_question(lab, subject=SENTENCE, given=""):
             "criteria": [g.replace("{name}", lab["name"]) for g in FIT_SCALE]}
 
 
+CONTEXT_NOTE = ("Only the sentence in the 'sentence' field is judged; the 'context' field is the "
+                "paragraph around it, for reference. ")
+
+
+def in_context(question):
+    """The same question for a state that carries a 'context' field (the
+    paragraph): it says that only the sentence is judged. A different question,
+    so a different hash and its own stored answers."""
+    return dict(question, instructions=CONTEXT_NOTE + question["instructions"])
+
+
+def flag_question(flag_id):
+    """The fit question of a flag of inputs/taxonomy/flags.csv (digital): does
+    the flag apply to the sentence, asked with the paragraph beside it."""
+    f = labels.flag(flag_id)
+    return in_context(fit_question({"id": f["id"], "name": f["name"], "definition": f["definition"]}))
+
+
 def graded_questions(name):
     """{label_id: graded question} of a set, and its scale."""
     labs, scale = load(name)
@@ -243,6 +261,24 @@ class Corpus:
             state["component"] = comp
         if self.context == "paragraph":
             state["paragraph"] = self.paragraph_text(r["paragraph_id"])
+        return state
+
+    def context_state(self, unit_id):
+        """state() with the paragraph in a field named 'context', cut to
+        second.context_chars, for the questions that read the sentence with
+        its paragraph beside it (in_context). state() is not changed: a
+        first-pass answer already stored stays what it was."""
+        state = self.state(unit_id)
+        state.pop("paragraph", None)
+        text = self.paragraph_text(self.row(unit_id)["paragraph_id"])
+        state["context"] = text[:int(panel.require("second.context_chars"))]
+        return state
+
+    def chat_state(self, unit_id):
+        """state() without any paragraph: what the chat model's second look at a
+        measure is shown (section, the sentence with its lead-in, component)."""
+        state = self.state(unit_id)
+        state.pop("paragraph", None)
         return state
 
     def vector(self, unit_id):

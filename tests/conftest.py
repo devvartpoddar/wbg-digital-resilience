@@ -21,7 +21,12 @@ os.environ.setdefault("WBG_ASK_BATCH", "0")
 STARTING = {"posterior.on": "true", "floor.default": "0.5", "floor.types": "0.5",
             "floor.pair_check": "0.5", "asset.floor": "0.3", "asset.decay": "0.4",
             "asset.multiple": "true", "link.asset_yes": "0.5", "floor.ask": "0.5",
-            "asset.ask_floor": "0.3"}
+            "asset.ask_floor": "0.3",
+            # the tests written before the band rule, the digital rule and the link strengths
+            # keep their meaning; the new tests switch these on themselves
+            "band.on": "false", "digital.on": "false", "links.strengths": "false",
+            "dashboard.apply_measure_pair_checks": "true",
+            "dashboard.commitment_link_levels": "unit|none"}
 
 
 def _test_panel():
@@ -214,6 +219,9 @@ def corpus(tmp_path, monkeypatch):
     write_csv(str(lab / "assets_queries.csv"), ["asset_id", "query_id", "query", "active"],
               [{"asset_id": "towers", "query_id": "t1", "query": "towers", "active": "true"},
                {"asset_id": "fiber", "query_id": "f1", "query": "fibre", "active": "true"}])
+    import shutil
+    shutil.copy(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                             "inputs", "taxonomy", "flags.csv"), str(lab / "flags.csv"))
     from wbg_portfolio import labels
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
     from wbg_portfolio import questions
@@ -265,6 +273,7 @@ def fake_model(monkeypatch):
             text = b["state"][field] if field else json.dumps(b["state"])
             asked = (b["state"].get(f"q {m_.group(2)}") if field else q["instructions"]).lower()
             t = text.lower()
+            sentence = (b["state"].get(field) if field else b["state"].get("sentence", "")).lower()
             if "carrying out" in asked:                       # the link question reads the package
                 m = re.search(r"package[\"']?: ?[\"']?([^\n\"]*)", text)
                 t = m.group(1).lower() if m else ""
@@ -272,7 +281,8 @@ def fake_model(monkeypatch):
                 label = asked.split("does ", 1)[1].split(" apply", 1)[0]
                 yes = (("site" in label and "site" in t) or ("route" in label and "corridor" in t)
                        or ("mobile" in label and "tower" in t) or ("fibre" in label and "fibre" in t)
-                       or ("carrying out" in label and "tower" in t))
+                       or ("carrying out" in label and "tower" in t)
+                       or ("digital" in label and any(w in sentence for w in ("tower", "fibre"))))
             else:                                             # a graded question: relate to <label>
                 yes = (("hazard" in asked and "hazard assessment" in t) or ("mobile" in asked and "tower" in t)
                        or ("fibre" in asked and "fibre" in t))
@@ -284,3 +294,42 @@ def fake_model(monkeypatch):
         return {"model": "m", "usage": {"cost": 0.0001}, "answers": out}
     monkeypatch.setattr(api, "post", post)
     return calls
+
+
+class _Chat:
+    """The fake chat model's record: every request body, and `reply`, a
+    function from the prompt to the text the model sends back."""
+
+    def __init__(self):
+        self.calls = []
+        self.reply = self.default
+
+    @staticmethod
+    def default(prompt):
+        if '{"grade"' in prompt:
+            return '{"grade": 3}'
+        if '"answer": "<one of: investment, policy>"' in prompt:
+            return '{"answer": "investment"}'
+        if '"answer": "yes"' in prompt:
+            return '{"answer": "yes"}'
+        return '{"labels": []}'
+
+    def prompts(self):
+        return [c["messages"][0]["content"] for c in self.calls]
+
+
+@pytest.fixture
+def fake_chat(monkeypatch, fake_model):
+    """The chat model (/v1/chat/completions) on top of the fake decision model:
+    replies come from fake_chat.reply(prompt), a JSON object by default."""
+    from wbg_portfolio import api
+    inner, chat = api.post, _Chat()
+
+    def post(path, b, api_key, **kw):
+        if path != "/v1/chat/completions":
+            return inner(path, b, api_key, **kw)
+        chat.calls.append(b)
+        return {"model": "chat-served", "usage": {"cost": 0.0002},
+                "choices": [{"message": {"content": chat.reply(b["messages"][0]["content"])}}]}
+    monkeypatch.setattr(api, "post", post)
+    return chat

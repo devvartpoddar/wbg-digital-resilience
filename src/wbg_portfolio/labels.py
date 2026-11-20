@@ -15,6 +15,8 @@ A label set is two or three CSV files, kept by people and only read here:
                       "conducted"; an acronym that must keep its case goes in
                       (?-i:...), or "UPS" also matches "start-ups". The candidates stage takes every unit a
                       pattern matches, whatever its embedding score.
+  flags.csv           yes/no questions asked of any committed sentence (digital,
+                      policy): flag_id, flag_name, definition, version. Not a set.
   <set>_types.csv     the types of a label (optional): <x>_id, type_id,
                       type_name, definition, pattern, active, and two
                       presentation columns a person may add at any time:
@@ -45,7 +47,8 @@ import re
 
 from wbg_portfolio.paths import REPO as ROOT
 LABEL_DIRS = (os.path.join(ROOT, "inputs", "taxonomy"), os.path.join(ROOT, "analysis", "labels"))
-_SUFFIXES = ("_queries", "_scale", "_patterns", "_types")
+_SUFFIXES = ("_queries", "_scale", "_patterns", "_types", "_subtypes")
+NOT_SETS = ("scale", "flags")
 
 
 def scratch_dir():
@@ -73,7 +76,7 @@ def _dirs(dirs, scratch=True):
 
 def _is_set(path):
     name = os.path.basename(path)[:-4]
-    return name != "scale" and not name.endswith(_SUFFIXES)
+    return name not in NOT_SETS and not name.endswith(_SUFFIXES)
 
 
 def label_sets(dirs=None, include_inactive=False):
@@ -142,6 +145,30 @@ def load_set(name, dirs=None, taxonomy=None):
     if not out:
         raise SystemExit(f"labels: {path} has no rows")
     return out
+
+
+def load_flags(dirs=None):
+    """{flag_id: {id, name, definition, version}} from flags.csv, the yes/no
+    questions asked of a committed sentence whatever its measure (digital,
+    policy). Kept by people beside the assets; read here, never written."""
+    dirs = _dirs(dirs, scratch=False)
+    found = [d for d in dirs if os.path.exists(os.path.join(d, "flags.csv"))]
+    if not found:
+        raise SystemExit("labels: flags.csv is missing from " + " or ".join(os.path.relpath(d, ROOT) for d in dirs))
+    out = {}
+    for r in rows(os.path.join(found[0], "flags.csv")):
+        out[r["flag_id"].strip()] = {"id": r["flag_id"].strip(), "name": " ".join(r["flag_name"].split()),
+                                     "definition": " ".join(r["definition"].split()),
+                                     "version": (r.get("version") or "").strip()}
+    return out
+
+
+def flag(flag_id, dirs=None):
+    """One flag of flags.csv, or a clear error."""
+    flags = load_flags(dirs)
+    if flag_id not in flags:
+        raise SystemExit(f"labels: flags.csv has no {flag_id!r} row")
+    return flags[flag_id]
 
 
 def family(name, dirs=None):
