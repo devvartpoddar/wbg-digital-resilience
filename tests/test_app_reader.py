@@ -123,8 +123,7 @@ def test_an_activity_has_its_assets_types_instrument_and_procurement(demo):
     assert a["n_sentences"].between(1, 4).all()
     has_asset = a["asset_id"].notna()
     assert (a[has_asset].apply(lambda r: r["asset_column"].startswith(r["asset_name"]), axis=1)).all()
-    assert (a[~has_asset & (a["instrument"] == "policy")]["asset_column"] == "policy").all()
-    assert (a[~has_asset & (a["instrument"] != "policy")]["asset_column"] == "none").all()
+    assert (a[~has_asset]["asset_column"] == "none").all()   # policy is an instrument, never an asset
     assert (a["instrument"] == "policy")[~has_asset].any()                         # policy with no asset exists
     assert (a["n_types"] == 0).any() and a["has_proposed_type"].any() and (a["n_assets"] == 2).any()
     assert a[a["asset2_id"].notna()]["asset2_name"].notna().all()
@@ -275,7 +274,7 @@ def test_the_new_readers_take_a_store_the_pipeline_published(pg, corpus, fake_mo
     q = _published(pg, corpus)
     a = app.activities(q)
     assert list(a.columns) == ACTIVITY_COLUMNS and a["project_id"].tolist() == ["P1"] and len(a) == 1
-    assert a["asset_column"].iloc[0] in ("Mobile networks", "Fibre networks", "policy", "none")
+    assert a["asset_column"].iloc[0] in ("Mobile networks", "Fibre networks", "none")
     s = app.activity_sentences(q, a["activity_id"])
     assert len(s) == a["n_sentences"].iloc[0] and s["text"].notna().all() and s["pdf_url"].notna().all()
     f = app.families(q)

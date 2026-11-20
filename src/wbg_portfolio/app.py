@@ -381,7 +381,7 @@ x AS (
                 THEN coalesce(al1.label_name, r1.asset_id)
                      || CASE WHEN r2.asset_id IS NOT NULL
                              THEN ' + ' || coalesce(al2.label_name, r2.asset_id) ELSE '' END
-              WHEN fnd.instrument = 'policy' THEN 'policy' ELSE 'none' END AS asset_column,
+              ELSE 'none' END AS asset_column,
          fnd.component_number, coalesce(comp.component_name, fnd.paragraph_component_name) AS component_name,
          act.n_sentences, fnd.first_document_date,
          coalesce(prc.linked_packages, 0) AS linked_packages,
@@ -485,8 +485,8 @@ def activities(q, family=None, *, cohort=None, **filters):
     asset type is the asset's finer kind), asset2_id, asset2_name, subtype2_id, subtype2_name
     (the second asset, if any; an activity shows at most two), n_assets (how many it has in all),
     instrument ('investment', 'policy' or empty: the instrument most of its sentences carry),
-    instrument_mixed, asset_column (the asset's name, "A + B" for two; else 'policy' when the
-    instrument is policy; else 'none'), component_number, component_name (the component most of
+    instrument_mixed, asset_column (the asset's name, "A + B" for two; else 'none':
+    policy is an instrument, not an asset), component_number, component_name (the component most of
     its sentences sit under), n_sentences, first_document_date, linked_packages (distinct
     packages linked to its sentences, either strength), strong_packages, next_package_date (the
     soonest next date of a linked package still to come), best_link_strength ('strong', 'asset'
@@ -803,7 +803,7 @@ _ACTIVITY_DOWNLOAD = [
     ("measure_name", "measure_name", "The measure's name."),
     ("activity", "activity_label", "A short name for the activity, given by the chat model."),
     ("instrument", "instrument", "investment (the project builds, buys or runs something) or policy (a law, strategy, standard or plan); the model's reading of most of the activity's sentences."),
-    ("asset", "asset_column", "The asset when there is one (two joined with +); else 'policy' when the instrument is policy; else 'none'."),
+    ("asset", "asset_column", "The asset when there is one (two joined with +); else 'none'. Policy is not an asset: see instrument."),
     ("asset_id", "asset_id", "The main asset's id."),
     ("asset_name", "asset_name", "The main asset's name: the one most of the activity's sentences name."),
     ("asset_type_id", "subtype_id", "The main asset's finer kind (asset type), id."),
@@ -832,7 +832,7 @@ _SENTENCE_DOWNLOAD = [
     ("measure_name", "measure_name", "The measure's name."),
     ("activity", "activity_label", "The activity's short name."),
     ("instrument", "instrument", "The activity's instrument (investment or policy)."),
-    ("asset", "asset_column", "The activity's asset: the asset, else 'policy', else 'none'."),
+    ("asset", "asset_column", "The activity's asset: the asset, else 'none'. Policy is not an asset: see instrument."),
     ("sentence_id", "unit_id", "The sentence's id."),
     ("sentence", "text", "The sentence as the document prints it (with its list lead-in where it is an item)."),
     ("document_kind", "document_kind", "pad, additional_financing, restructuring or project_paper_other."),

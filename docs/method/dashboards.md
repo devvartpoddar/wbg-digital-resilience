@@ -79,7 +79,7 @@ Countries are mapped from `country_code` (ISO 3166 alpha-2); a regional project 
 | Function | Returns |
 |---|---|
 | `families(q)` | one row per family and measure (a measure in "a\|b" is under both), with project and activity counts for the measure and for the family |
-| `activities(q, family=None, **filters)` | one row per activity: place, measure, label, types (and whether one is a proposed `OTH.` type), up to two assets with their asset type, instrument, component, sentence count, first document date and procurement summary. `asset_column` is the asset when there is one, else `policy`, else `none` |
+| `activities(q, family=None, **filters)` | one row per activity: place, measure, label, types (and whether one is a proposed `OTH.` type), up to two assets with their asset type, instrument, component, sentence count, first document date and procurement summary. `asset_column` is the asset when there is one, else `none` (policy is the instrument, not an asset) |
 | `activity_sentences(q, activity_ids=None, family=None, **filters)` | the sentences of those activities (or of the filtered ones) with document kind, date, page, link, section, component and the strength inputs (`score_first`, `score_context`, `second_grade`, `decided_by`) |
 | `packages_detail(q, family=None, **filters)`, `package(q, package_id)` | one row per linked package with every procurement field, its asset(s), link strength, the measures its strong links name and the activities it serves; `package` adds its notices, awards and activities |
 | `not_digital(q, project_id=None, measure=None)` | the committed sentences the digital question leaves out |
