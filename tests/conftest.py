@@ -272,6 +272,7 @@ def fake_model(monkeypatch):
 
     class Calls(list):
         also_yes = ()           # texts a test wants the measure question to say yes to as well
+        no_fibre = ()           # texts a test wants the fibre asset question to say no to
 
     calls = Calls()
 
@@ -298,7 +299,7 @@ def fake_model(monkeypatch):
             else:                                             # a graded question: relate to <label>
                 yes = (("hazard" in asked and ("hazard assessment" in t or any(w in t for w in calls.also_yes)))
                        or ("mobile" in asked and "tower" in t)
-                       or ("fibre" in asked and "fibre" in t))
+                       or ("fibre" in asked and "fibre" in t and not any(w in t for w in calls.no_fibre)))
             n = len(q["criteria"])
             probs = {str(i): 0.0 for i in range(n)}
             probs[str(n - 1) if yes else "0"] = 0.9

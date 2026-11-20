@@ -2,7 +2,7 @@
 """The pipeline's command line and the one place its stages are ordered.
 
     ./wbg_portfolio run [--from S] [--to S] [--only S] [--measures a b] [--max-spend US$] [--dry-run]
-        fetch > prepare > embed > search > classify > measure > link > publish (> audit)
+        fetch > prepare > embed > search > classify > measure > link > activities > publish (> audit)
     ./wbg_portfolio add <set>...        a measure from its files to Postgres (run --from search --to measure)
     ./wbg_portfolio publish             every decision read again from the scores, then the views
     ./wbg_portfolio check draw|fill|evaluate|spotcheck|import   the grading cycle (src/wbg_portfolio/grading.py)
@@ -694,7 +694,8 @@ def _print_rows(rows, cols):
 
 # ------------------------------------------------------------------ the run
 
-RUN_STAGES = ("fetch", "prepare", "embed", "search", "classify", "measure", "link", "publish", "audit")
+RUN_STAGES = ("fetch", "prepare", "embed", "search", "classify", "measure", "link", "activities", "publish",
+              "audit")
 
 
 def stages_between(start=None, stop=None, only=None):
@@ -752,6 +753,7 @@ def run(args, data):
                 conn = db.connect()
                 db.ensure(conn)
                 corpus = Q.Corpus(data)
+            from wbg_portfolio import activities
             from wbg_portfolio import checks
             from wbg_portfolio import decide
             from wbg_portfolio import funnel
@@ -759,32 +761,38 @@ def run(args, data):
             if stage == "classify":
                 ok = funnel.run(conn, data, Q.ASSETS, corpus=corpus, **kw) is not None or args.dry_run
             elif stage == "measure":
+                no_projects = {k: v for k, v in kw.items() if k != "projects"}
+                # first pass and the band's second look, measure by measure
                 for name in sets:
                     if funnel.run(conn, data, name, corpus=corpus, **kw) is None and not args.dry_run:
                         ok = False
                         continue
                     if second.measure(conn, data, corpus, name, **kw) is None and not args.dry_run:
                         ok = False
-                        continue
-                    checks.propose(conn, data, corpus, name, api_key=key, dry_run=args.dry_run)
-                    if checks.types(conn, data, corpus, name, **{k: v for k, v in kw.items()
-                                                                  if k != "projects"}) is None \
-                            and not args.dry_run:
-                        ok = False
                 if ok:
-                    # once whatever the measure: the digital and policy questions of the
-                    # committed sentences of the sets this run was given
-                    for step in (second.digital, second.policy):
+                    # once whatever the measure: the digital and policy questions of the committed
+                    # sentences of the sets this run was given, then the assets' second look and kinds
+                    # (committed and digital sentences). The types need none of them, so they come after.
+                    for step in (second.digital, second.policy, second.asset_second, second.asset_subtype):
                         if step(conn, data, corpus, sets, **kw) is None and not args.dry_run:
+                            ok = False
+                if ok:
+                    for name in sets:
+                        checks.propose(conn, data, corpus, name, api_key=key, dry_run=args.dry_run)
+                        if checks.types(conn, data, corpus, name, **no_projects) is None and not args.dry_run:
                             ok = False
                 if ok:
                     # across every active measure, whatever subset this run was given:
                     # the pair and link stages replace their whole kind
-                    ok = checks.pairs(conn, data, corpus, every, **{k: v for k, v in kw.items()
-                                                                     if k != "projects"}) is not None \
-                        or args.dry_run
+                    ok = checks.pairs(conn, data, corpus, every, **no_projects) is not None or args.dry_run
             elif stage == "link":
                 ok = checks.links(conn, data, corpus, every, **kw) is not None or args.dry_run
+                if ok and decide.links_strengths():
+                    for step in (second.package_asset_second, checks.package_measure):
+                        if step(conn, data, corpus, every, **kw) is None and not args.dry_run:
+                            ok = False
+            elif stage == "activities":
+                ok = activities.run(conn, data, corpus, every, **kw) is not None or args.dry_run
             elif stage == "publish" and not args.dry_run:
                 if projects and os.environ.get("WBG_PUBLISH_SCOPED") != "1":
                     print("  postgres: not written: a run over named projects would replace the "

@@ -28,8 +28,9 @@ def brief(data=None):
         sets = [n for n in labels.label_sets() if n != Q.ASSETS]
         off = [n for n in labels.label_sets(include_inactive=True) if n not in sets and n != Q.ASSETS]
         lines.append(f"measures: {len(sets)} active ({', '.join(sets)})" + (f"; off: {', '.join(off)}" if off else ""))
-        for kind in ("asset", "measure", "measure_ctx", "measure_second", "digital", "policy", "type", "pair",
-                     "package_asset", "link", "scratch"):
+        for kind in ("asset", "asset_second", "asset_subtype", "measure", "measure_ctx", "measure_second",
+                     "digital", "policy", "type", "pair", "package_asset", "package_asset_second",
+                     "package_measure", "link", "activity", "scratch"):
             r = _n(conn, f"SELECT count(*), count(DISTINCT label_set) FROM {S}.scores WHERE kind = %s", (kind,))
             if r and r[0]:
                 lines.append(f"scores:   {kind:<14} {r[0]:>9,} rows, {r[1]} set(s)")
@@ -54,6 +55,10 @@ def brief(data=None):
             lines.append(f"spend:    US${float(r[0]):.2f} in all, US${float(r[1]):.2f} this week, {r[2]} step(s)")
         r = _n(conn, f"SELECT max(loaded_at) FROM {S}.loads WHERE table_name = 'measure_findings'")
         lines.append(f"publish:  {r[0].strftime('%Y-%m-%d %H:%M') if r and r[0] else 'never'}")
+        r = _n(conn, f"SELECT count(*) FILTER (WHERE strength = 'strong'), count(*) FILTER (WHERE strength = 'asset'), "
+                     f"(SELECT count(DISTINCT activity_id) FROM {S}.activities) FROM {S}.commitment_package_links")
+        if r and (r[0] or r[1] or r[2]):
+            lines.append(f"links:    {r[0]:,} strong, {r[1]:,} asset-level (sentence x package); {r[2]:,} activities")
         r = _n(conn, f"SELECT count(*) FROM {S}.commitments")
         if r and r[0] is not None:
             lines.append(f"dashboards: {r[0]:,} commitments")
