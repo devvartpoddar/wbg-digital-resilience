@@ -133,8 +133,9 @@ COMP_NAMED_LETTER = re.compile(
 class _Num:
     """A plan's component number found in text: what match.group(1) and .end() give."""
 
-    def __init__(self, m, group):
+    def __init__(self, m, group, bare=False):
         self.m, self._g = m, group
+        self.bare = bare                       # a letter read without the word 'Component'
 
     def group(self, _=1):
         return normal_number(self.m.group(self._g))
@@ -150,7 +151,7 @@ def comp_number(text):
     if m:
         return _Num(m, 1)
     m = COMP_LETTER.match(text)
-    return _Num(m, 1 if m.group(1) else 2) if m else None
+    return _Num(m, 1 if m.group(1) else 2, bare=not m.group(1)) if m else None
 
 
 def comp_named(text):
@@ -232,12 +233,30 @@ class Components:
         num, (name, doc) = next(iter(found.items()))
         return num, name, doc
 
+    def plan_number(self, pid, text):
+        """comp_number(text) for this project's plan. A bare lettered start ('J. Smith Consulting',
+        'A. Supply of laptops', 'B) Works') is a component only when the project's appraisal
+        documents have that lettered component, and never when only one capitalised word follows
+        it (a person's initial and surname)."""
+        m = comp_number(text)
+        if m is None or not m.bare:
+            return m
+        letter = m.group(1).split(".")[0]
+        if letter.isdigit():
+            return m
+        rest = text[m.end():].strip()
+        initial = m.group(1).isalpha() and text[:m.end()].lstrip()[1:2] == "."          # 'J. Smith'
+        if initial and re.fullmatch(r"(?-i:[A-Z][a-zà-ÿ'’\-]+)", rest):
+            return None
+        have = {n.split(".")[0].upper() for n, *_ in self.by_project.get(pid, ())}
+        return m if letter.upper() in have else None
+
     def strip_tail(self, pid, desc):
         """A component at the end of a description: (description, component)."""
         starts = [m.start() for m in re.finditer(r"(?:(?<=\s)|^)\S", desc)]
         for p in starts[2:]:
             seg = desc[p:]
-            m = comp_number(seg)
+            m = self.plan_number(pid, seg)
             rest = seg[m.end():] if m else seg
             flat = _flat(rest)
             if len(flat) < 12:
@@ -255,7 +274,7 @@ class Components:
         hit = self._by_name(pid, _flat(cells), partial_ok=True)
         if hit:
             return hit[0], hit[1], "name_match", hit[2]
-        m = comp_named(cells) or comp_number(cells)
+        m = comp_named(cells) or self.plan_number(pid, cells)
         if not m:
             return None
         # The plan's own number.

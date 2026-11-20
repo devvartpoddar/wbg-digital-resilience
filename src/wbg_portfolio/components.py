@@ -26,9 +26,13 @@ COMP_WORD = r"(?:Component|Composante|Componente|Komponen)"
 # ('Component B.1' and 'Component A1' are sub-components of B and A).
 _LET = r"(?-i:[A-Z](?![A-Za-z\d]|\.\d)|[IVX]{2,4}(?![A-Za-z\d]|\.\d))"
 # The number is followed by punctuation ('Component 2: ...') or, in some templates, by the
-# title alone ('Component 1 Extending digital connectivity').
-COMP_HEAD = re.compile(
-    rf"^\s*{COMP_WORD}\s*(\d{{1,2}}|{_LET})(?:\s*[:.\-–)]\s*|\s+(?=(?-i:[A-Z(])))(.+?)\s*$", re.I)
+# title alone ('Component 1 Extending digital connectivity'). A letter is followed by a colon,
+# full stop, closing bracket, dash or spaced hyphen, or by the title alone; never by a hyphen
+# that runs into the next word ('Component E-Government Services' is no component E).
+_COMP_NUM_HEAD = re.compile(
+    rf"^\s*{COMP_WORD}\s*(\d{{1,2}})(?:\s*[:.\-–)]\s*|\s+(?=(?-i:[A-Z(])))(.+?)\s*$", re.I)
+_COMP_LET_HEAD = re.compile(
+    rf"^\s*{COMP_WORD}\s*({_LET})(?:\s*[:.–—)]\s*|\s*-\s+|\s+(?=(?-i:[A-Z(])))(.+?)\s*$", re.I)
 # Sub-component number: 2.1, or lettered 'A.1' / 'A1', or roman 'II.1'.
 _SUBID = r"((?-i:\d{1,2}(?=\.)|[A-Z]|[IVX]{2,4}))(?:\.|(?<=[A-Z])(?=\d))(\d{1,2})"
 SUB_HEAD = re.compile(
@@ -53,7 +57,15 @@ def _ok(m):
 
 
 def comp_match(text):
-    return _ok(COMP_HEAD.match(text))
+    return _ok(_COMP_NUM_HEAD.match(text)) or _ok(_COMP_LET_HEAD.match(text))
+
+
+class _Head:
+    """COMP_HEAD.match, for what reads the heading pattern directly."""
+    match = staticmethod(lambda text: comp_match(text))
+
+
+COMP_HEAD = _Head
 
 
 def sub_word_match(text):
@@ -75,7 +87,71 @@ MENTION = re.compile(
     rf"(?!\d)(?:{_SEP}\d{{1,2}}(?:\.\d{{1,2}})?(?![\d.]?\d))*"
     rf"|{_LID}(?:{_SEP}{_LID})*)", re.I)
 RUN_IN_NUMBER = re.compile(r"^\s*\d{1,3}\.\s+")
-RUN_IN_COMP = re.compile(rf"^\s*{COMP_WORD}\s*(\d{{1,2}}|{_LET})\s*[:.\-\u2013)]\s*[A-Z]")
+RUN_IN_COMP = re.compile(rf"^\s*{COMP_WORD}\s*(?:(\d{{1,2}})\s*[:.\-\u2013)]\s*|({_LET})(?:\s*[:.\u2013\u2014)]\s*|\s*-\s+))[A-Z]")
+
+
+def run_in_match(text):
+    """A run-in 'Component 3: Title' or 'Component C: Title' (a letter never runs into a hyphenated word);
+    the match's group(1) is the number."""
+    m = RUN_IN_COMP.match(text)
+    if m is None:
+        return None
+    return _Run(m)
+
+
+class _Run:
+    def __init__(self, m):
+        self.m = m
+
+    def group(self, _=1):
+        return self.m.group(1) or self.m.group(2)
+
+
+# A document's lettered components are real only when its lettered headings form a sequence that
+# starts A, B (or I, II): a lone 'Component E-Government' or 'Component X Activities' is not one.
+_ROMANS = ["I", "II", "III", "IV", "V", "VI", "VII", "VIII", "IX", "X"]
+
+
+def _is_letter(n):
+    return not n[:1].isdigit()
+
+
+def sequence_letters(found):
+    """The component letters a document may use, from the letters its headings carry: the run from
+    A (or the roman run from I) that is unbroken and holds at least two; empty otherwise."""
+    found = {str(n).split(".")[0].upper() for n in found if _is_letter(str(n))}
+    out = set()
+    for seq in (list(map(chr, range(65, 91))), _ROMANS):
+        run = []
+        for x in seq:
+            if x not in found:
+                break
+            run.append(x)
+        if len(run) >= 2:
+            out.update(run)
+    return out
+
+
+def document_letters(units):
+    """The component letters a document's headings may use: units are (text, block) in order.
+    Reads the same headings the Tagger reads, with no letter filter, and returns sequence_letters
+    of what it finds."""
+    found = set()
+    for text, block in units:
+        if block not in TAGGED_BLOCKS:
+            continue
+        short = len(text.split()) <= 30
+        if not short and block in ("narrative", "annex"):
+            head = RUN_IN_NUMBER.sub("", text, count=1)
+            for m in (sub_word_match(head[:200]), _ok(run_in_match(head))):
+                if m:
+                    found.add(m.group(1))
+        if block == "heading" or (short and block in ("narrative", "annex")):
+            for m in (comp_match(text), sub_word_match(text)):
+                if m:
+                    found.add(m.group(1))
+    return sequence_letters(found)
+
 
 
 def _reader_version():
@@ -112,11 +188,20 @@ class Tagger:
     one the component opened in, or inside it: after the last component of
     'II.B Project Components', 'II.C Project Beneficiaries' belongs to none."""
 
-    def __init__(self, close_at_section=True):
+    def __init__(self, close_at_section=True, letters=None):
         # close_at_section=False keeps a component open until the next component heading;
         # src/wbg_portfolio/sensitivity.py compares the two.
+        # letters: the component letters this document may use (document_letters of its units);
+        # None applies no document test (a Tagger fed unit by unit, in a test).
         self.close_at_section = close_at_section
+        self.letters = letters
         self._close()
+
+    def _allowed(self, m):
+        """The match, unless its number is a letter this document's headings do not support."""
+        if m is None or self.letters is None or not _is_letter(m.group(1)):
+            return m
+        return m if m.group(1).split(".")[0].upper() in self.letters else None
 
     def _close(self):
         self.comp, self.sub, self.home = "", "", None
@@ -150,24 +235,24 @@ class Tagger:
         # centre. This subcomponent will finance ...'.
         if not short and block in ("narrative", "annex"):
             head = RUN_IN_NUMBER.sub("", text, count=1)
-            m = sub_word_match(head[:200])
+            m = self._allowed(sub_word_match(head[:200]))
             # A run-in title ends at its first full stop.
             title = re.split(r"\.\s+", head[:200])[0]
             if m:
                 return self._open_sub(m, title, path)
-            m = _ok(RUN_IN_COMP.match(head))
+            m = self._allowed(_ok(run_in_match(head)))
             if m:
                 return self._open(m.group(1), title, path)
         # A short footnote or table row that names a component ("Component 2: see Annex 3",
         # a cost table's row) refers to it; it does not open it.
         if block == "heading" or (short and block in ("narrative", "annex")):
-            m = comp_match(text)
+            m = self._allowed(comp_match(text))
             if m:
                 return self._open(m.group(1), m.group(2), path)
             # A numbered sub-component title is a heading even when set in plain type, if it
             # carries a cost: '1.2. Infrastructure ... (US$15.3 million equivalent)'.
             titled = block == "heading" or bool(COST_IN_TEXT.search(text))
-            m = sub_word_match(text)
+            m = self._allowed(sub_word_match(text))
             if m:
                 return self._open_sub(m, text, path)
             # A bare 'N.M Title' is a sub-component only under component N: elsewhere it is
@@ -471,6 +556,7 @@ def read_headings(rows, text):
     """Components and sub-components from body headings in Section II and the
     annexes."""
     out, seen = [], set()
+    letters = document_letters((text[int(r["char_start"]):int(r["char_end"])], r["block"]) for r in rows)
     for r in rows:
         s = text[int(r["char_start"]):int(r["char_end"])]
         if r["block"] != "heading":
@@ -483,6 +569,8 @@ def read_headings(rows, text):
                 continue
             s = first
         m = comp_match(s)
+        if m and _is_letter(m.group(1)) and m.group(1).upper() not in letters:
+            m = None
         level, number, name = None, None, None
         if m:
             level, number, name = "component", m.group(1), m.group(2)
@@ -490,6 +578,8 @@ def read_headings(rows, text):
             # 'Sub-component 2.1: ...' always; a bare '2.1 Title' only once component 2 has
             # been seen, else it is a numbered section.
             m = sub_word_match(s)
+            if m and _is_letter(m.group(1)) and m.group(1).upper() not in letters:
+                m = None
             if not m:
                 m = sub_bare_match(s)
                 if m and ("component", m.group(1)) not in seen:

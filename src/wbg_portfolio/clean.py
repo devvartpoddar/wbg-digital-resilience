@@ -238,7 +238,8 @@ def main():
                               "char_end": end, "project_ids": owners, "assigned_by": how,
                               "listed_project_ids": doc["project_ids"]})
         kept, doc_paras = 0, []
-        tagger = components.Tagger()
+        tagger = components.Tagger(letters=components.document_letters(
+            (clean[a:b], block) for a, b, _p, _t, block, *_ in spans))
         for ordinal, (a, b, path, title, block, p0, p1, meta) in enumerate(spans, 1):
             body = clean[a:b]
             pid = f"{did}:p{ordinal:05d}"

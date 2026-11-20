@@ -88,7 +88,10 @@ def component_closing(data):
     change (default) and when they run on; and how many differ."""
     tagged = Counter()
     for did, rows, text in _documents_text(data):
-        a, b = components.Tagger(), components.Tagger(close_at_section=False)
+        letters = components.document_letters(
+            (text[int(r["char_start"]):int(r["char_end"])], r["block"]) for r in rows)
+        a = components.Tagger(letters=letters)
+        b = components.Tagger(close_at_section=False, letters=letters)
         for r in rows:
             body = text[int(r["char_start"]):int(r["char_end"])]
             ta = a.see(body, r["block"], r["section_path"])

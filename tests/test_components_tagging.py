@@ -316,8 +316,10 @@ def test_a_contingent_emergency_response_component_heading_opens_its_component(h
     assert t.see("This component supports an emergency response if needed.",
                  "narrative", "II.B")[0] == comp
     assert t.comp_name.startswith("Contingent Emergency Response Component")
-    text = heading + "\n"
-    assert [r["number"] for r in K.read_headings(_rows(text), text)] == [comp]
+    # a lettered component counts in a document whose lettered headings run A, B ... (rule: no lone letter)
+    text = ("Component A: First\nComponent B: Second\nComponent C: Third\nComponent D: Fourth\n" if comp.isalpha() else "") \
+        + heading + "\n"
+    assert [r["number"] for r in K.read_headings(_rows(text), text)][-1] == comp
 
 
 def test_mentions_read_lettered_components():
@@ -365,3 +367,81 @@ def test_a_plan_matches_a_lettered_component_by_name_or_letter():
     assert desc == "Repair of rooftop gauges" and comp[0] == "B.1"
     assert P.comp_number("A. Rules and Institutions").group(1) == "A"
     assert P.comp_number("A plan for masts") is None
+
+
+# ---- lettered false positives (invented headings)
+
+@pytest.mark.parametrize("heading", [
+    "Component E-Government Services",
+    "Component X Activities of the project",
+    "Component V Strengthening",
+    "Component S Support",
+    "Component A Plan",
+    "Component E: E-Government Services",
+])
+def test_a_lone_lettered_heading_in_a_numbered_document_is_no_component(heading):
+    letters = K.document_letters([("Component 1: Rules", "heading"), (heading, "heading"),
+                                  ("Component 2: Masts", "heading")])
+    t = K.Tagger(letters=letters)
+    assert t.see("Component 1: Rules", "heading", "II.B") == ("1", "")
+    assert t.see(heading, "heading", "II.B") == ("1", "")            # still under component 1
+    text = "Component 1: Rules\n" + heading + "\nComponent 2: Masts\n"
+    assert [r["number"] for r in K.read_headings(_rows(text), text)] == ["1", "2"]
+
+
+def test_a_letter_that_runs_into_a_hyphenated_word_is_no_component_even_in_a_lettered_document():
+    units = [("Component A: Rules", "heading"), ("Component B: Masts", "heading"),
+             ("Component E-Government Services", "heading")]
+    t = K.Tagger(letters=K.document_letters(units))
+    t.see(*units[0][:1], "heading", "II.B")
+    assert t.see("Component E-Government Services", "heading", "II.B")[0] == "A"
+    assert K.comp_match("Component E - Government Services").group(1) == "E"      # a spaced dash is a separator
+
+
+def test_a_lettered_document_needs_a_and_b_and_an_unbroken_run():
+    docs = {"A: One|B: Two|C: Three": {"A", "B", "C"}, "A: One": set(), "B: Two|C: Three": set(),
+            "A: One|B: Two|D: Four": {"A", "B"}}
+    for heads, expect in docs.items():
+        units = [(f"Component {h}", "heading") for h in heads.split("|")]
+        assert K.document_letters(units) == expect, heads
+    assert K.document_letters([("Component I: One", "heading"), ("Component II: Two", "heading")]) >= {"I", "II"}
+
+
+def test_a_lettered_document_still_tags_its_components_and_a_stray_letter_is_ignored():
+    units = [("Component A: Rules", "heading"), ("Component B: Masts", "heading"),
+             ("Component X Activities of the project", "heading")]
+    t = K.Tagger(letters=K.document_letters(units))
+    assert t.see(units[0][0], "heading", "II.B") == ("A", "")
+    assert t.see(units[2][0], "heading", "II.B") == ("A", "")
+    assert t.see(units[1][0], "heading", "II.B") == ("B", "")
+
+
+def _plan_components(*numbers):
+    from wbg_portfolio import clean_procurement as P
+    return P.Components([{"project_ids": "P1", "doc_id": "D1", "disclosure_date": "2020-01-01",
+                          "number": n, "name": f"Invented component number {n} name"} for n in numbers])
+
+
+@pytest.mark.parametrize("cell", ["J. Smith Consulting Ltd", "A. Supply of laptops", "B) Works",
+                                  "I: Strengthening", "V. Something", "X) something", "J. Smith", "A. Smith"])
+def test_a_leading_initial_in_a_plan_cell_is_no_component_in_a_numbered_project(cell):
+    c = _plan_components("1", "2")
+    assert c.in_cells("P1", cell) is None
+    assert c.strip_tail("P1", "Supply of laptops for the ministry " + cell) == \
+        ("Supply of laptops for the ministry " + cell, None)
+
+
+def test_a_leading_letter_is_a_component_when_the_project_has_that_lettered_component():
+    c = _plan_components("A", "B")
+    assert c.in_cells("P1", "A. Supply of laptops")[0] == "A"
+    assert c.in_cells("P1", "B) Works")[0] == "B"
+    assert c.in_cells("P1", "J. Smith Consulting Ltd") is None             # the project has no J
+    assert c.in_cells("P1", "A. Smith") is None                              # initial and surname, nothing else
+    assert c.in_cells("P1", "Component A: Supply") == ("A", "", "number_only", "")
+
+
+def test_numbered_plan_cells_read_as_before():
+    c = _plan_components("1", "2")
+    assert c.in_cells("P1", "2. Supply of laptops")[0] == "2"
+    assert c.in_cells("P1", "Component 1 Supply")[0] == "1"
+    assert c.in_cells("P1", "2.1 Supply of laptops")[0] == "2.1"
