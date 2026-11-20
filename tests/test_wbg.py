@@ -210,7 +210,9 @@ def test_upcoming_carries_the_notices_linked_to_each_package(store, cohort):
     assert rows["b"]["notices"] == 0
 
 
-def test_a_project_whose_fetch_failed_is_tried_again(store, cohort, monkeypatch):
+def test_a_project_whose_fetch_failed_is_tried_again(store, cohort, monkeypatch, capsys):
+    """Tried again on the next day's run (or at once with --update), not at every restart the
+    same day: a restart does not go back to the interface for it and rewrite the fetched tables."""
     import json
     calls = []
 
@@ -224,6 +226,17 @@ def test_a_project_whose_fetch_failed_is_tried_again(store, cohort, monkeypatch)
     monkeypatch.setattr(wbg, "_run", fake_run)
     sel = wbg.select(project="P000002", path=cohort)
     wbg.prepare(sel, data=store)
+    assert "P000002" in capsys.readouterr().out          # named as not fully fetched
+    calls.clear()
+    wbg.prepare(sel, data=store)
+    assert "fetch_procurement.py" not in calls, "not again the same day"
+    assert "tried again tomorrow" in capsys.readouterr().out
+    wbg.prepare(sel, data=store, update=True)
+    assert "fetch_procurement.py" in calls, "--update tries it now"
+    # the next day
+    state = wbg._load_state(store)
+    state["failed"]["procurement"]["P000002"] = "2000-01-01"
+    wbg._save_state(store, state)
     calls.clear()
     wbg.prepare(sel, data=store)
     assert "fetch_procurement.py" in calls

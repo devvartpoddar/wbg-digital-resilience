@@ -415,9 +415,19 @@ def prepare(sel=None, update=False, data=None, fetch=True, refresh_projects=Fals
             # fetched again once it is PROJECT_REFRESH_DAYS old; a closed
             # one's is not. Documents and procurement are fetched once, and
             # again with --update.
+            failed = state.setdefault("failed", {}).setdefault(kind, {})
             todo = [p for p in sel.ids if update or p not in done
                     or (kind == "projects" and (refresh_projects
                                                 or _record_due(p, done[p], today, data)))]
+            # A project whose fetch failed today is not fetched again today: a restart does
+            # not go back to the interface (and rewrite the fetched tables) for it, again and
+            # again. It is tried on the next day's run, or now with --update.
+            waiting = [p for p in todo if not update and p not in done and failed.get(p) == today]
+            if waiting:
+                print(f"{script}: {len(waiting)} project(s) failed earlier today and are tried "
+                      f"again tomorrow (or now with --update): {', '.join(waiting[:20])}"
+                      + (" ..." if len(waiting) > 20 else ""), flush=True)
+            todo = [p for p in todo if p not in waiting]
             if not todo:
                 continue
             args = ["--projects", ",".join(todo)]
@@ -425,10 +435,17 @@ def prepare(sel=None, update=False, data=None, fetch=True, refresh_projects=Fals
                 args.append("--refresh-records")      # notices and awards change
             _run(script, *args, data=data)
             # Only what the fetch says it fully read counts as fetched; a
-            # project whose request failed is tried again next time.
-            ok, _failed = _fetch_status(data, kind, todo)
+            # project whose request failed is tried again (above).
+            ok, not_ok = _fetch_status(data, kind, todo)
             for p in ok:
                 done[p] = today
+                failed.pop(p, None)
+            for p in not_ok:
+                failed[p] = today
+            if not_ok:
+                print(f"{script}: {len(not_ok)} of {len(todo)} project(s) not fully fetched "
+                      f"(why: reports/{script[:-3]}.txt): {', '.join(not_ok[:20])}"
+                      + (" ..." if len(not_ok) > 20 else ""), flush=True)
             _save_state(data, state)
             ran.append(script)
     for name, script, code, inputs, outputs in STAGES:
