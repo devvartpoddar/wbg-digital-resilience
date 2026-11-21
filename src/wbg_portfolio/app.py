@@ -25,10 +25,6 @@ STAGE_OF_STATUS = {
     "Not in latest plan": DROPPED, "Cancelled": DROPPED,
     "No package found": "No package linked",
 }
-# Which stage a sentence behind several commitments shows: the one that most
-# needs a reader's attention first, as wbg.package_status_order does for a
-# commitment with several packages (a package still to come before one signed).
-STAGE_URGENCY = ("Coming up", "Under way", "Completed", DROPPED, "No package linked")
 # What a package's status is called where it is listed (the coming-up list).
 COMING_UP_STATUSES = ("Overdue", "Planned", "Tendered")
 NO_ASSET = "(no asset)"
@@ -261,7 +257,6 @@ PACKAGE_FILTERS = ("project", "country", "region", "measure", "asset", "status",
                    "package_id", "type", "asset_type", "instrument")
 _PACKAGE_ONLY = ("status", "strength", "package_id")    # no meaning for a commitment or a sentence
 SEPARATOR = "; "          # between the values of a column that holds several (ids, names)
-PROPOSED = "OTH."         # a proposed type's id and name start with this (decide.OTH)
 
 # The three statements that go with every output (docs/methodology.md).
 STATEMENTS = (
@@ -1215,9 +1210,10 @@ _ABOUT = {
                count(*) FILTER (WHERE similarity) AS by_similarity,
                count(*) FILTER (WHERE pattern) AS by_pattern FROM sc""",
     "measures": "WITH" + _SCOPE + """
+        -- at_threshold: the sentences that pass the measure rule (the band rule), before the digital rule;
+        -- kept: those that are also digital and count on the dashboards
         SELECT (SELECT count(DISTINCT f.unit_id) FROM wbg.measure_findings f JOIN docs USING (document_id)
-                 WHERE f.was_sent_to_model AND f.is_committed) AS at_threshold,
-               0 AS overlap_tested,   -- the pair check is gone: nothing is tested for overlap
+                 WHERE f.was_sent_to_model AND f.passes_measure_rule) AS at_threshold,
                (SELECT count(DISTINCT unit_id) FROM wbg.commitment_units) AS kept,
                (SELECT count(DISTINCT u.unit_id) FROM wbg.commitment_units u
                  JOIN wbg.measure_findings f ON f.label_set = u.label_set AND f.unit_id = u.unit_id
@@ -1263,10 +1259,9 @@ def about(q):
     The thresholds the page quotes come from the control panel."""
     from wbg_portfolio import panel
     out = {}
-    # floor.default is now only the cut the evaluation reads a first-pass score at; the commitment
-    # is the band rule, so band.low, band.keep and band.context are given too. floor.cyber_security
-    # stays as a key but is always None: there are no per-measure floors any more.
-    floors = {"floor.cyber_security": None}
+    # floor.default is only the cut the evaluation reads a first-pass score at; the commitment is the
+    # band rule, so band.low, band.keep and band.context are given too.
+    floors = {}
     for key in ("floor.default", "floor.types", "asset.floor", "link.asset_yes", "band.low", "band.keep",
                 "band.context"):
         v = panel.get(key)

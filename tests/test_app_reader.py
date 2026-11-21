@@ -5,10 +5,9 @@ import pandas as pd
 from wbg_portfolio import app
 
 
-def test_stage_names_and_urgency():
+def test_stage_names():
     assert app.stage("Cancelled") == app.DROPPED == "Package dropped"
     assert app.stage("Overdue") == app.stage("Tendered") == "Coming up"
-    assert set(app.STAGE_URGENCY) == set(app.STAGES) and app.STAGE_URGENCY[0] == "Coming up"
 
 
 def test_package_date_says_which_date():

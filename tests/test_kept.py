@@ -46,8 +46,11 @@ def test_a_not_digital_sentence_is_never_kept_anywhere(demo):
     measures = app.measures(q).set_index("label_set")["commitments"]
     assert measures.sum() == len(c)
     at = app.about(q)["measures"]
+    # the About page's funnel: the step before the digital rule is the measure rule alone, and kept is
+    # what is also digital, so the digital drop shows
     assert at["at_threshold"] == db.one(pg, f"SELECT count(DISTINCT unit_id) FROM {S}.measure_findings "
-                                            f"WHERE is_committed AND is_digital")[0]
+                                            f"WHERE passes_measure_rule")[0]
+    assert at["kept"] < at["at_threshold"]
     # the evaluation sampler: kept is committed and digital, and the not-digital pairs are never kept
     mf, ua, _ = sampling.published(pg)
     m = {(x["label_set"], x["unit_id"]): x for x in sampling.measure_units(mf, {})}
