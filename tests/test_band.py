@@ -151,10 +151,15 @@ def test_the_chat_asker_never_updates_or_deletes_an_answer_row(pg, fake_chat):
     pg.execute(f"CREATE TRIGGER no_change BEFORE UPDATE OR DELETE ON {db.STORE}.answers "
                f"FOR EACH ROW EXECUTE FUNCTION {db.STORE}.no_change()")
     pg.commit()
-    for reply in ("not json", "still not json", '{"grade": 2}'):
+    got = {}
+    for reply in ("not json", '{"grade": 2}', '{"grade": 0}'):   # unreadable, then read, then never asked
         fake_chat.reply = lambda prompt, r=reply: r
-        chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
-        chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
+        got, _ = chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
+    # the readable reply was stored once and read back; the unreadable one went to chat_failures;
+    # the trigger above would have raised on any update or delete of an answer row
+    assert got["a"]["grade"] == 2 and len(fake_chat.calls) == 2
+    assert db.rows(pg, f"SELECT answer->>'grade' FROM {db.STORE}.answers") == [("2",)]
+    assert db.one(pg, f"SELECT count(*) FROM {db.STORE}.chat_failures")[0] == 1
 
 
 def test_a_request_that_fails_is_counted_and_nothing_is_invented(pg, fake_chat, monkeypatch):

@@ -1,6 +1,9 @@
 """A sentence that passes the measure rule but is not digital is never counted as kept: not in
-measure_findings.is_committed, not in a commitment, a view, a reader function, a download or the
-evaluation sampler (the invented dataset of tests/demo_seed.py, published with the real views)."""
+measure_findings.is_committed, not in a commitment (commitment_members) or a link, not in the views that
+hold kept sentences, not in the readers (commitments, sentences, commitment_detail,
+commitment_sentences_detail, packages_detail, families, measures, about) or the downloads (sentence,
+commitment, project, package), and not in the evaluation sampler (the invented dataset of
+tests/demo_seed.py, published with the real views)."""
 import pytest
 
 import demo_seed
@@ -43,6 +46,18 @@ def test_a_not_digital_sentence_is_never_kept_anywhere(demo):
     assert not set(app.download(q, "sentence")["sentence_id"]) & units
     c = app.commitments(q)
     assert not set(app.sentences(q, c["commitment_id"])["unit_id"]) & units
+    # every reader and download of commitments and packages holds only commitments made of kept sentences
+    d = app.commitment_detail(q)
+    assert set(d["commitment_id"]) == set(c["commitment_id"])
+    assert set(app.download(q, "commitment")["commitment_id"]) == set(d["commitment_id"])
+    assert app.download(q, "project")["commitments"].sum() == len(d)
+    assert app.families(q).drop_duplicates("label_set")["measure_commitments"].sum() == len(d)
+    pk = app.packages_detail(q)
+    served = {x for ids in pk["commitment_ids"] for x in ids.split("; ") if x}
+    assert served and served <= set(d["commitment_id"])
+    assert set(app.download(q, "package")["package_id"]) == set(pk["package_id"])
+    linked = {u for (u,) in db.rows(pg, f"SELECT DISTINCT unit_id FROM {S}.commitment_package_links")}
+    assert not linked & units
     measures = app.measures(q).set_index("label_set")["commitments"]
     assert measures.sum() == len(c)
     at = app.about(q)["measures"]
