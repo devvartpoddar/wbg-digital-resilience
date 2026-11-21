@@ -40,6 +40,12 @@ CREATE FUNCTION wbg.is_upcoming(status text) RETURNS boolean
 LANGUAGE sql IMMUTABLE AS $$
   SELECT status IN ('Pending', 'Pending Implementation', 'Under Review', 'Planned')
 $$;
+-- The plan statuses that mean a package was cancelled: Canceled and Terminated. The list is
+-- decide.CANCELLED, put in here at publish, so the package_cancelled flag of the links and this view
+-- read one rule.
+DROP FUNCTION IF EXISTS wbg.is_cancelled(text) CASCADE;
+CREATE FUNCTION wbg.is_cancelled(status text) RETURNS boolean
+LANGUAGE sql IMMUTABLE AS $$ SELECT coalesce(status IN ({{cancelled_statuses}}), false) $$;
 COMMENT ON FUNCTION wbg.due_date(date, date) IS
   'The date a package falls due: its revised date where the plan prints one, else its planned date.';
 
@@ -50,7 +56,7 @@ COMMENT ON FUNCTION wbg.due_date(date, date) IS
 --   Contract signed       the plan says Signed, or it says pending and a
 --                         linked award has a signing date
 --   Under implementation  the plan says Under Implementation
---   Cancelled             the plan says Canceled or Terminated
+--   Cancelled             the plan says Canceled or Terminated (wbg.is_cancelled)
 --   Tendered              pending in the plan, a linked notice
 --   Not in latest plan    pending, nothing linked, and the newest plan no
 --                         longer lists it (557 of 850 "overdue" packages on
@@ -82,7 +88,7 @@ SELECT p.package_id, p.project_id, p.description_clean, p.category, p.method_cod
          WHEN p.status = 'Completed' THEN 'Contract completed'
          WHEN p.status = 'Signed' THEN 'Contract signed'
          WHEN p.status = 'Under Implementation' THEN 'Under implementation'
-         WHEN p.status IN ('Canceled', 'Terminated') THEN 'Cancelled'
+         WHEN wbg.is_cancelled(p.status) THEN 'Cancelled'
          WHEN a.signed_date IS NOT NULL THEN 'Contract signed'
          WHEN n.package_id IS NOT NULL THEN 'Tendered'
          WHEN NOT coalesce(p.in_latest_plan, true) THEN 'Not in latest plan'
@@ -92,8 +98,8 @@ SELECT p.package_id, p.project_id, p.description_clean, p.category, p.method_cod
        -- A date to act on, only while the package is still to come: a future
        -- due date for a planned one, a future deadline for a tendered one.
        CASE
-         WHEN p.status IN ('Completed', 'Signed', 'Under Implementation', 'Canceled',
-                           'Terminated') OR a.signed_date IS NOT NULL THEN NULL
+         WHEN p.status IN ('Completed', 'Signed', 'Under Implementation') OR wbg.is_cancelled(p.status)
+              OR a.signed_date IS NOT NULL THEN NULL
          WHEN n.package_id IS NOT NULL
            THEN CASE WHEN n.notice_deadline >= current_date THEN n.notice_deadline END
          WHEN NOT coalesce(p.in_latest_plan, true) THEN NULL

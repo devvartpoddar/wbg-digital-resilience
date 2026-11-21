@@ -406,6 +406,13 @@ def type_rows(data):
     return out
 
 
+def _cancelled_sql():
+    """The plan statuses that mean a package is cancelled (decide.CANCELLED), as a SQL list: the views'
+    wbg.is_cancelled and the published package_cancelled flag read the one list."""
+    from wbg_portfolio import decide
+    return ", ".join(_lit(x) for x in decide.CANCELLED)
+
+
 def definition_rows():
     """(queries, patterns, scale): every set's phrases, patterns and grade
     scale, with the file's checksum, so a page shows the wording a run used."""
@@ -524,6 +531,7 @@ def finish(conn, log=print):
                 continue
             sql = sql.replace("{VECTOR}", vec)
         sql = re.sub(r"\{\{panel:([a-z0-9_.]+)\}\}", lambda m: panel.sql_value(m.group(1)), sql)
+        sql = sql.replace("{{cancelled_statuses}}", _cancelled_sql())
         if db.SCHEMA != "wbg":
             sql = re.sub(r"\bwbg\.", db.SCHEMA + ".", sql).replace("'wbg'", f"'{db.SCHEMA}'")
         try:

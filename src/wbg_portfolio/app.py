@@ -910,7 +910,7 @@ _PACKAGE_DOWNLOAD = [
     ("next_date", "next_date", "The date to act on, set only while the package is still to come."),
     ("link_strength", "link_strength", "strong (the package, asked alone, is about a measure) or asset (only a shared asset)."),
     ("link_level", "link_level", "The best level of its links: strong, type_and_component, type, component or asset (same asset only)."),
-    ("cancelled", "is_cancelled", "True when the plan status says the package was cancelled."),
+    ("cancelled", "is_cancelled", "True when the plan status is Canceled or Terminated (the same rule as the Cancelled stage)."),
     ("generic", "is_generic", "True when the description is about running the project (project management, audit, vehicles, office furniture, workshops, per diem, accounting, salaries)."),
     ("measures_named", "measure_names", "The measures its strong links name (joined with ';')."),
     ("asset_names", "asset_names", "The assets the package is for, best first (joined with ';')."),

@@ -481,8 +481,13 @@ def is_generic(description):
     return bool(GENERIC.search(d)) and not NOT_GENERIC.search(d)
 
 
+# The plan statuses (as clean_procurement writes them) that mean a package was cancelled: the one list,
+# read by the published package_cancelled flag here and by the views' wbg.is_cancelled (package_status).
+CANCELLED = ("Canceled", "Terminated")
+
+
 def is_cancelled(status):
-    return "cancel" in (status or "").lower()
+    return (status or "").strip() in CANCELLED
 
 
 def top_component(x):

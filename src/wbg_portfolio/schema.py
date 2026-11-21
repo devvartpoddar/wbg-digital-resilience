@@ -578,7 +578,7 @@ TABLES = {
             "component_relation": "same, different or unknown: the sentence's and the package's top-level component numbers, unknown when either is missing.",
             "sentence_component": "The sentence's top-level component, normalised (2.1 and Component 2 read as 2).",
             "package_component": "The package's top-level component in its plan, normalised the same way.",
-            "package_cancelled": "True when the package's plan status says it was cancelled.",
+            "package_cancelled": "True when the package's plan status is Canceled or Terminated (the one rule, decide.CANCELLED, that package_status also reads).",
             "package_generic": "True when the package description is about running the project (project management, audit, vehicles, office furniture, workshops, per diem, accounting, salaries; src/wbg_portfolio/decide.py GENERIC). A flag to filter on, never a cut.",
         }),
     "commitments": dict(
