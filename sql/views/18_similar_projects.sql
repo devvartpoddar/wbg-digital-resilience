@@ -30,7 +30,8 @@ LANGUAGE sql STABLE AS $$
          EXISTS (SELECT 1 FROM wbg.commitments o, c
                  WHERE o.project_id = n.project_id AND o.label_set = c.label_set
                    AND o.commitment_key = c.commitment_key AND c.commitment_key <> 'paragraph'
-                   AND o.asset_id = c.asset_id AND o.subtype_id = c.subtype_id AND o.type_id = c.type_id)
+                   AND o.asset_id IS NOT DISTINCT FROM c.asset_id AND o.subtype_id IS NOT DISTINCT FROM c.subtype_id
+                   AND o.type_id IS NOT DISTINCT FROM c.type_id)   -- a key's unused parts are NULL
            AS has_same_commitment
   FROM near n
   JOIN wbg.project_info i ON i.project_id = n.project_id
