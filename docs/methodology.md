@@ -65,6 +65,7 @@ The method is split by stage so a change reads only its part. **When you change 
 | 5e | `docs/method/links.md` | packages to assets and to measures; the links a commitment has |
 | 5f | `docs/method/dashboards.md` | the views the app reads, package status, the app's pages and what they compute (`sql/views/13-18`, `app.py`) |
 | 5g | `docs/method/decisions.md` | one decision system: the asker, the funnel, the floors, the probability layer, the skip rule, grading and evaluation, the control panel (`api.py`, `ask.py`, `questions.py`, `funnel.py`, `decide.py`, `grading.py`, `posterior.py`, `skip.py`, `fits.py`, `panel.py`) |
+| 5h | `docs/method/evaluation.md` | the evaluation sample: a Poisson draw from what is published, three grader models, thresholds tuned on one part and reported on the other (`sampling.py`, `graders.py`, `tuning.py`) |
 | 6 | `docs/method/storage.md` | `data/` layout, joins, the cohort (`paths.py`, `cohort_build.py`) |
 | 7 | `docs/method/limits.md` | known limits |
 | - | `docs/method/history.md` | dated results and trials the method was tuned on; read only when a choice needs its evidence |

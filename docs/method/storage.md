@@ -15,7 +15,8 @@ Part of the method (`docs/methodology.md` is the index). Measured results and tr
 - `types/`: proposed type lists (`<set>_types.csv`, `<set>_oth_types.csv`);
 - `review/`: the grading tasks and fills (`tasks_s<seed>.jsonl`, `fills_s<seed>.jsonl`, `spotcheck_s<seed>.xlsx`);
 - `releases/`: one folder per data release with its manifest and a copy of the cleaned tables, and `index.csv`;
-- `reports/`: every stage's report, the evaluation (`evaluate.md`), the run notes;
+- `samples/s<seed>/`: the evaluation sample (`measure.jsonl`, `package_measure.jsonl`, `link.jsonl`, `asset.jsonl`, `sample.json`, and `person.csv` for the owner's grades): data with document text, never committed (`docs/method/evaluation.md`);
+- `reports/`: every stage's report, the evaluation (`evaluate.md`, `evaluation_s<seed>.md`, `holdout_s<seed>.json`), the run notes;
 - `classify/answers/`, `labels/`, `measures/`, `links/`, `checks/`, `archive/`: what the file-based pipeline wrote before 2026-10-24. The answers are read once into `wbg_store.answers` as they are needed; the grades are imported by `./wbg_portfolio check import`. Nothing is deleted.
 
 The record of every model answer, grade, fit and payment is Postgres (`docs/method/postgres.md`), not a file.
