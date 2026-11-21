@@ -167,6 +167,20 @@ At the prices measured on 2026-11-20 (decision model about US$0.035 per 1,000 co
 
 Estimates (2026-10-22, 251 projects, about 150,000 searched sentences, starting gates 0.3): embedding about US$1; the asset map US$0.8 to 1.2; the twelve measures of that day US$3 to 5 (there are 23 active measures now); types and package links US$1 to 2; **about US$6 to 9 for a clean run, US$15 to 19 with the second looks and the chat questions**. The dry run gives the figure for the corpus as it stands.
 
+**What the review fixes of 2026-11-21 re-ask.** These questions changed after the rewrite (`tests/test_question_wording.py` lists each hash); the next run asks them again. Every measure's first pass, context question, chat second grade and package-to-measure question, the digital question, the asset second look and the package asset second look are unchanged. Counts are those published on 2026-11-21.
+
+| What changed | What it re-asks | About |
+|---|---|---|
+| The asset questions say "{asset} means:" for "{asset} are:" | the whole asset map's first pass (every sentence the asset funnel asks, four assets) and every package's asset first pass (13,993 x 4) | 100,000 to 200,000 sentence questions (2,000 to 4,000 requests) and about 56,000 package questions (about 1,100 requests): US$1.5 to 2.5 |
+| The asset type question sends each type's definition ("kind" is "type" in its file) | every sentence x asset type question and every package x asset type question | about 4,400 and 3,000 to 5,000 chat requests: under US$1 |
+| The measure type question says "type" for "kind", one builder, a proposed type's name without "OTH." | every type question of every kept sentence (118 types over 23 measures) | each kept sentence x measure (about 8,600) x its measure's types, 50 sentences a request: a few hundred requests, well under US$0.5 |
+| The type-proposal and gap prompts say "type" | one proposal per measure with no person's list, one gap proposal per measure with sentences no listed type reaches; a new proposal can change that measure's types, and then its type questions are asked again | a few cents |
+| The policy question uses the one paragraph note | every kept, digital sentence | about 5,200 chat requests: under US$0.5 |
+| The paragraph sent is centred on the sentence | the paragraph questions (digital, measure context, asset second look, asset types, policy) of sentences in paragraphs longer than `second.context_chars` (1,800 characters) only; their share is not measured here | at most what those steps cost in full (about US$3), likely far less |
+| The graders' package question asks the strong-link core; the grader asset question shows "type not stated" | the evaluation's package x measure items (about 350) and asset items (about 300), for each of the three graders | about 2,000 requests: well under US$1 |
+
+In all about US$3 to 5, most of it the asset map. Run `./wbg_portfolio run --from classify --dry-run` first: each step's line gives its stored answers, its requests and what its estimate rests on.
+
 **What a run never loses.** Each answer is committed as it arrives, so a crash, a kill or the spend cap loses nothing already paid for. A batch with one unreadable answer keeps its good ones and the bad one alone is asked again. Identical (state, question) items in one stage are asked once. An empty reply from the chat model is asked again within the run and never counts toward `second.max_attempts`; only a reply with content that cannot be read does. An item the provider refuses alone (an HTTP 4xx for that request, after the run has had answers from the same model) is recorded in `<store>.refused`, skipped, and listed at the end of the run; delete its row there to ask it again. A refusal about the whole request (a bad key, no credit, or nothing answered at all) stops the run.
 
 ## Clean run on the box
