@@ -269,9 +269,19 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
         else:
             todo.setdefault(k, (state, q))
     sent = {k: prompt(state, q) for k, (state, q) in todo.items()}
+    # the estimate the cap checks: a measured price per item where there is one (the step's own
+    # average in the ledger, else the model's; the graders pass theirs), else the upper bound
+    if price is not None:
+        basis = f"measured: US${price:.6f} an item"
+    elif todo:
+        price, basis = api.measured_cost(conn, stage, mdl)
+    else:
+        basis = "nothing to ask"
     stats = {"stored": sum(1 for k, v in have.items() if k not in legacy), "to_ask": len(todo),
              "estimate_usd": (price * len(todo) if price is not None
-                              else sum(estimate(sent[k], todo[k][1], request) for k in todo)), "gave_up": len(gave_up),
+                              else sum(estimate(sent[k], todo[k][1], request) for k in todo)),
+             "estimate_basis": "estimate " + basis,
+             "gave_up": len(gave_up),
              "calls": 0, "cost_usd": 0.0, "failures": [], "refused": [], "unparsed": 0, "seconds": 0.0}
     if todo and not dry_run:
         lock = Lock()
@@ -336,6 +346,7 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
 
 def estimate_line(stage, stats):
     return (asker.estimate_line(stage, stats)
+            + (f" ({stats['estimate_basis']})" if stats.get("to_ask") and stats.get("estimate_basis") else "")
             + (f"; {stats['unparsed']} reply(ies) unreadable" if stats["unparsed"] else "")
             + (f"; {len(stats['refused']):,} item(s) refused by the provider and skipped" if stats["refused"] else "")
             + (f"; gave up on {stats['gave_up']:,} question(s) unreadable second.max_attempts times "

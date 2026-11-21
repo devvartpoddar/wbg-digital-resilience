@@ -137,11 +137,23 @@ def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, wo
     t0 = time.time()
     progress = common.Progress(f"  {stage}: requests", len(jobs), log)
     with api.Spend(conn, stage, label_set, model, lock=lock) as spend:
-        spend.check(stats["estimate_usd"])
+        spend.check(stats["estimate_usd"], stats.get("estimate_basis", ""))
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [pool.submit(one, *job) for job in jobs]
+            counted = set()
+
+            def stop():
+                """No new request; the ones already in flight finish, are stored, and their cost
+                reaches the ledger (recorded, not checked again: the cap already stops the step)."""
+                pool.shutdown(wait=True, cancel_futures=True)
+                for g in futures:
+                    if g in counted or g.cancelled() or not g.done() or g.exception() is not None:
+                        continue
+                    counted.add(g)
+                    spend.add(g.result(), check=False)
             skipped = []
             for n, f in enumerate(as_completed(futures), 1):
+                counted.add(f)
                 try:
                     spend.add(f.result())
                 except api.Transport as exc:
@@ -152,10 +164,10 @@ def run_requests(conn, model, jobs, one, stats, *, stage, label_set, api_key, wo
                         stats.setdefault("refused", []).extend(exc.items)
                         log(f"  refused, skipped: {str(exc)[:200]}")
                     if exc.fatal or (spend.calls == 0 and len(skipped) >= 3):
-                        pool.shutdown(wait=True, cancel_futures=True)
+                        stop()
                         raise
                 except api.CapReached:
-                    pool.shutdown(wait=True, cancel_futures=True)
+                    stop()
                     raise
                 progress.step(f"{len(stats['failures'])} failed{tail()}, US${spend.cost:.3f}")
         if skipped and not spend.calls:

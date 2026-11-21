@@ -307,13 +307,20 @@ def fetch_missing(todo, unique, root, dim, *, model, api_key, base_url, log,
                                model=model, api_key=api_key, base_url=base_url, log=log)
                    for n, batch in enumerate(batches, 1)]
         progress = common.Progress("  embed: requests", len(batches), log)
+        counted = set()
         for f in as_completed(futures):
+            counted.add(f)
             r, t, st, sg, rl, sv, fl = f.result()
             if spend is not None and r:
                 try:
                     spend.add(t / 1e6 * PRICE_PER_MTOK, calls=r)
                 except api.CapReached:
                     pool.shutdown(wait=True, cancel_futures=True)       # nothing more is asked
+                    for g in futures:                                   # what was in flight is paid: record it
+                        if g not in counted and g.done() and not g.cancelled() and g.exception() is None:
+                            r2, t2 = g.result()[:2]
+                            if r2:
+                                spend.add(t2 / 1e6 * PRICE_PER_MTOK, calls=r2, check=False)
                     raise
             stats["requests"] += r
             stats["tokens"] += t

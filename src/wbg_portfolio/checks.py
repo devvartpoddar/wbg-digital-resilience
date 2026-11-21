@@ -341,8 +341,10 @@ def load_packages(data, projects=None):
     return out
 
 
-def package_vectors(data, packages, api_key, log):
-    """(P, dim) unit vectors of the package texts, embedded once and cached."""
+def package_vectors(conn, data, packages, api_key, log):
+    """(P, dim) unit vectors of the package texts, embedded once and cached. A description not embedded
+    yet is paid for like the sentences' vectors: checked against --max-spend and counted in the ledger
+    (stage link:embed)."""
     model, dim = embed.DEFAULT_MODEL, embed.DEFAULT_DIM
     root = embed.cache_root(data, model, dim)
     unique = {p["sha"]: p["text"] for p in packages}
@@ -350,8 +352,11 @@ def package_vectors(data, packages, api_key, log):
     if todo:
         if not api_key:
             raise SystemExit(f"link: {len(todo)} package description(s) are not embedded yet and no key is set")
-        _, failures = embed.fetch_missing(todo, unique, root, dim, model=model, api_key=api_key,
-                                          base_url=embed.DEFAULT_BASE, log=log)
+        with api.Spend(conn, "link:embed", "", model) as sp:
+            sp.check(sum(len(unique[s]) for s in todo) / 4 / 1e6 * embed.PRICE_PER_MTOK,
+                     "estimate from the descriptions' length")
+            _, failures = embed.fetch_missing(todo, unique, root, dim, model=model, api_key=api_key,
+                                              base_url=embed.DEFAULT_BASE, log=log, spend=sp)
         if failures:
             raise SystemExit(f"link: {len(failures)} package description(s) failed to embed")
     out = numpy.zeros((len(packages), dim), dtype="float32")
@@ -371,7 +376,7 @@ def package_assets(conn, data, corpus, *, model=Q.MODEL, api_key="", dry_run=Fal
     if not packages:
         log("link: no package in scope")
         return None
-    vecs = package_vectors(data, packages, api_key, log)
+    vecs = package_vectors(conn, data, packages, api_key, log)
     aq = Q.package_asset_questions()
     queries = search.load_queries(Q.ASSETS, labels.folder(Q.ASSETS))
     qv = search.query_vectors(queries, data, embed.DEFAULT_MODEL, embed.DEFAULT_DIM, embed.DEFAULT_BASE,
@@ -409,10 +414,10 @@ def package_assets(conn, data, corpus, *, model=Q.MODEL, api_key="", dry_run=Fal
 
 # ---------------------------------------------------------------- strong links
 
-def measure_cosines(data, packages, names, api_key, log):
+def measure_cosines(conn, data, packages, names, api_key, log):
     """{measure: (P,) array}: each package's best cosine over the measure's phrases and definition
     (the measure's search queries), from the cached vectors."""
-    vecs = package_vectors(data, packages, api_key, log)
+    vecs = package_vectors(conn, data, packages, api_key, log)
     out = {}
     for name in names:
         queries = search.load_queries(name, labels.folder(name))
@@ -445,7 +450,7 @@ def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry
     qs = {name: {labs[name]["id"]: Q.package_measure_question(labs[name])} for name in names}
     cands = [(i, p, name) for i, p in enumerate(packages) for name in sorted(wanted.get(p["project_id"], ()))]
     have = ask.stored(conn, model, [(Q.sha(Q.package_state(p)), Q.sha(qs[n][labs[n]["id"]])) for _, p, n in cands])
-    cos = measure_cosines(data, packages, sorted({n for _, _, n in cands}), api_key, log) if cands else {}
+    cos = measure_cosines(conn, data, packages, sorted({n for _, _, n in cands}), api_key, log) if cands else {}
     top = int(panel.require("link.package_measure_top"))
     chosen = defaultdict(list)                             # measure -> packages to ask
     for i, p in enumerate(packages):

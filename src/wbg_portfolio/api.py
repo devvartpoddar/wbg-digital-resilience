@@ -139,6 +139,26 @@ def cap_left(conn):
     return float(cap) - float(spent)
 
 
+MEASURED_MIN_CALLS = 20        # paid requests the ledger needs before their average is the estimate
+
+
+def measured_cost(conn, stage, model):
+    """(US$ a request, basis): the ledger's average cost per request of this step with this model, else of
+    the model over every step, once it holds MEASURED_MIN_CALLS paid requests; (None, "upper bound")
+    with neither. What a step's estimate rests on is logged with it."""
+    from wbg_portfolio import db
+    if not db.exists(conn, f"{db.STORE}.spend"):
+        return None, "upper bound (no measured cost yet)"
+    for cond, args, what in (("stage = %s AND model = %s", (stage, model), f"step {stage}"),
+                             ("model = %s", (model,), f"model {model}")):
+        n, cost = db.one(conn, f"SELECT coalesce(sum(calls), 0), coalesce(sum(cost_usd), 0) "
+                               f"FROM {db.STORE}.spend WHERE {cond}", args)
+        conn.commit()
+        if n >= MEASURED_MIN_CALLS and cost > 0:
+            return float(cost) / n, f"measured: US${float(cost) / n:.6f} a request over {int(n):,} paid requests of {what}"
+    return None, "upper bound (no measured cost yet)"
+
+
 class Spend:
     """The ledger of one step: with Spend(conn, stage, label_set, model) as s:
     s.check(estimate); ... s.add(cost) per call. `lock` is the lock the step's
@@ -150,12 +170,12 @@ class Spend:
         self.lock = lock or contextlib.nullcontext()
         self.calls, self.cost, self.t0, self.at = 0, 0.0, time.time(), None
 
-    def check(self, estimate):
+    def check(self, estimate, basis=""):
         with self.lock:
             left = cap_left(self.conn)
         if left is not None and estimate > left:
             raise CapReached(f"{self.stage}: --max-spend would be passed (about US${estimate:.3f} "
-                             f"to ask, US${max(left, 0):.3f} left); nothing asked")
+                             f"to ask{', ' + basis if basis else ''}; US${max(left, 0):.3f} left); nothing asked")
 
     def _write(self):
         from wbg_portfolio import db
@@ -172,15 +192,15 @@ class Spend:
                        (*values, self.at, self.stage, self.label_set, self.model))
         self.conn.commit()
 
-    def add(self, cost, calls=1):
+    def add(self, cost, calls=1, check=True):
         """What one call (or `calls` calls) paid: into the ledger at once; CapReached when the cap
-        is passed."""
+        is passed (check=False records it only: a request that was in flight when the cap was reached)."""
         with self.lock:
             self.calls += calls
             self.cost += cost
             self._write()
             left = cap_left(self.conn)
-        if left is not None and left < 0:
+        if check and left is not None and left < 0:
             raise CapReached(f"{self.stage}: --max-spend reached after {self.calls:,} calls; "
                              f"the answers so far are stored")
 
