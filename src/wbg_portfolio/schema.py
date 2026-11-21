@@ -83,7 +83,7 @@ RENAME_IN = {
 
 # Types by column name (after renaming). Anything not here is text, except
 # *_date -> date and *_at -> timestamptz.
-INTEGER = {"ordinal", "asset_rank", "text_start_offset", "text_end_offset", "pdf_text_start_offset",
+INTEGER = {"ordinal", "asset_rank", "level_rank", "text_start_offset", "text_end_offset", "pdf_text_start_offset",
            "pdf_text_end_offset", "word_count", "character_count", "row_count", "page_from",
            "page_to", "page_number", "part_number", "approval_fiscal_year", "pdf_size_bytes",
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
@@ -108,7 +108,8 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "cosine", "probability"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
-           "was_sent_to_model", "was_asked", "is_committed", "passes_measure_rule", "is_digital"}
+           "was_sent_to_model", "was_asked", "is_committed", "passes_measure_rule", "is_digital",
+           "has_asset", "same_type", "package_cancelled", "package_generic"}
 # Pipe-joined lists in the CSV become arrays, which `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
          "matched_types", "asset_ids_above_threshold", "type_ids_above_threshold",
@@ -511,17 +512,20 @@ TABLES = {
         key=("package_id", "label_id"),
         foreign=[("package_id", "packages", "package_id"),
                  ("project_id", "projects", "project_id")],
-        comment="Which digital asset a procurement package buys, builds, installs, connects "
-                "or operates: one row per package and asset asked (its best few by cosine "
-                "over the asset taxonomy's phrases), with the decision model's yes "
-                "probability and its posterior (src/wbg_portfolio/checks.py). A package has the "
-                "asset when posterior_probability reaches the control panel's link.asset_yes; "
-                "a package may have several.",
+        comment="Which digital asset a procurement package is for: one row per package and "
+                "asset asked (its best few by cosine over the asset taxonomy's phrases), with the "
+                "decision model's score (how far the package is for the asset, P(grades 2, 3)) and "
+                "its posterior (src/wbg_portfolio/checks.py). A package has the asset (has_asset) "
+                "when posterior_probability reaches the control panel's link.asset_yes, or from "
+                "link.asset_band_low when the chat model's second look says yes; a package may have "
+                "several. subtype_id is the type of an asset it has, by the chat model.",
         columns={
             "label_id": "The asset's id in wbg.labels (label_set assets).",
             "cosine": "The package description's best cosine over the asset's search phrases.",
             "cosine_rank": "The asset's rank among the package's assets by that cosine; 1 is the best.",
-            "probability": "The decision model's probability that the package procures this asset.",
+            "probability": "The decision model's score: the probability of grades 2 and 3 on how far the package is for this asset.",
+            "has_asset": "True when the package has the asset (see the table comment).",
+            "subtype_id": "The asset's type for this package (assets_subtypes.csv), by the chat model; empty where the package does not have the asset or the type was not asked yet.",
             "model_served": "The decision-model snapshot that answered.",
         }),
     "unit_assets": dict(
@@ -551,19 +555,30 @@ TABLES = {
         foreign=[("package_id", "packages", "package_id"),
                  ("unit_id", "search_units", "unit_id"),
                  ("project_id", "projects", "project_id")],
-        comment="Which procurement packages a committed, digital sentence is linked to, and how firmly: "
-                "one row per sentence, measure and package of the same project. strength strong: the "
-                "package, asked on its own, is about the sentence's measure (strong_p reaches "
-                "link.strong_yes). strength asset: the package and the sentence share a top-level asset, "
-                "which says only that both concern the same kind of asset, not that the package delivers "
-                "the commitment. A pair that is both is one row, strong, with its shared assets filled. "
-                "Built from the model readings at every publish. The models' reading, not a person's; "
-                "documented is not done.",
+        comment="Which procurement packages a kept sentence is linked to, and how firmly: one row per "
+                "sentence, measure and package of the same project. strength strong: the package, asked "
+                "on its own, is about the sentence's measure (strong_p reaches link.strong_yes). strength "
+                "asset: the package and the sentence share a top-level asset. level orders the links from "
+                "most to least telling: strong (the package names the measure), type_and_component (same "
+                "asset type and same top-level component), type (same asset type), component (same asset "
+                "and same component), asset (same asset only); level_rank is 1 to 5 in that order. The "
+                "levels add nothing and remove nothing: they only order the same links. A same-asset link "
+                "at any level says the package and the sentence concern the same kind of asset, not that "
+                "the package delivers the commitment. Built from the model readings at every publish. The "
+                "models' reading, not a person's; documented is not done.",
         columns={
             "strength": "strong or asset: see the table comment.",
             "shared_asset_ids": "The top-level assets the sentence and the package share (empty for a strong link with none).",
-            "strong_p": "The decision model's P(yes) that the measure applies to the package alone; empty when the package was not asked about this measure (it has no asset).",
+            "strong_p": "The decision model's P(yes) that the measure applies to the package alone; empty when the package was not asked about this measure (each package is asked only its likeliest measures).",
             "package_category": "The package's procurement category (Goods, Works, Consulting and so on).",
+            "level": "strong, type_and_component, type, component or asset: see the table comment.",
+            "level_rank": "1 (strong) to 5 (asset): order links by it.",
+            "same_type": "True when the sentence and the package have the same type of a shared asset (unit_assets.subtype_id and package_assets.subtype_id; unspecified never counts).",
+            "component_relation": "same, different or unknown: the sentence's and the package's top-level component numbers, unknown when either is missing.",
+            "sentence_component": "The sentence's top-level component, normalised (2.1 and Component 2 read as 2).",
+            "package_component": "The package's top-level component in its plan, normalised the same way.",
+            "package_cancelled": "True when the package's plan status says it was cancelled.",
+            "package_generic": "True when the package description is about running the project (project management, audit, vehicles, office furniture, workshops, per diem, accounting, salaries; src/wbg_portfolio/decide.py GENERIC). A flag to filter on, never a cut.",
         }),
     "activities": dict(
         key=("activity_id", "unit_id"),

@@ -333,6 +333,8 @@ def load_packages(data, projects=None):
                 out.append({"package_id": r["package_id"], "project_id": r["project_id"], "text": text,
                             "sha": hashlib.sha256(text.encode("utf-8")).hexdigest(),
                             "category": (r.get("category") or "").strip(),
+                            "status": (r.get("status") or "").strip(),
+                            "component_number": (r.get("component_number") or "").strip(),
                             "component": " ".join(f"{r.get('component_number') or ''} {r.get('component') or ''}".split())})
     return out
 

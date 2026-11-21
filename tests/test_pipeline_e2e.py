@@ -89,7 +89,14 @@ def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(sche
         assert rows(schema, f"SELECT count(*) FROM {{S}}.{v}")[0][0] > 0, v
     kinds = {k for (k,) in rows(schema, "SELECT DISTINCT kind FROM {S}.scores")}
     assert {"measure", "digital", "policy", "asset", "type", "package_asset", "package_measure",
-            "activity"} <= kinds and not {"link", "pair"} & kinds
+            "package_asset_subtype", "activity"} <= kinds and not {"link", "pair"} & kinds
+    # the digital question is graded on the four-grade scale; a package that has an asset has its type
+    assert rows(schema, "SELECT count(*) FROM {S}.scores WHERE kind = 'digital' "
+                        "AND jsonb_typeof(answer->'probabilities'->'3') IS NOT NULL")[0][0] > 0
+    assert rows(schema, "SELECT count(*) FROM {S}.package_assets WHERE has_asset AND subtype_id <> ''")[0][0] > 0
+    # every package is asked the strong-link question, with an asset or not
+    assert {p for (p,) in rows(schema, "SELECT DISTINCT item_id FROM {S}.scores WHERE kind = 'package_measure'")} == \
+        {"P1-1", "P1-2"}
     # the second looks that the first pass left to the chat model
     assert {"asset_second", "asset_subtype"} <= kinds
     assert {r[0] for r in rows(schema, "SELECT DISTINCT asset_level FROM {S}.unit_assets")} >= {"unit", "second_look", "none"}
@@ -109,7 +116,8 @@ def test_a_dry_run_asks_nothing_prints_estimates_and_writes_nothing(schema, wide
     # on a fresh schema the steps after the first cannot be estimated, and say so instead of a quiet 0
     for step, until in (("digital", "measure"), ("policy", "measure"), ("asset second look", "digital"),
                         ("asset types", "digital"), ("package asset second look", "link"),
-                        ("package_measure", "link"), ("activities", "digital")):
+                        ("package asset types", "link"), ("package_measure", "link"),
+                        ("activities", "digital")):
         assert f"{step}: cannot estimate until {until} has run" in out, step
     for stage in ("classify", "measure", "link", "activities"):
         assert f"#### {stage}" in out

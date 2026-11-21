@@ -54,9 +54,10 @@ GRADE_COLS = ["label_set", "unit_id", "paragraph_id", "doc_id", "project_ids", "
 UNIT_ASSET_COLS = ["unit_id", "asset_rank", "paragraph_id", "project_ids", "asset_id", "subtype_id", "probability",
                    "asset_level", "own_best_asset_id", "own_best_probability", "second_look_asset_id"]
 PACKAGE_ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_rank", "probability",
-                      "p_calibrated", "model_served"]
+                      "p_calibrated", "has_asset", "subtype_id", "model_served"]
 STRENGTH_COLS = ["project_id", "label_set", "unit_id", "package_id", "strength", "shared_asset_ids",
-                 "strong_p", "package_category"]
+                 "strong_p", "package_category", "level", "level_rank", "same_type", "component_relation",
+                 "sentence_component", "package_component", "package_cancelled", "package_generic"]
 ACTIVITY_COLS = ["activity_id", "project_id", "label_set", "activity_label", "unit_id", "n_sentences"]
 LABEL_COLS = ["label_set", "label_id", "name", "definition", "active", "version", "family", "folder"]
 TYPE_COLS = ["label_set", "label_id", "type_id", "type_name", "definition", "merged_from"]

@@ -378,42 +378,126 @@ def package_asset_sets(conn, only=None):
     return out
 
 
+def package_asset_kinds(conn):
+    """{(package_id, asset_id): subtype_id} of the assets a package has (kind package_asset_subtype)."""
+    out = {}
+    for _, aid, pid, _, answer, *_ in scores(conn, "package_asset_subtype"):
+        labs = (answer or {}).get("labels") or []
+        if labs:
+            out[(pid, aid)] = labs[0]
+    return out
+
+
 def package_measure_scores(conn):
     """{(label_set, package_id): P(yes)} of the package-alone question about a measure."""
     return {(lset, pid): float(score) for lset, _, pid, score, *_ in scores(conn, "package_measure")}
 
 
-def link_strength_rows(conn, corpus, names, ua, packages):
-    """The commitment_package_links rows. A
-    committed, digital sentence and a package of the same project are linked
-    'strong' when the package, asked alone, is about the sentence's measure at
-    link.strong_yes or more, and 'asset' when they share a top-level asset (the
-    sentence's, at the levels the panel counts, and the package's). A pair that
-    is both is one row, 'strong', its shared assets filled."""
+# The levels of a link, most to least telling (docs/method/links.md says what each can be trusted to mean).
+LINK_LEVELS = ("strong", "type_and_component", "type", "component", "asset")
+# A package whose description is about running the project rather than a digital thing (published as a
+# flag, never a cut). Whole words only, and no bare "communication": "Unified Communication Tools" is not
+# generic. An audit of security or of an information system is not generic either.
+GENERIC = re.compile(r"\b(?:project management|project implementation unit|PIU|PMU|audit(?:s|ing|or|ors)?|"
+                     r"vehicles?|(?:office )?furniture|workshops?|per diem|accounting|accountants?|"
+                     r"salar(?:y|ies))\b", re.I)
+NOT_GENERIC = re.compile(r"\b(?:security|cyber\w*|IT|information systems?|data)\s+audit", re.I)
+
+
+def is_generic(description):
+    """True when a package description matches the generic pattern (GENERIC) and is not an audit of
+    security or of a system (NOT_GENERIC)."""
+    d = description or ""
+    return bool(GENERIC.search(d)) and not NOT_GENERIC.search(d)
+
+
+def is_cancelled(status):
+    return "cancel" in (status or "").lower()
+
+
+def top_component(x):
+    """The top-level component of a plan or appraisal component ('Component 2.1', '2b', 'II' -> '2'; 'D',
+    'Component C.1' -> 'D', 'C'), '' when there is none."""
+    t = (x or "").strip().lower()
+    t = re.sub(r"^(component|composante|componente|sub-?component)\s*", "", t)
+    m = re.match(r"(\d+)", t)
+    if m:
+        return str(int(m.group(1)))
+    m = re.match(r"([ivx]+)\b", t)
+    if m:
+        vals, total, prev = {"i": 1, "v": 5, "x": 10}, 0, 0
+        for ch in reversed(m.group(1)):
+            v = vals[ch]
+            total, prev = (total - v, prev) if v < prev else (total + v, v)
+        return str(total)
+    m = re.match(r"([a-h])(?:\b|[.:)])", t)
+    return m.group(1).upper() if m else ""
+
+
+def component_relation(a, b):
+    """same, different, or unknown when either side has no top-level component."""
+    if not a or not b:
+        return "unknown"
+    return "same" if a == b else "different"
+
+
+def link_level(strong, same_type, relation):
+    if strong:
+        return "strong"
+    if same_type:
+        return "type_and_component" if relation == "same" else "type"
+    return "component" if relation == "same" else "asset"
+
+
+def link_strength_rows(conn, corpus, names, ua, packages, kinds=None):
+    """The commitment_package_links rows. A kept sentence and a package of the same project are
+    linked when the package, asked alone, is about the sentence's measure at link.strong_yes or more
+    (strength strong), or when they share a top-level asset (the sentence's, at the levels the panel
+    counts, and the package's; strength asset). A pair that is both is one row, strong. Each link
+    also has a level (LINK_LEVELS): strong; else by whether the sentence and the package share an
+    asset type (`kinds` is asset_kinds(); the package's from package_asset_kinds(); unspecified never
+    counts) and a top-level component (both known and equal). The levels only order the links: none
+    is added or removed by them. The package's cancelled and generic flags ride along."""
     strong_yes = float(setting("link.strong_yes"))
     levels = link_levels()
     has = package_asset_sets(conn)
     asked = package_measure_scores(conn)
+    kinds = asset_kinds(conn) if kinds is None else kinds
+    pkinds = package_asset_kinds(conn)
     by_project = defaultdict(list)
     for p in packages:
         by_project[p["project_id"]].append(p)
+    typed = lambda pairs: {(a, t) for a, t in pairs if t and t != Q.UNSPECIFIED}
     out = []
     for name in names:
         for u in committed_digital_units(conn, corpus, [name]):
             mine = linked_assets(ua.get(u, ({}, [], "none")), levels)
+            stypes = typed((a, kinds.get((u, a), "")) for a in mine)
+            scomp = top_component(corpus.row(u).get("component_number", ""))
             for pid in corpus.projects(u):
                 for p in by_project.get(pid, []):
-                    shared = mine & has.get(p["package_id"], set())
-                    sp = asked.get((name, p["package_id"]))
+                    pkg = p["package_id"]
+                    shared = mine & has.get(pkg, set())
+                    sp = asked.get((name, pkg))
                     strong = sp is not None and sp >= strong_yes
                     if not strong and not shared:
                         continue
+                    same_type = bool({x for x in stypes if x[0] in shared}
+                                     & typed((a, pkinds.get((pkg, a), "")) for a in shared))
+                    pcomp = top_component(p.get("component_number", ""))
+                    rel = component_relation(scomp, pcomp)
+                    level = link_level(strong, same_type, rel)
                     out.append({"project_id": pid, "label_set": name, "unit_id": u,
-                                "package_id": p["package_id"], "strength": "strong" if strong else "asset",
+                                "package_id": pkg, "strength": "strong" if strong else "asset",
                                 "shared_asset_ids": "|".join(sorted(shared)),
                                 "strong_p": "" if sp is None else f"{sp:.4f}",
-                                "package_category": p.get("category", "")})
-    return sorted(out, key=lambda r: (r["label_set"], r["unit_id"], r["package_id"]))
+                                "package_category": p.get("category", ""),
+                                "level": level, "level_rank": LINK_LEVELS.index(level) + 1,
+                                "same_type": str(same_type).lower(), "component_relation": rel,
+                                "sentence_component": scomp, "package_component": pcomp,
+                                "package_cancelled": str(is_cancelled(p.get("status"))).lower(),
+                                "package_generic": str(is_generic(p.get("text"))).lower()})
+    return sorted(out, key=lambda r: (r["label_set"], r["unit_id"], r["level_rank"], r["package_id"]))
 
 
 def link_levels():
@@ -552,8 +636,10 @@ def asset_rows(conn, corpus, amap, ua, kinds=None, second=None):
 
 
 def package_asset_rows(conn, packages):
-    """The package_assets rows: every package x asset the first pass asked about."""
+    """The package_assets rows: every package x asset the first pass asked about, with the asset's type
+    where the package has the asset and its type was asked (kind package_asset_subtype)."""
     pq = Q.package_asset_questions()
+    kinds, has = package_asset_kinds(conn), package_asset_sets(conn)
     pa = posterior(conn, "package_asset", Q.ASSETS, {a: Q.sha(q) for a, q in pq.items()}, lambda i: None)
     by_pkg = {p["package_id"]: p for p in packages}
     assets = []
@@ -563,6 +649,8 @@ def package_asset_rows(conn, packages):
         assets.append({"package_id": pid, "project_id": by_pkg[pid]["project_id"], "label_id": aid,
                        "cosine": f"{float(cos or 0):.4f}", "cosine_rank": rank or "",
                        "probability": f"{float(score):.3f}", "p_calibrated": f"{pa(aid, pid, score):.3f}",
+                       "has_asset": str(aid in has.get(pid, ())).lower(),
+                       "subtype_id": kinds.get((pid, aid), "") if aid in has.get(pid, ()) else "",
                        "model_served": served or ""})
     return assets
 
@@ -577,7 +665,8 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
     amap = asset_map(conn, corpus)
     second = asset_second_looks(conn)
     ua = unit_assets(corpus, amap, second)
-    grades, assets = asset_rows(conn, corpus, amap, ua, asset_kinds(conn), second)
+    kinds = asset_kinds(conn)
+    grades, assets = asset_rows(conn, corpus, amap, ua, kinds, second)
     counts = {}
     findings = measure_rows(conn, corpus, names, ua, counts)
     if counts.get("waiting"):
@@ -586,7 +675,7 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
         log(f"  {counts['no_digital_answer']:,} committed pair(s) have no digital answer yet; not digital")
     packages = checks.load_packages(data)
     pk_assets = package_asset_rows(conn, packages)
-    strengths = link_strength_rows(conn, corpus, names, ua, packages)
+    strengths = link_strength_rows(conn, corpus, names, ua, packages, kinds)
     from wbg_portfolio import activities
     acts = activities.rows(conn, data, corpus, names, log=log)
     written = {}

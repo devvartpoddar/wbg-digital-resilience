@@ -18,8 +18,10 @@ scores, and src/wbg_portfolio/decide.py reads them.
   asset_second, asset_subtype   for the committed, digital sentences: the chat model's
             assets (asset_second, for those whose best first-pass asset is under asset.ask_high),
             then the type of every asset that counts, whichever look found it (asset_subtype)
-  package_asset_second   every package x asset pair whose first-pass P(yes) is
+  package_asset_second   every package x asset pair whose first-pass score is
             in [link.asset_ask_low, link.asset_ask_high): the chat model's yes or no
+  package_asset_subtype  every package x asset that counts: the type of the asset, the
+            sentences' type question with the package as subject
 
 What is asked and what decides are separate, the same way for each look: the
 `*ask_low`/`*ask_high` settings say which pairs are asked (wide), and
@@ -241,4 +243,29 @@ def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=
     checks.write_scoped(conn, "package_asset_second", Q.ASSETS, rows, packages if projects else None)
     log(f"  {len(rows):,} package asset second looks written; {len(pairs) - len(rows):,} pair(s) waiting "
         f"(not counted)")
+    return len(rows) if ok else None
+
+
+def package_asset_subtype(conn, data, corpus, names=None, *, api_key="", dry_run=False, workers=ask.WORKERS,
+                          log=print, projects=None, **_):
+    """The type of each asset a package has (decide.package_asset_sets, after the package second look):
+    the sentences' type question with the package as its subject, by the chat model, one question per
+    package and asset. Writes kind package_asset_subtype (label_set assets, label the asset, item the
+    package; the answer's labels are the type). A reply that is not one of the asset's types is
+    unreadable (asked again), never stored."""
+    if checks.cannot_estimate(conn, dry_run, log, "package asset types", ("package_asset", "link")):
+        return None
+    packages = {p["package_id"]: p for p in checks.load_packages(data, projects)}
+    qs = Q.package_subtype_questions()
+    has = decide.package_asset_sets(conn, packages)
+    items = [((pid, aid), Q.package_state(packages[pid]), qs[aid])
+             for pid in sorted(has) for aid in sorted(has[pid]) if aid in qs]
+    log(f"package asset types: {len(items):,} package x asset pair(s) that count")
+    got, ok = chat.asked(conn, items, "package_asset_subtype", Q.ASSETS, api_key, dry_run, workers, log)
+    if dry_run:
+        return None
+    rows = [checks._row("package_asset_subtype", Q.ASSETS, aid, pid, Q.package_state(packages[pid]), qs[aid], a,
+                        score=1) for (pid, aid), a in got.items()]
+    checks.write_scoped(conn, "package_asset_subtype", Q.ASSETS, rows, packages if projects else None)
+    log(f"  {len(rows):,} package asset types written; {len(items) - len(rows):,} pair(s) waiting")
     return len(rows) if ok else None

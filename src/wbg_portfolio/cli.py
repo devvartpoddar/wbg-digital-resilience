@@ -847,7 +847,7 @@ def run(args, data):
             elif stage == "link":
                 ok = checks.package_assets(conn, data, corpus, **kw) is not None or args.dry_run
                 if ok:
-                    for step in (second.package_asset_second, checks.package_measure):
+                    for step in (second.package_asset_second, second.package_asset_subtype, checks.package_measure):
                         if step(conn, data, corpus, every, **kw) is None and not args.dry_run:
                             ok = False
             elif stage == "activities":

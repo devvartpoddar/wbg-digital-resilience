@@ -101,7 +101,8 @@ $do$;
 -- every link (47 s for a count).
 CREATE MATERIALIZED VIEW wbg.commitment_package_status AS
 WITH l AS MATERIALIZED (
-  SELECT u.commitment_id, u.unit_id, cl.package_id, cl.strength,
+  SELECT u.commitment_id, u.unit_id, cl.package_id, cl.strength, cl.level_rank,
+         cl.package_cancelled, cl.package_generic,
          CASE WHEN cl.strength = 'strong' THEN cl.strong_p END AS probability
   FROM wbg.commitment_units u
   JOIN wbg.commitment_package_links cl
@@ -110,6 +111,9 @@ WITH l AS MATERIALIZED (
 SELECT l.commitment_id, l.package_id,
        CASE WHEN bool_or(l.strength = 'strong') THEN 'strong' ELSE 'asset' END AS strength,
        max(l.probability) AS link_probability,
+       min(l.level_rank) AS level_rank,
+       (ARRAY['strong', 'type_and_component', 'type', 'component', 'asset'])[min(l.level_rank)] AS level,
+       bool_or(l.package_cancelled) AS package_cancelled, bool_or(l.package_generic) AS package_generic,
        count(DISTINCT l.unit_id) AS units_linked,
        s.project_id, s.description_clean, s.category, s.method_code, s.estimated_amount_usd,
        s.planned_date, s.due_date, s.plan_status, s.in_latest_plan, s.notice_date,
@@ -124,7 +128,7 @@ CREATE UNIQUE INDEX ON wbg.commitment_package_status (commitment_id, package_id)
 CREATE INDEX ON wbg.commitment_package_status (package_id);
 ANALYZE wbg.commitment_package_status;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_package_status IS
-  'One row per commitment and procurement package linked to any of its sentences (commitment_package_links: strong when the package, asked alone, is about the measure; asset when they share a top-level asset): strength is strong when any of the links is, else asset; link_probability is the strongest strong-link probability and is null when every link is by shared asset; the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A strong link says the package, read alone, is about the measure; an asset link says only that both concern the same kind of asset. Both are the models'' reading, unmeasured until a sample is graded.';
+  'One row per commitment and procurement package linked to any of its sentences (commitment_package_links: strong when the package, asked alone, is about the measure; asset when they share a top-level asset): strength is strong when any of the links is, else asset; level and level_rank are the best level among its sentences'' links (1 strong, 2 same asset type and component, 3 same asset type, 4 same asset and component, 5 same asset); link_probability is the strongest strong-link probability and is null when every link is by shared asset; the package''s plan columns, latest notice, signed contract, due_date and package_status (see package_status), as of the last publish (rebuilt there, so a status that turns on today''s date is frozen at that day). A strong link says the package, read alone, is about the measure; an asset link says only that both concern the same kind of asset. Both are the models'' reading, unmeasured until a sample is graded.';
 
 -- Near-identical wording across projects: word-for-word equality is rare,
 -- while the operations of one programme print one climate section with

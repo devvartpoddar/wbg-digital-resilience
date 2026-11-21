@@ -36,13 +36,16 @@ SELECT cl.label_set, f.label_id, f.measure_name, cl.project_id, f.cohort_set, f.
        p.status, p.planned_date, p.estimated_amount_usd, p.in_latest_plan,
        p.component_number AS package_component_number, p.component_name AS package_component_name,
        wbg.is_upcoming(p.status) AS is_upcoming,
-       cl.strength, cl.shared_asset_ids, cl.strong_p
+       cl.strength, cl.shared_asset_ids, cl.strong_p, cl.level, cl.level_rank, cl.same_type,
+       cl.component_relation, cl.sentence_component, cl.package_component, cl.package_cancelled,
+       cl.package_generic
 FROM wbg.commitment_package_links cl
 JOIN wbg.measure_findings_in_context f ON f.label_set = cl.label_set AND f.unit_id = cl.unit_id
                                        AND f.project_id = cl.project_id
-JOIN wbg.packages p ON p.package_id = cl.package_id;
+JOIN wbg.packages p ON p.package_id = cl.package_id
+ORDER BY cl.label_set, cl.unit_id, cl.level_rank, cl.package_id;
 COMMENT ON VIEW wbg.commitment_package_links_in_context IS
-  'One row per committed, digital sentence and package of the same project that are linked, with the commitment''s text, measure, asset and type and the package''s plan columns. strength is strong when the package, asked on its own, is about the measure (strong_p at link.strong_yes or more), or asset when they share a top-level asset (shared_asset_ids) and nothing more. Both are models'' readings; an asset link says the same kind of asset, not that the package delivers the commitment.';
+  'One row per kept sentence and package of the same project that are linked, with the commitment''s text, measure, asset and type and the package''s plan columns, in order of level (level_rank 1 strong, 2 same asset type and component, 3 same asset type, 4 same asset and component, 5 same asset). strength is strong when the package, asked on its own, is about the measure (strong_p at link.strong_yes or more), or asset when they share a top-level asset (shared_asset_ids) and nothing more; package_cancelled and package_generic flag the package. Both are models'' readings; an asset link says the same kind of asset, not that the package delivers the commitment.';
 
 -- Activities: the distinct things a project commits to do for a measure, with
 -- what its sentences say about assets, kinds, instrument, types and links.

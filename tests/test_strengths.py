@@ -211,3 +211,68 @@ def test_the_views_the_app_reads_carry_both_kinds_of_link(pg, corpus, fake_chat)
     assert db.one(pg, f"SELECT measures_linked, commitments_linked, best_commitment_probability "
                       f"FROM {db.SCHEMA}.packages_with_commitments WHERE package_id = 'P1-1'") == (["cra"], 1, None)
     assert db.one(pg, f"SELECT count(*), min(strength) FROM {db.SCHEMA}.commitment_packages_in_context") == (1, "asset")
+
+
+def test_a_package_asset_has_its_type_asked_stored_and_published(pg, corpus, fake_chat):
+    from wbg_portfolio import sampling
+    c = ready(pg, corpus)
+    assert second.package_asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1      # P1-1 towers only
+    prompt = fake_chat.prompts()[-1]
+    assert prompt.startswith("Which type of Mobile networks is the procurement package in the 'package' field about?")
+    assert "- mast: Masts\n- unspecified: not stated" in prompt and "[package]\nSupply of towers" in prompt
+    assert decide.package_asset_kinds(pg) == {("P1-1", "towers"): "mast"}
+    n = len(fake_chat.calls)
+    second.package_asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)
+    assert len(fake_chat.calls) == n                                        # a rerun asks nothing
+    assert second.package_asset_subtype(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None
+    publish(pg, corpus, c)
+    got = {(p, a): (h, st) for p, a, h, st in db.rows(
+        pg, f"SELECT package_id, label_id, has_asset, subtype_id FROM {db.SCHEMA}.package_assets")}
+    assert got[("P1-1", "towers")] == (True, "mast") and got[("P1-1", "fiber")] == (False, None)
+    # the evaluation sampler reads the published type, under the same names
+    pk = sampling.load_packages(corpus)
+    assert sampling.package_types(pg, [], pk)["P1-1"] == ({("towers", "mast")}, "published")
+
+
+def test_generic_and_component_rules():
+    assert not decide.is_generic("Unified Communication Tools")
+    assert decide.is_generic("Project management consultant") and decide.is_generic("External audit of accounts")
+    assert decide.is_generic("Purchase of vehicles") and decide.is_generic("Per diem for workshops")
+    assert not decide.is_generic("Security audit of the data centre") and not decide.is_generic("Supply of towers")
+    assert decide.top_component("Component 2.1: Data") == "2" and decide.top_component("D") == "D"
+    assert decide.top_component("C.1 Platforms") == "C" and decide.top_component("") == ""
+    assert decide.component_relation("2", "2") == "same" and decide.component_relation("2", "") == "unknown"
+    assert decide.component_relation("1", "2") == "different"
+
+
+def level_of(pg, u, pkg):
+    return db.one(pg, f"SELECT level, level_rank, same_type, component_relation, package_cancelled, package_generic "
+                      f"FROM {db.SCHEMA}.commitment_package_links WHERE unit_id = %s AND package_id = %s", (u, pkg))
+
+
+def test_each_link_has_a_level_from_its_type_and_component_and_no_link_is_added_or_removed(pg, corpus, fake_chat):
+    c = ready(pg, corpus)
+    u0 = c.index[0]["unit_id"]
+    second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)            # the tower sentence: mast
+    second.package_asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)    # the tower package: mast
+    checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET)
+    publish(pg, corpus, c)
+    assert level_of(pg, u0, "P1-1") == ("strong", 1, True, "same", False, False)
+    pg.execute(f"UPDATE {db.SCHEMA}.scores SET score = 0.5 WHERE kind = 'package_measure'")
+    pg.commit()
+    decide.publish(pg, corpus, corpus=c, log=lambda *_: None)
+    assert level_of(pg, u0, "P1-1")[:4] == ("type_and_component", 2, True, "same")
+    before = set(links(pg))
+    # an unspecified type never counts as the same type
+    pg.execute(f"UPDATE {db.SCHEMA}.scores SET answer = jsonb_set(answer, '{{labels}}', '[\"unspecified\"]') "
+               f"WHERE kind = 'package_asset_subtype'")
+    pg.commit()
+    decide.publish(pg, corpus, corpus=c, log=lambda *_: None)
+    assert level_of(pg, u0, "P1-1")[:4] == ("component", 4, False, "same")
+    # the types moved the level; the set of links did not move
+    assert set(links(pg)) == before
+    order = [r[0] for r in db.rows(pg, f"SELECT level_rank FROM {db.SCHEMA}.commitment_package_links_in_context")]
+    assert order == sorted(order)
+    st = db.one(pg, f"SELECT level, level_rank FROM {db.SCHEMA}.commitment_package_status WHERE package_id = 'P1-1' "
+                    f"ORDER BY level_rank LIMIT 1")
+    assert st == ("component", 4)
