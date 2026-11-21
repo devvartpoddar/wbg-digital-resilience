@@ -597,7 +597,7 @@ PARAGRAPH_LABEL = "Sentences of one paragraph"
 
 def commitment_keys(instrument, assets, types, paragraph_id):
     """[(key, asset_id, subtype_id, type_id, paragraph_id)] of one kept sentence of a project and measure.
-    An investment sentence (or one whose instrument is not known yet) belongs to one commitment per
+    An investment sentence (or one whose instrument is not known yet, keyed as investment) belongs to one commitment per
     asset it has with a stated type (assets: [(asset_id, subtype_id)]; unspecified or no type yet is
     not stated); with no asset at all, to one per measure type it has (types); a policy sentence to one
     per measure type. A sentence left with none of these (no asset and no type, only unspecified asset
@@ -622,12 +622,15 @@ def commitment_assets(ua, type_of):
 
 def commitment_names():
     """(asset names, {(asset, subtype): name}, {(measure, type): name}) from the label files, for a
-    commitment's label."""
+    commitment's label. A proposed (OTH) type is named by its readable name, marked "(proposed)"."""
     assets, subtypes = Q.asset_catalogue()
     types = {}
-    for name in [n for n in labels.label_sets() if n != Q.ASSETS]:
+    for name in measure_sets():
         shown = labels.type_resolution(name)[1]
         types.update({(name, t): v["type_name"] for (_, t), v in shown.items()})
+        for t in Q.oth_types(name):
+            n = t["type_name"][len(OTH):].strip() if t["type_name"].startswith(OTH) else t["type_name"]
+            types.setdefault((name, t["type_id"]), f"{n} (proposed)")
     return ({a["id"]: a["name"] for a in assets},
             {(a, s["id"]): s["name"] for a, v in subtypes.items() for s in v}, types)
 
@@ -651,7 +654,9 @@ def commitment_rows(findings, assets_of, links, names_of):
         uid, name = f["unit_id"], f["label_set"]
         assets = assets_of.get(uid, [])
         types = [t for t in f["types_yes"].split("|") if t]
-        instrument = f["instrument"]
+        # a sentence with no policy answer yet is grouped as investment, so its commitment (and id) stays
+        # the same when an investment answer arrives
+        instrument = f["instrument"] or "investment"
         for pid in [p for p in f["project_ids"].split("|") if p]:
             for key, a, st, t, para in commitment_keys(instrument, assets, types, f["paragraph_id"]):
                 cid = hashlib.md5("|".join((pid, name, instrument, key, a, st, t, para)).encode()).hexdigest()

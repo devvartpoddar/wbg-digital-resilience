@@ -56,3 +56,24 @@ def test_a_sentence_in_two_projects_is_in_a_commitment_of_each():
     rows, members = decide.commitment_rows([finding("u1", project="P1|P2")], {"u1": [("a", "x")]}, [], NAMES)
     assert sorted(r["project_id"] for r in rows) == ["P1", "P2"] and len({r["commitment_id"] for r in rows}) == 2
     assert all(r["best_link_level"] == "" and r["linked_packages"] == 0 for r in rows)
+
+
+def test_a_sentence_with_no_instrument_answer_yet_keeps_its_commitment_when_the_answer_arrives():
+    before, _ = decide.commitment_rows([finding("u1", instrument=""), finding("u2")], {"u1": [("a", "x")],
+                                       "u2": [("a", "x")]}, [], NAMES)
+    after, _ = decide.commitment_rows([finding("u1"), finding("u2")], {"u1": [("a", "x")], "u2": [("a", "x")]},
+                                      [], NAMES)
+    assert len(before) == 1 and before[0]["sentences"] == 2 and before[0]["instrument"] == "investment"
+    assert [r["commitment_id"] for r in before] == [r["commitment_id"] for r in after]
+
+
+def test_a_proposed_type_is_labelled_by_its_name(monkeypatch):
+    from wbg_portfolio import questions as Q
+    monkeypatch.setattr(Q, "asset_catalogue", lambda: ([], {}))
+    monkeypatch.setattr(decide, "measure_sets", lambda: ["m"])
+    monkeypatch.setattr(decide.labels, "type_resolution", lambda name: ({}, {}))
+    monkeypatch.setattr(Q, "oth_types", lambda name, data=None: [
+        {"label_id": "m", "type_id": "OTH.drills", "type_name": "OTH. Emergency drills", "definition": "d"}])
+    names = decide.commitment_names()
+    rows, _ = decide.commitment_rows([finding("u1", instrument="policy", types=["OTH.drills"])], {}, [], names)
+    assert rows[0]["commitment_label"] == "Emergency drills (proposed)"
