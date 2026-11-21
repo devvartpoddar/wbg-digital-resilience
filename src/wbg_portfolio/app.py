@@ -1,4 +1,4 @@
-"""What the Shiny app (repository devvartpoddar/shiny, apps/wbg) reads, and the
+"""What the Shiny app (repository devvartpoddar/applications, apps/wbg) reads, and the
 little it computes on top. Read only: every function takes `q`, a function
 (sql, params) -> pandas.DataFrame (kit.query_df in the app), and reads the
 views of schema wbg (sql/views/, docs/method/dashboards.md); nothing here
