@@ -372,3 +372,20 @@ def test_a_pair_with_no_digital_truth_is_left_out_of_the_digital_figures():
     assert with_unknown["lenient_recall_digital"] == known["lenient_recall_digital"] == 1.0
     f = tuning.measure_frame([row(True), row(None)])
     assert list(f.dig_known) == [1.0, 0.0] and list(f.dig_t) == [1.0, 0.0]
+
+
+def test_a_unit_that_cannot_be_shown_is_left_out_before_the_draw_and_reported(pg, corpus, fake_chat):
+    from wbg_portfolio import db
+    uids = _publish(pg, corpus)
+    pg.execute(f"INSERT INTO {db.SCHEMA}.measure_findings (label_set, label_id, unit_id, project_ids, score_first, "
+               f"is_committed, is_digital) SELECT label_set, label_id, 'X:not-in-this-corpus', project_ids, "
+               f"score_first, is_committed, is_digital FROM {db.SCHEMA}.measure_findings WHERE unit_id = %s",
+               (uids[0],))
+    pg.commit()
+    logged = []
+    rows = sampling.draw(pg, corpus, 2, log=logged.append)
+    assert "X:not-in-this-corpus" not in {r["unit_id"] for r in rows["measure"]}
+    assert {r["unit_id"] for r in rows["measure"]} == set(uids)          # every pi still 1: nothing biased low
+    manifest = json.load(open(os.path.join(sampling.folder(corpus, 2), "sample.json")))
+    assert manifest["left_out_before_draw"]["measure"] == 1
+    assert any("left out of the population before the draw" in line for line in logged)

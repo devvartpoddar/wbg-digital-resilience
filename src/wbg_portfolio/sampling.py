@@ -458,8 +458,22 @@ def draw(conn, data, seed, corpus=None, log=print, dry_run=False):
     units = {"measure": measure_units(mf, type_scores), "asset": asset_units(mf, ua, own),
              "package_measure": package_measure_units(conn, mf, packages, seed),
              "link": link_units(links, packages, commitments_of(conn))}
+    # A unit that cannot be shown to a grader (its sentence is not in this data folder's corpus, or its
+    # package not in the package list) is left out of the population before the chances are set, so every
+    # drawn unit is graded and the weighted totals are of the population that can be graded, not short
+    # of it; how many were left out is reported and kept in the manifest.
+    left_out = {}
+    for kind in KINDS:
+        ok = [u for u in units[kind]
+              if (kind not in ("measure", "asset", "link") or u["unit_id"] in corpus.texts)
+              and (kind not in ("package_measure", "link") or u["package_id"] in packages)]
+        left_out[kind] = len(units[kind]) - len(ok)
+        units[kind] = ok
     lines, short = [], {}
     for kind in KINDS:
+        if left_out[kind]:
+            lines.append(f"{kind}: {left_out[kind]:,} unit(s) left out of the population before the draw: not in the "
+                         f"corpus or the package list of this data folder")
         targets = asset_targets(units[kind]) if kind == "asset" else TARGETS[kind]
         short[kind] = chances(units[kind], targets, minimum=MEASURE_MIN if kind == "measure" else 0, group="group")
         lines += expected_lines(kind, units[kind], short[kind])
@@ -472,16 +486,10 @@ def draw(conn, data, seed, corpus=None, log=print, dry_run=False):
     if dry_run:
         log("check sample: --dry-run: nothing drawn or written")
         return {}
-    rows, missing = {}, 0
+    rows = {}
     for kind in KINDS:
         got = []
         for u in drawn(units[kind], seed, kind):
-            if kind in ("measure", "asset", "link") and u["unit_id"] not in corpus.texts:
-                missing += 1
-                continue
-            if kind in ("package_measure", "link") and u["package_id"] not in packages:
-                missing += 1
-                continue
             u = dict(u, kind=kind)
             u.pop("group", None)
             if kind in ("measure", "asset", "link"):
@@ -496,8 +504,6 @@ def draw(conn, data, seed, corpus=None, log=print, dry_run=False):
                 u["types_pi"] = u["pi"] * q_types if u["ask_types"] else None
             got.append(u)
         rows[kind] = got
-    if missing:
-        log(f"  {missing:,} drawn unit(s) left out: not in the corpus or the package list of this data folder")
     for kind in KINDS:
         common.write_atomic(path_of(data, seed, kind),
                             "".join(json.dumps(r, ensure_ascii=False, sort_keys=True) + "\n" for r in rows[kind]))
@@ -507,7 +513,8 @@ def draw(conn, data, seed, corpus=None, log=print, dry_run=False):
     manifest = {"seed": seed, "schema": db.SCHEMA, "store": db.STORE,
                 "drawn": {k: len(v) for k, v in rows.items()},
                 "expected": {k: round(sum(u["pi"] for u in units[k]), 1) for k in KINDS},
-                "population": {k: len(units[k]) for k in KINDS}, "types_chance": q_types,
+                "population": {k: len(units[k]) for k in KINDS}, "left_out_before_draw": left_out,
+                "types_chance": q_types,
                 "short_of_minimum": short["measure"]}
     common.write_atomic(os.path.join(out_dir, "sample.json"), json.dumps(manifest, indent=1, sort_keys=True))
     return rows
