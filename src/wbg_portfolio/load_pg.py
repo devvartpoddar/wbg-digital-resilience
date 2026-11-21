@@ -240,6 +240,15 @@ def prepare(conn):
             conn.execute(f"DROP {'MATERIALIZED VIEW' if kind[0] == 'm' else 'VIEW'} {ident(table)} CASCADE")
         if not db.exists(conn, ident(table)):
             create_table(conn, table, cols)
+        else:
+            # a table left by an earlier publish can lack columns added since (measure_quality.scope made
+            # the views fail on 2026-11-21): add them, so the views build; the owning load replaces the rows
+            have = {c for (c,) in conn.execute("SELECT column_name FROM information_schema.columns "
+                                               "WHERE table_schema = %s AND table_name = %s", (db.SCHEMA, table))}
+            for c in cols:
+                n = S.rename(table, c)
+                if n not in have:
+                    conn.execute(f'ALTER TABLE {ident(table)} ADD COLUMN "{n}" {S.col_type(n)}')
     db.scores_table(conn)
 
 
