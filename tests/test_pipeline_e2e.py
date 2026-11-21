@@ -82,7 +82,6 @@ def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(sche
     out = capsys.readouterr().out
     for stage in ("classify", "measure", "link", "publish"):
         assert f"#### {stage}" in out
-    assert "#### activities" not in out
     for table in (*TABLES, "measure_findings", "unit_assets", "package_assets"):
         assert db.exists(schema, f"{db.SCHEMA}.{table}"), table
     for t in TABLES:
@@ -91,8 +90,7 @@ def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(sche
         assert rows(schema, f"SELECT count(*) FROM {{S}}.{v}")[0][0] > 0, v
     kinds = {k for (k,) in rows(schema, "SELECT DISTINCT kind FROM {S}.scores")}
     assert {"measure", "digital", "policy", "asset", "type", "package_asset", "package_measure",
-            "package_asset_subtype"} <= kinds and not {"link", "pair", "activity"} & kinds
-    assert not db.exists(schema, f"{db.SCHEMA}.activities") and not db.exists(schema, f"{db.SCHEMA}.activity_summary")
+            "package_asset_subtype"} <= kinds
     # every link has a level; the commitments are made by the rule and carry their best link level
     assert {r[0] for r in rows(schema, "SELECT DISTINCT level FROM {S}.commitment_package_links")} <= {
         "strong", "type_and_component", "type", "component", "asset"}

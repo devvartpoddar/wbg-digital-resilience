@@ -634,8 +634,3 @@ TABLES = {
         columns={}),
 }
 
-
-def qualified(table):
-    """schema.table for a table name, as created."""
-    from wbg_portfolio import db
-    return f"{db.SCHEMA}.{table}"

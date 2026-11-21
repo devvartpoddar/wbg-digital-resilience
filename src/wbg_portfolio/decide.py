@@ -586,7 +586,6 @@ def linked_assets(ua):
 # The commitment rule (docs/method/decisions.md, "Commitments"), no model call: the kept sentence x
 # measure pairs of a project grouped by what they commit to.
 
-COMMITMENT_KEYS = ("asset_type", "type", "paragraph")
 PARAGRAPH_LABEL = "Sentences of one paragraph"
 
 

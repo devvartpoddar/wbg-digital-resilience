@@ -304,8 +304,3 @@ def run(conn, data, name, *, corpus=None, model=Q.MODEL, api_key="", dry_run=Fal
     log(f"  {total['calls']:,} calls, US${total['cost_usd']:.4f}; {len(rows):,} scores written")
     return {"labels": summary, "calls": total["calls"], "cost_usd": total["cost_usd"]}
 
-
-def run_many(conn, data, names, **kw):
-    """Several sets through the funnel in one process, the corpus read once."""
-    corpus = Q.Corpus(data)
-    return {name: run(conn, data, name, corpus=corpus, **kw) for name in names}

@@ -43,7 +43,7 @@ EVAL = {"committed_total": 900, "not_committed": 30, "asset": {"eval:asset_yes":
 ELUSION = {"near": 25, "far": 25}
 GRADES = ["0", "1", "2", "3", "unsure"]
 YES_NO = ["yes", "no", "unsure"]
-FIT_KINDS = ("type", "package_asset")
+FIT_KINDS = ("type",)            # yes, unsure or no; every other kind is graded 0-3
 FLOOR_OF = {"measure": None, "asset": "asset.floor", "type": "floor.types", "package_asset": "link.asset_yes"}
 
 
@@ -291,9 +291,11 @@ def build_tasks(f, corpus, drawn, items, design, seed, scale):
                 k -= 1
             elif ln[0] == "package_asset":
                 a = f["assets"]["defs"][ln[1]]
+                # the pipeline's own question (questions.package_asset_questions), graded on its scale
                 t.update(kind="package_asset", label_set=Q.ASSETS, label_id=ln[1], label_name=a["name"],
-                         definition=a["definition"], question=pk_q[ln[1]]["instructions"], scale=fit_text,
-                         answer="grade", allowed=YES_NO)
+                         definition=a["definition"], question=pk_q[ln[1]]["instructions"],
+                         scale=[f"{i} = {g}" for i, g in enumerate(pk_q[ln[1]]["criteria"])],
+                         answer="grade", allowed=GRADES)
                 out.append(t)
         # the closing task: anything else that applies (measures and assets not listed)
         k += 1
@@ -623,7 +625,9 @@ def blocks(conn, corpus, kind, names):
             if not p or (aid, p["package_id"]) not in raw:
                 continue
             b = out.setdefault((Q.ASSETS, aid), ([], {}, {}, Q.sha(pq[aid]), {}))
-            b[0].append((p["package_id"], 1 if grade == "yes" else 0, float(w or 1), {p["project_id"]}))
+            if not str(grade).isdigit():
+                continue                 # a yes or no to the earlier fit question, not a grade of this one
+            b[0].append((p["package_id"], int(yes_of(kind, grade)), float(w or 1), {p["project_id"]}))
             b[1][p["package_id"]] = raw[(aid, p["package_id"])]
             b[4][p["package_id"]] = design
     return out
@@ -780,7 +784,7 @@ def evaluate(conn, data, corpus=None, names=None, log=print, grid=False):
     corpus = corpus or Q.Corpus(data)
     names = names or [n for n in labels.label_sets() if n != Q.ASSETS]
     lines = ["# Evaluation: every decision against the grades", "",
-             "Yes = graded 2 or more (a fit question: yes). Weighted figures use each row's design weight "
+             "Yes = graded 2 or more (the type question, a fit question: yes). Weighted figures use each row's design weight "
              "(one over its chance of being drawn); intervals are 95 per cent Wilson on Kish's effective "
              "sample size. Training rows fit the layers and gates; evaluation rows never do. Figures on "
              "training rows are upper estimates: quote an evaluation draw's.", ""]

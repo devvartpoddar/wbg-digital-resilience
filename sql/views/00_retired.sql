@@ -29,3 +29,6 @@ DROP VIEW IF EXISTS wbg.measure_findings_by_project;
 -- rule (wbg.commitments, written at publish) replaces it.
 DROP VIEW IF EXISTS wbg.activity_summary;
 DROP TABLE IF EXISTS wbg.activities;
+
+-- The duplicate of commitment_package_links_in_context under an earlier name, retired 2026-11-21.
+DROP VIEW IF EXISTS wbg.commitment_packages_in_context;

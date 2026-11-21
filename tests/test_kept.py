@@ -30,7 +30,7 @@ def test_a_not_digital_sentence_is_never_kept_anywhere(demo):
     assert {(m, u) for m, u in db.rows(pg, f"SELECT label_set, unit_id FROM {S}.not_digital_findings")} == nd
     # every table and view that holds kept sentences
     for rel in ("commitment_members", "commitment_units", "commitment_package_links",
-                "commitment_package_links_in_context", "commitment_packages_in_context", "commitment_sentences"):
+                "commitment_package_links_in_context", "commitment_sentences"):
         got = {u for (u,) in db.rows(pg, f"SELECT DISTINCT unit_id FROM {S}.{rel}")}
         assert not got & units, rel
     kept_mf = {u for (u,) in db.rows(pg, f"SELECT unit_id FROM {S}.measure_findings_in_context WHERE is_committed")}

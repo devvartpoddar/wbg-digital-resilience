@@ -663,24 +663,6 @@ def upcoming(sel=None, data=None, t=None):
                                        r["package_id"]))
 
 
-def open_notices(sel=None, data=None, today=None, t=None):
-    """Notices whose deadline is today or later, soonest deadline first."""
-    today = today or datetime.date.today().isoformat()
-    t = t or tables(sel, data)
-    cols = ("project_id", "notice_id", "notice_type", "publication_date", "deadline_date",
-            "borrower_ref", "description_clean", "category", "method", "method_name",
-            "package_id", "package_link")
-    pk = {r["package_id"]: r for r in t["packages"]}
-    rows = []
-    for n in t["notices"]:
-        if not (n["deadline_date"] and n["deadline_date"] >= today):
-            continue
-        row = {k: n.get(k, "") for k in cols}
-        p = pk.get(n.get("package_id") or "", {})
-        row["package_status"] = p.get("status", "")
-        row["package_estimated_amount"] = p.get("estimated_amount", "")
-        rows.append(row)
-
 # ------------------------------------------------------------------ command line
 
 def _filters(ap):

@@ -32,12 +32,7 @@ def test_every_setting_the_code_reads_is_written():
     assert read <= written, sorted(read - written)
 
 
-def test_the_retired_settings_are_gone_and_no_description_speaks_of_a_before_and_after():
-    written = {r["setting"] for r in shipped()}
-    gone = {"band.on", "digital.on", "link.strengths", "policy.on", "activities.on", "floor.pair_check",
-            "floor.cyber_security", "floor.public_institutions", "link.measure_top",
-            "dashboard.apply_measure_pair_checks", "dashboard.package_link_min_probability"}
-    assert not gone & written, sorted(gone & written)
+def test_no_description_speaks_of_a_before_and_after():
     bad = re.compile(r"\bv2\b|\bnew\b|\bold\b|retired|when on|as before", re.I)
     for r in shipped():
         assert not bad.search(r["what_it_does"]), r["setting"]

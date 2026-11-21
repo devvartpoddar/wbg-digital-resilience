@@ -84,11 +84,6 @@ def runs(data):
     return out
 
 
-def last_run(data):
-    got = runs(data)
-    return got[-1] if got else None
-
-
 def earlier(run, all_runs, keep=5):
     """(started, total seconds, stages) for the runs before the one reported, so
     a note written after a repeat run still shows what the earlier ones cost.

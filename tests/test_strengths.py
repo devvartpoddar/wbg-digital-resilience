@@ -209,7 +209,7 @@ def test_the_views_the_app_reads_carry_both_kinds_of_link(pg, corpus, fake_chat)
     assert db.rows(pg, q) == [("P1-1", "asset", None, 1)]      # the tower sentence shares an asset; the fibre one does not
     assert db.one(pg, f"SELECT measures_linked, commitments_linked, best_commitment_probability "
                       f"FROM {db.SCHEMA}.packages_with_commitments WHERE package_id = 'P1-1'") == (["cra"], 1, None)
-    assert db.one(pg, f"SELECT count(*), min(strength) FROM {db.SCHEMA}.commitment_packages_in_context") == (1, "asset")
+    assert db.one(pg, f"SELECT count(*), min(strength) FROM {db.SCHEMA}.commitment_package_links_in_context") == (1, "asset")
 
 
 def test_a_package_asset_has_its_type_asked_stored_and_published(pg, corpus, fake_chat):

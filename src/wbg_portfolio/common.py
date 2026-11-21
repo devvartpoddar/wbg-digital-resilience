@@ -5,7 +5,6 @@ unattended: a file written whole or not at all (write_atomic), a steady "n of to
 """
 import csv
 import hashlib
-import json
 import os
 import threading
 import time
@@ -65,23 +64,6 @@ def write_csv(path, cols, rows):
         if os.path.exists(tmp):
             os.unlink(tmp)
         raise
-
-
-def json_path(root, sha):
-    return os.path.join(root, sha[:2], sha + ".json")
-
-
-def read_json(root, sha):
-    """The stored object under this key, or None."""
-    try:
-        with open(json_path(root, sha), encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, ValueError):
-        return None
-
-
-def write_json(root, sha, obj):
-    write_atomic(json_path(root, sha), json.dumps(obj, ensure_ascii=False, sort_keys=True))
 
 
 # ------------------------------------------------------------------ long steps

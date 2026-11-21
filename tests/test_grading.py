@@ -24,8 +24,12 @@ def test_tasks_are_self_contained_and_one_per_decision(pg, corpus, fake_model, f
     assert types[0]["allowed"] == grading.YES_NO and types[0]["definition"]
     other = [t for t in tasks if t["kind"] == "other"]
     assert other and "none" in other[0]["allowed"]
-    assert any(t["kind"] == "package_asset" and t["package"] for t in tasks)
-    assert not any(t["kind"] in ("link", "pair") for t in tasks)
+    pk = next(t for t in tasks if t["kind"] == "package_asset" and t["package"])
+    q = Q.package_asset_questions()[pk["label_id"]]            # the pipeline's own question, graded 0-3
+    assert pk["question"] == q["instructions"] and pk["allowed"] == grading.GRADES
+    assert pk["scale"] == [f"{i} = {g}" for i, g in enumerate(q["criteria"])]
+    assert grading.yes_of("package_asset", "2") and not grading.yes_of("package_asset", "1")
+    assert grading.yes_of("type", "yes") and not grading.yes_of("type", "unsure")
     with pytest.raises(SystemExit):
         grading.draw(pg, corpus, c, 7, log=lambda *_: None)          # a seed already drawn
 
@@ -56,7 +60,9 @@ def test_fills_are_checked_strictly_and_stored_by_text_and_label(pg, corpus, fak
             return "none"
         if t["kind"] in ("measure", "asset"):
             return "3" if t.get("unit_id") == u0 and t["label_id"] in ("cra", "towers") else "0"
-        return "yes" if t.get("unit_id") == u0 or t.get("package_id") == "P1-1" else "no"
+        if t["kind"] == "package_asset":                     # graded 0-3, as the pipeline asks it
+            return "3" if t.get("package_id") == "P1-1" else "0"
+        return "yes" if t.get("unit_id") == u0 else "no"
     bad = fill_all(tasks, answer)
     bad[0]["grade"] = "3.0"
     bad.append({"task_id": "S9999.01", "grade": "1"})
@@ -72,7 +78,8 @@ def test_fills_are_checked_strictly_and_stored_by_text_and_label(pg, corpus, fak
     assert got[("type", "cra", "site", grading.sha(c.texts[u0]))] == "yes"
     assert all(v == "agent:test" for (v,) in db.rows(pg, f"SELECT DISTINCT grader FROM {db.STORE}.grades"))
     # a second fill of the same text replaces the grade
-    again = fill_all(tasks, lambda t: "none" if t["kind"] == "other" else ("1" if t["kind"] in ("measure", "asset") else "no"))
+    again = fill_all(tasks, lambda t: "none" if t["kind"] == "other" else
+                     ("1" if t["kind"] in ("measure", "asset", "package_asset") else "no"))
     grading.fill(pg, corpus, 7, write_fills(tmp_path / "again.jsonl", again), log=lambda *_: None)
     assert db.one(pg, f"SELECT grade FROM {db.STORE}.grades WHERE kind = 'measure' AND item_sha = %s",
                   (grading.sha(c.texts[u0]),))[0] == "1"
@@ -84,7 +91,8 @@ def test_evaluate_reports_and_writes_fits_from_training_grades_only(pg, corpus, 
     u0 = c.index[0]["unit_id"]
     rows = fill_all(tasks, lambda t: "none" if t["kind"] == "other" else
                     ("3" if t.get("unit_id") == u0 and t["label_id"] in ("cra", "towers") else "0")
-                    if t["kind"] in ("measure", "asset") else ("yes" if t.get("unit_id") == u0 else "no"))
+                    if t["kind"] in ("measure", "asset") else "0" if t["kind"] == "package_asset"
+                    else ("yes" if t.get("unit_id") == u0 else "no"))
     grading.fill(pg, corpus, 7, write_fills(tmp_path / "f.jsonl", rows), log=lambda *_: None)
     from wbg_portfolio import posterior
     monkeypatch.setattr(posterior, "settings", lambda: dict(sharpness=20, centroid=True, ridge=1.0, min_graded=2,
