@@ -14,7 +14,7 @@ so the sentences are embedded once, gated, pattern-matched, asked with the
 graded question and scored; every answer is stored and reused. The scores land
 in wbg.scores with kind "scratch", which the publish never reads: the
 dashboards' commitments do not move. wbg.scratch_sets records the wording;
-summary() prints what was found.
+summary() prints a first-pass tally of what was found (not the published rule).
 
 Graduation is a person's act: copy the three files into analysis/labels/ (a
 pull request) and run ./wbg_portfolio add <slug>; the stored answers are reused.
@@ -32,7 +32,7 @@ from wbg_portfolio import questions as Q
 from wbg_portfolio.paths import where
 
 GEN_MODEL = "anthropic/claude-haiku-5.5"
-EXPAND_PROMPT = """You are helping an analyst search World Bank project appraisal documents for one kind of commitment.
+EXPAND_PROMPT = """You are helping an analyst search World Bank project appraisal documents for one type of commitment.
 
 The analyst wants to find: {ask}
 
@@ -126,16 +126,22 @@ def listing(conn):
 
 
 def summary(conn, corpus, slug, floor, top=12):
-    """Lines: committed sentences by project, then the strongest sentences."""
-    rows = db.rows(conn, f"SELECT item_id, score, route FROM {db.SCHEMA}.scores WHERE kind = 'scratch' "
-                         f"AND label_set = %s ORDER BY score DESC", (slug,))
+    """Lines: a first-pass tally only (the sentences whose first score alone reaches floor.default, by
+    project, then the strongest), said so in its first line: not the published rule, which also needs
+    the second looks and the digital question. Only scores of the set's current question are read."""
+    qshas = {lid: Q.sha(q) for lid, q in Q.graded_questions(slug)[0].items()}
+    rows = [(u, s, r) for u, s, r, lid, qs in db.rows(
+        conn, f"SELECT item_id, score, route, label_id, question_sha FROM {db.SCHEMA}.scores "
+              f"WHERE kind = 'scratch' AND label_set = %s ORDER BY score DESC", (slug,)) if qshas.get(lid) == qs]
     yes = [(u, float(s), r) for u, s, r in rows if float(s) >= floor]
     by_project = {}
     for u, s, r in yes:
         for pid in corpus.projects(u):
             by_project[pid] = by_project.get(pid, 0) + 1
-    lines = [f"{slug}: {len(rows):,} sentences asked, {len(yes):,} at or above {floor:.2f} "
-             f"in {len(by_project)} projects"]
+    lines = [f"{slug}: a first-pass tally only: {len(rows):,} sentences asked, {len(yes):,} with a first score "
+             f"at or above floor.default {floor:.2f}, in {len(by_project)} projects. This is not the published "
+             f"rule (which also needs the second looks in the band and the digital question), so a measure "
+             f"added from these files may keep fewer."]
     for pid, n in sorted(by_project.items(), key=lambda x: -x[1])[:top]:
         lines.append(f"  {pid}  {n}")
     if len(by_project) > top:

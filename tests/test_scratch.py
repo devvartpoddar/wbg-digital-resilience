@@ -53,7 +53,8 @@ def test_a_scratch_run_scores_as_kind_scratch_and_the_publish_leaves_it_out(pg, 
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.measure_findings WHERE label_set = %s", (slug,))[0] == 0
     assert db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.labels WHERE label_set = %s", (slug,))[0] == 0
     lines = scratch.summary(pg, c, slug, 0.5)
-    assert lines[0].startswith(f"{slug}:") and "P1" in lines[1]
+    assert lines[0].startswith(f"{slug}: a first-pass tally only") and "not the published rule" in lines[0]
+    assert "P1" in lines[1]
     assert any(r[0] == slug for r in scratch.listing(pg))
 
 
