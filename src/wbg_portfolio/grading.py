@@ -188,12 +188,11 @@ def line_chances(chance, f):
         for ln in lines:
             d[ln] = max(d.get(ln, 0.0), p)
     ua = f["assets"]["ua"]
-    levels = decide.link_levels()
     for name, m in f["measures"].items():
         for (kind, uid), d in out.items():
             p, u = d.get(("measure", name)), m["units"].get(uid)
             if kind == "sentence" and p and u and u["committed"]:
-                for asset in decide.linked_assets(ua.get(uid, ({}, [], "none")), levels):
+                for asset in decide.linked_assets(ua.get(uid, ({}, [], "none"))):
                     d[("asset", asset)] = max(d.get(("asset", asset), 0.0), p)
     return out
 

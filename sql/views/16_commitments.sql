@@ -19,8 +19,8 @@ COMMENT ON VIEW wbg.package_status_order IS
   'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Not in latest plan, Cancelled.';
 
 -- One row per kept sentence of a commitment that counts, per project: the base of the views
--- below. The commitment is the rule's (wbg.commitment_members); the dashboards' filters are added
--- here: a further floor on the posterior, Investment Project Financing only.
+-- below. The commitment is the rule's (wbg.commitment_members); the dashboards' one filter is added
+-- here: Investment Project Financing only (dashboard.ipf_only).
 -- Materialised: built once per load, not once per card, and indexed, so a
 -- dashboard read is milliseconds.
 DO $do$
@@ -54,14 +54,13 @@ JOIN wbg.project_info i ON i.project_id = cm.project_id
 CROSS JOIN wbg.dashboard_settings s
 -- kept: the band rule and digital (measure_findings.is_committed); the rest are in wbg.not_digital_findings
 WHERE f.was_sent_to_model AND f.is_committed
-  AND f.posterior_probability >= s.commitment_min_probability
   AND (i.is_ipf OR NOT s.ipf_only);
 CREATE INDEX ON wbg.commitment_units (commitment_id);
 CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every kept sentence of a commitment that counts on the dashboards (wbg.commitment_members, in an Investment Project Financing operation and at the posterior floor: dashboard_settings), once per project, with its commitment''s id and key (commitment_key asset_type, type or paragraph; asset_id and subtype_id, or type_id). asset_from says where the sentence''s asset was found. A sentence with two assets or types belongs to each of those commitments, so a sentence count across commitments counts it more than once.';
+  'Every kept sentence of a commitment that counts on the dashboards (wbg.commitment_members, in an Investment Project Financing operation: dashboard_settings.ipf_only), once per project, with its commitment''s id and key (commitment_key asset_type, type or paragraph; asset_id and subtype_id, or type_id). asset_from says where the sentence''s asset was found. A sentence with two assets or types belongs to each of those commitments, so a sentence count across commitments counts it more than once.';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$

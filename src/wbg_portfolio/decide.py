@@ -527,14 +527,13 @@ def link_level(strong, same_type, relation):
 def link_strength_rows(conn, corpus, names, ua, packages, asset_types_=None):
     """The commitment_package_links rows. A kept sentence and a package of the same project are
     linked when the package, asked alone, is about the sentence's measure at link.strong_yes or more
-    (strength strong), or when they share a top-level asset (the sentence's, at the levels the panel
-    counts, and the package's; strength asset). A pair that is both is one row, strong. Each link
+    (strength strong), or when they share a top-level asset (the sentence's, whichever look found it,
+    and the package's; strength asset). A pair that is both is one row, strong. Each link
     also has a level (LINK_LEVELS): strong; else by whether the sentence and the package share an
     asset type (`asset_types_` is asset_types(); the package's from package_asset_types(); unspecified never
     counts) and a top-level component (both known and equal). The levels only order the links: none
     is added or removed by them. The package's cancelled and generic flags ride along."""
     strong_yes = float(setting("link.strong_yes"))
-    levels = link_levels()
     has = package_asset_sets(conn)
     asked = package_measure_scores(conn)
     stype_of = asset_types(conn) if asset_types_ is None else asset_types_
@@ -546,7 +545,7 @@ def link_strength_rows(conn, corpus, names, ua, packages, asset_types_=None):
     out = []
     for name in names:
         for u in committed_digital_units(conn, corpus, [name]):
-            mine = linked_assets(ua.get(u, ({}, [], "none")), levels)
+            mine = linked_assets(ua.get(u, ({}, [], "none")))
             stypes = typed((a, stype_of.get((u, a), "")) for a in mine)
             scomp = top_component(corpus.row(u).get("component_number", ""))
             for pid in corpus.projects(u):
@@ -575,15 +574,11 @@ def link_strength_rows(conn, corpus, names, ua, packages, asset_types_=None):
     return sorted(out, key=lambda r: (r["label_set"], r["unit_id"], r["level_rank"], r["package_id"]))
 
 
-def link_levels():
-    return {x.strip() for x in str(setting("dashboard.commitment_link_levels")).split("|") if x.strip()}
-
-
-def linked_assets(ua, levels=None):
-    """The assets a unit's commitment carries, at the levels the panel counts."""
-    levels = link_levels() if levels is None else levels
+def linked_assets(ua):
+    """The assets a unit's commitment carries: the assets the sentence has (unit_assets), whichever
+    level found them."""
     own, win, level = ua
-    return {a for a, _ in win} if level in levels and level != "none" else set()
+    return {a for a, _ in win} if level != "none" else set()
 
 
 # ---------------------------------------------------------------- commitments
@@ -614,10 +609,9 @@ def commitment_keys(instrument, assets, types, paragraph_id):
 
 
 def commitment_assets(ua, type_of):
-    """{unit_id: [(asset_id, subtype_id)]}: each sentence's assets at the levels the panel counts
-    (unit_assets()) with their types (asset_types(); '' where none was asked yet)."""
-    levels = link_levels()
-    return {u: [(a, type_of.get((u, a), "")) for a in sorted(linked_assets(x, levels))] for u, x in ua.items()}
+    """{unit_id: [(asset_id, subtype_id)]}: each sentence's assets (unit_assets()) with their types
+    (asset_types(); '' where none was asked yet)."""
+    return {u: [(a, type_of.get((u, a), "")) for a in sorted(linked_assets(x))] for u, x in ua.items()}
 
 
 def commitment_names():

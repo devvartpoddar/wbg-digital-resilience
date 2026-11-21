@@ -1243,7 +1243,7 @@ _ABOUT = {
                (SELECT count(*) FROM wbg.measure_types WHERE type_name LIKE 'OTH.%%') AS types_proposed""",
     "as_of": "SELECT loaded_at::date AS loaded FROM wbg.data_as_of LIMIT 1",
     "settings": """
-        SELECT s.package_link_min_probability AS link_floor, s.pair_check_floor
+        SELECT s.package_link_min_probability AS link_floor
         FROM wbg.dashboard_settings s""",
 }
 

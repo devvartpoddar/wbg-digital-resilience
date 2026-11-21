@@ -39,8 +39,6 @@ types.gaps,on,types (src/checks.py),on: re-propose OTH types from the sentences 
 types.gap_min_units,5,types (src/checks.py),Fewest such sentences before OTH types are proposed.
 link.asset_top,4,package links (src/checks.py),Assets asked of each package: its best this many by cosine.
 link.asset_yes,0.67,package links,A package has an asset at this P(yes) or above.
-dashboard.commitment_min_probability,0.0,dashboards (sql/views),A further floor on the posterior for a sentence to count on the dashboards.
-dashboard.commitment_link_levels,unit|second_look|none,dashboards,"Where a commitment's asset may come from: unit (the sentence, first pass), second_look (the chat model's second look), paragraph, none."
 dashboard.ipf_only,true,dashboards,Only Investment Project Financing operations count.
 dashboard.near_copy_share,0.5,dashboards,Another project prints a sentence near-identically when its committed sentences hold this share of its word runs.
 text.shingle_words,6,units and dashboards (src/units.py; sql/views/16_commitments.sql),Words per run when comparing wording (template_share and the dashboards' near-copy test).

@@ -201,9 +201,8 @@ def test_the_views_the_app_reads_carry_both_kinds_of_link(pg, corpus, fake_chat)
     got = db.rows(pg, q)
     assert {(p, s, n) for p, s, _, n in got} == {("P1-1", "strong", 1)} and len(got) == 2   # a commitment each
     assert all(float(pr) >= 0.7 for _, _, pr, _ in got)
-    link_floor, pair_floor = db.one(pg, f"SELECT package_link_min_probability, pair_check_floor "
-                                        f"FROM {db.SCHEMA}.dashboard_settings")
-    assert float(link_floor) == 0.7 and pair_floor is None
+    link_floor = db.one(pg, f"SELECT package_link_min_probability FROM {db.SCHEMA}.dashboard_settings")[0]
+    assert float(link_floor) == 0.7
     pg.execute(f"UPDATE {db.SCHEMA}.scores SET score = 0.5 WHERE kind = 'package_measure'")
     pg.commit()
     decide.publish(pg, corpus, corpus=c, log=lambda *_: None)
