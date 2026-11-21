@@ -29,7 +29,7 @@ Every sentence-level question sends the same state (`questions.Corpus.state`): t
 | package_asset_subtype | every package x asset that counts | chat: which type of the asset, the sentences' type question with the package as subject | kind package_asset_subtype |
 | package_measure | every package in scope, with or without an asset, x its `link.package_measure_top` likeliest measures by cosine among those its project has a kept sentence for (and every pair already answered) | fit, on the package alone: is what the package procures the measure; strong at `link.strong_yes` | kind package_measure |
 
-A measure with no type list a person wrote has one proposed from its committed sentences by a generative model (`checks.GEN_MODEL`, the response stored in the answer store under its prompt) into `data/types/<set>_types.csv`; with `types.gaps` on, OTH types are proposed from the sentences no approved type reaches and asked of those sentences.
+A measure with no type list a person wrote has one proposed from its committed sentences by the chat model (`second.model`), asked through the chat asker like every chat question (`checks.generate`: the same answer store, keyed on its prompt, the spend cap and ledger, an empty reply asked again; its own request size, `chat.GENERATE_REQUEST`, so a long proposal is never cut at `second.max_tokens`) into `data/types/<set>_types.csv`; with `types.gaps` on, OTH types are proposed from the sentences no approved type reaches and asked of those sentences.
 
 ## The decision (`src/wbg_portfolio/decide.py`)
 

@@ -31,7 +31,6 @@ from wbg_portfolio import labels
 from wbg_portfolio import questions as Q
 from wbg_portfolio.paths import where
 
-GEN_MODEL = "anthropic/claude-haiku-5.5"
 EXPAND_PROMPT = """You are helping an analyst search World Bank project appraisal documents for one type of commitment.
 
 The analyst wants to find: {ask}
@@ -57,9 +56,7 @@ def expand(conn, ask, api_key, dry_run=False):
     """{name, definition, phrases, patterns} from one generative call, stored
     like any answer (the same ask gives the same files)."""
     from wbg_portfolio import checks
-    body = {"model": GEN_MODEL, "temperature": 0,
-            "messages": [{"role": "user", "content": EXPAND_PROMPT.format(ask=ask)}]}
-    text = checks.generate(conn, body, api_key, dry_run)
+    text = checks.generate(conn, EXPAND_PROMPT.format(ask=ask), api_key, dry_run, stage="try:expand")
     if text is None:
         return None
     m = re.search(r"\{.*\}", text, re.S)

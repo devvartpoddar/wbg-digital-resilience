@@ -34,17 +34,16 @@ from wbg_portfolio import questions as Q
 from wbg_portfolio import search
 from wbg_portfolio.paths import where
 
-GEN_MODEL = "anthropic/claude-haiku-5.5"
 OTH = Q.OTH
 MAX_UNITS = 400
 PROPOSE_PROMPT = """You are helping an analyst sort sentences from World Bank project appraisal documents.
 Every sentence below was judged to commit the project to the measure "{name}", defined as: {definition}
 
-Propose the distinct KINDS of this measure that these sentences show. Rules:
-- Between 2 and {max_types} kinds. Fewer, well-separated kinds are better than many overlapping ones.
-- A kind is defined by WHAT is done and FOR WHAT, not by which country or project.
-- Each kind: a short id (lowercase, underscores), a name of at most six words, a one-sentence definition an analyst could apply to a new sentence, and the numbers of up to three example sentences.
-- Do not invent kinds the sentences do not show. Do not add an "other" kind.
+Propose the distinct TYPES of this measure that these sentences show. Rules:
+- Between 2 and {max_types} types. Fewer, well-separated types are better than many overlapping ones.
+- A type is defined by WHAT is done and FOR WHAT, not by which country or project.
+- Each type: a short id (lowercase, underscores), a name of at most six words, a one-sentence definition an analyst could apply to a new sentence, and the numbers of up to three example sentences.
+- Do not invent types the sentences do not show. Do not add an "other" type.
 
 Answer with JSON only, no prose: {{"types": [{{"type_id": "...", "type_name": "...", "definition": "...", "examples": [1, 2]}}]}}
 
@@ -53,14 +52,14 @@ Sentences:
 """
 GAP_PROMPT = """You are helping an analyst sort sentences from World Bank project appraisal documents.
 Every sentence below was judged to commit the project to the measure "{name}", defined as: {definition}
-The measure's existing kinds are:
+The measure's existing types are:
 {existing}
-None of these kinds fits the sentences below. Propose NEW kinds that these sentences show and the existing kinds do not cover. Rules:
-- A new kind must not restate or overlap an existing kind.
-- Define a kind by WHAT the project does. Do not define it by the asset or facility it concerns (towers, data centres, schools, clinics), by whether it is a project-wide requirement or a single investment, or by another climate measure.
+None of these types fits the sentences below. Propose NEW types that these sentences show and the existing types do not cover. Rules:
+- A new type must not restate or overlap an existing type.
+- Define a type by WHAT the project does. Do not define it by the asset or facility it concerns (towers, data centres, schools, clinics), by whether it is a project-wide requirement or a single investment, or by another climate measure.
 - Stay within the measure's definition; do not widen it.
-- Propose a kind only if at least {min_units} sentences show it; at most {max_types} kinds. If none qualifies, answer with an empty list.
-- Each kind: a short id (lowercase, underscores), a name of at most six words, a one-sentence definition an analyst could apply to a new sentence, and the numbers of up to three example sentences.
+- Propose a type only if at least {min_units} sentences show it; at most {max_types} types. If none qualifies, answer with an empty list.
+- Each type: a short id (lowercase, underscores), a name of at most six words, a one-sentence definition an analyst could apply to a new sentence, and the numbers of up to three example sentences.
 
 Answer with JSON only, no prose: {{"types": [{{"type_id": "...", "type_name": "...", "definition": "...", "examples": [1, 2]}}]}}
 
@@ -133,37 +132,22 @@ def _ask(conn, model, items, stage, name, api_key, dry_run, workers, log, data):
 
 # ---------------------------------------------------------------- types
 
-def generate(conn, body, api_key, dry_run):
-    """A generative completion, stored in the answer store under its prompt
-    (model GEN_MODEL); None on a dry run with nothing stored. The request
-    goes out as the chat model's questions do (chat.request_body: temperature 0,
-    max_tokens second.max_tokens, reasoning as second.reasoning says) and is
-    checked against and counted in the spend ledger through api.Spend, with
-    the cost chat.cost_of reads, so --max-spend stops it like any question."""
+def generate(conn, prompt, api_key, dry_run, stage="types:generate", label_set="", log=print):
+    """A generative answer to one prompt (a type proposal, a gap proposal, a scratch expansion), asked
+    through the chat asker like every chat question: the chat model (second.model), the same answer
+    store (keyed on the prompt and the model), the spend cap and ledger, an empty reply asked again. Its
+    own request size (chat.GENERATE_REQUEST), so a long proposal is never cut. Returns the text; None on
+    a dry run with nothing stored; api.Transport when the request failed or was refused."""
     from wbg_portfolio import chat
-    prompt = body["messages"][0]["content"]
-    state = {"prompt": prompt}
-    q = {"type": "generate", "model": body["model"]}
-    have = ask.stored(conn, GEN_MODEL, [(Q.sha(state), Q.sha(q))])
-    if have:
-        return next(iter(have.values()))["text"]
+    mdl = chat.model()
+    state, q = {"prompt": prompt}, {"type": "generate", "model": mdl}
+    got, st = chat.ask(conn, [("g", state, q)], stage=stage, label_set=label_set, api_key=api_key,
+                       dry_run=dry_run, workers=1, log=log, mdl=mdl, request=chat.GENERATE_REQUEST)
+    if "g" in got:
+        return got["g"]["text"]
     if dry_run:
         return None
-    form = {"reply": {"form": "generate"}}
-    body = chat.request_body(GEN_MODEL, form, prompt)
-    with api.Spend(conn, "types:generate", "", GEN_MODEL) as spend:
-        spend.check(chat.estimate(prompt, form))
-        r = api.post(chat.PATH, body, api_key or api.key(True), timeout=180)
-        try:
-            text = r["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError):
-            raise api.Transport(f"reply has no message: {str(r)[:200]}")
-        spend.add(chat.cost_of(r, prompt, text, form))
-    ask._store(conn, GEN_MODEL, [(Q.sha(state), Q.sha(q), {"type": "generate", "text": text},
-                                   r.get("model", ""), spend.cost, Q.sha(body), None)], {Q.sha(state): state},
-               {Q.sha(q): q})
-    conn.commit()
-    return text
+    raise api.Transport("; ".join(st["failures"][:1]) or "the provider refused it or gave no usable reply")
 
 
 def parse_types(text, allow_empty=False):
@@ -212,15 +196,15 @@ def propose(conn, data, corpus, name, *, api_key="", dry_run=False, log=print, m
     rng = random.Random(f"{name}:propose")
     chosen = sorted(rng.sample(units, MAX_UNITS)) if len(units) > MAX_UNITS else units
     listing = "\n".join(f"{i}. {' '.join(corpus.texts[u].split())}" for i, u in enumerate(chosen, 1))
-    body = {"model": GEN_MODEL, "temperature": 0, "messages": [{"role": "user", "content": PROPOSE_PROMPT.format(
-        name=labs[0]["name"], definition=labs[0]["definition"], max_types=max_types, units=listing)}]}
+    prompt = PROPOSE_PROMPT.format(name=labs[0]["name"], definition=labs[0]["definition"], max_types=max_types,
+                                   units=listing)
     try:
-        text = generate(conn, body, api_key, dry_run)
+        text = generate(conn, prompt, api_key, dry_run, label_set=name, log=log)
     except api.Transport as exc:
         log(f"{name}: proposal request failed ({str(exc)[:120]}); no types proposed")
         return None
     if text is None:
-        log(f"{name}: one proposal call to {GEN_MODEL} to make; --dry-run: nothing asked")
+        log(f"{name}: one proposal call to the chat model to make; --dry-run: nothing asked")
         return None
     try:
         found = parse_types(text)
@@ -272,12 +256,12 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
                              for t in sorted(labels.load_types(name), key=lambda t: t["type_id"]))
         rng = random.Random(f"{name}:gaps")
         chosen = sorted(rng.sample(none, MAX_UNITS)) if len(none) > MAX_UNITS else none
-        body = {"model": GEN_MODEL, "temperature": 0, "messages": [{"role": "user", "content": GAP_PROMPT.format(
+        prompt = GAP_PROMPT.format(
             name=lab["name"], definition=lab["definition"], existing=existing,
             min_units=panel.require("types.gap_min_units"), max_types=5,
-            units="\n".join(f"{i}. {' '.join(corpus.texts[u].split())}" for i, u in enumerate(chosen, 1)))}]}
+            units="\n".join(f"{i}. {' '.join(corpus.texts[u].split())}" for i, u in enumerate(chosen, 1)))
         try:
-            text = generate(conn, body, api_key, False)
+            text = generate(conn, prompt, api_key, False, label_set=name, log=log)
             found = parse_types(text, allow_empty=True)
         except api.Transport as exc:
             # a request that failed or a reply that is not the JSON asked for proposes nothing: the

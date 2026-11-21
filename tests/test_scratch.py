@@ -63,7 +63,7 @@ def test_expand_parses_the_generative_answer_and_drops_a_bad_pattern(pg, monkeyp
     answer = {"name": "E-waste management", "definition": "Collection, recycling or safe disposal of ICT equipment.",
               "phrases": ["The project will finance e-waste collection.", "  Recycling of obsolete ICT equipment  "],
               "patterns": [r"\be-?waste\b", "(unbalanced"]}
-    monkeypatch.setattr(checks, "generate", lambda conn, body, key, dry: "Here you go:\n" + json.dumps(answer))
+    monkeypatch.setattr(checks, "generate", lambda conn, prompt, key, dry, **kw: "Here you go:\n" + json.dumps(answer))
     got = scratch.expand(pg, "e-waste", "k")
     assert got["name"] == "E-waste management" and got["patterns"] == [r"\be-?waste\b"]
     assert got["phrases"][1] == "Recycling of obsolete ICT equipment"

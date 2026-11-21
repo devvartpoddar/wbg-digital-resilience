@@ -50,6 +50,10 @@ from wbg_portfolio import questions as Q
 
 PATH = "/v1/chat/completions"
 EMPTY_TRIES = 3          # requests an empty reply (HTTP 200, no content) is tried in one run
+# The request of a generative answer (checks.generate: type proposals, a scratch expansion): a reply is a
+# JSON list of up to eight types with definitions and examples, far longer than a grade, so it has its own
+# size and is never cut at second.max_tokens; reasoning off, as for the short forms.
+GENERATE_REQUEST = {"max_tokens": 4000, "reasoning": False}
 
 
 def model():
@@ -121,7 +125,10 @@ def reply_text(reply):
 def prompt(state, q):
     """The one message sent: the question, the item's fields, the reply format. A question with a
     "template" (the evaluation's graders, questions.grader_question) is that text with the item's
-    fields put in its {places}; it says how to reply itself."""
+    fields put in its {places}; it says how to reply itself. A generative question (type "generate",
+    checks.generate) sends its state's prompt as it is."""
+    if q.get("type") == "generate":
+        return state["prompt"]
     if q.get("template"):
         return q["template"].format_map(state)
     fields = "\n\n".join(f"[{k}]\n{v}" for k, v in state.items())
@@ -158,10 +165,12 @@ def parse(text, reply):
     """The answer {grade, labels} of a reply, or ValueError. Exactly one top-level JSON object
     (prose or a code fence around it is allowed) with the key the form asks for and a valid value;
     no object, several objects or an invalid one is a failure."""
+    form = reply["form"]
+    if form == "generate":                    # a generative answer: the text is the answer, read by its caller
+        return {"grade": None, "labels": None, "text": text}
     obj = _the_object(text)
     if not isinstance(obj, dict):
         raise ValueError("not a JSON object")
-    form = reply["form"]
     if form == "grade":
         g = obj.get("grade")
         if isinstance(g, bool) or not isinstance(g, int) or not 0 <= g <= reply["max"]:
@@ -315,7 +324,7 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
                 return cost
             served = r.get("model", "")
             try:
-                answer = dict(parse(text, q["reply"]), raw=text)
+                answer = dict(parse(text, q.get("reply") or {"form": "generate"}), raw=text)
             except (ValueError, TypeError) as exc:
                 with lock:
                     _store_failure(conn, mdl, key[0], key[1], text, str(exc)[:200], state, q)
