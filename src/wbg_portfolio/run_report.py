@@ -63,7 +63,34 @@ def commit():
         return ""
 
 
-SPEND_GROUP = (("asset:", "classify"), ("types:", "measure"), ("link:", "link"))
+SPEND_GROUP = (
+    ("asset_second", "classify"),
+    ("asset_subtype", "classify"),
+    ("asset:", "classify"),
+    ("types:", "measure"),
+    ("second:", "measure"),
+    ("policy", "measure"),
+    ("digital", "measure"),
+    ("link:", "link"),
+    ("package_asset", "link"),
+    ("package_measure", "link"),
+)
+
+
+def fold_spend(rows):
+    """(stage, calls, US$) of a run's ledger, folded into the pipeline stage that paid.
+
+    The ledger names the step that paid (`types:<set>`, `asset_second`, `second:<set>:chat`,
+    `link:assets`, `package_measure:<set>`); the note's table prints only the pipeline
+    stage names, so every step must fold into one of them - a step left under its own
+    name is silently dropped from the table and the run's cost is understated.
+    """
+    got = {}
+    for stage, _steps, calls, cost in rows or []:
+        group = next((g for pre, g in SPEND_GROUP if stage.startswith(pre)), stage.split(":")[0])
+        c, k = got.get(group, (0, 0.0))
+        got[group] = (c + int(calls), k + float(cost))
+    return [(g, c, k) for g, (c, k) in got.items()]
 
 
 def runs(data):
@@ -113,12 +140,7 @@ def spend_by_stage(run):
     sql = ("SELECT stage, coalesce(count(*), 0), coalesce(sum(calls), 0), coalesce(sum(cost_usd), 0) "
            f"FROM {db.STORE}.spend WHERE at >= %s AND at <= %s GROUP BY stage")
     rows = _query(sql, (run["started"], run["ended"]))
-    got = {}
-    for stage, _steps, calls, cost in rows or []:
-        group = next((g for pre, g in SPEND_GROUP if stage.startswith(pre)), stage.split(":")[0])
-        c, k = got.get(group, (0, 0.0))
-        got[group] = (c + int(calls), k + float(cost))
-    return [(g, c, k) for g, (c, k) in got.items()]
+    return fold_spend(rows)
 
 
 def quality():
