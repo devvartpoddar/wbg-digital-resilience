@@ -925,6 +925,7 @@ def check(args, data):
 def grade(args, data, conn):
     """check grade: the graders' answers for a drawn sample (paid: --max-spend), or the person's file."""
     from wbg_portfolio import api
+    from wbg_portfolio import db
     from wbg_portfolio import graders
     if args.export_for_person is not None:
         graders.export_for_person(data, args.seed, args.export_for_person)
@@ -932,6 +933,7 @@ def grade(args, data, conn):
     if args.read_person:
         graders.read_person(conn, data, args.seed, args.read_person, args.graders)
         return 0
+    db.check_store(conn, fresh=args.fresh_store)
     command = {"stages": ["grade"], "seed": args.seed, "graders": list(args.graders)}
     if not args.dry_run:
         if args.max_spend is None:
@@ -1007,6 +1009,7 @@ def main(argv=None):
     p.add_argument("--graders", nargs="+", default=list(GRADERS),
                    help="grade, tune: the three grader models (default: %(default)s)")
     p.add_argument("--max-spend", type=float, default=None, help="grade: US$ the graders may spend")
+    p.add_argument("--fresh-store", action="store_true", help="grade: the answer store is meant to be empty")
     p.add_argument("--workers", type=int, default=10, help="grade: model requests in flight")
     p.add_argument("--export-for-person", type=int, nargs="?", const=100, default=None, metavar="N",
                    help="grade: write N measure items (default 100) for a person to grade")
