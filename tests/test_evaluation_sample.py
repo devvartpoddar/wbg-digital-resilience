@@ -139,7 +139,10 @@ def test_the_truth_rules():
                             "b": {"grade": 3, "digital": 3, "general_aim": "no"}})
     assert t["lenient"] and t["strict"] and not t["digital"]             # one grader in two reads it digital
     t = G.truth("measure", {"a": {"grade": 3}, "b": {"grade": 3}})       # the second request not answered yet
-    assert t["strict"] and not t["digital"] and not t["general_aim"]
+    assert t["strict"] and t["digital"] is None and t["general_aim"] is None   # no truth, never "not digital"
+    t = G.truth("measure", {"a": {"grade": 3, "digital": 0, "general_aim": "no"}, "b": {"grade": 3},
+                            "c": {"grade": 2}})                               # one grader answered it: no truth
+    assert t["digital"] is None and t["general_aim"] is None
     assert G.truth("measure", {"a": {"grade": 3, "digital": 0, "general_aim": "no"}}) is None
     t = G.truth("link", {"a": {"verdict": "yes"}, "b": {"verdict": "yes"}, "c": {"verdict": "unsure"}})
     assert t["lenient"] and not t["strict"]
@@ -357,3 +360,15 @@ def test_the_holdout_sheet_and_the_person_graded_sheets_keep_each_other(pg):
         load_pg.replace_quality(pg, [row("evaluation", 0.7)], {"evaluation", "training"}, "evaluate")
     got = db.rows(pg, f"SELECT sheet, precision FROM {db.SCHEMA}.measure_quality ORDER BY sheet")
     assert [(s, float(p)) for s, p in got] == [("evaluation", 0.7), ("holdout", 0.9)]
+
+
+def test_a_pair_with_no_digital_truth_is_left_out_of_the_digital_figures():
+    row = lambda dig_truth: {"score_first": 0.95, "score_context": None, "second_grade": None, "digital_p": 0.9,
+                             "weight": 1, "project": "P",
+                             "truth": {"lenient": True, "strict": True, "digital": dig_truth}}
+    rule = {"keep": 0.9, "low": 0.5, "context": 0.7, "second_grade": 2, "digital": 0.5}
+    known = tuning.measure_figures(tuning.measure_frame([row(True), row(False)]), rule)
+    with_unknown = tuning.measure_figures(tuning.measure_frame([row(True), row(False), row(None), row(None)]), rule)
+    assert with_unknown["lenient_recall_digital"] == known["lenient_recall_digital"] == 1.0
+    f = tuning.measure_frame([row(True), row(None)])
+    assert list(f.dig_known) == [1.0, 0.0] and list(f.dig_t) == [1.0, 0.0]

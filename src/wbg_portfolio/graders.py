@@ -228,13 +228,18 @@ def truth(kind, by_grader):
     grade it 2 or 3 on the digital scale) and general_aim (two or more yes), from the graders that answered
     the second request; package_measure and link: lenient = two or more yes, strict = two or more yes and none
     unsure; asset: the first asset (and type) two or more name, else split, and every asset two or more name
-    first or second (assets); types: the types two or more list (lenient) or every reader lists (strict)."""
+    first or second (assets); types: the types two or more list (lenient) or every reader lists (strict).
+    digital and general_aim are None (no truth) when fewer than two graders answered them."""
     vals = list(by_grader.values())
     if kind == "measure":
         t = _votes([v["grade"] for v in vals], lambda g: g >= 2, lambda g: g == 3)
         if t:
-            t["digital"] = sum(1 for v in vals if isinstance(v.get("digital"), int) and v["digital"] >= 2) >= 2
-            t["general_aim"] = sum(1 for v in vals if v.get("general_aim") == "yes") >= 2
+            # from the graders that answered the second request only; fewer than two: no truth (None),
+            # never "not digital" or "not a general aim"
+            dig = [v["digital"] for v in vals if isinstance(v.get("digital"), int) and not isinstance(v["digital"], bool)]
+            aim = [v["general_aim"] for v in vals if v.get("general_aim") in ("yes", "no")]
+            t["digital"] = sum(1 for d in dig if d >= 2) >= 2 if len(dig) >= 2 else None
+            t["general_aim"] = sum(1 for a in aim if a == "yes") >= 2 if len(aim) >= 2 else None
             t["grades"] = sorted(v["grade"] for v in vals)
         return t
     if kind in ("package_measure", "link"):

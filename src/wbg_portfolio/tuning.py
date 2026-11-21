@@ -149,7 +149,13 @@ def measure_frame(rows):
     f.grade = f.col(lambda r: _f(r["second_grade"]))
     f.dig = f.col(lambda r: _f(r["digital_p"]))
     f.right = {"lenient": f.col(lambda r: r["truth"]["lenient"]), "strict": f.col(lambda r: r["truth"]["strict"])}
-    f.dig_t = f.col(lambda r: r["truth"]["digital"])
+    # the graders' digital truth: 1, 0, or NaN where fewer than two graders answered (left out of every
+    # figure that reads it); dig_known masks those rows
+    f.dig_t_raw = f.col(lambda r: _f(r["truth"]["digital"]))
+    f.dig_known = (~numpy.isnan(f.dig_t_raw)).astype(float)
+    f.dig_t = numpy.nan_to_num(f.dig_t_raw, nan=0.0)
+    aim = f.col(lambda r: _f(r["truth"].get("general_aim")))
+    f.aim_known, f.aim = (~numpy.isnan(aim)).astype(float), numpy.nan_to_num(aim, nan=0.0)
     f.cand = (f.first >= 0.3).astype(float)
     return f
 
@@ -345,11 +351,12 @@ def tune(conn, data, seed, graders=G.GRADERS, settings=None, log=print):
         holdout["measure_right_below_0.3"] = {"estimate": est, "range": rng}
         lines += ["", f"Right pairs (lenient) with a first score under 0.3, never asked a second look: about "
                       f"{est:,.0f} ({rng[0]:,.0f}-{rng[1]:,.0f}), from {int(low.sum())} graded pairs there.", ""]
-        aim = fh.col(lambda r: r["truth"]["general_aim"])
         kept = measure_kept(fh, cur)
-        lines += [f"Kept pairs the graders read as only a general aim: {_p(fh.ratio(kept * aim, kept), fh.boot(kept * aim, kept))}; "
-                  f"kept pairs the graders read as not digital: "
-                  f"{_p(fh.ratio(kept * (1 - fh.dig_t), kept), fh.boot(kept * (1 - fh.dig_t), kept))}.", ""]
+        ka, kd = kept * fh.aim_known, kept * fh.dig_known      # kept pairs with a truth for each question
+        nd = kd * (1 - fh.dig_t)
+        lines += [f"Kept pairs the graders read as only a general aim: {_p(fh.ratio(ka * fh.aim, ka), fh.boot(ka * fh.aim, ka))}; "
+                  f"kept pairs the graders read as not digital: {_p(fh.ratio(nd, kd), fh.boot(nd, kd))} (of the kept "
+                  f"pairs at least two graders answered).", ""]
         holdout["quality"] = quality_rows(fh, ho, cur, seed)
 
     # ---- the strong link
