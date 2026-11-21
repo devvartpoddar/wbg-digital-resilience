@@ -21,12 +21,11 @@ control panel; no option here moves a number.
 import argparse, csv, datetime, glob, hashlib, json, os, re, subprocess, sys
 from collections import Counter, defaultdict
 
-from wbg_portfolio.paths import REPO as ROOT, data_root, where
+from wbg_portfolio.paths import REPO as ROOT, cohort_path, data_root, where
 from wbg_portfolio import common
 
 SRC = os.path.dirname(os.path.abspath(__file__))
 
-COHORT = os.path.join(ROOT, "inputs", "config", "cohort.csv")
 UPCOMING = ("Pending", "Pending Implementation", "Under Review", "Planned")
 
 
@@ -51,8 +50,9 @@ class Selection:
         return f"Selection({self.name!r}, {len(self)} projects)"
 
 
-def cohort(path=COHORT):
-    with open(path, newline="", encoding="utf-8") as fh:
+def cohort(path=None):
+    from wbg_portfolio.paths import cohort_path
+    with open(path or cohort_path(), newline="", encoding="utf-8") as fh:
         return [r for r in csv.DictReader(fh) if r["included"].strip().lower() == "true"]
 
 
@@ -87,7 +87,7 @@ def _has(values, *fields):
 
 
 def select(project=None, country=None, region=None, fy=None, practice=None, unit=None,
-           cohort_set=None, path=COHORT, data=None):
+           cohort_set=None, path=None, data=None):
     """Cohort projects matching every filter given; all of them when none is.
 
     cohort_set  the cohort's own set ('digital': operations whose object is a
@@ -275,7 +275,7 @@ def _fingerprint(data, code, inputs):
             h.update(name.encode() + fh.read())
     for spec in inputs:
         # ("cohort",) is the hand-kept cohort file, outside the data folder.
-        path = COHORT if spec == ("cohort",) else where(data, *spec)
+        path = cohort_path() if spec == ("cohort",) else where(data, *spec)
         label = "cohort" if spec == ("cohort",) else os.path.relpath(path, data)
         if "*" in path:
             for p in sorted(glob.glob(path)):
@@ -820,7 +820,6 @@ def run(args, data):
             if stage == "classify":
                 ok = funnel.run(conn, data, Q.ASSETS, corpus=corpus, **kw) is not None or args.dry_run
             elif stage == "measure":
-                no_projects = {k: v for k, v in kw.items() if k != "projects"}
                 # every first pass, then the digital question (a sentence the first pass is unsure of or sure
                 # of, for any measure), then the measures' second looks only for sentences that may be digital,
                 # then the policy flag and the assets' second look and kinds (committed and digital sentences).
@@ -840,8 +839,9 @@ def run(args, data):
                             ok = False
                 if ok:
                     for name in sets:
-                        checks.propose(conn, data, corpus, name, api_key=key, dry_run=args.dry_run)
-                        if checks.types(conn, data, corpus, name, **no_projects) is None and not args.dry_run:
+                        checks.propose(conn, data, corpus, name, api_key=key, dry_run=args.dry_run,
+                                       projects=projects)
+                        if checks.types(conn, data, corpus, name, **kw) is None and not args.dry_run:
                             ok = False
             elif stage == "link":
                 ok = checks.package_assets(conn, data, corpus, **kw) is not None or args.dry_run

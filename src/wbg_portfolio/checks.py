@@ -194,12 +194,16 @@ def oth_types(data, name):
     return Q.oth_types(name, data)
 
 
-def propose(conn, data, corpus, name, *, api_key="", dry_run=False, log=print, max_types=8):
+def propose(conn, data, corpus, name, *, api_key="", dry_run=False, log=print, max_types=8, projects=None):
     """For a measure with no type list a person wrote: propose one from its
     committed sentences and write it as data/types/<set>_types.csv (the list
-    until a person writes analysis/labels/<set>_types.csv)."""
+    until a person writes analysis/labels/<set>_types.csv). A run over named projects
+    proposes nothing (a list is the cohort's, never one project's) and asks nothing."""
     if os.path.exists(os.path.join(labels.folder(name), f"{name}_types.csv")):
         return "person's list"
+    if projects:
+        log(f"{name}: a run over named projects proposes no types; the list already written is used")
+        return None
     labs, _ = Q.load(name)
     units = committed_at_ask(conn, corpus, name)
     if not units:
@@ -237,12 +241,15 @@ def propose(conn, data, corpus, name, *, api_key="", dry_run=False, log=print, m
 
 
 def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
-          log=print):
+          log=print, projects=None):
     """Every committed, digital unit asked each approved type's fit
     question; the units no approved type reaches at floor.types asked the OTH
-    types (re-proposed first when types.gaps is on). Writes kind 'type'."""
+    types (re-proposed first when types.gaps is on). Writes kind 'type'. With projects, only
+    those projects' sentences are asked and only their rows replaced, and no OTH type is
+    proposed (the proposals already written are asked)."""
     tq = Q.type_questions(name)
-    units = committed_at_ask(conn, corpus, name)
+    units = [u for u in committed_at_ask(conn, corpus, name) if corpus.in_scope(u, projects)]
+    scope = {r["unit_id"] for r in corpus.index if corpus.in_scope(r["unit_id"], projects)} if projects else None
     labs, _ = Q.load(name)
     lab = labs[0]
     approved = tq.get(lab["id"], {})
@@ -259,7 +266,7 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
     none = [u for u in units if not any(Q.score(a, fit=True) >= fl for a in got[u].values())]
     oth = oth_types(data, name)
     proposed = None
-    if str(panel.get("types.gaps", "off")).lower() in ("on", "true") and \
+    if not projects and str(panel.get("types.gaps", "off")).lower() in ("on", "true") and \
             len(none) >= int(panel.require("types.gap_min_units")):
         existing = "\n".join(f"- {t['type_name']}: {t['definition']}"
                              for t in sorted(labels.load_types(name), key=lambda t: t["type_id"]))
@@ -304,7 +311,7 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
             rows.append(_row("type", name, tid, u, corpus.state(u), approved[tid], a))
         for tid, a in got2.get(u, {}).items():
             rows.append(_row("type", name, tid, u, corpus.state(u), oth_q[tid], a))
-    write_scores(conn, "type", name, rows)
+    write_scoped(conn, "type", name, rows, scope)
     log(f"  {len(rows):,} type scores written; {len(none):,} units no approved type reaches"
         + (f"; {proposed} OTH type(s) proposed" if proposed is not None else
            f"; {len(oth)} OTH type(s) kept from earlier"))
