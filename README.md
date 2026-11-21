@@ -3,14 +3,16 @@
 Finds climate resilience commitments for digital infrastructure in World Bank appraisal documents, and links them to upcoming procurement.
 
 ```
-./run.sh                                   # everything: fetch what is new, rebuild what changed, publish
-./run.sh --update                          # the same, fetching every project again first
+./run.sh --max-spend 25                    # everything: fetch what is new, rebuild what changed, publish; at most US$25
+./run.sh --update --max-spend 25           # the same, fetching every project again first
 
 ./wbg_portfolio run --to prepare --project P171528   # one project's documents and tables
 ./wbg_portfolio run --from classify --max-spend 5    # the asset map, the measures, the links, the publish; stop at US$5
-./wbg_portfolio run --from search --measures cra     # a changed measure, from its search to Postgres
+./wbg_portfolio run --from search --measures cra --max-spend 1   # a changed measure, from its search to Postgres
 ./wbg_portfolio run --dry-run --from classify        # estimates only; nothing asked, nothing written
-./wbg_portfolio add cra                              # a new measure from its files (analysis/README.md)
+./wbg_portfolio add cra --max-spend 1                # a new measure: its search, first pass and later questions
+                                                     # (search to measure; then run link and publish for its
+                                                     # links and its place on the dashboards; analysis/README.md)
 ./wbg_portfolio publish                              # every decision read again from the scores, then the views
 
 ./wbg_portfolio check draw --seed 3                  # grading tasks for a person or an agent (data/review/tasks_s3.jsonl)
@@ -20,7 +22,7 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
 
 ./wbg_portfolio list    --region "South Asia"        # which cohort projects a selection covers
 ./wbg_portfolio summary --country KE                 # where each selected project stands
-./wbg_portfolio status                               # which code and data release the store is at
+./wbg_portfolio status                               # one screen: release, what the store holds, spend, what waits
 ./wbg_portfolio audit                                # the parse and procurement audits (data/reports/)
 python -m pytest                           # tests (not on the box)
 ```

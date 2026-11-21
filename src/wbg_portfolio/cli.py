@@ -955,7 +955,9 @@ def main(argv=None):
     p.add_argument("--max-spend", type=float, default=None, help="US$ the run may spend on models")
     p.add_argument("--fresh-store", action="store_true", help="the answer store is meant to be empty (a new store)")
     _filters(p)
-    p = sub.add_parser("add", help="a measure from its files to Postgres (run --from search --to measure)")
+    p = sub.add_parser("add", help="a new measure from its files: its search, first pass and later questions "
+                                   "(run --from search --to measure); then run --from link for its links and "
+                                   "the publish")
     p.add_argument("label_set", nargs="+")
     p.add_argument("--jobs", type=int, default=3)
     p.add_argument("--workers", type=int, default=10)
@@ -1002,7 +1004,8 @@ def main(argv=None):
     sub.add_parser("audit", help="the parse and procurement audits (reports in data/reports/)")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on its settings")
     p.add_argument("--docs", type=int, default=10)
-    sub.add_parser("status", help="which code and which data release the store is at")
+    sub.add_parser("status", help="one screen: the code and data release, what the store holds, what was "
+                                  "spent and what is waiting")
     sub.add_parser("release", help="record the store's current data as a release")
     args = ap.parse_args(argv)
     # Every line reaches a log file or a service's journal as it is printed, not when a buffer

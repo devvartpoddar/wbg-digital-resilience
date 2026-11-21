@@ -4,7 +4,7 @@
 
 The pipeline reads World Bank Project Appraisal Documents (PADs) and procurement records, finds which digital assets a project finances and which climate resilience measures it commits to for them, and links that to upcoming procurement, so an advisor knows which Task Team Leaders (TTLs) to talk to, and when. Anything outside the four questions at the top of `docs/methodology.md` does not belong here.
 
-`src/wbg_portfolio/` is the pipeline, a Python package (`pyproject.toml`; `./wbg_portfolio run`: fetch > prepare > embed > search > classify > measure > link > activities > publish), and `app.py` in it is what the Shiny app (repository `devvartpoddar/shiny`, `apps/wbg`) reads the results through; it takes any label set by name and holds no measure's definition. `inputs/taxonomy/` holds the assets, `analysis/labels/` the measures, `analysis/sql/` questions over Postgres, `sql/views/` the views the dashboards read. Keep analysis assumptions out of `src/` and pipeline mechanics out of `analysis/`.
+`src/wbg_portfolio/` is the pipeline, a Python package (`pyproject.toml`; `./wbg_portfolio run`: fetch > prepare > embed > search > classify > measure > link > publish; the commitments are made at publish), and `app.py` in it is what the Shiny app (repository `devvartpoddar/shiny`, `apps/wbg`) reads the results through; it takes any label set by name and holds no measure's definition. `inputs/taxonomy/` holds the assets, `analysis/labels/` the measures, `analysis/sql/` questions over Postgres, `sql/views/` the views the dashboards read. Keep analysis assumptions out of `src/` and pipeline mechanics out of `analysis/`.
 
 ## Read little, spend little
 
@@ -33,7 +33,7 @@ Every decision is **repeatable** (same text, same answer), **scored** (a probabi
 
 1. Never delete data to save space, and never treat a stage's input as disposable. Never drop or truncate `wbg_store`. If disk is a problem, say so.
 2. No document text in git: tables carry identifiers, offsets and checksums. Test fixtures are invented.
-3. `inputs/config/`, `inputs/taxonomy/` and `analysis/labels/` are kept by people: read, never written by code. Changing an asset definition invalidates every grade under it: stop and ask. A set in `analysis/labels/` may be added or revised freely. These files change only through a pull request that a card asks for and a person merges; the pipeline never writes them.
+3. `inputs/config/`, `inputs/taxonomy/` and `analysis/labels/` are kept by people: read, never written by code. Changing an asset definition is a new question for the model, so everything asked under it is asked again (and paid for); a person's grades are kept, keyed on the item and the label, and read against the new wording, so they may no longer fit it: stop and ask. A set in `analysis/labels/` may be added or revised freely. These files change only through a pull request that a card asks for and a person merges; the pipeline never writes them.
 4. Secrets come from the environment or `.secrets/wbg-openrouter-key` (mode 0600). Never in a committed file, a command line or a log; if you see one anywhere else, stop, say so and recommend rotation.
 5. Identifiers are deterministic: a re-run on unchanged input gives byte-identical ids and outputs.
 6. Stages are resumable and skip unchanged work, keyed on content checksums.

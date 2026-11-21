@@ -14,8 +14,8 @@ from wbg_portfolio import db
 
 # Where a commitment's procurement stands, from its most pressing linked
 # package (wbg.commitment_summary.status, docs/method/dashboards.md "A commitment's
-# status"). Package links are found for about a third of commitments, so
-# "No package linked" is the common case, not a finding.
+# status"). Package links are found for only part of the commitments
+# (docs/method/links.md), so "No package linked" is common and not a finding.
 DROPPED = "Package dropped"
 STAGES = ("Completed", "Under way", "Coming up", DROPPED, "No package linked")
 STAGE_OF_STATUS = {

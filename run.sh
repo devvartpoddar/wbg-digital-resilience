@@ -3,8 +3,11 @@
 # before, rebuild every stage whose code or inputs changed and write
 # Postgres. Unchanged work is skipped.
 #
-#   ./run.sh                 everything
-#   ./run.sh --update        fetch every project again first
+#   ./run.sh --max-spend 25            everything, spending at most US$25 on models
+#   ./run.sh --update --max-spend 25   the same, fetching every project again first
+#
+# --max-spend is required: the run includes stages that call paid models (./wbg_portfolio run
+# refuses to start without it; --dry-run prints the estimates instead).
 #
 # For a selection (a project, country, region or approval year) use ./wbg_portfolio:
 #   ./wbg_portfolio prepare --project P171528        ./wbg_portfolio summary --country KE

@@ -151,9 +151,9 @@ PROBABILITY_GRADES = {
     "grade_confidence": "The model's own confidence in its answer.",
     "probability_grade_0": "Probability of grade 0 (the passage is not about the label).",
     "probability_grade_1": "Probability of grade 1 (mentioned as background or another party's work).",
-    "probability_grade_2": "Probability of grade 2 (supported, planned or conditional).",
-    "probability_grade_3": "Probability of grade 3 (financed or committed). The four grade probabilities are the model's raw answer, kept as the record: no decision reads them one by one; the decision reads posterior_probability.",
-    "posterior_probability": "The probability every decision reads: the model's probability of grades 2 and 3 through the label's probability layer (src/wbg_portfolio/posterior.py), or that score itself until a sheet graded under the current question has been evaluated. A sentence counts at the label's floor (control panel) or above.",
+    "probability_grade_2": "Probability of grade 2: on the measure scale, the project may finance, deliver or require it (planned, optional or conditional); on the taxonomy scale (assets, digital), partly or as the means. Grade 2 counts (read.grades).",
+    "probability_grade_3": "Probability of grade 3: on the measure scale, the project explicitly finances, delivers or requires it; on the taxonomy scale, what the sentence is about. The four grade probabilities are the model's raw answer, kept as the record: no decision reads them one by one; the decision reads posterior_probability.",
+    "posterior_probability": "The probability every decision reads: the model's probability of grades 2 and 3 (read.grades). The posterior layer is off (posterior.on false), so it equals the first score. A measure decides by the band rule (band.*), an asset at asset.floor.",
     "model_served": "The exact decision-model snapshot that answered.",
 }
 
@@ -388,9 +388,10 @@ TABLES = {
         foreign=[("unit_id", "search_units", "unit_id"),
                  ("paragraph_id", "paragraphs", "paragraph_id")],
         comment="One unit seen by a measure run: the decision model's answer (the probability "
-                "of each grade: 0 not described, 1 background, 2 planned, 3 committed), the "
-                "posterior probability of grades 2 and 3 every decision reads, whether it "
-                "is kept (is_committed: it passes the measure rule and is digital), and the asset it links to.",
+                "of each grade: 0 not described, 1 background, 2 the project may finance it, 3 it explicitly "
+                "does), the probability of grades 2 and 3 every decision reads, whether it "
+                "is kept (is_committed: it passes the measure rule and is digital; a kept pair is planned or "
+                "committed, since grade 2 counts), and the asset it links to.",
         columns=dict(PROBABILITY_GRADES, **{
             "route": "pattern, embedding, both, or feedback (found by a relevance-feedback round).",
             "feedback_round": "0 for the candidate pool; 1 and up for relevance-feedback rounds.",
@@ -410,13 +411,13 @@ TABLES = {
             "linked_asset_id": "The asset the finding is linked to: the sentence's own (level unit), else the decayed sum over its paragraph's earlier sentences (level paragraph), at the control panel's asset.floor and asset.paragraph_floor.",
             "linked_asset_level": "unit, second_look (the chat model's second look), paragraph or none.",
             "linked_asset_probability": "The probability behind the link.",
-            "score_first": "The first-pass score the band rule reads: the posterior of grades 2 and 3 from the sentence asked alone.",
+            "score_first": "The first-pass score the band rule reads: the probability the sentence is graded 2 or 3 (the project may finance it, or explicitly does), asked alone.",
             "score_context": "The decision model's score for the same question asked with the paragraph beside the sentence; empty unless the pair's first-pass score was asked about (band.ask_low to band.ask_high; a look above band.keep decides nothing). Model-graded, not person-graded.",
             "second_grade": "The chat model's grade 0 to 3 for the pair, asked in the band; empty otherwise. Reading is the model's: a missing second look never counts as yes.",
             "decided_by": "score (first-pass score at band.keep or more), second_look (in the band, and both looks reach band.context and band.second_grade) or empty (not committed).",
             "is_digital": "True when the digital question (the sentence with its paragraph beside it, asked once whatever the measure) scores digital.floor or more. A sentence is kept (is_committed) only when this is true.",
-            "digital_p": "P(yes) of the digital question; empty when not asked (it is asked of committed sentences only).",
-            "instrument": "investment or policy, the chat model's reading of the committed sentence (flags.csv, policy); empty when not asked.",
+            "digital_p": "The digital question's score: P(2)+P(3) on the taxonomy's 0-3 scale (how far the sentence, read with its paragraph, is about a digital technology); empty when not asked. It is asked of every sentence with a first-pass score in the asked band (band.ask_low to band.ask_high) for some measure.",
+            "instrument": "investment or policy, the chat model's reading of the kept sentence (flags.csv, policy); empty when not asked yet. Policy is not an asset, but a policy sentence can be about an asset and then carries it.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
             "type_ids_above_threshold": "The unit's types (one fit question per type in analysis/labels/<set>_types.csv: yes, unsure or no): every type whose P(yes), through the types' layer once fitted, reaches the control panel's floor.types (the likeliest only without types.multiple); empty when none does or no list exists yet.",
             "best_type_id": "The likeliest type.",
@@ -428,9 +429,13 @@ TABLES = {
         })),
     "measure_types": dict(
         key=("label_set", "label_id", "type_id"), foreign=[],
-        comment="A measure's approved types (its clusters): proposed by a generative model "
-                "from the committed units, approved by a person in analysis/labels/"
-                "<set>_types.csv, assigned by the decision model with one fit question per type, yes, unsure or no (src/wbg_portfolio/kinds.py); a unit has every type whose probability reaches floor.types.",
+        comment="A measure's types: the list a person wrote in analysis/labels/<set>_types.csv, or, where "
+                "there is none, the list the chat model proposed from the kept sentences "
+                "(data/types/<set>_types.csv), used as soon as it is stored; no person approves it first. "
+                "The types the gap step proposes for sentences no listed type reaches are marked as proposed: "
+                "their id and name start with OTH. Each kept sentence is asked one fit question per type "
+                "(yes, unsure or no; questions.type_question) by the decision model; a unit has every type "
+                "whose probability reaches floor.types.",
         columns={"type_name": "The name shown (display_name in the file when given, else "
                               "the name the model was asked with).",
                  "definition": "The definition the decision model was given.",
@@ -449,11 +454,13 @@ TABLES = {
                  "version": "The hand-kept version of the row."}),
     "flags": dict(
         key=("flag_id",), foreign=[],
-        comment="The yes-or-no flags asked of a committed sentence whatever its measure "
-                "(inputs/taxonomy/flags.csv, kept by a person): digital and policy, with the definitions "
-                "the chat model was given. They are definitions, not label sets.",
+        comment="The two flags of a sentence, whatever its measure (inputs/taxonomy/flags.csv, kept by "
+                "a person): digital, graded 0-3 by the decision model (how far the sentence is about a "
+                "digital technology; it counts at digital.floor), and policy, investment or policy "
+                "instrument by the chat model; with the definitions the models were given. They are "
+                "definitions, not label sets.",
         columns={"flag_name": "What the flag says of a sentence.",
-                 "definition": "The definition the chat model was given.",
+                 "definition": "The definition the model was given.",
                  "version": "The hand-kept version of the row."}),
     "measure_quality": dict(
         key=("label_set", "question_sha256", "sheet"), foreign=[],

@@ -15,8 +15,9 @@ A label set is two or three CSV files, kept by people and only read here:
                       "conducted"; an acronym that must keep its case goes in
                       (?-i:...), or "UPS" also matches "start-ups". The candidates stage takes every unit a
                       pattern matches, whatever its embedding score.
-  flags.csv           yes/no questions asked of any committed sentence (digital,
-                      policy): flag_id, flag_name, definition, version. Not a set.
+  flags.csv           the two flags of a sentence: digital (graded 0-3 by the decision
+                      model) and policy (investment or policy, by the chat model):
+                      flag_id, flag_name, definition, version. Not a set.
   <set>_types.csv     the types of a label (optional): <x>_id, type_id,
                       type_name, definition, pattern, active, and two
                       presentation columns a person may add at any time:
@@ -30,8 +31,11 @@ A label set is two or three CSV files, kept by people and only read here:
 Two folders hold them, with one difference between them:
 
   inputs/taxonomy/    the pipeline's own sets (the assets). Changed rarely
-                      and deliberately: a change invalidates every label a
-                      person gave under the old wording (AGENTS.md rule 3).
+                      and deliberately: a changed definition is a new question,
+                      so the model is asked again (its earlier answers stay stored,
+                      unread); a person's grades are keyed on the item and the
+                      label, not the wording, so they are kept and read against
+                      the new wording, and may no longer fit it (AGENTS.md rule 3).
   analysis/labels/    analysis sets (the measures, and anything tried). Added
                       and revised freely; every run keys its output on the
                       set's exact wording, so trying a new set costs only the
@@ -264,9 +268,9 @@ def load_patterns(name, dirs=None, taxonomy=None):
 
 def load_types(name, dirs=None, taxonomy=None):
     """Active types: [{label_id, type_id, type_name, definition, pattern,
-    regex}]. A type approved from the decision model's proposals
-    (src/wbg_portfolio/kinds.py) has a definition and usually no pattern; its regex is
-    then None and the candidates stage does not tag by it."""
+    regex}]. A proposed type (the chat model's list, used when no person wrote one: checks.propose)
+    has a definition and usually no pattern; its regex is then None and the candidates stage does
+    not tag by it."""
     path, found = _optional(name, "_types", dirs, taxonomy)
     out = []
     for r in found:

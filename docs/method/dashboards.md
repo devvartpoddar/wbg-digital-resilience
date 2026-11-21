@@ -2,7 +2,7 @@
 
 Part of the method (`docs/methodology.md` is the index). Measured results and trials: `docs/method/history.md`.
 
-## 5f. What the app reads (`sql/views/13_*` to `18_*`)
+## 5f. What the app reads (`sql/views/13_*` to `19_*`)
 
 The Shiny app (`apps.amduat.dev/wbg`, repository `devvartpoddar/shiny`, `apps/wbg`) reads views, not tables, through `src/wbg_portfolio/app.py`, and those views are the interface: a column is renamed or removed only with the app changed in step. Every view carries a comment. The views are rebuilt inside the publish's transaction (section 4). Four are materialised, built once per publish and indexed, because as plain views Postgres misjudged their joins: `commitment_units`, `unit_wording_overlap`, `commitment_summary` and `commitment_package_status`. A status that turns on today's date is therefore as of the last publish.
 
@@ -11,7 +11,7 @@ The Shiny app (`apps.amduat.dev/wbg`, repository `devvartpoddar/shiny`, `apps/wb
 | View or function | One row per | Reads |
 |---|---|---|
 | `dashboard_settings` | the readings (one row) | control panel |
-| `iso_country_code()`, `https()`, `due_date()`, `is_upcoming()`, `same_component()` | helpers: ISO 3166 alpha-2 (NULL for a regional code, `ZR` read as `CD`); a link made https; the date a package falls due; whether a status is still to come; whether two component numbers name the same component | |
+| `iso_country_code()`, `https()`, `due_date()`, `is_upcoming()`, `is_cancelled()`, `same_component()` | helpers: ISO 3166 alpha-2 (NULL for a regional code, `ZR` read as `CD`); a link made https; the date a package falls due; whether a status is still to come; whether it means cancelled; whether two component names are the same component (`keys.same_component`) | |
 | `project_info`, `project_header`, `project_documents` | project: a name never blank, map-ready country code, `is_regional`; place, status, dates, documents read; each document with its kind, title and PDF link | projects, documents |
 | `project_components` | component of the project's latest document that lists any; the cost is that document's, else the most recent one stating it for the same component; `cost_covers` = all funding sources | components |
 | `project_assets` | project and asset: sentences naming it, sentences taking it from their paragraph, paragraphs, best probability | unit_assets |
@@ -62,7 +62,7 @@ Every bar, cell, country and card opens what is behind it in a side panel: the p
 
 **Computed in `app.py`, not in the views:**
 
-- **Stage** (`app.STAGES`, `app.stage`): a commitment's `status` grouped into Completed (Contract completed), Under way (Under implementation, Contract signed), Coming up (Overdue, Planned, Tendered), Package dropped (Not in latest plan, Cancelled: the package, not the commitment) and No package linked. A commitment with several packages takes the first status in `wbg.package_status_order`. Package links are found for about a third of commitments, so No package linked is the common case and says nothing about the project.
+- **Stage** (`app.STAGES`, `app.stage`): a commitment's `status` grouped into Completed (Contract completed), Under way (Under implementation, Contract signed), Coming up (Overdue, Planned, Tendered), Package dropped (Not in latest plan, Cancelled: the package, not the commitment) and No package linked. A commitment with several packages takes the first status in `wbg.package_status_order`. Package links are found for only part of the commitments (the share is in `links.md`; same-asset links raised it), so No package linked is common and says nothing about the project.
 - **Place**: the country, or the region for a regional project.
 - **Counting projects** (`app.tally` with unit `projects`): a project counts once in each group it has a commitment in, however many, so the groups do not add up to the number of projects. Its share is of a base of projects (`app.projects`: the cohort's projects with a document read, of the instruments `dashboard.ipf_only` admits, with or without a commitment). Grouped by something about the project (country, region, approval year) the base is the projects sharing it; grouped by measure, asset, type or stage it is the whole base. Inside one measure or asset the app passes that measure's or asset's projects as the base, so a type's share is of the measure's projects; inside one country, the country's projects.
 - **Where each project stands** (`app.board`): one card per project and stage, with its commitments and types; a project with commitments at two stages has two cards.
