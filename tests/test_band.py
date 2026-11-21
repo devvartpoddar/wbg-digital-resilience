@@ -182,7 +182,8 @@ def test_the_context_state_adds_the_paragraph_and_the_plain_state_is_unchanged(c
     assert c.chat_state(u) == plain
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "second.context_chars": 10})
-    assert c.context_state(u)["context"] == "The projec"
+    # a window shorter than the sentence shows the sentence whole, never its first characters only
+    assert c.context_state(u)["context"] == "The project will finance a hazard assessment of tower sites."
 
 
 def test_a_context_question_says_what_the_paragraph_is_for():

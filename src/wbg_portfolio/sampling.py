@@ -421,8 +421,7 @@ def mark(paragraph, sentence):
             p, s = p2, s2
     if i < 0:
         return p[:PARAGRAPH_CHARS] + "\n>>> " + s + " <<<"
-    lo = max(0, min(i - (PARAGRAPH_CHARS - len(s)) // 2, len(p) - PARAGRAPH_CHARS))
-    hi = max(lo + PARAGRAPH_CHARS, i + len(s))
+    lo, hi = Q.window(len(p), i, i + len(s), PARAGRAPH_CHARS)
     return p[lo:i] + ">>> " + s + " <<<" + p[i + len(s):hi]
 
 

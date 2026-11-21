@@ -429,6 +429,18 @@ def included_projects(path=None):
         return {r["project_id"].strip() for r in csv.DictReader(fh) if r["included"].strip().lower() == "true"}
 
 
+def window(length, start, end, chars):
+    """(lo, hi): the stretch of a text of `length` characters that a question shows around the
+    sentence at [start, end): `chars` characters centred on the sentence, moved inward at either end
+    of the text, and never cutting the sentence (a sentence longer than `chars` is shown whole). The one
+    window of the pipeline's context questions (Corpus.paragraph_window) and the graders' paragraph
+    (sampling.mark)."""
+    lo = max(0, min(start - (chars - (end - start)) // 2, length - chars))
+    lo = min(lo, start)
+    hi = min(length, max(lo + chars, end))
+    return lo, hi
+
+
 class Corpus:
     """The embedded sentences, read once per process: the index, the texts
     as embedded (lead-in included), the paragraphs, the component names and
@@ -452,12 +464,13 @@ class Corpus:
                 for r in sorted(csv.DictReader(fh), key=lambda r: r["source"] == "heading"):
                     self.names.setdefault((r["doc_id"], r["number"]), r["name"])
         every = {u["unit_id"]: u for u in units.search_units(data)}
-        self._docs, self.texts = {}, {}
+        self._docs, self.texts, self.spans = {}, {}, {}
         for r in self.index:
             u = every.get(r["unit_id"])
             if u is None:
                 continue
             t = self._doc(u["doc_id"])
+            self.spans[r["unit_id"]] = (int(u["char_start"]), int(u["char_end"]))
             body = t[int(u["char_start"]):int(u["char_end"])]
             if u.get("lead_in_start"):
                 body = t[int(u["lead_in_start"]):int(u["lead_in_end"])] + "\n" + body
@@ -507,15 +520,32 @@ class Corpus:
             state["paragraph"] = self.paragraph_text(r["paragraph_id"])
         return state
 
+    def paragraph_window(self, unit_id, chars):
+        """At most `chars` characters of the sentence's paragraph, centred on the sentence (window):
+        the sentence itself is always inside."""
+        p = self.paras.get(self.row(unit_id)["paragraph_id"])
+        if not p:
+            return ""
+        text = self.paragraph_text(p["paragraph_id"])
+        start, end = self.spans.get(unit_id, (None, None))
+        if start is not None and int(p["char_start"]) <= start and end <= int(p["char_end"]):
+            start, end = start - int(p["char_start"]), end - int(p["char_start"])
+        else:
+            body = self.texts.get(unit_id, "").split("\n")[-1]
+            start = text.find(body)
+            if start < 0:
+                return text[:chars]
+            end = start + len(body)
+        lo, hi = window(len(text), start, end, chars)
+        return text[lo:hi]
+
     def context_state(self, unit_id):
-        """state() with the paragraph in a field named 'context', cut to
-        second.context_chars, for the questions that read the sentence with
-        its paragraph beside it (in_context). state() is not changed: a
-        first-pass answer already stored stays what it was."""
+        """state() with the paragraph in a field named 'context', second.context_chars of it centred
+        on the sentence, for the questions that read the sentence with its paragraph beside it
+        (in_context). state() is not changed: a first-pass answer already stored stays what it was."""
         state = self.state(unit_id)
         state.pop("paragraph", None)
-        text = self.paragraph_text(self.row(unit_id)["paragraph_id"])
-        state["context"] = text[:int(panel.require("second.context_chars"))]
+        state["context"] = self.paragraph_window(unit_id, int(panel.require("second.context_chars")))
         return state
 
     def chat_state(self, unit_id):
