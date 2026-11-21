@@ -66,7 +66,7 @@ QUERY_COLS = ["label_set", "label_id", "query_id", "query", "active", "version",
 PATTERN_COLS = ["label_set", "label_id", "pattern_id", "pattern", "active", "version", "file_sha256"]
 SCALE_COLS = ["label_set", "label_id", "grade", "description", "version", "file_sha256"]
 QUALITY_COLS = ["label_set", "version", "question_sha256", "sheet", "graded_units", "precision",
-                "recall", "evaluated_at", "report_path"]
+                "recall", "evaluated_at", "report_path", "scope"]
 DECISION_TABLES = {"measure_findings": FINDING_COLS, "paragraph_grades": GRADE_COLS,
                    "unit_assets": UNIT_ASSET_COLS,
                    "package_assets": PACKAGE_ASSET_COLS,
@@ -190,6 +190,26 @@ def load_rows(conn, table, cols, rows, source_sha, types=None, after=()):
     conn.execute(f"INSERT INTO {loads()} (table_name, source_sha256, row_count, loaded_at) "
                  f"VALUES (%s, %s, %s, %s)", (table, source_sha, n, _now()))
     return n, bad
+
+
+def replace_quality(conn, rows, sheets, source):
+    """Replace the measure_quality rows of the named sheets with rows, keeping every other sheet's (the
+    evaluation of person-graded sheets writes evaluation and training; the sample's tuning writes holdout).
+    In the caller's transaction."""
+    prepare(conn)
+    t = ident("measure_quality")
+    have = [c for (c,) in conn.execute("SELECT column_name FROM information_schema.columns WHERE table_schema = %s "
+                                       "AND table_name = 'measure_quality'", (db.SCHEMA,)).fetchall()]
+    names = {S.rename("measure_quality", c): c for c in QUALITY_COLS}
+    keep = []
+    for r in conn.execute(f"SELECT * FROM {t}").fetchall():
+        row = {names.get(k, k): v for k, v in zip(have, r)}
+        if row.get("sheet") in sheets:
+            continue
+        keep.append({c: ("" if row.get(c) is None else str(row[c])) for c in QUALITY_COLS})
+    for r in keep:
+        r["scope"] = r["scope"] or "measure"
+    return load_rows(conn, "measure_quality", QUALITY_COLS, keep + list(rows), source)
 
 
 def last_sha(conn, table):

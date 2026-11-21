@@ -803,11 +803,10 @@ def evaluate(conn, data, corpus=None, names=None, log=print, grid=False):
                     quality.append({"label_set": lset, "version": "", "question_sha256": qsha,
                                     "sheet": "evaluation" if des == "eval" else "training", "graded_units": len(rs),
                                     "precision": p, "recall": r, "evaluated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-                                    "report_path": "data/reports/evaluate.md"})
+                                    "report_path": "data/reports/evaluate.md", "scope": "measure"})
     from wbg_portfolio import load_pg
     with conn.transaction():
-        load_pg.prepare(conn)
-        load_pg.load_rows(conn, "measure_quality", load_pg.QUALITY_COLS, quality, "evaluate")
+        load_pg.replace_quality(conn, quality, {"evaluation", "training"}, "evaluate")
     conn.commit()
     out = where(data, "reports", "evaluate.md")
     os.makedirs(os.path.dirname(out), exist_ok=True)

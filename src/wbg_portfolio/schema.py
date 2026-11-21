@@ -460,14 +460,20 @@ TABLES = {
                 "decision (posterior at the floor) against the person's grade 2 or more, "
                 "weighted back to the pool, with recall within the graded pool, not the "
                 "corpus. Only an evaluation sheet (a random draw) measures the dashboards; a "
-                "training sheet holds the hard cases. Quote graded_units beside them.",
+                "training sheet holds the hard cases. Quote graded_units beside them. A holdout "
+                "sheet (./wbg_portfolio check tune) is the holdout half of the evaluation sample, graded "
+                "by three models, for the current settings: the band rule and the digital rule against "
+                "two of three graders giving 2 or 3; recall among the pairs asked (first score 0.3 or more).",
         columns={"version": "The measure's version (its file's version column) when the "
                             "sheet was evaluated.",
                  "question_sha256": "SHA-256 of the exact question the sheet was graded "
                                     "under: a revised definition is a new row.",
-                 "sheet": "evaluation (a random draw by the decision, which fits nothing) or "
+                 "sheet": "holdout (the evaluation sample's holdout half, graded by three models), "
+                          "evaluation (a random draw by the decision, which fits nothing) or "
                           "training (drawn near the floor).",
-                 "graded_units": "Rows the person graded.",
+                 "graded_units": "Rows graded (scope overall: every holdout pair).",
+                 "scope": "measure (the measure's own graded rows) or overall (a holdout sheet's "
+                          "figures over every measure, for a measure with too few holdout rows of its own).",
                  "precision": "Of the units the pipeline counts, the weighted share the person "
                               "graded 2 or more.",
                  "recall": "Of the units the person graded 2 or more, the weighted share the "

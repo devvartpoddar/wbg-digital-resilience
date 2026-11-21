@@ -18,23 +18,25 @@ c AS (
   FROM wbg.commitments GROUP BY label_set
 ),
 q AS (
-  -- an evaluation sheet (a random draw) before a training sheet, then the latest
+  -- the evaluation sample's holdout sheet, then an evaluation sheet (a random draw), then a
+  -- training sheet; the latest of each
   SELECT DISTINCT ON (label_set) label_set, version AS graded_version, sheet AS graded_sheet,
-         graded_units, precision, recall, question_sha256 AS graded_question_sha256, evaluated_at
+         graded_units, precision, recall, question_sha256 AS graded_question_sha256, evaluated_at,
+         scope AS graded_scope
   FROM wbg.measure_quality
-  ORDER BY label_set, (sheet = 'evaluation') DESC, evaluated_at DESC
+  ORDER BY label_set, (sheet = 'holdout') DESC, (sheet = 'evaluation') DESC, evaluated_at DESC
 )
 SELECT m.label_set, m.measure_name, m.family, m.definition, m.version,
        coalesce(c.commitments, 0) AS commitments, coalesce(c.projects, 0) AS projects,
        coalesce(c.countries, 0) AS countries, coalesce(c.types, 0) AS types,
        q.graded_sheet, q.graded_units, q.precision, q.recall, q.graded_version,
        q.graded_question_sha256,
-       q.evaluated_at AS graded_at
+       q.evaluated_at AS graded_at, q.graded_scope
 FROM m
 LEFT JOIN c USING (label_set)
 LEFT JOIN q USING (label_set);
 COMMENT ON VIEW wbg.measure_summary IS
-  'One row per measure: its definition and version, how many commitments, projects, countries (regional operations not counted as countries) and types the model finds, and a graded sheet''s numbers (graded_units, precision, recall of the pipeline''s decision, weighted; null where no sheet is graded): an evaluation sheet (a random draw, the dashboards'' figures) when one exists, else the latest training sheet (the hard cases near the floor; graded_sheet says which). A sheet graded under an earlier wording of the definition says so in graded_question_sha256: compare it with the current question before quoting.';
+  'One row per measure: its definition and version, how many commitments, projects, countries (regional operations not counted as countries) and types the model finds, and a graded sheet''s numbers (graded_units, precision, recall of the pipeline''s decision, weighted; null where no sheet is graded): the evaluation sample''s holdout sheet when one exists (graded by three models; graded_scope overall means the figures are over every measure because this one has too few holdout rows), else an evaluation sheet (a random draw, the dashboards'' figures) when one exists, else the latest training sheet (the hard cases near the floor; graded_sheet says which). A sheet graded under an earlier wording of the definition says so in graded_question_sha256: compare it with the current question before quoting.';
 
 -- How many committed units two measures share: a report, not a
 -- correction. A unit can be a commitment to several measures (on 2026-10-20
