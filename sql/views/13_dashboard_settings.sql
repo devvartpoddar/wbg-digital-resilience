@@ -43,7 +43,6 @@ SELECT
   {{panel:link.strong_yes}}::numeric AS link_strong_yes,
   {{panel:link.asset_band_low}}::numeric AS link_asset_band_low,
   {{panel:link.asset_yes}}::numeric AS link_asset_yes,
-  {{panel:activities.max_sentences}}::integer AS activities_max_sentences,
   {{panel:second.model}} AS second_model;
 COMMENT ON VIEW wbg.dashboard_settings IS
   'The readings the dashboard views apply (one row): a further floor on the posterior for a unit to count, the asset-link levels that count, whether only Investment Project Financing operations count, the probability at which a package is strongly linked (package_link_min_probability, the same as link_strong_yes), the share of six-word runs that makes another project''s wording a near copy, the band rule''s thresholds, the digital rule and its floor, the package-link settings and the chat model of the second looks. pair_check_floor is always null: the pair check no longer exists.';

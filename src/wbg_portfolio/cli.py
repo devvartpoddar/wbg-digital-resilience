@@ -2,7 +2,7 @@
 """The pipeline's command line and the one place its stages are ordered.
 
     ./wbg_portfolio run [--from S] [--to S] [--only S] [--measures a b] [--max-spend US$] [--dry-run]
-        fetch > prepare > embed > search > classify > measure > link > activities > publish (> audit)
+        fetch > prepare > embed > search > classify > measure > link > publish (> audit)
     ./wbg_portfolio add <set>...        a measure from its files to Postgres (run --from search --to measure)
     ./wbg_portfolio publish             every decision read again from the scores, then the views
     ./wbg_portfolio check draw|fill|evaluate|spotcheck|import   the grading cycle (src/wbg_portfolio/grading.py)
@@ -727,13 +727,13 @@ def _print_rows(rows, cols):
 
 # ------------------------------------------------------------------ the run
 
-RUN_STAGES = ("fetch", "prepare", "embed", "search", "classify", "measure", "link", "activities", "publish",
+RUN_STAGES = ("fetch", "prepare", "embed", "search", "classify", "measure", "link", "publish",
               "audit")
 
 
 # The stages that can call a model that is paid for (the embedding model included): a run of
 # any of them needs --max-spend.
-PAID_STAGES = ("embed", "search", "classify", "measure", "link", "activities")
+PAID_STAGES = ("embed", "search", "classify", "measure", "link")
 
 
 def stages_between(start=None, stop=None, only=None):
@@ -808,14 +808,13 @@ def run(args, data):
                 conn = db.connect()
                 db.ensure(conn)
                 corpus = Q.Corpus(data)
-            from wbg_portfolio import activities
             from wbg_portfolio import checks
             from wbg_portfolio import decide
             from wbg_portfolio import funnel
             from wbg_portfolio import second
-            if stage in ("classify", "measure", "link", "activities"):
+            if stage in ("classify", "measure", "link"):
                 print(corpus.scope_note())
-            if stage in ("classify", "measure", "link", "activities") and not checked:
+            if stage in ("classify", "measure", "link") and not checked:
                 db.check_store(conn, fresh=getattr(args, "fresh_store", False))
                 checked = True
             if stage == "classify":
@@ -850,8 +849,6 @@ def run(args, data):
                     for step in (second.package_asset_second, second.package_asset_subtype, checks.package_measure):
                         if step(conn, data, corpus, every, **kw) is None and not args.dry_run:
                             ok = False
-            elif stage == "activities":
-                ok = activities.run(conn, data, corpus, every, **kw) is not None or args.dry_run
             elif stage == "publish" and not args.dry_run:
                 if projects and os.environ.get("WBG_PUBLISH_SCOPED") != "1":
                     print("  postgres: not written: a run over named projects would replace the "

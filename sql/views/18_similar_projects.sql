@@ -29,7 +29,9 @@ LANGUAGE sql STABLE AS $$
            AS commits_to_measure,
          EXISTS (SELECT 1 FROM wbg.commitments o, c
                  WHERE o.project_id = n.project_id AND o.label_set = c.label_set
-                   AND o.type_id = c.type_id) AS has_same_commitment
+                   AND o.commitment_key = c.commitment_key AND c.commitment_key <> 'paragraph'
+                   AND o.asset_id = c.asset_id AND o.subtype_id = c.subtype_id AND o.type_id = c.type_id)
+           AS has_same_commitment
   FROM near n
   JOIN wbg.project_info i ON i.project_id = n.project_id
   WHERE n.project_id <> (SELECT c.project_id FROM c)
@@ -38,4 +40,4 @@ LANGUAGE sql STABLE AS $$
   LIMIT k
 $$;
 COMMENT ON FUNCTION wbg.similar_projects IS
-  'The k other projects whose documents hold sentences nearest a commitment''s three strongest sentences (stored embeddings, 60 nearest each; no model call): closeness is 1 minus the smallest cosine distance, close_sentences how many of the near sentences are theirs, commits_to_measure whether the project has any commitment to the same measure, has_same_commitment whether it has one of the same type. Near wording is not the same commitment: read the sentences.';
+  'The k other projects whose documents hold sentences nearest a commitment''s three strongest sentences (stored embeddings, 60 nearest each; no model call): closeness is 1 minus the smallest cosine distance, close_sentences how many of the near sentences are theirs, commits_to_measure whether the project has any commitment to the same measure, has_same_commitment whether it has one with the same key (the same asset type, or the same measure type; never for a paragraph group). Near wording is not the same commitment: read the sentences.';

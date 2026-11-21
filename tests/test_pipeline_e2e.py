@@ -14,8 +14,8 @@ from wbg_portfolio import db
 from wbg_portfolio import load_pg
 from wbg_portfolio import search
 
-TABLES = ("commitment_package_links", "activities")
-VIEWS = ("not_digital_findings", "commitment_package_links_in_context", "activity_summary")
+TABLES = ("commitment_package_links", "commitments", "commitment_members")
+VIEWS = ("not_digital_findings", "commitment_package_links_in_context", "commitment_summary", "commitment_units")
 
 
 @pytest.fixture
@@ -47,6 +47,7 @@ def wide_corpus(corpus, fake_model, monkeypatch):
     first-pass asset, a key that is no key, the spend cap variables restored afterwards."""
     fake_model.also_yes = ("fibre backbone", "road will be widened")
     fake_model.no_fibre = ("fibre backbone",)
+    fake_model.strong_too = ("consulting on roads",)       # a package with no asset that names the measure
     folder, _ = search.run_folder("cra", corpus)
     scores = numpy.load(os.path.join(folder, "scores.npy"))
     scores[:3, :] = 0.9
@@ -79,8 +80,9 @@ def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(sche
         load_pg.load(schema, corpus, log=lambda *_: None)
     assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
     out = capsys.readouterr().out
-    for stage in ("classify", "measure", "link", "activities", "publish"):
+    for stage in ("classify", "measure", "link", "publish"):
         assert f"#### {stage}" in out
+    assert "#### activities" not in out
     for table in (*TABLES, "measure_findings", "unit_assets", "package_assets"):
         assert db.exists(schema, f"{db.SCHEMA}.{table}"), table
     for t in TABLES:
@@ -89,11 +91,25 @@ def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(sche
         assert rows(schema, f"SELECT count(*) FROM {{S}}.{v}")[0][0] > 0, v
     kinds = {k for (k,) in rows(schema, "SELECT DISTINCT kind FROM {S}.scores")}
     assert {"measure", "digital", "policy", "asset", "type", "package_asset", "package_measure",
-            "package_asset_subtype", "activity"} <= kinds and not {"link", "pair"} & kinds
+            "package_asset_subtype"} <= kinds and not {"link", "pair", "activity"} & kinds
+    assert not db.exists(schema, f"{db.SCHEMA}.activities") and not db.exists(schema, f"{db.SCHEMA}.activity_summary")
+    # every link has a level; the commitments are made by the rule and carry their best link level
+    assert {r[0] for r in rows(schema, "SELECT DISTINCT level FROM {S}.commitment_package_links")} <= {
+        "strong", "type_and_component", "type", "component", "asset"}
+    assert rows(schema, "SELECT count(*) FROM {S}.commitment_package_links WHERE level IS NULL")[0][0] == 0
+    keys = {r[0] for r in rows(schema, "SELECT DISTINCT commitment_key FROM {S}.commitments")}
+    assert keys and keys <= {"asset_type", "type", "paragraph"}
+    assert rows(schema, "SELECT count(*) FROM {S}.commitments WHERE best_link_level = 'strong'")[0][0] > 0
+    assert rows(schema, "SELECT count(*) FROM {S}.commitment_members")[0][0] >= \
+        rows(schema, "SELECT count(*) FROM {S}.commitments")[0][0]
     # the digital question is graded on the four-grade scale; a package that has an asset has its type
     assert rows(schema, "SELECT count(*) FROM {S}.scores WHERE kind = 'digital' "
                         "AND jsonb_typeof(answer->'probabilities'->'3') IS NOT NULL")[0][0] > 0
     assert rows(schema, "SELECT count(*) FROM {S}.package_assets WHERE has_asset AND subtype_id <> ''")[0][0] > 0
+    # a package with no asset is strongly linked when it names the measure
+    assert rows(schema, "SELECT count(*) FROM {S}.package_assets WHERE package_id = 'P1-2' AND has_asset")[0][0] == 0
+    assert rows(schema, "SELECT count(*) FROM {S}.commitment_package_links WHERE package_id = 'P1-2' "
+                        "AND level = 'strong'")[0][0] > 0
     # every package is asked the strong-link question, with an asset or not
     assert {p for (p,) in rows(schema, "SELECT DISTINCT item_id FROM {S}.scores WHERE kind = 'package_measure'")} == \
         {"P1-1", "P1-2"}
@@ -116,24 +132,23 @@ def test_a_dry_run_asks_nothing_prints_estimates_and_writes_nothing(schema, wide
     # on a fresh schema the steps after the first cannot be estimated, and say so instead of a quiet 0
     for step, until in (("digital", "measure"), ("policy", "measure"), ("asset second look", "digital"),
                         ("asset types", "digital"), ("package asset second look", "link"),
-                        ("package asset types", "link"), ("package_measure", "link"),
-                        ("activities", "digital")):
+                        ("package asset types", "link"), ("package_measure", "link")):
         assert f"{step}: cannot estimate until {until} has run" in out, step
-    for stage in ("classify", "measure", "link", "activities"):
+    for stage in ("classify", "measure", "link"):
         assert f"#### {stage}" in out
     assert "#### publish" in out and db.one(schema, f"SELECT count(*) FROM {db.STORE}.answers")[0] == 0
-    assert not db.exists(schema, f"{db.SCHEMA}.activities") and not db.exists(schema, f"{db.SCHEMA}.measure_findings")
+    assert not db.exists(schema, f"{db.SCHEMA}.commitments") and not db.exists(schema, f"{db.SCHEMA}.measure_findings")
 
 
 def test_a_dry_run_after_a_run_still_asks_nothing(schema, wide, fake_model, fake_chat, capsys):
     corpus = wide
     with load_pg.transaction(schema):
         load_pg.load(schema, corpus, log=lambda *_: None)
-    assert run(corpus, "--from", "classify", "--to", "activities", "--max-spend", "1") == 0
+    assert run(corpus, "--from", "classify", "--to", "link", "--max-spend", "1") == 0
     schema.commit()
     n_model, n_chat = len(fake_model), len(fake_chat.calls)
     capsys.readouterr()
-    assert run(corpus, "--from", "classify", "--to", "activities", "--dry-run") == 0
+    assert run(corpus, "--from", "classify", "--to", "link", "--dry-run") == 0
     out = capsys.readouterr().out
     assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat) and "0 requests to make" in out
 
@@ -147,7 +162,7 @@ def test_a_run_for_one_project_asks_for_that_project_only_and_honours_the_cap(sc
         load_pg.load(schema, corpus, log=lambda *_: None)
     assert run(corpus, "--from", "classify", "--to", "publish", "--project", "P1", "--max-spend", "1") == 0
     schema.commit()
-    assert rows(schema, "SELECT count(*) FROM {S}.activities")[0][0] > 0
+    assert rows(schema, "SELECT count(*) FROM {S}.commitments")[0][0] > 0
     schema.commit()
     n_model, n_chat = len(fake_model), len(fake_chat.calls)
     assert n_chat > 0
@@ -224,7 +239,7 @@ def test_a_run_into_another_schema_over_the_live_store_leaves_the_live_schema_un
         assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
         conn.commit()
         assert (len(fake_model), len(fake_chat.calls)) == (n_model, n_chat)     # every answer was in A's store
-        assert db.exists(conn, f"{b}.activities") and db.exists(conn, f"{b}.commitment_package_links")
+        assert db.exists(conn, f"{b}.commitments") and db.exists(conn, f"{b}.commitment_package_links")
         assert conn.execute(f"SELECT count(*) FROM {b}.measure_findings").fetchone()[0] > 0
         assert snapshot(conn, a) == before                                      # nothing created, dropped or written
         assert conn.execute(f"SELECT md5(string_agg(t::text, '|' ORDER BY t::text)), count(*) "
@@ -338,7 +353,7 @@ def test_a_run_killed_in_any_stage_and_started_again_asks_nothing_twice_and_publ
         assert run(corpus, *args) == 0
         conn.commit()
         expected, asked = published(conn, whole), list(k.answered)
-        assert {"classify", "measure", "link", "activities"} <= set(asked)
+        assert {"classify", "measure", "link"} <= set(asked)
         for at in range(1, len(asked) + 1):                    # before each request in turn
             stage = asked[at - 1]
             name = _fresh(conn, monkeypatch, corpus)
@@ -362,7 +377,7 @@ def test_a_run_killed_in_any_stage_and_started_again_asks_nothing_twice_and_publ
         # killed in the publish, part way through writing its tables
         name = _fresh(conn, monkeypatch, corpus)
         made.append(name)
-        assert run(corpus, *args[:-2], "--to", "activities", *args[-2:]) == 0
+        assert run(corpus, *args[:-2], "--to", "link", *args[-2:]) == 0
         conn.commit()
         real, calls = load_pg.load_rows, []
 

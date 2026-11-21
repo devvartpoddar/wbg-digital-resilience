@@ -213,7 +213,7 @@ class Demo:
                                    "definition": "Proposed from sentences no approved type reaches: " + name.lower() + ".",
                                    "merged_from": ""})
         self.oth = {m: ("OTH." + s, "OTH. " + n) for m, (s, n) in OTH_TYPES.items()}
-        self.activity_rows = []                              # for the procurement links
+        self.group_rows = []                                 # each group of sentences, for the procurement links
 
     # ------------------------------------------------------------ projects
     def build(self):
@@ -257,7 +257,7 @@ class Demo:
         p["commitment"] = c
         self.documents(p)
         self.components(p)
-        self.activities(p)
+        self.groups(p)
         self.procurement(p)
 
     # ------------------------------------------------------------ documents and components
@@ -295,17 +295,19 @@ class Demo:
                 "disclosure_date": iso(pad["date"]), "source": "datasheet", "level": "component", "number": n, "name": name,
                 "name_key": name_key(name), "cost_usd_m": cost, "page": 4})
 
-    # ------------------------------------------------------------ activities and sentences
-    def activities(self, p):
+    # ------------------------------------------------------------ groups of sentences
+    def groups(self, p):
+        """Each measure of the project gets a few groups of sentences, each about one thing (the
+        commitment rule groups them again at the end, as the pipeline does)."""
         rng = self.rng
         lean = rng.choice(["climate", "cloud_data", "both"])
         pool = [m for m in self.measures if lean == "both" or lean in (m["family"] or "").split("|")]
         n_meas = min(rng.randint(2, 12), len(pool))
         for m in rng.sample(pool, n_meas):
             ms = m["label_set"]
-            n_act = wchoice(rng, [(30, 1), (25, 2), (18, 3), (12, 4), (8, 5), (7, 6)])
-            for a in range(n_act):
-                self.activity(p, ms, m["name"])
+            n_groups = wchoice(rng, [(30, 1), (25, 2), (18, 3), (12, 4), (8, 5), (7, 6)])
+            for _ in range(n_groups):
+                self.group(p, ms)
             if rng.random() < 0.3:
                 self.not_digital(p, ms)
             if rng.random() < 0.5:
@@ -411,7 +413,7 @@ class Demo:
                 "asset_level": level, "own_best_asset_id": a, "own_best_probability": round(self.rng.uniform(0.3, 0.9), 3),
                 "second_look_asset_id": a if level == "second_look" else ""})
 
-    def activity(self, p, ms, mname):
+    def group(self, p, ms):
         rng = self.rng
         policy = rng.random() < (0.55 if ms in POLICY_LEAN else 0.12)
         assets, types = self.assets_for(ms, policy), self.types_for(ms)
@@ -443,22 +445,8 @@ class Demo:
             self.finding(p, ms, uid, comp[0], t, score=score, band=band, context=ctx, grade=grade, assets=assets,
                          types=types, level=level, instrument=ins, doc=p["docs"][kind]["id"])
             self.unit_assets(uid, uid.rsplit(":", 1)[0], p, assets, level)
-        from wbg_portfolio import activities as act
-        aid = act.item_id(p["project_id"], ms, units)
-        label = self.label(ms, policy, assets, types, mname)
-        for uid in units:
-            self.t["activities"].append({"activity_id": aid, "project_id": p["project_id"], "label_set": ms,
-                                         "activity_label": label, "unit_id": uid, "n_sentences": len(units)})
-        self.activity_rows.append({"id": aid, "project": p["project_id"], "measure": ms, "units": units,
-                                   "assets": [a for a, _ in assets], "policy": policy, "types": types, "comp": comp})
-
-    def label(self, ms, policy, assets, types, mname):
-        rng = self.rng
-        what = TOPIC[ms]
-        if policy:
-            return rng.choice(["Prepare and adopt ", "Update standards for ", "Draft a framework for "]) + what
-        phrase = ASSET_PHRASE.get(assets[0][1]) or ASSET_DEFAULT[assets[0][0]] if assets else "the sector"
-        return rng.choice(["Finance ", "Install ", "Support "]) + what + " for " + phrase
+        self.group_rows.append({"project": p["project_id"], "measure": ms, "units": units, "assets": dict(assets),
+                                "policy": policy, "types": types, "comp": comp})
 
     def not_digital(self, p, ms):
         rng = self.rng
@@ -482,15 +470,15 @@ class Demo:
     # ------------------------------------------------------------ procurement
     def procurement(self, p):
         rng, pid = self.rng, p["project_id"]
-        mine = [a for a in self.activity_rows if a["project"] == pid]
+        mine = [a for a in self.group_rows if a["project"] == pid]
         target = wchoice(rng, [(6, 0), (35, rng.randint(3, 12)), (40, rng.randint(13, 30)), (19, rng.randint(31, 60))])
-        wanted = []                                           # (category, text, asset, measure, activity or None)
+        wanted = []                                           # (category, text, asset, group or None)
         for a in mine:
             if not a["policy"] and rng.random() < 0.3:
                 cat, buys = BUYS[a["measure"]]
                 for k in range(rng.randint(1, 2)):
                     where = (" - Lot %d" % (k + 1)) if k else ""
-                    wanted.append((cat, f"{PREFIX[cat]} {buys}{where}", (a["assets"] or [None])[0], a))
+                    wanted.append((cat, f"{PREFIX[cat]} {buys}{where}", (list(a["assets"]) or [None])[0], a))
         wanted = wanted[:min(target, 60)] if target else []
         while len(wanted) < target:
             cat, text = rng.choice(FILLERS)
@@ -580,18 +568,27 @@ class Demo:
         # which asset the model finds the package buys, and the ones it was asked about and said no to
         ids = [a["label_id"] for a in self.assets]
         order = ([asset] if asset else []) + [a for a in rng.sample(ids, len(ids)) if a != asset]
+        subtype = ""
+        if asset:
+            mine = (act_ or {}).get("assets", {}).get(asset)
+            subtype = mine if mine and rng.random() < 0.7 else rng.choice(self.subtypes[asset])
         for rank, a in enumerate(order[:3], 1):
             yes = asset is not None and rank == 1
             prob = round(rng.uniform(0.75, 0.97) if yes else rng.uniform(0.02, 0.45), 3)
             self.t["package_assets"].append({"package_id": pkg_id, "project_id": pid, "label_id": a,
                                              "cosine": round(rng.uniform(0.4, 0.85), 3), "cosine_rank": rank,
-                                             "probability": prob, "p_calibrated": prob, "model_served": "demo"})
-        return {"id": pkg_id, "asset": asset, "activity": act_, "category": cat.replace("_", " ").capitalize()}
+                                             "probability": prob, "p_calibrated": prob, "has_asset": str(yes).lower(),
+                                             "subtype_id": subtype if yes else "", "model_served": "demo"})
+        return {"id": pkg_id, "asset": asset, "subtype": subtype, "group": act_, "text": text, "status": plan_status,
+                "component": p["components"][0][0] if act_ is None else act_["comp"][0],
+                "category": cat.replace("_", " ").capitalize()}
 
     def links(self, p, pkgs):
-        """Strong links to the activity a package was made from; asset links to others sharing its asset."""
+        """Strong links to the group a package was made from; asset links to others sharing its asset;
+        each with its level, as decide.link_strength_rows gives it."""
+        from wbg_portfolio import decide
         rng, pid = self.rng, p["project_id"]
-        mine = [a for a in self.activity_rows if a["project"] == pid]
+        mine = [a for a in self.group_rows if a["project"] == pid]
         seen = set()
 
         def link(pkg, a, strength):
@@ -601,15 +598,23 @@ class Demo:
                     continue
                 seen.add(key)
                 shared = pkg["asset"] if pkg["asset"] in a["assets"] else ""
+                st = a["assets"].get(shared) if shared else None
+                same_type = bool(shared and st and st != "unspecified" and st == pkg["subtype"])
+                rel = decide.component_relation(a["comp"][0], pkg["component"])
+                level = decide.link_level(strength == "strong", same_type, rel)
                 self.t["commitment_package_links"].append({
                     "project_id": pid, "label_set": a["measure"], "unit_id": uid, "package_id": pkg["id"], "strength": strength,
                     "shared_asset_ids": shared, "strong_p": round(rng.uniform(0.72, 0.97), 3) if strength == "strong" else "",
-                    "package_category": pkg["category"]})
+                    "package_category": pkg["category"], "level": level,
+                    "level_rank": decide.LINK_LEVELS.index(level) + 1, "same_type": str(same_type).lower(),
+                    "component_relation": rel, "sentence_component": a["comp"][0], "package_component": pkg["component"],
+                    "package_cancelled": str(decide.is_cancelled(pkg["status"])).lower(),
+                    "package_generic": str(decide.is_generic(pkg["text"])).lower()})
         for pkg in pkgs:
-            if pkg["activity"]:
-                link(pkg, pkg["activity"], "strong")
+            if pkg["group"]:
+                link(pkg, pkg["group"], "strong")
             if pkg["asset"]:
-                same = [a for a in mine if pkg["asset"] in a["assets"] and a is not pkg["activity"]]
+                same = [a for a in mine if pkg["asset"] in a["assets"] and a is not pkg["group"]]
                 for a in rng.sample(same, min(len(same), rng.randint(0, 2))):
                     link(pkg, a, "asset")
 
@@ -627,6 +632,13 @@ class Demo:
                                          "sheet": "evaluation", "graded_units": rng.randint(60, 200),
                                          "precision": round(rng.uniform(0.72, 0.95), 2), "recall": round(rng.uniform(0.5, 0.85), 2),
                                          "evaluated_at": iso(ANCHOR) + "T00:00:00Z", "report_path": ""})
+        from wbg_portfolio import decide
+        assets_of = defaultdict(list)
+        for r in t["unit_assets"]:
+            if r["asset_id"] and r["asset_level"] != "none":
+                assets_of[r["unit_id"]].append((r["asset_id"], r["subtype_id"]))
+        t["commitments"], t["commitment_members"] = decide.commitment_rows(
+            t["measure_findings"], assets_of, t["commitment_package_links"], decide.commitment_names())
         t["data_release"] = [{"release_id": "demo", "commit": "demo", "code_dirty": "false", "loaded_at": iso(ANCHOR) + "T00:00:00Z",
                               "appraisal_fetched_date": iso(ANCHOR - datetime.timedelta(days=30)),
                               "procurement_fetched_date": iso(ANCHOR - datetime.timedelta(days=10)),
@@ -681,16 +693,16 @@ def check(conn, log=print):
         cur = conn.execute(sql, params)
         return pd.DataFrame(cur.fetchall(), columns=[d.name for d in cur.description])
     out = {"commitments": app.commitments(q), "projects": app.projects(q), "measures": app.measures(q),
-           "families": app.families(q), "activities": app.activities(q), "asset_types": app.asset_types(q),
+           "families": app.families(q), "commitment_detail": app.commitment_detail(q), "asset_types": app.asset_types(q),
            "type_definitions": app.type_definitions(q), "packages_detail": app.packages_detail(q),
            "not_digital": app.not_digital(q), "coming_up": app.coming_up(q)}
-    acts = out["activities"]
-    out["activity_sentences"] = app.activity_sentences(q, acts["activity_id"].head(5))
+    out["commitment_sentences_detail"] = app.commitment_sentences_detail(
+        q, out["commitment_detail"]["commitment_id"].head(5))
     pid = out["packages_detail"]["package_id"].iloc[0]
     out["package.notices"] = app.package(q, pid)["notices"]
     for level in app.DOWNLOAD_LEVELS:
         out[f"download:{level}"] = app.download(q, level, family="climate")
-    out["download_notes"] = app.download_notes(q, "activity", "climate", {"instrument": "policy"})
+    out["download_notes"] = app.download_notes(q, "commitment", "climate", {"instrument": "policy"})
     for name, df in out.items():
         log(f"  {name:<26} {len(df):>6} rows x {df.shape[1]:>2} columns")
     return out

@@ -73,26 +73,18 @@ def test_prose_before_or_after_one_json_object_is_read_from_the_object(text, rep
     assert chat.parse(text, reply) == expect
 
 
-def test_reasoning_is_switched_off_in_the_request_for_the_short_forms_only(pg, fake_chat):
+def test_reasoning_is_switched_off_in_the_request(pg, fake_chat):
     chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
     assert fake_chat.calls[-1]["reasoning"] == {"enabled": False}
-    q = Q.chat_question("Group.", "activities")
-    fake_chat.reply = lambda prompt: '{"activities": [{"label": "x", "sentences": [1]}]}'
-    chat.ask(pg, [("a", {"sentences": "1. one"}, q)], stage="t", api_key="k", **QUIET)
-    assert "reasoning" not in fake_chat.calls[-1]
     assert panel.require("second.reasoning") is False or panel.require("second.reasoning") == False  # noqa: E712
     assert "reasoning" not in GRADE and "reasoning" not in GRADE["reply"]
 
 
-def test_the_reasoning_setting_of_the_form_decides(pg, fake_chat, monkeypatch):
+def test_the_reasoning_setting_decides(pg, fake_chat, monkeypatch):
     live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "second.reasoning": True, "activities.reasoning": False})
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "second.reasoning": True})
     chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
     assert "reasoning" not in fake_chat.calls[-1]
-    fake_chat.reply = lambda prompt: '{"activities": [{"label": "x", "sentences": [1]}]}'
-    chat.ask(pg, [("a", {"sentences": "1. one"}, Q.chat_question("Group.", "activities"))], stage="t",
-             api_key="k", **QUIET)
-    assert fake_chat.calls[-1]["reasoning"] == {"enabled": False}
 
 
 def test_the_estimate_is_an_upper_bound_at_the_token_cap():
@@ -421,13 +413,9 @@ def test_a_run_of_some_measures_keeps_the_rows_of_the_other_measures_sentences(
     assert other not in {r[2] for r in decide.scores(pg, kind)}
 
 
-def test_every_chat_request_carries_max_tokens_and_activities_get_more(pg, fake_chat):
+def test_every_chat_request_carries_max_tokens(pg, fake_chat):
     chat.ask(pg, [("a", {"sentence": "one"}, GRADE)], stage="t", api_key="k", **QUIET)
     assert fake_chat.calls[-1]["max_tokens"] == panel.require("second.max_tokens") == 1000
-    q = Q.chat_question("Group.", "activities")
-    fake_chat.reply = lambda prompt: '{"activities": [{"label": "x", "sentences": [1]}]}'
-    chat.ask(pg, [("a", {"sentences": "1. one"}, q)], stage="t", api_key="k", **QUIET)
-    assert fake_chat.calls[-1]["max_tokens"] == panel.require("activities.max_tokens") == 4000
 
 
 def test_a_response_without_a_cost_is_priced_from_its_tokens_or_the_estimate(pg, fake_chat, monkeypatch):

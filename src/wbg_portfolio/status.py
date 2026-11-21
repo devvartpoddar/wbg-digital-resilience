@@ -35,7 +35,7 @@ def brief(data=None):
         lines.append(f"measures: {len(sets)} active ({', '.join(sets)})" + (f"; off: {', '.join(off)}" if off else ""))
         for kind in ("asset", "asset_second", "asset_subtype", "measure", "measure_ctx", "measure_second",
                      "digital", "policy", "type", "package_asset", "package_asset_second",
-                     "package_measure", "activity", "scratch"):
+                     "package_asset_subtype", "package_measure", "scratch"):
             r = _n(conn, f"SELECT count(*), count(DISTINCT label_set) FROM {S}.scores WHERE kind = %s", (kind,))
             if r and r[0]:
                 lines.append(f"scores:   {kind:<14} {r[0]:>9,} rows, {r[1]} set(s)")
@@ -61,9 +61,9 @@ def brief(data=None):
         r = _n(conn, f"SELECT max(loaded_at) FROM {S}.loads WHERE table_name = 'measure_findings'")
         lines.append(f"publish:  {r[0].strftime('%Y-%m-%d %H:%M') if r and r[0] else 'never'}")
         r = _n(conn, f"SELECT count(*) FILTER (WHERE strength = 'strong'), count(*) FILTER (WHERE strength = 'asset'), "
-                     f"(SELECT count(DISTINCT activity_id) FROM {S}.activities) FROM {S}.commitment_package_links")
+                     f"(SELECT count(*) FROM {S}.commitments) FROM {S}.commitment_package_links")
         if r and (r[0] or r[1] or r[2]):
-            lines.append(f"links:    {r[0]:,} strong, {r[1]:,} asset-level (sentence x package); {r[2]:,} activities")
+            lines.append(f"links:    {r[0]:,} strong, {r[1]:,} asset-level (sentence x package); {r[2]:,} commitments")
         r = _n(conn, f"SELECT count(*) FILTER (WHERE component_matched_by = 'plan_pdf'), "
                      f"count(*) FILTER (WHERE amount_source = 'plan_pdf'), count(*) FROM {S}.packages")
         if r and r[2]:

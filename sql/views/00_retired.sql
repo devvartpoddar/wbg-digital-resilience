@@ -24,3 +24,8 @@ DROP VIEW IF EXISTS wbg.commitment_status_by_quarter;
 DROP VIEW IF EXISTS wbg.type_procurement_profile;
 DROP VIEW IF EXISTS wbg.measure_finding_lists;
 DROP VIEW IF EXISTS wbg.measure_findings_by_project;
+
+-- The activities stage (model-written groups of sentences), retired 2026-11-21: the commitment
+-- rule (wbg.commitments, written at publish) replaces it.
+DROP VIEW IF EXISTS wbg.activity_summary;
+DROP TABLE IF EXISTS wbg.activities;

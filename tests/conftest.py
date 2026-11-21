@@ -284,6 +284,7 @@ def fake_model(monkeypatch):
     class Calls(list):
         also_yes = ()           # texts a test wants the measure question to say yes to as well
         no_fibre = ()           # texts a test wants the fibre asset question to say no to
+        strong_too = ()         # package texts a test wants the package-measure question to say yes to
 
     calls = Calls()
 
@@ -305,7 +306,8 @@ def fake_model(monkeypatch):
                 yes = (("site" in label and "site" in t) or ("route" in label and "corridor" in t)
                        or ("mobile" in label and "tower" in t) or ("fibre" in label and "fibre" in t)
                        or ("carrying out" in label and "tower" in t)
-                       or ("hazard" in label and "procurement package" in asked and "tower" in t))
+                       or ("hazard" in label and "procurement package" in asked
+                           and ("tower" in t or any(w in t for w in calls.strong_too))))
             else:                                             # a graded question: relate to <label>
                 yes = (("hazard" in asked and ("hazard assessment" in t or any(w in t for w in calls.also_yes)))
                        or ("mobile" in asked and "tower" in t)
@@ -340,9 +342,6 @@ class _Chat:
         m = re.search(r'"answer": "<one of: ([^>]*)>"', prompt)
         if m:
             return json.dumps({"answer": m.group(1).split(", ")[0]})
-        if '"activities": [{"label"' in prompt:
-            n = len(re.findall(r"^\d+\. \[", prompt, re.M))
-            return json.dumps({"activities": [{"label": "One activity", "sentences": list(range(1, n + 1))}]})
         return '{"labels": []}'
 
     def prompts(self):

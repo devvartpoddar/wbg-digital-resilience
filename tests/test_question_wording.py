@@ -4,7 +4,7 @@ their hashes, so moving a builder from one module to another must not change one
 A hash here changes only by a deliberate edit. The rewrite of 2026-11-21 changed, on purpose and only:
 digital (graded on the taxonomy scale), in_context (the paragraph note), asset_towers (the first-pass asset
 question, new key), package_asset (graded), asset_second (the asset alone), asset_subtype_* (types by name)
-and package_asset_subtype_towers (new). The measure first pass (graded), fit, type, grade_second, policy,
+and package_asset_subtype_towers (new); the activity question is gone with its stage. The measure first pass (graded), fit, type, grade_second, policy,
 package_measure and package_asset_second questions, and the states, are as before.
 """
 from wbg_portfolio import questions as Q
@@ -31,7 +31,6 @@ def questions_of(corpus):
         "asset_subtype_fiber": Q.asset_subtype_question(ast["fiber"], subtypes["fiber"]),
     "package_asset_second_towers": Q.package_asset_second_question(ast["towers"]),
         "package_asset_second_fiber": Q.package_asset_second_question(ast["fiber"]),
-        "activity": Q.activity_question(lab),
         "package_measure": Q.package_measure_question(lab),
     }
     u = Q.Corpus(corpus).index[0]["unit_id"]
@@ -42,7 +41,6 @@ def questions_of(corpus):
 
 
 EXPECTED = {
-    "activity": "58325e681f9b565b0e00cbe6a8ff8a30ff97abc9e98b74c12dfbb71dde87a6b7",
     "asset_second": "60ad858ec0b097e24297ddbd83bb9b79ead5db6c5a0594425f2a3900dd41411d",
     "asset_subtype_fiber": "91e90e584b4c6998b04b81cd722bf141caddd3b44939909361d8ebf2b6906477",
     "asset_subtype_towers": "2fe9237a43e09eba3c3739efb1665124dd19802168dffb42c92f57777743b19b",

@@ -1,5 +1,4 @@
--- The views of the band rule, the digital rule, the link strengths and the
--- activities.
+-- The views of the band rule, the digital rule and the link levels.
 
 -- Sentences that pass the measure rule but that the digital question says are not
 -- digital: they stay in measure_findings (passes_measure_rule true, is_digital
@@ -46,33 +45,3 @@ JOIN wbg.packages p ON p.package_id = cl.package_id
 ORDER BY cl.label_set, cl.unit_id, cl.level_rank, cl.package_id;
 COMMENT ON VIEW wbg.commitment_package_links_in_context IS
   'One row per kept sentence and package of the same project that are linked, with the commitment''s text, measure, asset and type and the package''s plan columns, in order of level (level_rank 1 strong, 2 same asset type and component, 3 same asset type, 4 same asset and component, 5 same asset). strength is strong when the package, asked on its own, is about the measure (strong_p at link.strong_yes or more), or asset when they share a top-level asset (shared_asset_ids) and nothing more; package_cancelled and package_generic flag the package. Both are models'' readings; an asset link says the same kind of asset, not that the package delivers the commitment.';
-
--- Activities: the distinct things a project commits to do for a measure, with
--- what its sentences say about assets, kinds, instrument, types and links.
-DROP VIEW IF EXISTS wbg.activity_summary;
-CREATE VIEW wbg.activity_summary AS
-SELECT a.activity_id, a.project_id, a.label_set, l.label_name AS measure_name,
-       min(a.activity_label) AS activity_label, count(DISTINCT a.unit_id) AS sentences,
-       (SELECT array_agg(DISTINCT x.asset_id ORDER BY x.asset_id) FROM wbg.unit_assets x
-         WHERE x.unit_id = ANY (array_agg(a.unit_id)) AND x.asset_id <> '') AS asset_ids,
-       (SELECT array_agg(DISTINCT x.subtype_id ORDER BY x.subtype_id) FROM wbg.unit_assets x
-         WHERE x.unit_id = ANY (array_agg(a.unit_id)) AND x.subtype_id <> '') AS subtype_ids,
-       (SELECT array_agg(DISTINCT f.instrument ORDER BY f.instrument) FROM wbg.measure_findings f
-         WHERE f.label_set = a.label_set AND f.unit_id = ANY (array_agg(a.unit_id)) AND f.instrument <> '') AS instruments,
-       (SELECT array_agg(DISTINCT t ORDER BY t) FROM wbg.measure_findings f,
-               LATERAL unnest(f.type_ids_above_threshold) AS t
-         WHERE f.label_set = a.label_set AND f.unit_id = ANY (array_agg(a.unit_id))) AS type_ids,
-       (SELECT array_agg(DISTINCT c.strength ORDER BY c.strength) FROM wbg.commitment_package_links c
-         WHERE c.label_set = a.label_set AND c.project_id = a.project_id
-           AND c.unit_id = ANY (array_agg(a.unit_id))) AS link_strengths,
-       (SELECT count(DISTINCT c.package_id) FROM wbg.commitment_package_links c
-         WHERE c.label_set = a.label_set AND c.project_id = a.project_id
-           AND c.unit_id = ANY (array_agg(a.unit_id)) AND c.strength = 'strong') AS strong_packages,
-       (SELECT count(DISTINCT c.package_id) FROM wbg.commitment_package_links c
-         WHERE c.label_set = a.label_set AND c.project_id = a.project_id
-           AND c.unit_id = ANY (array_agg(a.unit_id))) AS linked_packages
-FROM wbg.activities a
-LEFT JOIN wbg.labels l ON l.label_set = a.label_set
-GROUP BY a.activity_id, a.project_id, a.label_set, l.label_name;
-COMMENT ON VIEW wbg.activity_summary IS
-  'One row per activity (a project''s distinct action for a measure, grouped by the chat model from its committed, digital sentences): its sentence count and, gathered from those sentences, the asset ids and kinds, the instruments (investment, policy), the types, the strengths of the package links (strong, asset) and how many packages are linked and how many strongly. The models'' reading, not a person''s.';

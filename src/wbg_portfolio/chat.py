@@ -23,19 +23,15 @@ it is never read as a yes.
 
 Replies (reply["form"]): grade (0 to reply["max"]), yesno (yes or no), choice
 (one of reply["options"]), labels (any of reply["options"], at most
-reply["max"], none allowed; an id not among the options is unreadable), activities
-(a list of labelled groups of sentence numbers; the step validates and
-repairs them), fields (named answers, each a grade, one of a list or any of a list: the evaluation's
+reply["max"], none allowed; an id not among the options is unreadable), fields (named answers, each a grade, one of a list or any of a list: the evaluation's
 graders, whose question is a template with a system line, questions.grader_question). temperature 0; the spend ledger and --max-spend
 work as in src/wbg_portfolio/ask.py. Tests replace api.post (tests/conftest.py fake_chat).
 
-Reasoning is off for the short forms (second.reasoning false: the request body carries
-"reasoning": {"enabled": false}) and on for the activities form (activities.reasoning true: nothing
-extra is sent). Measured 2026-11-20 on the production wording: with reasoning on and
-second.max_tokens 300 the model spent its tokens on hidden reasoning and 61 per cent of grade replies
-came back empty or as prose (asking again did not help; the activities form failed at 1,500 tokens),
-while with reasoning off the same replies were readable and cost about a quarter as much; the
-activities form groups better with reasoning on and 4,000 tokens. The request body is part of how an
+Reasoning is off (second.reasoning false: the request body carries "reasoning": {"enabled": false}).
+Measured 2026-11-20 on the production wording: with reasoning on and second.max_tokens 300 the model
+spent its tokens on hidden reasoning and 61 per cent of grade replies came back empty or as prose
+(asking again did not help), while with reasoning off the same replies were readable and cost about a
+quarter as much. The request body is part of how an
 answer is produced, not of the question: it is not in the question dict and not in the question hash.
 A reply may carry prose around one JSON object; that object is read (parse), but a reply with no
 object, with more than one, or with an invalid one is a failure, and a yes is never read out of prose.
@@ -61,23 +57,19 @@ def model():
 
 
 def max_tokens(q, request=None):
-    """Most tokens a reply to this question may hold: second.max_tokens, or
-    activities.max_tokens for the activities form (a list of labelled groups); `request` (a step's
-    own request, {"max_tokens", "reasoning"}) overrides both."""
+    """Most tokens a reply to this question may hold: second.max_tokens; `request` (a step's
+    own request, {"max_tokens", "reasoning"}) overrides it."""
     if request:
         return int(request["max_tokens"])
-    return int(panel.require("activities.max_tokens" if q["reply"]["form"] == "activities"
-                             else "second.max_tokens"))
+    return int(panel.require("second.max_tokens"))
 
 
 def reasoning(q, request=None):
-    """Whether the chat model may reason before it answers this question: activities.reasoning for the
-    activities form, second.reasoning for every other form (read through panel.require); `request`
-    overrides both."""
+    """Whether the chat model may reason before it answers this question: second.reasoning (read
+    through panel.require); `request` overrides it."""
     if request:
         return bool(request["reasoning"])
-    return bool(panel.require("activities.reasoning" if q["reply"]["form"] == "activities"
-                              else "second.reasoning"))
+    return bool(panel.require("second.reasoning"))
 
 
 def request_body(mdl, q, content, request=None):
@@ -121,9 +113,6 @@ def reply_text(reply):
         return '{"answer": "yes"} or {"answer": "no"}'
     if f == "choice":
         return '{"answer": "<one of: ' + ", ".join(reply["options"]) + '>"}'
-    if f == "activities":
-        return ('{"activities": [{"label": "<a short name for the activity>", "sentences": [<the numbers of '
-                'its sentences>]}]}')
     return ('{"labels": [<ids from: ' + ", ".join(reply["options"]) + f'; at most {reply["max"]}; '
             'an empty list when none applies>]}')
 
@@ -184,15 +173,6 @@ def parse(text, reply):
             raise ValueError(f"answer {a!r} is not one of {allowed}")
         a = a.strip().lower()
         return {"grade": (1 if a == "yes" else 0) if form == "yesno" else None, "labels": [a]}
-    if form == "activities":
-        acts = obj.get("activities")
-        if not isinstance(acts, list) or not acts or not all(
-                isinstance(x, dict) and isinstance(x.get("label"), str) and isinstance(x.get("sentences"), list)
-                and all(isinstance(n, int) and not isinstance(n, bool) for n in x["sentences"]) for x in acts):
-            raise ValueError("activities is not a list of {label, sentences} objects")
-        return {"grade": None, "labels": None,
-                "activities": [{"label": " ".join(x["label"].split()), "sentences": list(x["sentences"])}
-                               for x in acts]}
     if form == "fields":
         return {"grade": None, "labels": None, **_fields(obj, reply["fields"])}
     labs = obj.get("labels")

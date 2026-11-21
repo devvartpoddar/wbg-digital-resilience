@@ -58,7 +58,11 @@ PACKAGE_ASSET_COLS = ["package_id", "project_id", "label_id", "cosine", "cosine_
 STRENGTH_COLS = ["project_id", "label_set", "unit_id", "package_id", "strength", "shared_asset_ids",
                  "strong_p", "package_category", "level", "level_rank", "same_type", "component_relation",
                  "sentence_component", "package_component", "package_cancelled", "package_generic"]
-ACTIVITY_COLS = ["activity_id", "project_id", "label_set", "activity_label", "unit_id", "n_sentences"]
+COMMITMENT_COLS = ["commitment_id", "project_id", "label_set", "instrument", "commitment_key", "asset_id",
+                   "subtype_id", "type_id", "paragraph_id", "commitment_label", "type_ids", "sentences", "paragraphs",
+                   "documents", "components", "linked_packages", "strong_packages", "best_link_level",
+                   "best_link_rank"]
+MEMBER_COLS = ["commitment_id", "project_id", "label_set", "unit_id", "paragraph_id", "doc_id"]
 LABEL_COLS = ["label_set", "label_id", "name", "definition", "active", "version", "family", "folder"]
 TYPE_COLS = ["label_set", "label_id", "type_id", "type_name", "definition", "merged_from"]
 SUBTYPE_COLS = ["asset_id", "subtype_id", "subtype_name", "definition", "active", "version"]
@@ -71,7 +75,8 @@ QUALITY_COLS = ["label_set", "version", "question_sha256", "sheet", "graded_unit
 DECISION_TABLES = {"measure_findings": FINDING_COLS, "paragraph_grades": GRADE_COLS,
                    "unit_assets": UNIT_ASSET_COLS,
                    "package_assets": PACKAGE_ASSET_COLS,
-                   "commitment_package_links": STRENGTH_COLS, "activities": ACTIVITY_COLS,
+                   "commitment_package_links": STRENGTH_COLS, "commitments": COMMITMENT_COLS,
+                   "commitment_members": MEMBER_COLS,
                    "labels": LABEL_COLS, "measure_types": TYPE_COLS,
                    "asset_subtypes": SUBTYPE_COLS, "flags": FLAG_COLS, "label_queries": QUERY_COLS,
                    "label_patterns": PATTERN_COLS, "label_scale": SCALE_COLS,
@@ -226,6 +231,12 @@ def prepare(conn):
     conn.execute(f"CREATE TABLE IF NOT EXISTS {loads()} (table_name text, source_sha256 text, "
                  f"row_count integer, loaded_at timestamptz)")
     for table, cols in DECISION_TABLES.items():
+        kind = conn.execute("SELECT c.relkind FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace "
+                            "WHERE n.nspname = %s AND c.relname = %s", (db.SCHEMA, table)).fetchone()
+        if kind and kind[0] in ("v", "m"):
+            # a view of the same name from an earlier publish (commitments was a view until 2026-11-21):
+            # the views are rebuilt after the tables
+            conn.execute(f"DROP {'MATERIALIZED VIEW' if kind[0] == 'm' else 'VIEW'} {ident(table)} CASCADE")
         if not db.exists(conn, ident(table)):
             create_table(conn, table, cols)
     db.scores_table(conn)
@@ -358,7 +369,7 @@ def label_rows():
 
 
 def subtype_rows():
-    """Every finer kind of every asset (assets_subtypes.csv), inactive ones
+    """Every type of every asset (assets_subtypes.csv), inactive ones
     too, marked."""
     path = os.path.join(labels.folder("assets"), "assets_subtypes.csv")
     if not os.path.exists(path):

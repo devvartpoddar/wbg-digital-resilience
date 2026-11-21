@@ -165,7 +165,7 @@ def load_flags(dirs=None):
 
 def load_subtypes(name="assets", dirs=None, taxonomy=None):
     """{asset_id: [{id, name, definition, version}]} from <set>_subtypes.csv,
-    the finer kinds of each asset (assets_subtypes.csv), active ones in file
+    the types of each asset (assets_subtypes.csv), active ones in file
     order. {} when the set has no such file. A subtype of an asset the set
     does not have is an error. Kept by people beside the assets; read here,
     never written."""

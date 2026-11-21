@@ -58,8 +58,10 @@ def test_publish_writes_the_decision_tables_and_the_views_build(pg, corpus, fake
     assert all(r[1] is False for r in f if r[0] != u0)
     ua = db.rows(pg, f"SELECT unit_id, asset_id, asset_level FROM {db.SCHEMA}.unit_assets WHERE asset_level = 'unit'")
     assert set(ua) == {(u0, "towers", "unit"), (c.index[1]["unit_id"], "fiber", "unit")}
-    com = db.rows(pg, f"SELECT project_id, label_set, asset_id, type_id FROM {db.SCHEMA}.commitments")
-    assert com == [("P1", "cra", "towers", "site")]
+    com = db.rows(pg, f"SELECT project_id, label_set, commitment_key, asset_id, subtype_id, type_ids, sentences, "
+                      f"best_link_level FROM {db.SCHEMA}.commitments")
+    assert com == [("P1", "cra", "asset_type", "towers", "mast", ["site"], 1, "strong")]
+    assert db.rows(pg, f"SELECT unit_id FROM {db.SCHEMA}.commitment_members") == [(u0,)]
     pk = db.rows(pg, f"SELECT package_id FROM {db.SCHEMA}.commitment_package_status")
     assert pk == [("P1-1",)]
 

@@ -245,8 +245,8 @@ def test_a_project_whose_fetch_failed_is_tried_again(store, cohort, monkeypatch,
 
 def test_run_walks_the_stages_in_order():
     assert wbg.stages_between() == ["fetch", "prepare", "embed", "search", "classify", "measure",
-                                    "link", "activities", "publish"]
-    assert wbg.stages_between("link", "publish") == ["link", "activities", "publish"]
+                                    "link", "publish"]
+    assert wbg.stages_between("link", "publish") == ["link", "publish"]
     assert wbg.stages_between("search", "measure") == ["search", "classify", "measure"]
     assert wbg.stages_between(only="link") == ["link"]
     assert wbg.stages_between(stop="audit")[-1] == "audit"

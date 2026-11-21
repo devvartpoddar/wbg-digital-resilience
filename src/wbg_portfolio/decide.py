@@ -9,9 +9,11 @@ threshold is a publish. The one place that says what "committed" means is commit
 the views only join and aggregate.
 
   publish(conn, data)   rewrite measure_findings, paragraph_grades, unit_assets,
-                        package_assets, commitment_package_links, activities, the
+                        package_assets, commitment_package_links, commitments and
+                        commitment_members (the commitment rule, no model call), the
                         label tables, then the views
 """
+import hashlib
 import re
 import time
 from collections import defaultdict
@@ -213,7 +215,7 @@ def only_digital(conn, units):
 
 def committed_digital_units(conn, corpus, names):
     """[unit_id] committed to any of the measures and digital: what every
-    later question (assets, activities, links) is asked about."""
+    later question (assets, links) is asked about."""
     return only_digital(conn, committed_units(conn, corpus, names))
 
 
@@ -511,6 +513,107 @@ def linked_assets(ua, levels=None):
     return {a for a, _ in win} if level in levels and level != "none" else set()
 
 
+# ---------------------------------------------------------------- commitments
+#
+# The commitment rule (docs/method/decisions.md, "Commitments"), no model call: the kept sentence x
+# measure pairs of a project grouped by what they commit to.
+
+COMMITMENT_KEYS = ("asset_type", "type", "paragraph")
+PARAGRAPH_LABEL = "Sentences of one paragraph"
+
+
+def commitment_keys(instrument, assets, types, paragraph_id):
+    """[(key, asset_id, subtype_id, type_id, paragraph_id)] of one kept sentence of a project and measure.
+    An investment sentence (or one whose instrument is not known yet) belongs to one commitment per
+    asset it has with a stated type (assets: [(asset_id, subtype_id)]; unspecified or no type yet is
+    not stated); with no asset at all, to one per measure type it has (types); a policy sentence to one
+    per measure type. A sentence left with none of these (no asset and no type, only unspecified asset
+    types, a policy sentence with no type) is grouped by its paragraph."""
+    if instrument != "policy":
+        typed = [(a, t) for a, t in assets if t and t != Q.UNSPECIFIED]
+        if typed:
+            return [("asset_type", a, t, "", "") for a, t in typed]
+        if assets:
+            return [("paragraph", "", "", "", paragraph_id)]
+    if types:
+        return [("type", "", "", t, "") for t in types]
+    return [("paragraph", "", "", "", paragraph_id)]
+
+
+def commitment_assets(ua, kinds):
+    """{unit_id: [(asset_id, subtype_id)]}: each sentence's assets at the levels the panel counts
+    (unit_assets()) with their types (asset_kinds(); '' where none was asked yet)."""
+    levels = link_levels()
+    return {u: [(a, kinds.get((u, a), "")) for a in sorted(linked_assets(x, levels))] for u, x in ua.items()}
+
+
+def commitment_names():
+    """(asset names, {(asset, subtype): name}, {(measure, type): name}) from the label files, for a
+    commitment's label."""
+    assets, subtypes = Q.asset_catalogue()
+    types = {}
+    for name in [n for n in labels.label_sets() if n != Q.ASSETS]:
+        shown = labels.type_resolution(name)[1]
+        types.update({(name, t): v["type_name"] for (_, t), v in shown.items()})
+    return ({a["id"]: a["name"] for a in assets},
+            {(a, s["id"]): s["name"] for a, v in subtypes.items() for s in v}, types)
+
+
+def commitment_rows(findings, assets_of, links, names_of):
+    """(commitments rows, commitment_members rows) from the measure_findings rows (kept ones only:
+    committed 'true'), each sentence's assets with their types (commitment_assets()) and the
+    commitment_package_links rows. `names_of` is commitment_names(). One commitment per project,
+    measure, instrument and key (commitment_keys); it carries its type tags (every type of its
+    sentences), its counts of sentences, paragraphs and documents, the component numbers seen, and its
+    links: the packages linked to any of its sentences, each at its best level."""
+    assets_n, subtypes_n, types_n = names_of
+    best = defaultdict(dict)                                   # (project, measure, unit) -> {package: rank}
+    for r in links:
+        d = best[(r["project_id"], r["label_set"], r["unit_id"])]
+        d[r["package_id"]] = min(d.get(r["package_id"], 9), r["level_rank"])
+    groups, members = {}, []
+    for f in findings:
+        if f["committed"] != "true":
+            continue
+        uid, name = f["unit_id"], f["label_set"]
+        assets = assets_of.get(uid, [])
+        types = [t for t in f["types_yes"].split("|") if t]
+        instrument = f["instrument"]
+        for pid in [p for p in f["project_ids"].split("|") if p]:
+            for key, a, st, t, para in commitment_keys(instrument, assets, types, f["paragraph_id"]):
+                cid = hashlib.md5("|".join((pid, name, instrument, key, a, st, t, para)).encode()).hexdigest()
+                g = groups.setdefault(cid, {
+                    "commitment_id": cid, "project_id": pid, "label_set": name, "instrument": instrument,
+                    "commitment_key": key, "asset_id": a, "subtype_id": st, "type_id": t, "paragraph_id": para,
+                    "commitment_label": (f"{assets_n.get(a, a)}: {subtypes_n.get((a, st), st)}" if key == "asset_type"
+                              else types_n.get((name, t), t) if key == "type" else PARAGRAPH_LABEL),
+                    "_units": set(), "_paragraphs": set(), "_documents": set(), "_components": set(),
+                    "_types": set(), "_packages": {}})
+                g["_units"].add(uid)
+                g["_paragraphs"].add(f["paragraph_id"])
+                g["_documents"].add(f["doc_id"])
+                if f["component_number"]:
+                    g["_components"].add(f["component_number"])
+                g["_types"].update(types)
+                for pkg, rank in best.get((pid, name, uid), {}).items():
+                    g["_packages"][pkg] = min(g["_packages"].get(pkg, 9), rank)
+                members.append({"commitment_id": cid, "project_id": pid, "label_set": name, "unit_id": uid,
+                                "paragraph_id": f["paragraph_id"], "doc_id": f["doc_id"]})
+    rows = []
+    for g in groups.values():
+        ranks = list(g["_packages"].values())
+        rows.append({**{k: v for k, v in g.items() if not k.startswith("_")},
+                     "type_ids": "|".join(sorted(g["_types"])), "sentences": len(g["_units"]),
+                     "paragraphs": len(g["_paragraphs"]), "documents": len(g["_documents"]),
+                     "components": "|".join(sorted(g["_components"])),
+                     "linked_packages": len(ranks), "strong_packages": sum(1 for x in ranks if x == 1),
+                     "best_link_level": LINK_LEVELS[min(ranks) - 1] if ranks else "",
+                     "best_link_rank": min(ranks) if ranks else ""})
+    rows.sort(key=lambda r: (r["project_id"], r["label_set"], r["commitment_key"], r["commitment_id"]))
+    members.sort(key=lambda r: (r["commitment_id"], r["unit_id"]))
+    return rows, members
+
+
 def types_of(conn, corpus, name):
     """{unit_id: {type_id: posterior}} of a measure's type scores."""
     tq = Q.type_questions(name)
@@ -676,8 +779,7 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
     packages = checks.load_packages(data)
     pk_assets = package_asset_rows(conn, packages)
     strengths = link_strength_rows(conn, corpus, names, ua, packages, kinds)
-    from wbg_portfolio import activities
-    acts = activities.rows(conn, data, corpus, names, log=log)
+    commitments, members = commitment_rows(findings, commitment_assets(ua, kinds), strengths, commitment_names())
     written = {}
     with load_pg.transaction(conn):
         load_pg.prepare(conn)
@@ -693,7 +795,8 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
                                   ("unit_assets", load_pg.UNIT_ASSET_COLS, assets),
                                   ("package_assets", load_pg.PACKAGE_ASSET_COLS, pk_assets),
                                   ("commitment_package_links", load_pg.STRENGTH_COLS, strengths),
-                                  ("activities", load_pg.ACTIVITY_COLS, acts)):
+                                  ("commitments", load_pg.COMMITMENT_COLS, commitments),
+                                  ("commitment_members", load_pg.MEMBER_COLS, members)):
             written[table] = load_pg.load_rows(conn, table, cols, rows, "decide")[0]
         if views:
             load_pg.finish(conn, log=log)

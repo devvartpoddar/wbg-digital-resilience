@@ -14,8 +14,9 @@ WITH m AS (
 c AS (
   SELECT label_set, count(*) AS commitments, count(DISTINCT project_id) AS projects,
          count(DISTINCT country_name) FILTER (WHERE NOT is_regional) AS countries,
-         count(DISTINCT type_id) FILTER (WHERE type_id <> '(no type)') AS types
-  FROM wbg.commitments GROUP BY label_set
+         (SELECT count(DISTINCT t) FROM wbg.commitment_summary x, unnest(x.type_ids) t
+           WHERE x.label_set = cs.label_set) AS types
+  FROM wbg.commitment_summary cs GROUP BY label_set
 ),
 q AS (
   -- the evaluation sample's holdout sheet, then an evaluation sheet (a random draw), then a

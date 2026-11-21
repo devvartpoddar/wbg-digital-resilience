@@ -1,4 +1,4 @@
-"""Shared by the tests of the second looks, the link strengths and the activities."""
+"""Shared by the tests of the second looks, the link strengths and the commitments."""
 from wbg_portfolio import db
 from wbg_portfolio import funnel
 from wbg_portfolio import questions as Q

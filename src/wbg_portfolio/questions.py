@@ -137,7 +137,7 @@ def digital_question():
 
 # ---------------------------------------------- the chat model's questions (second looks)
 
-CHAT_FORMS = ("grade", "yesno", "choice", "labels", "activities", "fields")
+CHAT_FORMS = ("grade", "yesno", "choice", "labels", "fields")
 
 
 def chat_question(instructions, form, options=None, maximum=None):
@@ -221,17 +221,6 @@ def package_measure_question(lab):
     return fit_question(lab, PACKAGE, given=(
         f"It applies when what the package procures is {lab['name']}, named or clearly implied in the "
         f"package's own description. "))
-
-
-def activity_question(lab):
-    """Group the numbered sentences of one project and measure into distinct activities."""
-    return chat_question(
-        f"Each numbered sentence in the 'sentences' field comes from the World Bank documents of one project and "
-        f"commits the project to {lab['name']} ({lab['definition']}). Group the sentences into the distinct "
-        f"activities they describe: one activity is one investment, study or action, even when several "
-        f"sentences or documents say it again or describe it in different words; two different things are two "
-        f"activities. Every sentence belongs to exactly one activity. Give each activity a short label.",
-        "activities")
 
 
 # ------------------------------------- the evaluation's graders (docs/method/evaluation.md)

@@ -56,7 +56,7 @@ def test_about_leaves_out_a_group_that_fails():
 
 # ------------------------------------------------------------------ the redesigned dashboard
 #
-# The reader's activity, sentence, package and download functions run against an invented
+# The reader's commitment, sentence, package and download functions run against an invented
 # dataset (tests/demo_seed.py) published into the test schema: the real tables, the real views.
 
 import pytest
@@ -72,13 +72,13 @@ def demo(pg):
     return _q(pg)
 
 
-ACTIVITY_COLUMNS = [
-    "activity_id", "project_id", "project_name", "country_name", "country_code", "region", "is_regional", "place",
-    "approval_fiscal_year", "label_set", "measure_name", "family", "activity_label", "type_ids", "type_names", "n_types",
-    "has_proposed_type", "asset_id", "asset_name", "subtype_id", "subtype_name", "asset2_id", "asset2_name",
-    "subtype2_id", "subtype2_name", "n_assets", "instrument", "instrument_mixed", "asset_column", "component_number",
-    "component_name", "n_sentences", "first_document_date", "linked_packages", "strong_packages", "next_package_date",
-    "best_link_strength"]
+COMMITMENT_COLUMNS = [
+    "commitment_id", "project_id", "project_name", "country_name", "country_code", "region", "is_regional", "place",
+    "approval_fiscal_year", "label_set", "measure_name", "family", "commitment_label", "commitment_key", "type_ids",
+    "type_names", "n_types", "has_proposed_type", "asset_id", "asset_name", "subtype_id", "subtype_name", "asset2_id",
+    "asset2_name", "subtype2_id", "subtype2_name", "n_assets", "instrument", "asset_column", "component_number",
+    "component_name", "n_sentences", "n_paragraphs", "n_documents", "first_document_date", "linked_packages",
+    "strong_packages", "next_package_date", "best_link_level", "best_link_rank"]
 
 
 def test_the_families_list_their_measures_and_a_measure_in_two_appears_under_both(demo):
@@ -86,10 +86,10 @@ def test_the_families_list_their_measures_and_a_measure_in_two_appears_under_bot
     assert set(f["family"]) == {"climate", "cloud_data"}
     assert f.groupby("family")["label_set"].nunique().to_dict() == {"climate": 13, "cloud_data": 11}
     assert set(f[f["label_set"] == "disaster_recovery"]["family"]) == {"climate", "cloud_data"}
-    a = app.activities(demo)
+    a = app.commitment_detail(demo)
     fam = f[f["family"] == "climate"]
-    assert fam["family_activities"].iloc[0] == a[a["family"].str.contains("climate")]["activity_id"].nunique()
-    assert fam.set_index("label_set").loc["cra", "measure_activities"] == (a["label_set"] == "cra").sum()
+    assert fam["family_commitments"].iloc[0] == a[a["family"].str.contains("climate")]["commitment_id"].nunique()
+    assert fam.set_index("label_set").loc["cra", "measure_commitments"] == (a["label_set"] == "cra").sum()
 
 
 def test_one_cohort_argument_narrows_every_reader_function_the_same_way(demo):
@@ -98,70 +98,78 @@ def test_one_cohort_argument_narrows_every_reader_function_the_same_way(demo):
     assert both == {"digital", "digital_contributor"}             # the demo carries both values
     for cohort in both:
         mine = set(projects.loc[projects["cohort_set"] == cohort, "project_id"])
-        a = app.activities(demo, cohort=cohort)
+        a = app.commitment_detail(demo, cohort=cohort)
         assert len(a) and set(a["project_id"]) <= mine
-        assert set(app.activity_sentences(demo, None, None, cohort=cohort)["project_id"]) <= mine
+        assert set(app.commitment_sentences_detail(demo, None, None, cohort=cohort)["project_id"]) <= mine
         assert set(app.packages_detail(demo, cohort=cohort)["project_id"]) <= mine
         assert set(app.not_digital(demo, cohort=cohort)["project_id"]) <= mine
-        for level in ("project_flags", "project", "activity", "sentence"):
+        for level in ("project_flags", "project", "commitment", "sentence"):
             assert set(app.download(demo, level, cohort=cohort)["project_id"]) <= mine
         assert len(app.download(demo, "package", cohort=cohort)) == len(app.packages_detail(demo, cohort=cohort))
         f = app.families(demo, cohort=cohort)
-        assert f["family_activities"].max() <= a["activity_id"].nunique()
-    whole = app.activities(demo)
-    parts = [app.activities(demo, cohort=c) for c in both]
-    assert sum(len(x) for x in parts) == len(whole) and not set(parts[0]["activity_id"]) & set(parts[1]["activity_id"])
-    assert app.families(demo)["family_activities"].max() >= app.families(demo, cohort="digital")["family_activities"].max()
+        assert f["family_commitments"].max() <= a["commitment_id"].nunique()
+    whole = app.commitment_detail(demo)
+    parts = [app.commitment_detail(demo, cohort=c) for c in both]
+    assert sum(len(x) for x in parts) == len(whole) and not set(parts[0]["commitment_id"]) & set(parts[1]["commitment_id"])
+    assert app.families(demo)["family_commitments"].max() >= app.families(demo, cohort="digital")["family_commitments"].max()
     with pytest.raises(TypeError):
-        app.activities(demo, cohrt="digital")                       # a misspelt cohort still fails
+        app.commitment_detail(demo, cohrt="digital")                       # a misspelt cohort still fails
 
 
-def test_an_activity_has_its_assets_types_instrument_and_procurement(demo):
-    a = app.activities(demo)
-    assert list(a.columns) == ACTIVITY_COLUMNS and len(a) > 50 and a["activity_id"].is_unique
+def test_a_commitment_has_its_key_assets_types_instrument_and_procurement(demo):
+    a = app.commitment_detail(demo)
+    assert list(a.columns) == COMMITMENT_COLUMNS and len(a) > 50 and a["commitment_id"].is_unique
     assert set(a["instrument"].dropna()) == {"investment", "policy"}
-    assert a["n_sentences"].between(1, 4).all()
+    assert set(a["commitment_key"]) == {"asset_type", "type", "paragraph"} and (a["n_sentences"] >= 1).all()
+    keyed = a[a["commitment_key"] == "asset_type"]
+    assert keyed["asset_id"].notna().all() and keyed["subtype_id"].notna().all()
+    assert (keyed["subtype_id"] != "unspecified").all() and (a[a["commitment_key"] == "asset_type"]["instrument"]
+                                                               != "policy").all()
+    assert (a[a["commitment_key"] == "paragraph"]["commitment_label"] == "Sentences of one paragraph").all()
     has_asset = a["asset_id"].notna()
     assert (a[has_asset].apply(lambda r: r["asset_column"].startswith(r["asset_name"]), axis=1)).all()
     assert (a[~has_asset]["asset_column"] == "none").all()   # policy is an instrument, never an asset
     assert (a["instrument"] == "policy")[~has_asset].any()                         # policy with no asset exists
     assert (a["n_types"] == 0).any() and a["has_proposed_type"].any() and (a["n_assets"] == 2).any()
     assert a[a["asset2_id"].notna()]["asset2_name"].notna().all()
-    assert (a["linked_packages"] > 0).any() and set(a["best_link_strength"].dropna()) <= {"strong", "asset"}
+    assert (a["linked_packages"] > 0).any()
+    assert set(a["best_link_level"].dropna()) <= {"strong", "type_and_component", "type", "component", "asset"}
+    assert {"strong", "asset"} <= set(a["best_link_level"].dropna())
     assert (a["strong_packages"] <= a["linked_packages"]).all()
-    assert a.loc[a["linked_packages"] == 0, "best_link_strength"].isna().all()
+    assert a.loc[a["linked_packages"] == 0, "best_link_level"].isna().all()
     assert a["first_document_date"].notna().all()
 
 
-def test_activity_filters_choose_rows_and_a_misspelt_one_fails(demo):
-    a = app.activities(demo)
-    pol = app.activities(demo, instrument="policy")
+def test_commitment_filters_choose_rows_and_a_misspelt_one_fails(demo):
+    a = app.commitment_detail(demo)
+    pol = app.commitment_detail(demo, instrument="policy")
     assert 0 < len(pol) < len(a) and set(pol["instrument"]) == {"policy"}
-    one = app.activities(demo, project=a["project_id"].iloc[0])
+    one = app.commitment_detail(demo, project=a["project_id"].iloc[0])
     assert set(one["project_id"]) == {a["project_id"].iloc[0]}
-    assert len(app.activities(demo, project=list(a["project_id"].unique()[:2]))) == a["project_id"].isin(a["project_id"].unique()[:2]).sum()
+    assert len(app.commitment_detail(demo, project=list(a["project_id"].unique()[:2]))) == a["project_id"].isin(a["project_id"].unique()[:2]).sum()
     asset = a["asset_id"].dropna().iloc[0]
-    sub = app.activities(demo, asset=asset)
+    sub = app.commitment_detail(demo, asset=asset)
     assert len(sub) and ((sub["asset_id"] == asset) | (sub["asset2_id"] == asset)).all()
-    assert (app.activities(demo, type="(no type)")["n_types"] == 0).all()
-    assert (app.activities(demo, asset="(no asset)")["n_assets"] == 0).all()
+    assert (app.commitment_detail(demo, type="(no type)")["n_types"] == 0).all()
+    assert (app.commitment_detail(demo, asset="(no asset)")["n_assets"] == 0).all()
     t = a[a["n_types"] > 0]["type_ids"].iloc[0].split("; ")[0]
-    assert all(t in s.split("; ") for s in app.activities(demo, type=t)["type_ids"])
+    assert all(t in s.split("; ") for s in app.commitment_detail(demo, type=t)["type_ids"])
     st = a["subtype_id"].dropna().iloc[0]
-    assert len(app.activities(demo, asset_type=st)) > 0
-    assert set(app.activities(demo, region=a["region"].iloc[0])["region"]) == {a["region"].iloc[0]}
-    assert set(app.activities(demo, country=a["country_code"].iloc[0])["country_code"]) == {a["country_code"].iloc[0]}
-    assert set(app.activities(demo, measure="cra")["label_set"]) <= {"cra"}
-    assert set(app.activities(demo, family="cloud_data")["family"].str.contains("cloud_data")) == {True}
-    assert app.activities(demo, family="no such family").empty and list(app.activities(demo, family="x").columns) == ACTIVITY_COLUMNS
+    assert len(app.commitment_detail(demo, asset_type=st)) > 0
+    assert set(app.commitment_detail(demo, region=a["region"].iloc[0])["region"]) == {a["region"].iloc[0]}
+    assert set(app.commitment_detail(demo, country=a["country_code"].iloc[0])["country_code"]) == {a["country_code"].iloc[0]}
+    assert set(app.commitment_detail(demo, measure="cra")["label_set"]) <= {"cra"}
+    assert set(app.commitment_detail(demo, family="cloud_data")["family"].str.contains("cloud_data")) == {True}
+    assert app.commitment_detail(demo, family="no such family").empty and list(app.commitment_detail(demo, family="x").columns) == COMMITMENT_COLUMNS
+    assert set(app.commitment_detail(demo, key="paragraph")["commitment_key"]) == {"paragraph"}
     with pytest.raises(TypeError):
-        app.activities(demo, instrumnt="policy")
+        app.commitment_detail(demo, instrumnt="policy")
 
 
-def test_the_sentences_of_activities_come_with_their_strength_inputs_and_page(demo):
-    a = app.activities(demo, measure="cra")
-    s = app.activity_sentences(demo, a["activity_id"])
-    assert len(s) == a["n_sentences"].sum() and set(s["activity_id"]) == set(a["activity_id"])
+def test_the_sentences_of_commitments_come_with_their_strength_inputs_and_page(demo):
+    a = app.commitment_detail(demo, measure="cra")
+    s = app.commitment_sentences_detail(demo, a["commitment_id"])
+    assert len(s) == a["n_sentences"].sum() and set(s["commitment_id"]) == set(a["commitment_id"])
     for col in ("text", "document_kind", "document_date", "page_number", "pdf_url", "section_title", "score_first",
                 "decided_by", "paragraph_id", "unit_id", "second_grade", "score_context"):
         assert col in s
@@ -170,9 +178,9 @@ def test_the_sentences_of_activities_come_with_their_strength_inputs_and_page(de
     band = s[s["decided_by"] == "second_look"]
     assert (band["score_context"] >= 0.7).all() and (band["second_grade"] >= 2).all()
     assert (s[s["decided_by"] == "score"]["score_first"] >= 0.9).all()
-    same = app.activity_sentences(demo, None, None, measure="cra")                  # by the filters instead
+    same = app.commitment_sentences_detail(demo, None, None, measure="cra")                  # by the filters instead
     assert sorted(same["unit_id"]) == sorted(s["unit_id"])
-    assert app.activity_sentences(demo, []).empty and app.activity_sentences(demo, ["no such activity"]).empty
+    assert app.commitment_sentences_detail(demo, []).empty and app.commitment_sentences_detail(demo, ["no such one"]).empty
 
 
 def test_packages_carry_every_procurement_field_and_what_they_serve(demo):
@@ -182,16 +190,18 @@ def test_packages_carry_every_procurement_field_and_what_they_serve(demo):
                 "market_approach", "estimated_amount_usd", "actual_amount_usd", "contract_amount_usd", "planned_date",
                 "revised_date", "notice_date", "notice_deadline", "signed_date", "supplier", "supplier_country",
                 "plan_document_id", "plan_disclosure_date", "package_status", "stage", "link_strength", "measure_names",
-                "activity_ids", "activity_labels", "asset_names", "country_name", "project_name"):
+                "commitment_ids", "commitment_labels", "asset_names", "country_name", "project_name", "link_level",
+                "link_rank", "is_cancelled", "is_generic", "asset_type_ids"):
         assert col in p, col
     assert set(p["link_strength"]) <= {"strong", "asset"} and {"strong", "asset"} <= set(p["link_strength"])
     signed = p[p["signed_date"].notna()]
     assert len(signed) and signed["supplier"].notna().all() and signed["supplier_country"].notna().all()
     assert p["package_number"].notna().all() and p["plan_document_id"].notna().all()
     strong = p[p["link_strength"] == "strong"]
-    assert (strong["measure_ids"] != "").all() and (p["n_activities"] > 0).all()
-    ids = set(app.activities(demo)["activity_id"])
-    assert {x for s in p["activity_ids"] for x in s.split("; ")} <= ids
+    assert (strong["measure_ids"] != "").all() and (p["n_commitments"] > 0).all()
+    assert (strong["link_level"] == "strong").all() and list(p["link_rank"]) == sorted(p["link_rank"])
+    ids = set(app.commitment_detail(demo)["commitment_id"])
+    assert {x for s in p["commitment_ids"] for x in s.split("; ")} <= ids
     coming = app.packages_detail(demo, status="Coming up")
     assert len(coming) and set(coming["stage"]) == {"Coming up"}
     assert set(app.packages_detail(demo, strength="asset")["link_strength"]) == {"asset"}
@@ -202,15 +212,15 @@ def test_packages_carry_every_procurement_field_and_what_they_serve(demo):
     assert app.packages_detail(demo, family="no such family").empty
 
 
-def test_one_package_has_its_notices_awards_and_activities(demo):
+def test_one_package_has_its_notices_awards_and_commitments(demo):
     p = app.packages_detail(demo)
     done = p[p["signed_date"].notna()].iloc[0]
     d = app.package(demo, done["package_id"])
-    assert set(d) == {"package", "notices", "awards", "activities"}
+    assert set(d) == {"package", "notices", "awards", "commitments"}
     assert len(d["package"]) == 1 and len(d["awards"]) >= 1
     assert d["awards"]["supplier_name"].iloc[0] == done["supplier"] and d["awards"]["supplier_country"].iloc[0]
     assert d["awards"]["total_amount_usd"].iloc[0] > 0
-    assert set(d["activities"]["activity_id"]) == set(done["activity_ids"].split("; "))
+    assert set(d["commitments"]["commitment_id"]) == set(done["commitment_ids"].split("; "))
     tendered = p[p["notice_date"].notna()].iloc[0]
     n = app.package(demo, tendered["package_id"])["notices"]
     assert len(n) >= 1 and {"publication_date", "deadline_date"} <= set(n)
@@ -242,8 +252,8 @@ def test_downloads_have_fixed_columns_whatever_the_filters(demo):
     assert set(climate) <= set(flags.columns) and len(flags.columns) == 6 + len(climate)
     assert set(flags[climate].stack().unique()) <= {0, 1} and flags[climate].sum().sum() > 0
     proj = app.download(demo, "project", "climate")
-    acts = app.download(demo, "activity", "climate")
-    assert proj["activities"].sum() == len(acts) and proj["investment"].sum() + proj["policy"].sum() <= len(acts)
+    acts = app.download(demo, "commitment", "climate")
+    assert proj["commitments"].sum() == len(acts) and proj["investment"].sum() + proj["policy"].sum() <= len(acts)
     assert len(app.download(demo, "project")) == len(flags) == len(app.projects(demo))
     assert len(app.download(demo, "sentence", "climate")) == acts["sentences"].sum()
     only = app.download(demo, "project_flags", "climate", measure="cra")
@@ -267,29 +277,29 @@ def test_the_notes_say_what_each_column_means_and_carry_the_standing_statements(
             ["family", "climate"], ["instrument", "policy"]]
         assert notes[notes["section"] == "Data date"]["text"].str.match(r"\d{4}-\d{2}-\d{2}").all()
         assert notes[notes["section"] == "Statement"]["text"].tolist() == list(app.STATEMENTS)
-    assert app.download_notes(demo, "activity")[lambda d: d["section"] == "Filter"]["item"].tolist() == ["none"]
+    assert app.download_notes(demo, "commitment")[lambda d: d["section"] == "Filter"]["item"].tolist() == ["none"]
 
 
 def test_the_new_readers_take_a_store_the_pipeline_published(pg, corpus, fake_model, fake_chat):
     q = _published(pg, corpus)
-    a = app.activities(q)
-    assert list(a.columns) == ACTIVITY_COLUMNS and a["project_id"].tolist() == ["P1"] and len(a) == 1
-    assert a["asset_column"].iloc[0] in ("Mobile networks", "Fibre networks", "none")
-    s = app.activity_sentences(q, a["activity_id"])
-    assert len(s) == a["n_sentences"].iloc[0] and s["text"].notna().all() and s["pdf_url"].notna().all()
+    a = app.commitment_detail(q)
+    assert list(a.columns) == COMMITMENT_COLUMNS and set(a["project_id"]) == {"P1"} and len(a) >= 1
+    assert set(a["asset_column"]) <= {"Mobile networks", "Fibre networks", "Mobile networks + Fibre networks", "none"}
+    s = app.commitment_sentences_detail(q, a["commitment_id"])
+    assert len(s) == a["n_sentences"].sum() and s["text"].notna().all() and s["pdf_url"].notna().all()
     f = app.families(q)
-    assert "cra" in f["label_set"].tolist() and f["measure_activities"].max() == 1
+    assert "cra" in f["label_set"].tolist() and f["measure_commitments"].max() == len(a)
     assert len(app.asset_types(q)) >= 2 and "site" in app.type_definitions(q)["type_id"].tolist()
     assert app.not_digital(q).empty or True
     for level in app.DOWNLOAD_LEVELS:
         assert len(app.download(q, level)) >= 0
-    assert app.download(q, "activity").shape[0] == 1
+    assert app.download(q, "commitment").shape[0] == len(a)
     assert app.packages_detail(q)["package_id"].tolist() == ["P1-1"]
     assert app.package(q, "P1-1")["package"]["package_id"].tolist() == ["P1-1"]
     assert app.download_notes(q, "project")["section"].eq("Statement").sum() == 3
-    empty = app.activities(q, instrument="policy")
-    assert empty.empty and list(empty.columns) == ACTIVITY_COLUMNS
-    assert app.activity_sentences(q, ["x"]).empty and app.packages_detail(q, family="no such family").empty
+    empty = app.commitment_detail(q, instrument="policy")
+    assert empty.empty and list(empty.columns) == COMMITMENT_COLUMNS
+    assert app.commitment_sentences_detail(q, ["x"]).empty and app.packages_detail(q, family="no such family").empty
     flags = app.download(q, "project_flags", project="no such project")        # no rows, the columns all the same
     assert flags.empty and list(flags.columns)[6:] == ["cra"]
     assert app.download(q, "project_flags")["cra"].tolist() == [1]

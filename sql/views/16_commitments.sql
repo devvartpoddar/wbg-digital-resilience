@@ -1,8 +1,9 @@
--- Commitments: the grain of every dashboard. A commitment is one project,
--- one digital asset, one measure and one type, held up by
--- the committed sentences the decision model found. Which sentences count is
--- set in wbg.dashboard_settings (13_dashboard_settings.sql). The id is the MD5
--- of the four parts, so it is the same on every load.
+-- Commitments: the grain of every dashboard. The commitment rule (src/wbg_portfolio/decide.py
+-- commitment_rows, no model call) writes wbg.commitments and wbg.commitment_members at publish:
+-- the kept sentences of a project and measure grouped by asset type (investment), by measure type
+-- (policy, or an investment sentence with no asset), else by paragraph. The views here add the
+-- dashboards' own filters (wbg.dashboard_settings, 13_dashboard_settings.sql), the packages and
+-- the evidence.
 --
 -- Package status precedence for a commitment with several packages:
 -- Overdue first, then Planned, Tendered, Contract signed,
@@ -17,14 +18,11 @@ SELECT * FROM (VALUES (1, 'Overdue'), (2, 'Planned'), (3, 'Tendered'),
 COMMENT ON VIEW wbg.package_status_order IS
   'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Not in latest plan, Cancelled.';
 
--- One row per committed unit that counts, per project: the base of the
--- views below. is_committed is the one decision: kept, the band rule and digital. The asset is the one the sentence
--- names or, where it names none, its paragraph's (the decayed sum); the type
--- its chosen one (control panel floor.types).
+-- One row per kept sentence of a commitment that counts, per project: the base of the views
+-- below. The commitment is the rule's (wbg.commitment_members); the dashboards' filters are added
+-- here: a further floor on the posterior, Investment Project Financing only.
 -- Materialised: built once per load, not once per card, and indexed, so a
--- dashboard read is milliseconds (as a plain view Postgres estimated 27
--- committed units against thousands, chose nested loops and re-ran the
--- asset-map subquery for every row).
+-- dashboard read is milliseconds.
 DO $do$
 DECLARE kind "char";
 BEGIN
@@ -37,52 +35,33 @@ BEGIN
 END
 $do$;
 CREATE MATERIALIZED VIEW wbg.commitment_units AS
-WITH f AS (
-  SELECT f.*, pp.project_id
-  FROM wbg.measure_findings f
-  JOIN wbg.paragraph_projects pp ON pp.paragraph_id = f.paragraph_id
-  JOIN wbg.project_info i ON i.project_id = pp.project_id
-  CROSS JOIN wbg.dashboard_settings s
-  -- committed: the band rule (src/wbg_portfolio/decide.py band_rule)
-  WHERE f.was_sent_to_model AND f.is_committed
-    AND f.posterior_probability >= s.commitment_min_probability
-    AND coalesce(f.linked_asset_level, 'none') = ANY (s.commitment_link_levels)
-    AND (i.is_ipf OR NOT s.ipf_only)
-    -- the digital rule: a committed sentence counts only when it is digital
-    -- (the rest are in wbg.not_digital_findings)
-    AND f.is_digital
-),
-u AS (
-  SELECT f.label_set, f.label_id, f.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
-         f.document_id, f.text, f.posterior_probability, f.firmness,
-         f.template_project_count, f.copy_unit_ids, f.linked_asset_level, f.component_key,
-         f.component_number, f.subcomponent_number,
-         CASE coalesce(f.linked_asset_level, 'none')
-           WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph'
-           WHEN 'second_look' THEN 'second_look' ELSE 'none' END
-           AS asset_from,
-         a.asset_id, t.type_id,
-         -- the wording, for collapsing word-for-word copies
-         regexp_replace(lower(f.text), '\s+', ' ', 'g') AS wording
-  FROM f
-  -- a unit with several assets or types (asset.multiple, types.multiple)
-  -- is a unit of each of those commitments
-  CROSS JOIN LATERAL unnest(CASE WHEN coalesce(cardinality(f.linked_asset_ids), 0) = 0
-                                 THEN ARRAY[coalesce(f.linked_asset_id, '(no asset)')]
-                                 ELSE f.linked_asset_ids END) AS a(asset_id)
-  CROSS JOIN LATERAL unnest(CASE WHEN coalesce(cardinality(f.type_ids_above_threshold), 0) = 0
-                                 THEN ARRAY['(no type)']
-                                 ELSE f.type_ids_above_threshold END) AS t(type_id)
-)
-SELECT md5(project_id || '|' || label_set || '|' || asset_id || '|' || type_id) AS commitment_id,
-       u.*
-FROM u;
+SELECT cm.commitment_id, f.label_set, f.label_id, cm.project_id, f.unit_id, f.unit_kind, f.paragraph_id,
+       f.document_id, f.text, f.posterior_probability, f.firmness,
+       f.template_project_count, f.copy_unit_ids, f.linked_asset_level, f.component_key,
+       f.component_number, f.subcomponent_number,
+       CASE coalesce(f.linked_asset_level, 'none')
+         WHEN 'unit' THEN 'sentence' WHEN 'paragraph' THEN 'paragraph'
+         WHEN 'second_look' THEN 'second_look' ELSE 'none' END AS asset_from,
+       c.commitment_key, c.instrument,
+       coalesce(nullif(c.asset_id, ''), '(no asset)') AS asset_id, nullif(c.subtype_id, '') AS subtype_id,
+       coalesce(nullif(c.type_id, ''), '(no type)') AS type_id,
+       -- the wording, for collapsing word-for-word copies
+       regexp_replace(lower(f.text), '\s+', ' ', 'g') AS wording
+FROM wbg.commitment_members cm
+JOIN wbg.commitments c ON c.commitment_id = cm.commitment_id
+JOIN wbg.measure_findings f ON f.label_set = cm.label_set AND f.unit_id = cm.unit_id
+JOIN wbg.project_info i ON i.project_id = cm.project_id
+CROSS JOIN wbg.dashboard_settings s
+-- kept: the band rule and digital (measure_findings.is_committed); the rest are in wbg.not_digital_findings
+WHERE f.was_sent_to_model AND f.is_committed
+  AND f.posterior_probability >= s.commitment_min_probability
+  AND (i.is_ipf OR NOT s.ipf_only);
 CREATE INDEX ON wbg.commitment_units (commitment_id);
 CREATE INDEX ON wbg.commitment_units (label_set, project_id);
 CREATE INDEX ON wbg.commitment_units (unit_id);
 ANALYZE wbg.commitment_units;
 COMMENT ON MATERIALIZED VIEW wbg.commitment_units IS
-  'Every committed unit that counts (committed by the band rule; in an Investment Project Financing operation; its asset found in the sentence or its paragraph: dashboard_settings), once per project, with its commitment''s id: the MD5 of project_id|label_set|asset_id|type_id. asset_from says where the asset was found (sentence or paragraph). A unit of no type has type_id ''(no type)''; a unit with several assets or types (control panel asset.multiple, types.multiple) belongs to each of those commitments, so a unit count across commitments counts it more than once. Only digital sentences count (measure_findings.is_digital); the committed sentences that are not digital are in wbg.not_digital_findings.';
+  'Every kept sentence of a commitment that counts on the dashboards (wbg.commitment_members, in an Investment Project Financing operation and at the posterior floor: dashboard_settings), once per project, with its commitment''s id and key (commitment_key asset_type, type or paragraph; asset_id and subtype_id, or type_id). asset_from says where the sentence''s asset was found. A sentence with two assets or types belongs to each of those commitments, so a sentence count across commitments counts it more than once.';
 
 -- Each commitment's linked packages with where they stand.
 DO $do$
@@ -198,7 +177,8 @@ FROM wbg.commitment_units u;
 COMMENT ON VIEW wbg.unit_dropped_by_restructuring IS
   'For each committed unit: true when a later restructuring paper marks its component "Marked for Deletion", false when its component is known and no later paper does, NULL when the unit sits under no known component.';
 
--- One row per commitment: the grain every dashboard page reads. Materialised
+-- One row per commitment that counts: the grain every dashboard page reads (the summary of
+-- wbg.commitments with the dashboards' filters, the packages and the project). Materialised
 -- with commitment_units: built once per load, indexed, so a read from the app
 -- returns in milliseconds (a read of the plain view ran for over ten minutes
 -- and held the views' locks while it did).
@@ -207,15 +187,15 @@ DECLARE kind "char";
 BEGIN
   SELECT c.relkind INTO kind FROM pg_class c
     JOIN pg_namespace n ON n.oid = c.relnamespace
-   WHERE n.nspname = 'wbg' AND c.relname = 'commitments';
-  IF kind = 'v' THEN EXECUTE 'DROP VIEW wbg.commitments CASCADE';
-  ELSIF kind = 'm' THEN EXECUTE 'DROP MATERIALIZED VIEW wbg.commitments CASCADE';
+   WHERE n.nspname = 'wbg' AND c.relname = 'commitment_summary';
+  IF kind = 'v' THEN EXECUTE 'DROP VIEW wbg.commitment_summary CASCADE';
+  ELSIF kind = 'm' THEN EXECUTE 'DROP MATERIALIZED VIEW wbg.commitment_summary CASCADE';
   END IF;
 END
 $do$;
-CREATE MATERIALIZED VIEW wbg.commitments AS
+CREATE MATERIALIZED VIEW wbg.commitment_summary AS
 WITH c AS (
-  SELECT u.commitment_id, u.project_id, u.label_set, u.asset_id, u.type_id,
+  SELECT u.commitment_id, u.project_id, u.label_set,
          CASE WHEN bool_or(u.asset_from = 'sentence') THEN 'sentence'
               ELSE min(u.asset_from) END AS asset_from,
          string_agg(DISTINCT nullif(coalesce(nullif(u.subcomponent_number, ''),
@@ -233,7 +213,7 @@ WITH c AS (
   LEFT JOIN wbg.unit_wording_overlap wo ON wo.unit_id = u.unit_id AND wo.project_id = u.project_id
   LEFT JOIN wbg.unit_dropped_by_restructuring ud
          ON ud.commitment_id = u.commitment_id AND ud.unit_id = u.unit_id
-  GROUP BY u.commitment_id, u.project_id, u.label_set, u.asset_id, u.type_id
+  GROUP BY u.commitment_id, u.project_id, u.label_set
 ),
 p AS (
   SELECT ps.commitment_id, count(*) AS linked_packages,
@@ -264,17 +244,22 @@ SELECT c.commitment_id,
        i.project_id, i.project_name, i.cohort_set, i.country_name, i.country_code, i.region,
        i.is_regional,
        c.label_set, l.label_name AS measure_name, l.family,
-       c.asset_id, coalesce(al.label_name, c.asset_id) AS asset_name,
-       c.type_id, coalesce(t.type_name, c.type_id) AS type_name,
+       k.instrument, k.commitment_key, k.commitment_label, k.type_ids, k.paragraph_id,
+       coalesce(nullif(k.asset_id, ''), '(no asset)') AS asset_id,
+       coalesce(al.label_name, nullif(k.asset_id, ''), '(no asset)') AS asset_name,
+       nullif(k.subtype_id, '') AS subtype_id, st.subtype_name,
+       coalesce(nullif(k.type_id, ''), '(no type)') AS type_id,
+       coalesce(t.type_name, nullif(k.type_id, ''), '(no type)') AS type_name,
+       k.best_link_level, k.best_link_rank, k.strong_packages,
        c.asset_from, c.asset_from AS asset_link_level, c.components,
        i.commitment_usd_millions AS project_commitment_usd_m,
        cc.component_cost_usd_m,
        c.sentences, c.paragraphs, c.documents, c.strongest_p,
        c.first_seen_date, c.same_wording_projects,
        c.dropped_by_restructuring,
-       CASE WHEN c.asset_id = '(no asset)' THEN NULL
+       CASE WHEN coalesce(k.asset_id, '') = '' THEN NULL
             ELSE EXISTS (SELECT 1 FROM wbg.project_assets pa
-                         WHERE pa.project_id = c.project_id AND pa.asset_id = c.asset_id
+                         WHERE pa.project_id = c.project_id AND pa.asset_id = k.asset_id
                            AND pa.sentences_naming_it > 0) END AS asset_in_asset_map,
        coalesce(p.linked_packages, 0) AS linked_packages,
        p.linked_package_estimate_usd, coalesce(p.linked_packages_with_estimate, 0)
@@ -282,20 +267,22 @@ SELECT c.commitment_id,
        coalesce(p.status, 'No package found') AS status,
        p.next_date
 FROM c
+JOIN wbg.commitments k ON k.commitment_id = c.commitment_id
 JOIN wbg.project_info i ON i.project_id = c.project_id
 LEFT JOIN p ON p.commitment_id = c.commitment_id
 LEFT JOIN cc ON cc.commitment_id = c.commitment_id
 LEFT JOIN (SELECT DISTINCT ON (label_set) label_set, label_name, family FROM wbg.labels
            WHERE label_set <> 'assets' ORDER BY label_set, label_id) l ON l.label_set = c.label_set
-LEFT JOIN wbg.labels al ON al.label_set = 'assets' AND al.label_id = c.asset_id
+LEFT JOIN wbg.labels al ON al.label_set = 'assets' AND al.label_id = k.asset_id
+LEFT JOIN wbg.asset_subtypes st ON st.asset_id = k.asset_id AND st.subtype_id = k.subtype_id
 LEFT JOIN (SELECT DISTINCT ON (label_set, type_id) label_set, type_id, type_name
            FROM wbg.measure_types ORDER BY label_set, type_id, label_id) t
-       ON t.label_set = c.label_set AND t.type_id = c.type_id;
-CREATE UNIQUE INDEX ON wbg.commitments (commitment_id);
-CREATE INDEX ON wbg.commitments (label_set);
-ANALYZE wbg.commitments;
-COMMENT ON MATERIALIZED VIEW wbg.commitments IS
-  'One row per commitment: one project, one digital asset, one measure and one type, held up by the committed sentences the decision model found (dashboard_settings says which count). sentences collapses word-for-word copies across documents; strongest_p is the highest posterior probability; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether a sentence of the project names this asset in the asset map (wbg.project_assets). status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen: project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms can disagree), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names the asset, else paragraph.';
+       ON t.label_set = c.label_set AND t.type_id = k.type_id;
+CREATE UNIQUE INDEX ON wbg.commitment_summary (commitment_id);
+CREATE INDEX ON wbg.commitment_summary (label_set);
+ANALYZE wbg.commitment_summary;
+COMMENT ON MATERIALIZED VIEW wbg.commitment_summary IS
+  'One row per commitment that counts on the dashboards (wbg.commitments, the commitment rule: one project, one measure, one instrument and one key; commitment_key asset_type (asset_id, subtype_id), type (type_id) or paragraph (a bucket of sentences with nothing else to group them by; paragraph_id)), held up by its kept sentences (dashboard_settings says which count). best_link_level is the best level of its package links (strong, type_and_component, type, component, asset). sentences collapses word-for-word copies across documents; strongest_p is the highest posterior probability; first_seen_date the earliest disclosure date; same_wording_projects the most other projects whose committed sentences hold at least half of one of its sentences'' six-word runs (near-identical wording); dropped_by_restructuring is true when a later paper marks the component of every sentence with a known component for deletion, NULL when none has a known component; asset_in_asset_map whether a sentence of the project names this asset in the asset map (wbg.project_assets). status is the first of its linked packages'' statuses in package_status_order, or No package found. A commitment in an appraisal document is design intent, not delivery; nothing here is causal; the pipeline misses real commitments. Three candidate values, none chosen: project_commitment_usd_m is the project''s total commitment from the projects interface (see wbg.projects: its two forms can disagree), repeated on every row; component_cost_usd_m is the cost of the components the sentences sit under, all funding sources, NULL when no sentence sits under a known component or one of them has no cost; linked_package_estimate_usd sums the plan estimates of the linked packages that give one (linked_packages_with_estimate of linked_packages). asset_link_level repeats asset_from: sentence if any sentence names its asset itself, else where the asset came from.';
 
 -- The commitment's sentences, one row per distinct wording (the strongest
 -- unit printing it).

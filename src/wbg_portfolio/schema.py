@@ -83,7 +83,8 @@ RENAME_IN = {
 
 # Types by column name (after renaming). Anything not here is text, except
 # *_date -> date and *_at -> timestamptz.
-INTEGER = {"ordinal", "asset_rank", "level_rank", "text_start_offset", "text_end_offset", "pdf_text_start_offset",
+INTEGER = {"ordinal", "asset_rank", "level_rank", "best_link_rank", "sentences", "documents",
+           "linked_packages", "strong_packages", "text_start_offset", "text_end_offset", "pdf_text_start_offset",
            "pdf_text_end_offset", "word_count", "character_count", "row_count", "page_from",
            "page_to", "page_number", "part_number", "approval_fiscal_year", "pdf_size_bytes",
            "word_repair_count", "embedding_rank", "query_count", "queries_agreeing_count",
@@ -115,7 +116,7 @@ ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "ma
          "matched_types", "asset_ids_above_threshold", "type_ids_above_threshold",
          "linked_asset_ids",
          "component_mentions",
-         "shared_asset_ids"}
+         "shared_asset_ids", "type_ids", "components"}
 INDEXED = {"document_id", "paragraph_id", "sentence_id", "project_id", "package_id", "notice_id",
            "award_id", "unit_id", "borrower_reference_normalised", "label_id", "label_set",
            "type_id"}
@@ -437,14 +438,14 @@ TABLES = {
                                 "pipe-separated; their yes answers count as this type's."}),
     "asset_subtypes": dict(
         key=("asset_id", "subtype_id"), foreign=[],
-        comment="The finer kinds of each asset (inputs/taxonomy/assets_subtypes.csv, kept by a person), "
-                "one row per asset and kind with its name and definition, so unit_assets.subtype_id "
-                "can be read by name. Inactive kinds are listed too, marked.",
-        columns={"asset_id": "The asset (a label of the assets set) the kind belongs to.",
-                 "subtype_id": "The kind's id, as unit_assets.subtype_id carries it.",
-                 "subtype_name": "The kind's name.",
-                 "definition": "The definition the chat model was shown for the kind.",
-                 "is_active": "Whether the kind is offered to the chat model.",
+        comment="The types of each asset (inputs/taxonomy/assets_subtypes.csv, kept by a person), "
+                "one row per asset and type with its name and definition, so unit_assets.subtype_id "
+                "can be read by name. Inactive types are listed too, marked.",
+        columns={"asset_id": "The asset (a label of the assets set) the type belongs to.",
+                 "subtype_id": "The type's id, as unit_assets.subtype_id carries it.",
+                 "subtype_name": "The type's name.",
+                 "definition": "The definition the chat model was shown for the type.",
+                 "is_active": "Whether the type is offered to the chat model.",
                  "version": "The hand-kept version of the row."}),
     "flags": dict(
         key=("flag_id",), foreign=[],
@@ -545,7 +546,7 @@ TABLES = {
         columns={"asset_id": "The sentence's asset; empty at level none.",
                  "asset_rank": "1 for the sentence's best asset, 2 the next, and so on; 0 for a sentence with none.",
                  "probability": "The posterior (level unit) or the decayed sum (level paragraph).",
-                 "subtype_id": "The finer kind of the asset (assets_subtypes.csv), chosen by the chat model; empty where it was not asked or its answer was not one of the asset's kinds.",
+                 "subtype_id": "The type of the asset (assets_subtypes.csv), chosen by the chat model; empty where it was not asked or its answer was not one of the asset's types.",
                  "asset_level": "unit (the first pass), second_look (the chat model's second look at a committed, digital sentence the first pass gave no asset), paragraph or none.",
                  "own_best_asset_id": "The sentence's own best asset, whatever its probability.",
                  "own_best_probability": "Its posterior probability.",
@@ -580,21 +581,42 @@ TABLES = {
             "package_cancelled": "True when the package's plan status says it was cancelled.",
             "package_generic": "True when the package description is about running the project (project management, audit, vehicles, office furniture, workshops, per diem, accounting, salaries; src/wbg_portfolio/decide.py GENERIC). A flag to filter on, never a cut.",
         }),
-    "activities": dict(
-        key=("activity_id", "unit_id"),
-        foreign=[("unit_id", "search_units", "unit_id"), ("project_id", "projects", "project_id")],
-        comment="The distinct activities a project commits to for a measure: for every project and "
-                "measure with committed, digital sentences, the chat model groups the sentences that "
-                "describe the same investment, study or action (src/wbg_portfolio/activities.py). One "
-                "row per sentence of an activity; activity_id is the MD5 of project_id|label_set|the "
-                "activity's sorted unit ids. Every sentence is in exactly one activity of its project "
-                "and measure; a reply that dropped or repeated a sentence was repaired. A group not yet "
-                "read is absent. The model's reading, not a person's.",
+    "commitments": dict(
+        key=("commitment_id",),
+        foreign=[("project_id", "projects", "project_id")],
+        comment="The commitments: the kept sentences of a project and measure grouped by what they commit to, "
+                "with no model call (src/wbg_portfolio/decide.py commitment_rows). An investment sentence "
+                "belongs to one commitment per asset type it has (asset_id and subtype_id; a sentence with "
+                "two assets is in two); with no asset, to one per measure type; a policy sentence to one per "
+                "measure type. What is left (no asset and no type, only an unspecified asset type, a policy "
+                "sentence with no type) is grouped by paragraph. commitment_key says which key made it: "
+                "asset_type, type or paragraph (a paragraph group is a bucket, not a finding). Every "
+                "commitment is listed here, whatever the dashboards' filters; commitment_summary is what the "
+                "dashboards read. A commitment in an appraisal document is design intent, not delivery.",
         columns={
-            "activity_label": "A short name the chat model gave the activity (the sentence's first words where the model gave none).",
-            "unit_id": "A committed, digital sentence of the activity.",
-            "n_sentences": "How many sentences the activity has.",
+            "commitment_id": "MD5 of project_id|label_set|instrument|commitment_key|asset_id|subtype_id|type_id|paragraph_id: the same on every publish.",
+            "instrument": "investment or policy (the chat model's reading of the sentences; empty while not asked yet, and then grouped as investment).",
+            "commitment_key": "asset_type, type or paragraph: which key grouped the sentences.",
+            "asset_id": "The asset, for a commitment keyed on asset_type.",
+            "subtype_id": "The asset's type, for a commitment keyed on asset_type.",
+            "type_id": "The measure type, for a commitment keyed on type.",
+            "paragraph_id": "The paragraph, for a commitment keyed on paragraph.",
+            "commitment_label": "A plain name: the asset and its type, the measure type, or 'Sentences of one paragraph'.",
+            "type_ids": "Tags: every measure type of its sentences.",
+            "sentences": "Its kept sentences (distinct units).",
+            "paragraphs": "The paragraphs they sit in.",
+            "documents": "The documents they come from.",
+            "components": "The component numbers its sentences sit under.",
+            "linked_packages": "Packages linked to any of its sentences (commitment_package_links).",
+            "strong_packages": "Of those, packages whose best level is strong.",
+            "best_link_level": "The best level among its links (strong, type_and_component, type, component, asset); empty when none.",
+            "best_link_rank": "That level as 1 (strong) to 5 (asset).",
         }),
+    "commitment_members": dict(
+        key=("commitment_id", "unit_id"),
+        foreign=[("unit_id", "search_units", "unit_id"), ("project_id", "projects", "project_id")],
+        comment="The sentences of each commitment: one row per commitment and kept sentence.",
+        columns={"unit_id": "A kept sentence of the commitment."}),
     "sentence_vectors": dict(
         key=("unit_id",), foreign=[("unit_id", "search_units", "unit_id")],
         comment="Pipeline bookkeeping: one embedding per search unit (3,072 dimensions), used "
