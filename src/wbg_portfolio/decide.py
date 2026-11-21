@@ -482,6 +482,7 @@ def measure_rows(conn, corpus, names, ua, stats=None):
                 if t2 not in shown:
                     shown.append(t2)
             text = corpus.texts[uid]
+            digital = is_digital(dig.get(uid), dig_floor)
             fl_rows.append({
                 "label_set": name, "label_id": u["label_id"], "unit_id": uid, "kind": r.get("kind", ""),
                 "paragraph_id": r["paragraph_id"], "doc_id": r["doc_id"], "project_ids": r.get("project_ids", ""),
@@ -498,7 +499,8 @@ def measure_rows(conn, corpus, names, ua, stats=None):
                 "asset_links": "|".join(a for a, _ in win),
                 "template_projects": r.get("template_projects", ""),
                 "template_share": r.get("template_share", ""),
-                "sent": "true", "committed": str(u["committed"]).lower(),
+                "sent": "true", "committed": str(u["committed"] and digital).lower(),
+                "measure_rule": str(u["committed"]).lower(),
                 "confidence": f"{float(u['answer'].get('confidence', 0) or 0):.3f}",
                 **_probs(u["answer"]), "p_committed_calibrated": f"{u['posterior']:.4f}",
                 "types_yes": "|".join(shown), "best_type": shown[0] if shown else "",
@@ -507,7 +509,7 @@ def measure_rows(conn, corpus, names, ua, stats=None):
                 "score_context": "" if u["score_context"] is None else f"{u['score_context']:.4f}",
                 "second_grade": "" if u["second_grade"] is None else f"{u['second_grade']:g}",
                 "decided_by": u["decided_by"],
-                "is_digital": str(is_digital(dig.get(uid), dig_floor)).lower(),
+                "is_digital": str(digital).lower(),
                 "digital_p": f"{dig[uid]:.4f}" if uid in dig else "",
                 "instrument": instrument.get(uid, ""),
                 "model_served": u["served"] or "", "text": text})

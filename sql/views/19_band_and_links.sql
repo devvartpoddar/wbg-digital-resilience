@@ -1,8 +1,9 @@
 -- The views of the band rule, the digital rule, the link strengths and the
 -- activities.
 
--- Committed sentences the digital question says are not digital: they stay in
--- measure_findings (is_committed true, is_digital false) and leave the
+-- Sentences that pass the measure rule but that the digital question says are not
+-- digital: they stay in measure_findings (passes_measure_rule true, is_digital
+-- false, so is_committed false) and leave the
 -- dashboards' commitment views (16_commitments.sql). One row per project, so
 -- a paragraph in two projects gives two rows.
 DROP VIEW IF EXISTS wbg.not_digital_findings CASCADE;
@@ -16,9 +17,9 @@ LEFT JOIN wbg.labels l ON l.label_set = m.label_set AND l.label_id = m.label_id
 LEFT JOIN wbg.paragraphs pa USING (paragraph_id)
 LEFT JOIN wbg.paragraph_projects pp ON pp.paragraph_id = m.paragraph_id
 LEFT JOIN wbg.projects pr ON pr.project_id = pp.project_id
-WHERE m.was_sent_to_model AND m.is_committed AND NOT m.is_digital;
+WHERE m.was_sent_to_model AND m.passes_measure_rule AND NOT m.is_digital;
 COMMENT ON VIEW wbg.not_digital_findings IS
-  'Committed sentences the digital question says are not a digital asset or the digital sector (digital_p below digital.floor, or never asked): kept here, left out of every commitment. One row per sentence, measure and project; with the score, the two second looks and who decided. The model''s reading, not a person''s.';
+  'Sentences that pass the measure rule but that the digital question says are not about a digital technology (digital_p below digital.floor, or never asked): listed here, never kept (is_committed false), left out of every commitment. One row per sentence, measure and project; with the score, the two second looks and who decided. The model''s reading, not a person''s.';
 
 -- Link strengths: a committed, digital sentence and a package of the same
 -- project, with the sentence's measure, asset and type and the package's plan

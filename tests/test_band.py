@@ -378,11 +378,13 @@ def test_publish_carries_the_new_columns_and_keeps_the_not_digital_out_of_the_co
     decide.publish(pg, corpus, corpus=c, log=logged.append)
     rows = {r[0]: r for r in db.rows(
         pg, f"SELECT unit_id, is_committed, decided_by, score_first, score_context, second_grade, is_digital, "
-            f"digital_p, instrument FROM {db.SCHEMA}.measure_findings")}
+            f"digital_p, instrument, passes_measure_rule FROM {db.SCHEMA}.measure_findings")}
     r0, r1 = rows[u0], rows[u1]
     assert r0[1:3] == (True, "second_look") and float(r0[3]) == 0.6 and float(r0[4]) >= 0.7 and r0[5] == 3
-    assert r0[6] is True and r0[8] == "investment"
-    assert r1[1:3] == (True, "score") and r1[4] is None and r1[5] is None and r1[6] is False and float(r1[7]) < 0.5
+    assert r0[6] is True and r0[8] == "investment" and r0[9] is True
+    # the road passes the measure rule but is not digital: it is not kept
+    assert r1[1:3] == (False, "score") and r1[9] is True
+    assert r1[4] is None and r1[5] is None and r1[6] is False and float(r1[7]) < 0.5
     nd = db.rows(pg, f"SELECT unit_id, project_id, digital_p FROM {db.SCHEMA}.not_digital_findings")
     assert [(u, p) for u, p, _ in nd] == [(u1, "P1")]
     assert u1 not in {u for (u,) in db.rows(pg, f"SELECT unit_id FROM {db.SCHEMA}.commitment_units")}

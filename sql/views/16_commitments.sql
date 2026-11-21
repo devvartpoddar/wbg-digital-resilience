@@ -18,7 +18,7 @@ COMMENT ON VIEW wbg.package_status_order IS
   'The order in which a commitment with several linked packages takes its status: Overdue, Planned, Tendered, Under implementation, Contract signed, Contract completed, Not in latest plan, Cancelled.';
 
 -- One row per committed unit that counts, per project: the base of the
--- views below. Committed is the one decision (is_committed: the band rule). The asset is the one the sentence
+-- views below. is_committed is the one decision: kept, the band rule and digital. The asset is the one the sentence
 -- names or, where it names none, its paragraph's (the decayed sum); the type
 -- its chosen one (control panel floor.types).
 -- Materialised: built once per load, not once per card, and indexed, so a

@@ -41,7 +41,7 @@ RENAME = {
     "raw_start": "pdf_text_start_offset", "raw_end": "pdf_text_end_offset",
     "for_model": "is_for_model", "list_item": "is_list_item", "active": "is_active",
     "code_dirty": "has_uncommitted_code", "sent": "was_sent_to_model", "asked": "was_asked",
-    "committed": "is_committed",
+    "committed": "is_committed", "measure_rule": "passes_measure_rule",
     "part": "part_number",
     "borrower_ref": "borrower_reference", "borrower_ref_norm": "borrower_reference_normalised",
     "description_match": "description_match_key", "description_lang": "description_language",
@@ -108,7 +108,7 @@ NUMERIC = {"estimated_amount_usd", "actual_amount_usd", "total_amount_usd", "sup
            "cosine", "probability"}
 BOOLEAN = {"is_for_model", "is_list_item", "is_rebid", "is_placeholder", "in_latest_plan",
            "in_projects_interface", "has_uncommitted_code", "is_active", "included",
-           "was_sent_to_model", "was_asked", "is_committed", "is_digital"}
+           "was_sent_to_model", "was_asked", "is_committed", "passes_measure_rule", "is_digital"}
 # Pipe-joined lists in the CSV become arrays, which `= ANY(column)` queries without LIKE.
 ARRAY = {"project_ids", "listed_project_ids", "notice_ids", "copy_unit_ids", "matched_patterns",
          "matched_types", "asset_ids_above_threshold", "type_ids_above_threshold",
@@ -388,7 +388,7 @@ TABLES = {
         comment="One unit seen by a measure run: the decision model's answer (the probability "
                 "of each grade: 0 not described, 1 background, 2 planned, 3 committed), the "
                 "posterior probability of grades 2 and 3 every decision reads, whether it "
-                "counts (is_committed), and the asset it links to.",
+                "is kept (is_committed: it passes the measure rule and is digital), and the asset it links to.",
         columns=dict(PROBABILITY_GRADES, **{
             "route": "pattern, embedding, both, or feedback (found by a relevance-feedback round).",
             "feedback_round": "0 for the candidate pool; 1 and up for relevance-feedback rounds.",
@@ -397,7 +397,8 @@ TABLES = {
             "matched_patterns": "Pattern ids that matched.",
             "firmness": "activity, outcome or none, from wording lists.",
             "was_sent_to_model": "False when a gate kept the unit from being graded.",
-            "is_committed": "The one decision, the band rule: a first-pass score at band.keep or more, or in the band with both second looks agreeing (decided_by says which; control panel inputs/config/control_panel.csv, band.*).",
+            "is_committed": "Kept: the sentence passes the measure rule (passes_measure_rule) and is digital (is_digital). This is what every table, view, download and count of commitments reads.",
+            "passes_measure_rule": "The band rule alone: a first-pass score at band.keep or more, or in the band with both second looks agreeing (decided_by says which; control panel inputs/config/control_panel.csv, band.*). True for a sentence that is not digital too; those are listed in not_digital_findings and are not kept.",
             "paragraph_best_asset_id": "For a sentence whose own best asset is under the control panel's asset.floor: the asset with the highest sum of its own score and the earlier sentences' scores in its paragraph, each weighted by asset.decay per sentence back; empty otherwise.",
             "paragraph_best_asset_probability": "That decayed sum (at most 1).",
             "unit_best_asset_id": "The sentence asset map's best asset for the sentence itself.",
@@ -411,7 +412,7 @@ TABLES = {
             "score_context": "The decision model's score for the same question asked with the paragraph beside the sentence; empty unless the pair's first-pass score was asked about (band.ask_low to band.ask_high; a look above band.keep decides nothing). Model-graded, not person-graded.",
             "second_grade": "The chat model's grade 0 to 3 for the pair, asked in the band; empty otherwise. Reading is the model's: a missing second look never counts as yes.",
             "decided_by": "score (first-pass score at band.keep or more), second_look (in the band, and both looks reach band.context and band.second_grade) or empty (not committed).",
-            "is_digital": "True when the digital question (the sentence with its paragraph beside it, asked once whatever the measure) scores digital.floor or more. The dashboards count a committed sentence only when this is true.",
+            "is_digital": "True when the digital question (the sentence with its paragraph beside it, asked once whatever the measure) scores digital.floor or more. A sentence is kept (is_committed) only when this is true.",
             "digital_p": "P(yes) of the digital question; empty when not asked (it is asked of committed sentences only).",
             "instrument": "investment or policy, the chat model's reading of the committed sentence (flags.csv, policy); empty when not asked.",
             "model_cost_usd": "What the stored answers for this unit cost, US$.",
