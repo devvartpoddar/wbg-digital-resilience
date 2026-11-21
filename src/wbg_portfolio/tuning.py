@@ -132,14 +132,17 @@ def _f(x):
 
 
 def measure_kept(f, r):
-    """Kept under a rule (the band rule of decide.band_rule and the digital rule of decide.is_digital,
-    vectorised; a rule with "mean" reads the mean of first and context in place of the context)."""
-    first, ctx, grade, dig = f.first, f.ctx, f.grade, f.dig
-    looks = ~numpy.isnan(ctx) & ~numpy.isnan(grade)
-    c = numpy.nan_to_num((first + ctx) / 2 if "mean" in r else ctx, nan=-1)
-    band = (first >= r["low"]) & looks & (c >= r.get("mean", r["context"])) & (numpy.nan_to_num(grade, nan=-1) >= r["second_grade"])
-    committed = (first >= r["keep"]) | band
-    return (committed & ~numpy.isnan(dig) & (numpy.nan_to_num(dig, nan=-1) >= r["digital"])).astype(float)
+    """Kept under a candidate rule: the published rule itself (decide.band_rule, then decide.is_digital)
+    with the candidate's settings, row by row, so what is tuned is what is published. A rule with "mean"
+    gives band_rule the mean of first and context in place of the context score, read at "mean"."""
+    b = {"keep": r["keep"], "low": r["low"], "context": r.get("mean", r["context"]),
+         "second_grade": r["second_grade"]}
+    out = numpy.zeros(len(f.rows))
+    for i, (first, ctx, grade, dig) in enumerate(f.rule_inputs):
+        if ctx is not None and "mean" in r:
+            ctx = (first + ctx) / 2
+        out[i] = decide.band_rule(first, ctx, grade, b)[0] and decide.is_digital(dig, r["digital"])
+    return out
 
 
 def measure_frame(rows):
@@ -148,6 +151,9 @@ def measure_frame(rows):
     f.ctx = f.col(lambda r: _f(r["score_context"]))
     f.grade = f.col(lambda r: _f(r["second_grade"]))
     f.dig = f.col(lambda r: _f(r["digital_p"]))
+    # what the published rule reads, as it reads it: a missing look or digital answer is None
+    f.rule_inputs = [(float(a), None if numpy.isnan(c) else float(c), None if numpy.isnan(g) else float(g),
+                      None if numpy.isnan(d) else float(d)) for a, c, g, d in zip(f.first, f.ctx, f.grade, f.dig)]
     f.right = {"lenient": f.col(lambda r: r["truth"]["lenient"]), "strict": f.col(lambda r: r["truth"]["strict"])}
     # the graders' digital truth: 1, 0, or NaN where fewer than two graders answered (left out of every
     # figure that reads it); dig_known masks those rows

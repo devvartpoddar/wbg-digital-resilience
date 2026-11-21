@@ -109,7 +109,17 @@ def test_horvitz_thompson_recovers_known_rates_over_many_seeds():
     assert lo <= hi
 
 
-def test_the_vectorised_rule_is_the_band_rule():
+def test_tuning_reads_the_published_rule(monkeypatch):
+    calls = []
+    real = decide.band_rule
+    monkeypatch.setattr(decide, "band_rule", lambda *a: calls.append(a) or real(*a))
+    f = tuning.measure_frame([{"score_first": 0.7, "score_context": 0.8, "second_grade": 3, "digital_p": 0.9,
+                               "weight": 1, "project": "P", "truth": {"lenient": True, "strict": True, "digital": True}}])
+    assert list(tuning.measure_kept(f, {"keep": 0.9, "low": 0.5, "context": 0.7, "second_grade": 2, "digital": 0.5})) == [1.0]
+    assert calls and calls[0][3]["context"] == 0.7
+
+
+def test_the_tuned_rule_is_the_band_rule():
     rng = random.Random(5)
     rows = []
     for i in range(400):
