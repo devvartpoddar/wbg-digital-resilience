@@ -239,6 +239,15 @@ def test_generic_and_component_rules():
     assert decide.is_generic("Project management consultant") and decide.is_generic("External audit of accounts")
     assert decide.is_generic("Purchase of vehicles") and decide.is_generic("Per diem for workshops")
     assert not decide.is_generic("Security audit of the data centre") and not decide.is_generic("Supply of towers")
+    # a package that names a digital thing is never generic (the reviewer's false hits)
+    for d in ("Project Management Information System (PMIS)", "Accounting software ERP", "project management software",
+              "Audit of the information system", "Data center audit", "Training workshops for SCADA operators",
+              "Supply of vehicles for monitoring network", "IT audit services", "Cybersecurity audit",
+              "Security audit and audit of accounts"):
+        assert not decide.is_generic(d), d
+    for d in ("Supply of PIU office furniture", "Financial audit", "PIU staff salaries", "Audit",
+              "Vehicles to carry it to the site"):
+        assert decide.is_generic(d), d
     assert decide.top_component("Component 2.1: Data") == "2" and decide.top_component("D") == "D"
     assert decide.top_component("C.1 Platforms") == "C" and decide.top_component("") == ""
     assert decide.component_relation("2", "2") == "same" and decide.component_relation("2", "") == "unknown"

@@ -467,16 +467,22 @@ def package_measure_scores(conn):
 LINK_LEVELS = ("strong", "type_and_component", "type", "component", "asset")
 # A package whose description is about running the project rather than a digital thing (published as a
 # flag, never a cut). Whole words only, and no bare "communication": "Unified Communication Tools" is not
-# generic. An audit of security or of an information system is not generic either.
+# generic.
 GENERIC = re.compile(r"\b(?:project management|project implementation unit|PIU|PMU|audit(?:s|ing|or|ors)?|"
                      r"vehicles?|(?:office )?furniture|workshops?|per diem|accounting|accountants?|"
                      r"salar(?:y|ies))\b", re.I)
-NOT_GENERIC = re.compile(r"\b(?:security|cyber\w*|IT|information systems?|data)\s+audit", re.I)
+# A description that names a digital thing, or an audit of security or of data, is never generic, whatever
+# else it names ("Project Management Information System", "Accounting software ERP", "Training workshops
+# for SCADA operators", "Supply of vehicles for monitoring network"). The acronyms are whole words in
+# capitals, so the pronoun "it" is not IT.
+NOT_GENERIC = re.compile(r"\b(?:(?:security|data)\s+audits?|information\s+systems?|software|data\s+cent(?:er|re)s?|"
+                         r"platforms?|networks?|cyber\w*|digital|databases?|servers?)\b"
+                         r"|\b(?-i:IT|ICT|ERP|PMIS|MIS|SCADA)\b", re.I)
 
 
 def is_generic(description):
-    """True when a package description matches the generic pattern (GENERIC) and is not an audit of
-    security or of a system (NOT_GENERIC)."""
+    """True when a package description matches the generic pattern (GENERIC) and names no digital thing
+    and no audit of security or data (NOT_GENERIC). A flag only, never a cut."""
     d = description or ""
     return bool(GENERIC.search(d)) and not NOT_GENERIC.search(d)
 
