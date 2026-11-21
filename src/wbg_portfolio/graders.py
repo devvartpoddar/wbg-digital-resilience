@@ -166,7 +166,8 @@ def grade(conn, data, seed, graders=GRADERS, *, api_key="", dry_run=False, worke
         if not st["to_ask"]:
             continue
         if price is None:                                   # measure the price on a few items first
-            pending = [it for it in its if it[0] in _missing(conn, its, g, seed)]
+            missing = _missing(conn, its, g, seed)          # once: it reads every stored answer
+            pending = [it for it in its if it[0] in missing]
             pending.sort(key=lambda it: uniform(seed, it[0]))
             _, s1 = _ask(conn, pending[:PILOT], g, api_key=api_key, dry_run=False, workers=workers, log=log,
                          price=None, seed=seed)
