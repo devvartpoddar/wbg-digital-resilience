@@ -1,6 +1,6 @@
-"""The second look at the assets and their kinds (src/wbg_portfolio/second.py):
+"""The second look at the assets and their types (src/wbg_portfolio/second.py):
 asset_second for a committed, digital sentence the first pass gave no asset,
-asset_subtype for one it did. No model is called: the fake decision and chat models."""
+asset_subtype for every asset that counts. No model is called: the fake decision and chat models."""
 import json
 
 import pytest
@@ -42,7 +42,7 @@ def test_the_subtypes_file_is_read_and_checked(corpus):
     assert [r["id"] for r in sub["towers"]] == ["mast", "unspecified"]
 
 
-def test_the_real_taxonomy_has_four_assets_each_with_kinds_and_no_cybersecurity():
+def test_the_real_taxonomy_has_four_assets_each_with_types_and_no_cybersecurity():
     real = labels.LABEL_DIRS[0]
     assert real.endswith("taxonomy")
     assets = [a["id"] for a in labels.load_set("assets", taxonomy=real)]
@@ -52,23 +52,27 @@ def test_the_real_taxonomy_has_four_assets_each_with_kinds_and_no_cybersecurity(
     assert "cybersecurity" not in assets and not any("cyber" in r["id"] for rows in sub.values() for r in rows)
 
 
+FIBRE = '{"labels": ["fiber"]}'
+
+
 def test_the_second_look_asks_only_sentences_with_no_first_pass_asset(pg, corpus, fake_chat, only_where_none):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    fake_chat.reply = lambda p: '{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
+    fake_chat.reply = lambda p: FIBRE
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
     assert len(fake_chat.calls) == 1
     prompt = fake_chat.prompts()[0]
     assert "fibre backbone" in prompt and "[context]" in prompt and "[section]" in prompt
-    assert "- towers:" in prompt and "- fiber:" in prompt and "kind backbone" in prompt and "kind mast" in prompt
+    assert "- towers: Mobile networks: masts" in prompt and "- fiber:" in prompt and Q.ASSET_RULE in prompt
+    assert "backbone" not in prompt.split("[section]")[0] and "kind" not in prompt.lower()   # the type is asked after
     row = db.one(pg, f"SELECT item_id, label_id, score, answer FROM {db.SCHEMA}.scores WHERE kind = 'asset_second'")
-    assert row[0] == u1 and row[1] == "second" and float(row[2]) == 1 and row[3]["labels"] == ["fiber/backbone"]
+    assert row[0] == u1 and row[1] == "second" and float(row[2]) == 1 and row[3]["labels"] == ["fiber"]
     # a rerun asks nothing
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1 and len(fake_chat.calls) == 1
 
 
 def test_it_asks_again_only_for_what_is_missing(pg, corpus, fake_chat, only_where_none):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    fake_chat.reply = lambda p: '{"assets": []}'
+    fake_chat.reply = lambda p: '{"labels": []}'
     second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
     assert len(fake_chat.calls) == 1
     pg.execute(f"DELETE FROM {db.SCHEMA}.scores WHERE kind = 'asset' AND item_id = %s", (u0,))
@@ -78,31 +82,27 @@ def test_it_asks_again_only_for_what_is_missing(pg, corpus, fake_chat, only_wher
     assert count(pg, "asset_second") == 2
 
 
-def test_an_asset_or_kind_the_files_do_not_have_is_discarded_and_counted(pg, corpus, fake_chat, only_where_none):
+def test_an_asset_the_files_do_not_have_is_unreadable_and_never_stored(pg, corpus, fake_chat, only_where_none):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    fake_chat.reply = lambda p: json.dumps({"assets": [{"asset": "cybersecurity", "subtype": "x"},
-                                                       {"asset": "fiber", "subtype": "invented"}]})
-    logged = []
-    assert second.asset_second(pg, corpus, c, NAMES, api_key="k", log=logged.append) == 1
-    answer = db.one(pg, f"SELECT answer FROM {db.SCHEMA}.scores WHERE kind = 'asset_second'")[0]
-    assert answer["labels"] == ["fiber/"] and answer["discarded"] == 1
-    assert any("discarded 1 unknown or repeated asset id(s) and 1 unknown kind(s)" in line for line in logged)
-    assert decide.asset_second_looks(pg) == {u1: [("fiber", "")]}
+    fake_chat.reply = lambda p: json.dumps({"labels": ["cybersecurity", "fiber"]})
+    assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
+    assert count(pg, "asset_second") == 0 and decide.asset_second_looks(pg) == {}
 
 
-def test_a_repeated_asset_counts_once_and_none_is_a_valid_answer(pg, corpus, fake_chat, only_where_none):
-    kept, la, lk = second.valid_assets(["fiber/backbone", "fiber/unspecified", "towers/mast"],
-                                       *Q.asset_catalogue())
-    assert kept == [("fiber", "backbone"), ("towers", "mast")] and (la, lk) == (1, 0)
+def test_none_is_a_valid_answer_and_an_old_asset_type_answer_reads_as_its_asset(pg, corpus, fake_chat, only_where_none):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    fake_chat.reply = lambda p: '{"assets": []}'
+    fake_chat.reply = lambda p: '{"labels": []}'
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
     assert decide.asset_second_looks(pg) == {}
+    pg.execute(f"UPDATE {db.SCHEMA}.scores SET answer = %s WHERE kind = 'asset_second'",
+               (json.dumps({"labels": ["fiber/backbone", "fiber/unspecified"]}),))
+    pg.commit()
+    assert decide.asset_second_looks(pg) == {u1: ["fiber"]}
 
 
 def test_more_than_two_assets_or_a_malformed_reply_is_never_a_yes(pg, corpus, fake_chat):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    fake_chat.reply = lambda p: json.dumps({"assets": [{"asset": "fiber"}, {"asset": "towers"}, {"asset": "x"}]})
+    fake_chat.reply = lambda p: json.dumps({"labels": ["fiber", "towers", "fiber"]})
     assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
     assert count(pg, "asset_second") == 0 and decide.asset_second_looks(pg) == {}
     fake_chat.reply = lambda p: "fiber"
@@ -110,20 +110,27 @@ def test_more_than_two_assets_or_a_malformed_reply_is_never_a_yes(pg, corpus, fa
     assert count(pg, "asset_second") == 0
 
 
-def test_the_kind_is_asked_only_for_sentences_with_a_first_pass_asset(pg, corpus, fake_chat):
+def test_the_type_is_asked_for_every_asset_that_counts_whichever_look_found_it(pg, corpus, fake_chat, only_where_none):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    assert second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
-    assert len(fake_chat.calls) == 1 and "kind mast" not in fake_chat.prompts()[0] and "- mast:" in fake_chat.prompts()[0]
+    assert second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1      # the first pass's asset
+    prompt = fake_chat.prompts()[0]
+    assert "Which type of Mobile networks is the sentence in the 'sentence' field about?" in prompt
+    assert "- mast: Masts\n- unspecified: not stated" in prompt and "tall masts" not in prompt
     assert decide.asset_kinds(pg) == {(u0, "towers"): "mast"}
     second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)
     assert len(fake_chat.calls) == 1
-    # a kind that is not one of the asset's is not stored
+    # the second look finds fibre for the other sentence: its type is asked too
+    fake_chat.reply = lambda p: FIBRE if '"labels"' in p else '{"answer": "backbone"}'
+    second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
+    assert second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET) == 2
+    assert decide.asset_kinds(pg) == {(u0, "towers"): "mast", (u1, "fiber"): "backbone"}
+    # a type that is not one of the asset's is not stored
     pg.execute(f"DELETE FROM {db.SCHEMA}.scores WHERE kind = 'asset_subtype'")
     pg.execute(f"DELETE FROM {db.STORE}.answers WHERE model = 'anthropic/claude-haiku-5.5'")
     pg.commit()
-    fake_chat.reply = lambda p: '{"answer": "backbone"}'
+    fake_chat.reply = lambda p: FIBRE if '"labels"' in p else '{"answer": "mast"}'
     second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)
-    assert decide.asset_kinds(pg) == {}
+    assert decide.asset_kinds(pg) == {(u0, "towers"): "mast"}
 
 
 def test_nothing_is_asked_on_a_dry_run(pg, corpus, fake_chat):
@@ -135,8 +142,8 @@ def test_nothing_is_asked_on_a_dry_run(pg, corpus, fake_chat):
 
 def test_the_levels_and_kinds_reach_unit_assets(pg, corpus, fake_chat, fake_model):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    fake_chat.reply = lambda p: ('{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
-                                 if '"assets": [{"asset"' in p else '{"answer": "mast"}')
+    fake_chat.reply = lambda p: (FIBRE if '"labels"' in p else
+                                 '{"answer": "backbone"}' if "backbone" in p else '{"answer": "mast"}')
     second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
     second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)
     with load_pg.transaction(pg):
@@ -151,7 +158,7 @@ def test_the_levels_and_kinds_reach_unit_assets(pg, corpus, fake_chat, fake_mode
     agree = dict(db.rows(pg, f"SELECT unit_id, second_look_asset_id FROM {db.SCHEMA}.unit_assets "
                              f"WHERE asset_id <> ''"))
     assert agree == {u0: "fiber", u1: "fiber"}
-    # a kind is readable by name: its table, and beside the ids in the asset map
+    # a type is readable by name: its table, and beside the ids in the asset map
     names = {(a, k): n for a, k, n in db.rows(
         pg, f"SELECT asset_id, subtype_id, subtype_name FROM {db.SCHEMA}.asset_subtypes")}
     assert names[("fiber", "backbone")] and names[("towers", "mast")]
@@ -169,7 +176,7 @@ def test_the_levels_and_kinds_reach_unit_assets(pg, corpus, fake_chat, fake_mode
 def test_the_asset_second_look_is_asked_also_under_asset_ask_high_and_never_changes_the_decision(
         pg, corpus, fake_chat, fake_model, monkeypatch):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    fake_chat.reply = lambda p: '{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
+    fake_chat.reply = lambda p: FIBRE
     from wbg_portfolio import panel
     live = panel.settings
     monkeypatch.setattr(panel, "settings", lambda: {**live(), "asset.ask_high": 0.8})   # only where none at the floor

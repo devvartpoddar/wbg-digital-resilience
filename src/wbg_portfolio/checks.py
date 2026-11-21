@@ -1,10 +1,10 @@
-"""The checks made after a classification, each a fit question (yes, unsure,
-no) through the one asker, each writing scores (docs/method/decisions.md):
+"""The checks made after a classification, through the one asker, each writing
+scores (docs/method/decisions.md):
 
   types            every committed, digital unit x the measure's approved
-                   types (and the OTH types the gap step proposed)
+                   types (and the OTH types the gap step proposed): fit (yes, unsure, no)
   package_assets   every procurement package x its best link.asset_top assets
-                   by cosine: does the package buy, build or run it
+                   by cosine: how far the package is for the asset, graded 0 to 3
   package_measure  every package that has an asset x each measure its project
                    has a committed, digital sentence for: does the measure
                    apply to the package alone (the strong link)
@@ -396,8 +396,8 @@ def package_assets(conn, data, corpus, *, model=Q.MODEL, api_key="", dry_run=Fal
     for pid, g in got.items():
         for a, cos, rank in cands[pid]:
             rows.append(_row("package_asset", Q.ASSETS, a, pid, Q.package_state(by_pkg[pid]), aq[a], g[a],
-                             route="cosine", cosine=cos, rank=rank))
-            if Q.score(g[a], fit=True) >= yes:
+                             route="cosine", cosine=cos, rank=rank, score=Q.score(g[a])))
+            if Q.score(g[a]) >= yes:
                 has[pid].add(a)
     write_scoped(conn, "package_asset", Q.ASSETS, rows, by_pkg if projects else None)
     return packages, has

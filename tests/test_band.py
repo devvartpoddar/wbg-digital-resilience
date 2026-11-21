@@ -66,7 +66,7 @@ def test_anything_else_is_not_read(text, reply):
 @pytest.mark.parametrize("text,reply,expect", [
     ('Sure: {"grade": 2}', {"form": "grade", "max": 3}, {"grade": 2, "labels": None}),
     ('{"answer": "no"}\nI chose no because the text is silent.', {"form": "yesno"}, {"grade": 0, "labels": ["no"]}),
-    ('Reasoning first.\n```json\n{"assets": []}\n```\nDone.', {"form": "assets", "max": 2},
+    ('Reasoning first.\n```json\n{"labels": []}\n```\nDone.', {"form": "labels", "options": ["a"], "max": 2},
      {"grade": None, "labels": []}),
 ])
 def test_prose_before_or_after_one_json_object_is_read_from_the_object(text, reply, expect):
@@ -193,10 +193,11 @@ def test_the_context_state_adds_the_paragraph_and_the_plain_state_is_unchanged(c
     assert c.context_state(u)["context"] == "The projec"
 
 
-def test_a_context_question_says_only_the_sentence_is_judged():
+def test_a_context_question_says_what_the_paragraph_is_for():
     q = Q.graded_question({"id": "x", "name": "X", "definition": "d"}, ["a", "b"])
     cq = Q.in_context(q)
-    assert cq["instructions"].startswith("Only the sentence in the 'sentence' field is judged")
+    assert cq["instructions"].startswith("The 'context' field is the paragraph around the sentence. It is there "
+                                         "only to show what the sentence refers to. ")
     assert cq["instructions"].endswith(q["instructions"]) and cq["criteria"] == q["criteria"]
     assert Q.sha(cq) != Q.sha(q)
 
@@ -310,7 +311,10 @@ def test_digital_is_asked_once_per_committed_sentence_and_a_rerun_asks_nothing(p
     assert second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET) == 2
     asked = [b for b in fake_model if "digital" in json.dumps(b["questions"]).lower()]
     assert len(asked) == 2 and "context" in asked[0]["state"]
-    assert "Only the sentence in the 'sentence' field is judged" in list(asked[0]["questions"].values())[0]["instructions"]
+    q = list(asked[0]["questions"].values())[0]
+    assert q["instructions"].startswith(Q.CONTEXT_NOTE + "How far is the sentence in the 'sentence' field about a "
+                                        "digital technology? A digital technology is: ")
+    assert len(q["criteria"]) == 4 and q["criteria"][0] == "Not at all."
     dig = decide.digital_scores(pg)
     assert dig[u0] >= 0.5 > dig[u1]
     assert (decide.is_digital(dig.get(u0)), decide.is_digital(dig.get(u1)), decide.is_digital(None)) == (True, False, False)

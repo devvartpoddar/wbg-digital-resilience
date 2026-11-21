@@ -1,8 +1,11 @@
 """Every question builder's output and the states are fixed byte for byte: a stored answer is keyed on
 their hashes, so moving a builder from one module to another must not change one of them.
 
-The wording of the second-look kinds is allowed to change only by a deliberate edit here (nothing has
-been asked of a real model for them yet); the measure, asset, type and package_asset questions never.
+A hash here changes only by a deliberate edit. The rewrite of 2026-11-21 changed, on purpose and only:
+digital (graded on the taxonomy scale), in_context (the paragraph note), asset_towers (the first-pass asset
+question, new key), package_asset (graded), asset_second (the asset alone), asset_subtype_* (types by name)
+and package_asset_subtype_towers (new). The measure first pass (graded), fit, type, grade_second, policy,
+package_measure and package_asset_second questions, and the states, are as before.
 """
 from wbg_portfolio import questions as Q
 
@@ -16,15 +19,17 @@ def questions_of(corpus):
         "graded": Q.graded_question(lab, scale),
         "fit": Q.fit_question(lab),
         "in_context": Q.in_context(Q.graded_question(lab, scale)),
-        "digital": Q.flag_question("digital"),
+        "digital": Q.digital_question(),
         "type": Q.type_questions("cra")["cra"]["site"],
         "package_asset": Q.package_asset_questions()["towers"],
         "grade_second": Q.second_grade_question(lab, scale),
         "policy": Q.policy_question(),
-        "asset_second": Q.asset_second_question(assets, subtypes),
+        "asset_second": Q.asset_second_question(assets),
+        "asset_towers": Q.graded_questions(Q.ASSETS)[0]["towers"],
+        "package_asset_subtype_towers": Q.package_subtype_questions()["towers"],
         "asset_subtype_towers": Q.asset_subtype_question(ast["towers"], subtypes["towers"]),
         "asset_subtype_fiber": Q.asset_subtype_question(ast["fiber"], subtypes["fiber"]),
-        "package_asset_second_towers": Q.package_asset_second_question(ast["towers"]),
+    "package_asset_second_towers": Q.package_asset_second_question(ast["towers"]),
         "package_asset_second_fiber": Q.package_asset_second_question(ast["fiber"]),
         "activity": Q.activity_question(lab),
         "package_measure": Q.package_measure_question(lab),
@@ -38,18 +43,20 @@ def questions_of(corpus):
 
 EXPECTED = {
     "activity": "58325e681f9b565b0e00cbe6a8ff8a30ff97abc9e98b74c12dfbb71dde87a6b7",
-    "asset_second": "97dfc0b7abd15cc2d2b9bdb2d3690f59a9e08513b9f5f012fb419d065c51bef3",
-    "asset_subtype_fiber": "6c522ea529ab20629976529cce68a779c6d86bf7702613c8996b2ef8b3620224",
-    "asset_subtype_towers": "5293b63cc0bb527948d00cd070b02a29c9d195780ece3b60b7014518808ddac4",
+    "asset_second": "60ad858ec0b097e24297ddbd83bb9b79ead5db6c5a0594425f2a3900dd41411d",
+    "asset_subtype_fiber": "91e90e584b4c6998b04b81cd722bf141caddd3b44939909361d8ebf2b6906477",
+    "asset_subtype_towers": "2fe9237a43e09eba3c3739efb1665124dd19802168dffb42c92f57777743b19b",
+    "asset_towers": "733708780d98e64ab97ae3afea3e16e69dc6c41290748492c2b6c32eb48e6bec",
     "chat_state": "5546ece881662533110c3e26b36fe7211a1d65f11d3ec335de5e1fca9492b9bf",
     "context_state": "20de94d93a4a2f7bc16725fff10f6c70e426555a3bbb848d6ff644108c48eda2",
-    "digital": "c152d16abeba8ba225b8cb00517fcdef09ac369314c3c8bb98965613418205e1",
+    "digital": "bc56ccf946bc00147c8f2d411fe746f586cb3d1f7056f739a07da58800db27d3",
     "fit": "1b4a5ef9a771ed8d48da8e0605858951d1fe0b4a9a048feccc374ad1867c36eb",
     "grade_second": "e02a6bbcc1a4dc54e61cf4ee02a38b1144070f11153dabd2a7bf67b388c5a621",
     "graded": "1379624693ebd551d13e6097fc0b359e37c20f1e726f7875de3d619fe7470f20",
-    "in_context": "0316a2b2573d82b2777aeab9bef7f82d1fd635216062a13434f8fc62dc9a3eb8",
-    "package_asset": "f3198cc63b5825a9a082a1a13c9d533c433098b8763e01e3ab8e242a50175101",
+    "in_context": "9c290edeebc8a6c1beebda86634cb9f33b3f395bc4a288a1a94510a981776126",
+    "package_asset": "51944732f9b8c0e0daf1777a94be7733152cbe9c091bf477663168e93d5b4667",
     "package_asset_second_fiber": "dd64eb66b1e35897e2213782822a6b4af0720a455c360af1401c9fd951a61390",
+    "package_asset_subtype_towers": "329959a46c67869a0f2ff4b9e75912c69551b130683292d8f4a3389608e7fb82",
     "package_asset_second_towers": "765bed26a06d65a9c5f4bf800e868cd1da0e5dac536f120519ec7c3d4101d4d4",
     "package_measure": "3fec361e52c31d666b517e5ba5833836e5d84c85e4ce269f9871664861f70bc8",
     "package_state": "d4257434f97726b894ed55bcf40164e69e6f69e96fbff78012208cac51572ca6",

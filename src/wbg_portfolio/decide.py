@@ -284,22 +284,23 @@ def asset_ask_high():
 
 
 def asset_second_looks(conn):
-    """{unit_id: [(asset_id, subtype_id)]} the chat model's second look named
-    (kind asset_second), only assets the asset file still has; a sentence it
-    named none for is absent."""
+    """{unit_id: [asset_id]} the chat model's second look named (kind
+    asset_second), only assets the asset file still has; a sentence it named
+    none for is absent. (An answer stored before 2026-11-21 named "asset/type";
+    only the asset is read.)"""
     known = {a["id"] for a in labels.load_set(Q.ASSETS) if a["active"] == "true"}
     out = {}
     for _, _, uid, _, answer, *_ in scores(conn, "asset_second"):
-        pairs = [tuple(x.partition("/")[::2]) for x in (answer or {}).get("labels") or []]
-        pairs = [(a, st) for a, st in pairs if a in known]
-        if pairs:
-            out[uid] = pairs
+        ids = [x.partition("/")[0] for x in (answer or {}).get("labels") or []]
+        ids = [a for a in dict.fromkeys(ids) if a in known]
+        if ids:
+            out[uid] = ids
     return out
 
 
 def asset_kinds(conn):
-    """{(unit_id, asset_id): subtype_id} of the first-pass assets (kind
-    asset_subtype), '' where the question was not asked or answered."""
+    """{(unit_id, asset_id): subtype_id} of the assets that count (kind
+    asset_subtype), whichever look found them; absent where the question was not asked or answered."""
     out = {}
     for _, aid, uid, _, answer, *_ in scores(conn, "asset_subtype"):
         labs = (answer or {}).get("labels") or []
@@ -318,8 +319,7 @@ def unit_assets(corpus, amap, second=None):
         uid, pid = r["unit_id"], r["paragraph_id"]
         earlier = before.setdefault(pid, [])
         own = amap.get(uid, {})
-        win, level = sentence_assets(own, [amap.get(u, {}) for u in reversed(earlier)], s,
-                                     [a for a, _ in second.get(uid, [])])
+        win, level = sentence_assets(own, [amap.get(u, {}) for u in reversed(earlier)], s, second.get(uid, []))
         earlier.append(uid)
         out[uid] = (own, win, level)
     return out
@@ -517,7 +517,7 @@ def measure_rows(conn, corpus, names, ua, stats=None):
 def asset_rows(conn, corpus, amap, ua, kinds=None, second=None):
     """(paragraph_grades rows, unit_assets rows). `kinds` is asset_kinds()
     and `second` asset_second_looks(): a row's subtype_id is the chat model's
-    kind of that asset for that sentence, '' where none was asked."""
+    type of that asset for that sentence, '' where none was asked."""
     kinds, second = kinds or {}, second or {}
     grades, assets = [], []
     qs, _ = Q.graded_questions(Q.ASSETS)
@@ -538,11 +538,10 @@ def asset_rows(conn, corpus, amap, ua, kinds=None, second=None):
         base = {"unit_id": uid, "paragraph_id": r["paragraph_id"], "project_ids": r.get("project_ids", ""),
                 "asset_level": level, "own_best_asset_id": best,
                 "own_best_probability": f"{own[best]:.4f}" if best else ""}
-        looked = dict(second.get(uid, []))
-        chat_assets = "|".join(a for a, _ in second.get(uid, []))
+        chat_assets = "|".join(second.get(uid, []))
         for k, (a, p) in enumerate(win, 1):
-            kind = looked.get(a, "") if level == "second_look" else kinds.get((uid, a), "")
-            assets.append(dict(base, asset_rank=k, asset_id=a, subtype_id=kind, second_look_asset_id=chat_assets,
+            assets.append(dict(base, asset_rank=k, asset_id=a, subtype_id=kinds.get((uid, a), ""),
+                               second_look_asset_id=chat_assets,
                                probability="" if p is None else f"{p:.4f}"))
         if not win:
             assets.append(dict(base, asset_rank=0, asset_id="", subtype_id="", probability="",

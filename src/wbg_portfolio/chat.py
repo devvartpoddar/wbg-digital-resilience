@@ -23,9 +23,7 @@ it is never read as a yes.
 
 Replies (reply["form"]): grade (0 to reply["max"]), yesno (yes or no), choice
 (one of reply["options"]), labels (any of reply["options"], at most
-reply["max"], none allowed), assets (up to reply["max"] pairs of an asset and
-a kind of it, none allowed; the ids are read as text and checked against the
-files by the step, which discards and counts any it does not know), activities
+reply["max"], none allowed; an id not among the options is unreadable), activities
 (a list of labelled groups of sentence numbers; the step validates and
 repairs them), fields (named answers, each a grade, one of a list or any of a list: the evaluation's
 graders, whose question is a template with a system line, questions.grader_question). temperature 0; the spend ledger and --max-spend
@@ -123,9 +121,6 @@ def reply_text(reply):
         return '{"answer": "yes"} or {"answer": "no"}'
     if f == "choice":
         return '{"answer": "<one of: ' + ", ".join(reply["options"]) + '>"}'
-    if f == "assets":
-        return ('{"assets": [{"asset": "<asset id from: ' + ", ".join(reply["options"]) + '>", "subtype": '
-                '"<kind id of that asset>"}]} with at most ' + str(reply["max"]) + ' assets, or {"assets": []} when none applies')
     if f == "activities":
         return ('{"activities": [{"label": "<a short name for the activity>", "sentences": [<the numbers of '
                 'its sentences>]}]}')
@@ -189,13 +184,6 @@ def parse(text, reply):
             raise ValueError(f"answer {a!r} is not one of {allowed}")
         a = a.strip().lower()
         return {"grade": (1 if a == "yes" else 0) if form == "yesno" else None, "labels": [a]}
-    if form == "assets":
-        items = obj.get("assets")
-        if not isinstance(items, list) or len(items) > reply["max"] or not all(
-                isinstance(x, dict) and isinstance(x.get("asset"), str)
-                and isinstance(x.get("subtype", ""), str) for x in items):
-            raise ValueError(f"assets is not a list of at most {reply['max']} {{asset, subtype}} objects")
-        return {"grade": None, "labels": [f"{x['asset'].strip()}/{x.get('subtype', '').strip()}" for x in items]}
     if form == "activities":
         acts = obj.get("activities")
         if not isinstance(acts, list) or not acts or not all(

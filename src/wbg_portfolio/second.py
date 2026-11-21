@@ -11,13 +11,13 @@ scores, and src/wbg_portfolio/decide.py reads them.
             paragraph beside the sentence (kind measure_ctx, P(grades 2, 3)),
             and the chat model's grade 0 to 3 (kind measure_second)
   digital   (before measure_second) every sentence with a first-pass score in [band.ask_low, band.ask_high)
-            for some measure, once whatever its measure: is it a digital asset or
-            the digital sector (kind digital, P(yes)); only committed ones are published
+            for some measure, once whatever its measure: how far is it about a digital
+            technology, graded 0 to 3 (kind digital, P(grades 2, 3)); only committed ones are published
   policy    every committed sentence: investment or policy instrument, by the
             chat model (kind policy, score 1 for policy, 0 for investment)
-  asset_second, asset_subtype   the chat model's assets, and the kind of each,
-            for the committed, digital sentences (kinds asset_second, asset_subtype);
-            asset_second for those whose best first-pass asset is under asset.ask_high
+  asset_second, asset_subtype   for the committed, digital sentences: the chat model's
+            assets (asset_second, for those whose best first-pass asset is under asset.ask_high),
+            then the type of every asset that counts, whichever look found it (asset_subtype)
   package_asset_second   every package x asset pair whose first-pass P(yes) is
             in [link.asset_ask_low, link.asset_ask_high): the chat model's yes or no
 
@@ -101,13 +101,14 @@ def measure_second(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_r
 
 def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
             log=print, projects=None, every=None):
-    """Is each sentence in the asked band of some measure a digital asset or the digital sector, asked
-    once whatever its measure (the decision stays with the committed ones). Writes kind digital (label_set and label digital)."""
+    """How far each sentence in the asked band of some measure is about a digital technology, asked
+    once whatever its measure (the decision stays with the committed ones). Writes kind digital (label_set and
+    label digital), scored as the probability of the counted grades (read.grades), as a measure is."""
     if checks.cannot_estimate(conn, dry_run, log, "digital", ("measure", "measure")):
         return None
     units, scope = _in_scope(corpus, decide.digital_asked_units(conn, corpus, names), projects,
                              partial=_partial(names, every))
-    q = Q.flag_question("digital")
+    q = Q.digital_question()
     b = decide.band()
     log(f"digital: {len(units):,} sentence(s) with a first score in [{b['ask_low']}, {b['ask_high']})")
     got = checks._ask(conn, model, [(u, corpus.context_state(u), {"digital": q}) for u in units],
@@ -115,8 +116,8 @@ def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=Fal
     if got is None:
         return None
     checks.write_scoped(conn, "digital", "digital",
-                        [checks._row("digital", "digital", "digital", u, corpus.context_state(u), q, g["digital"])
-                         for u, g in got.items()], scope)
+                        [checks._row("digital", "digital", "digital", u, corpus.context_state(u), q, g["digital"],
+                                     score=Q.score(g["digital"])) for u, g in got.items()], scope)
     log(f"  {len(got):,} digital scores written")
     return len(got)
 
@@ -143,43 +144,16 @@ def policy(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.
 
 # ------------------------------------------------------------------ the assets
 
-def valid_assets(pairs, assets, subtypes):
-    """(kept [(asset_id, subtype_id)], dropped_assets, dropped_subtypes) from
-    the chat model's "asset/subtype" strings. An asset the files do not have, or
-    a second mention of one, is discarded. A kind the files do not have for that
-    asset is discarded and the asset kept with no kind (''). Nothing the model
-    invented is stored as valid."""
-    known, kept, seen = {a["id"] for a in assets}, [], set()
-    lost_assets = lost_kinds = 0
-    for p in pairs:
-        a, _, st = p.partition("/")
-        if a not in known or a in seen:
-            lost_assets += 1
-            continue
-        seen.add(a)
-        if st not in {s["id"] for s in subtypes.get(a, [])}:
-            lost_kinds += bool(st)
-            st = ""
-        kept.append((a, st))
-    return kept, lost_assets, lost_kinds
-
-
-def first_pass_assets(conn, corpus):
-    """{unit_id: [asset_id]} the first pass gives each sentence (level unit)."""
-    s = decide.asset_settings()
-    return {u: [a for a, _ in decide.sentence_assets(own, [], dict(s, decay=0))[0]]
-            for u, own in decide.asset_map(conn, corpus).items()
-            if any(p >= s["floor"] for p in own.values())}
-
-
 def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
                  projects=None, every=None, **_):
     """The chat model's second look at the assets: every committed, digital
     sentence whose best first-pass asset is under asset.ask_high (no asset at all
     counts as under) is shown with its paragraph and the four assets, and names
-    up to two (or none) with a kind each. The decision does not change: the first
-    pass wins at asset.floor and the look fills only where there is none. Writes kind asset_second (label_set assets, label second; the answer's
-    labels are the valid "asset/subtype" pairs)."""
+    one (a second only when the sentence names two) or none. The type is asked after,
+    by asset_subtype. The decision does not change: the first pass wins at asset.floor
+    and the look fills only where there is none. A reply naming an asset the file does
+    not have is unreadable (asked again), never stored. Writes kind asset_second
+    (label_set assets, label second; the answer's labels are the asset ids)."""
     if checks.cannot_estimate(conn, dry_run, log, "asset second look", ("asset", "classify"), digital=True):
         return None
     high = decide.asset_ask_high()
@@ -187,50 +161,51 @@ def asset_second(conn, data, corpus, names, *, api_key="", dry_run=False, worker
     digital_units = decide.committed_digital_units(conn, corpus, names)
     units, scope = _in_scope(corpus, [u for u in digital_units if max(own.get(u, {}).values(), default=0.0) < high],
                              projects, digital_units, _partial(names, every))
-    assets, subtypes = Q.asset_catalogue()
-    q = Q.asset_second_question(assets, subtypes)
+    q = Q.asset_second_question(Q.asset_catalogue()[0])
     log(f"asset second look: {len(units):,} committed digital sentence(s) whose best first-pass asset is under {high}")
     got, ok = chat.asked(conn, [(u, corpus.context_state(u), q) for u in units], "asset_second", Q.ASSETS, api_key,
                     dry_run, workers, log)
     if dry_run:
         return None
-    rows, lost_a, lost_k = [], 0, 0
-    for u, a in got.items():
-        kept, la, lk = valid_assets(a["labels"], assets, subtypes)
-        lost_a, lost_k = lost_a + la, lost_k + lk
-        rows.append(checks._row("asset_second", Q.ASSETS, "second", u, corpus.context_state(u), q,
-                                dict(a, labels=[f"{x}/{y}" for x, y in kept], discarded=len(a["labels"]) - len(kept)),
-                                score=len(kept)))
+    rows = [checks._row("asset_second", Q.ASSETS, "second", u, corpus.context_state(u), q, a, score=len(a["labels"]))
+            for u, a in got.items()]
     checks.write_scoped(conn, "asset_second", Q.ASSETS, rows, scope)
-    log(f"  {len(rows):,} asset second looks written, {sum(1 for r in rows if r['score']):,} with an asset"
-        + (f"; discarded {lost_a} unknown or repeated asset id(s) and {lost_k} unknown kind(s)"
-           if lost_a or lost_k else "") + f"; {len(units) - len(rows):,} sentence(s) waiting (not counted)")
+    log(f"  {len(rows):,} asset second looks written, {sum(1 for r in rows if r['score']):,} with an asset; "
+        f"{len(units) - len(rows):,} sentence(s) waiting (not counted)")
     return len(rows) if ok else None
+
+
+def counted_assets(conn, corpus):
+    """{unit_id: [asset_id]} of the assets that count for each sentence, whichever look found them
+    (decide.unit_assets: the first pass at asset.floor, else the second look, else the paragraph)."""
+    ua = decide.unit_assets(corpus, decide.asset_map(conn, corpus), decide.asset_second_looks(conn))
+    return {u: [a for a, _ in win] for u, (_, win, _) in ua.items() if win}
 
 
 def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, workers=ask.WORKERS, log=print,
                   projects=None, every=None, **_):
-    """The kind of each asset the first pass gave a committed, digital sentence,
-    by the chat model, one question per sentence and asset. Writes kind
+    """The type of each asset that counts for a committed, digital sentence, by
+    the chat model, one question per sentence and asset (asked after asset_second,
+    so an asset the second look found gets its type too). Writes kind
     asset_subtype (label_set assets, label the asset). A reply that is not one
-    of the asset's kinds is unreadable (counted, asked again), never stored."""
-    if checks.cannot_estimate(conn, dry_run, log, "asset kinds", ("asset", "classify"), digital=True):
+    of the asset's types is unreadable (counted, asked again), never stored."""
+    if checks.cannot_estimate(conn, dry_run, log, "asset types", ("asset", "classify"), digital=True):
         return None
-    first = first_pass_assets(conn, corpus)
+    counted = counted_assets(conn, corpus)
     digital_units = decide.committed_digital_units(conn, corpus, names)
-    units, scope = _in_scope(corpus, [u for u in digital_units if u in first], projects,
+    units, scope = _in_scope(corpus, [u for u in digital_units if u in counted], projects,
                              digital_units, _partial(names, every))
     assets, subtypes = Q.asset_catalogue()
     qs = {a["id"]: Q.asset_subtype_question(a, subtypes[a["id"]]) for a in assets if subtypes.get(a["id"])}
-    items = [((u, a), corpus.context_state(u), qs[a]) for u in units for a in first[u] if a in qs]
-    log(f"asset kinds: {len(items):,} sentence x asset pair(s) from the first pass")
+    items = [((u, a), corpus.context_state(u), qs[a]) for u in units for a in counted[u] if a in qs]
+    log(f"asset types: {len(items):,} sentence x asset pair(s) that count")
     got, ok = chat.asked(conn, items, "asset_subtype", Q.ASSETS, api_key, dry_run, workers, log)
     if dry_run:
         return None
     checks.write_scoped(conn, "asset_subtype", Q.ASSETS,
            [checks._row("asset_subtype", Q.ASSETS, a, u, corpus.context_state(u), qs[a], ans, score=1)
             for (u, a), ans in got.items()], scope)
-    log(f"  {len(got):,} asset kinds written")
+    log(f"  {len(got):,} asset types written")
     return len(got) if ok else None
 
 

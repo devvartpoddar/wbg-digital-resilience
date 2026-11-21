@@ -237,8 +237,9 @@ def corpus(tmp_path, monkeypatch):
                   ("fiber", "backbone", "Backbone", "long distance cable"),
                   ("fiber", "unspecified", "Not stated", "no kind stated"))])
     import shutil
-    shutil.copy(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-                             "inputs", "taxonomy", "flags.csv"), str(lab / "flags.csv"))
+    for f in ("flags.csv", "assets_scale.csv"):
+        shutil.copy(os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                                 "inputs", "taxonomy", f), str(lab / f))
     from wbg_portfolio import labels
     monkeypatch.setattr(labels, "LABEL_DIRS", (str(lab),))
     from wbg_portfolio import questions
@@ -304,12 +305,12 @@ def fake_model(monkeypatch):
                 yes = (("site" in label and "site" in t) or ("route" in label and "corridor" in t)
                        or ("mobile" in label and "tower" in t) or ("fibre" in label and "fibre" in t)
                        or ("carrying out" in label and "tower" in t)
-                       or ("hazard" in label and "procurement package" in asked and "tower" in t)
-                       or ("digital" in label and any(w in sentence for w in ("tower", "fibre"))))
+                       or ("hazard" in label and "procurement package" in asked and "tower" in t))
             else:                                             # a graded question: relate to <label>
                 yes = (("hazard" in asked and ("hazard assessment" in t or any(w in t for w in calls.also_yes)))
                        or ("mobile" in asked and "tower" in t)
-                       or ("fibre" in asked and "fibre" in t and not any(w in t for w in calls.no_fibre)))
+                       or ("fibre" in asked and "fibre" in t and not any(w in t for w in calls.no_fibre))
+                       or ("digital technology" in asked and any(w in sentence for w in ("tower", "fibre"))))
             n = len(q["criteria"])
             probs = {str(i): 0.0 for i in range(n)}
             probs[str(n - 1) if yes else "0"] = 0.9
@@ -339,8 +340,6 @@ class _Chat:
         m = re.search(r'"answer": "<one of: ([^>]*)>"', prompt)
         if m:
             return json.dumps({"answer": m.group(1).split(", ")[0]})
-        if '"assets": [{"asset"' in prompt:
-            return '{"assets": []}'
         if '"activities": [{"label"' in prompt:
             n = len(re.findall(r"^\d+\. \[", prompt, re.M))
             return json.dumps({"activities": [{"label": "One activity", "sentences": list(range(1, n + 1))}]})

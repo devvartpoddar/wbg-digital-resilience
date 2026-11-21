@@ -29,6 +29,9 @@ ALIASES = ("typesafe/jev-1.13",)
 PRICE_PER_MTOK = 0.042          # US$ per million input tokens, for estimates only
 SENTENCE = "the sentence from a World Bank project appraisal document in the 'sentence' field"
 PACKAGE = "the procurement package in the 'package' field"
+SENTENCE_FIELD = "the sentence in the 'sentence' field"     # the digital and asset questions' plain subject
+# Said once, at the end of every question about an asset (first pass, second look, package).
+ASSET_RULE = "Equipment, training or a policy counts for the asset it is for."
 FIT_SCALE = ["No: {name} does not apply.",
              "Unsure: the text does not say enough to tell whether {name} applies.",
              "Yes: {name} clearly applies."]
@@ -54,12 +57,17 @@ def load(name, folder=None):
         path = os.path.join(ROOT, "analysis", "labels", "scale.csv")
     if not os.path.exists(path):
         raise SystemExit(f"{name}: no grade scale ({path} is missing)")
+    return active, read_scale(path)
+
+
+def read_scale(path):
+    """[grade 0 text, ...] of a scale file (grade, description)."""
     with open(path, newline="", encoding="utf-8") as fh:
         rows = sorted(csv.DictReader(fh), key=lambda r: int(r["grade"]))
     scale = [" ".join(r["description"].split()) for r in rows]
     if not 2 <= len(scale) <= 5:
         raise SystemExit(f"{path} needs 2 to 5 grades")
-    return active, scale
+    return scale
 
 
 # ------------------------------------------------------------------ questions
@@ -78,27 +86,58 @@ def fit_question(lab, subject=SENTENCE, given=""):
             "criteria": [g.replace("{name}", lab["name"]) for g in FIT_SCALE]}
 
 
-CONTEXT_NOTE = ("Only the sentence in the 'sentence' field is judged; the 'context' field is the "
-                "paragraph around it, for reference. ")
+CONTEXT_NOTE = ("The 'context' field is the paragraph around the sentence. It is there only to show what "
+                "the sentence refers to. ")
+# The policy question keeps the note it was first asked with, so its stored answers stand
+# (it was not part of the 2026-11-21 rewrite of the questions).
+POLICY_NOTE = ("Only the sentence in the 'sentence' field is judged; the 'context' field is the "
+               "paragraph around it, for reference. ")
 
 
-def in_context(question):
+def in_context(question, note=CONTEXT_NOTE):
     """The same question for a state that carries a 'context' field (the
-    paragraph): it says that only the sentence is judged. A different question,
+    paragraph): a note says what the paragraph is for. A different question,
     so a different hash and its own stored answers."""
-    return dict(question, instructions=CONTEXT_NOTE + question["instructions"])
+    return dict(question, instructions=note + question["instructions"])
 
 
-def flag_question(flag_id):
-    """The fit question of a flag of inputs/taxonomy/flags.csv (digital): does
-    the flag apply to the sentence, asked with the paragraph beside it."""
-    f = labels.flag(flag_id)
-    return in_context(fit_question({"id": f["id"], "name": f["name"], "definition": f["definition"]}))
+# ------------------------------------------------- the digital and asset questions
+#
+# Graded on the taxonomy's one scale (inputs/taxonomy/assets_scale.csv: 0 not at all, 1 in passing,
+# 2 partly or as the means, 3 what the sentence is about), scored as the probability of the grades
+# the panel counts (read.grades), the same way as a measure. A package question reads the same
+# scale with "package" where it says "sentence".
+
+def taxonomy_scale():
+    """The scale of the asset set, shared by the digital question."""
+    return load(ASSETS)[1]
 
 
-# ---------------------------------------------- the chat model's questions (second looks, activities)
+def package_scale(scale):
+    return [g.replace("sentence", "package") for g in scale]
 
-CHAT_FORMS = ("grade", "yesno", "choice", "labels", "assets", "activities", "fields")
+
+def asset_question(lab, scale, package=False):
+    """How far a sentence is about an asset (the first pass), or how far a package is for it."""
+    ask = f"How far is {PACKAGE} for" if package else f"How far is {SENTENCE_FIELD} about"
+    return {"type": "score",
+            "instructions": f"{ask} {lab['name']}? {lab['name']} are: {lab['definition']} {ASSET_RULE}",
+            "criteria": [g.replace("{name}", lab["name"]) for g in (package_scale(scale) if package else scale)]}
+
+
+def digital_question():
+    """How far a sentence is about a digital technology (the digital flag of inputs/taxonomy/flags.csv),
+    asked with the paragraph beside it."""
+    f = labels.flag("digital")
+    return in_context({"type": "score",
+                       "instructions": f"How far is {SENTENCE_FIELD} about {f['name']}? "
+                                       f"{f['name'][:1].upper() + f['name'][1:]} is: {f['definition']}",
+                       "criteria": taxonomy_scale()})
+
+
+# ---------------------------------------------- the chat model's questions (second looks)
+
+CHAT_FORMS = ("grade", "yesno", "choice", "labels", "activities", "fields")
 
 
 def chat_question(instructions, form, options=None, maximum=None):
@@ -127,42 +166,42 @@ def policy_question():
     f = labels.flag("policy")
     return in_context(chat_question(
         f"Does the sentence commit the project to an investment or to a policy instrument? "
-        f"{f['name'][:1].upper() + f['name'][1:]} means: {f['definition']}", "choice", ["investment", "policy"]))
+        f"{f['name'][:1].upper() + f['name'][1:]} means: {f['definition']}", "choice", ["investment", "policy"]),
+        POLICY_NOTE)
 
 
 def asset_catalogue():
-    """The four assets with their finer kinds, as the chat questions show them:
+    """The four assets with their types, as the chat questions show them:
     ([asset {id, name, definition}], {asset_id: [subtype {id, name, definition}]})."""
     assets, _ = load(ASSETS)
     return assets, labels.load_subtypes(ASSETS)
 
 
-def asset_second_question(assets, subtypes):
-    """Up to two of the four assets, or none, each with one of its kinds. The list is in the order of the ids,
-    not of the file, so reordering rows of assets.csv or assets_subtypes.csv does not change the question."""
+def asset_second_question(assets):
+    """Which asset (one, a second only when the sentence names two, or none); the type is asked
+    after, by asset_subtype_question. The list is in the order of the ids, not of the file, so
+    reordering rows of assets.csv does not change the question."""
     assets = sorted(assets, key=lambda a: a["id"])
-    subtypes = {k: sorted(v, key=lambda s: s["id"]) for k, v in subtypes.items()}
-    listing = []
-    for a in assets:
-        listing.append(f"- {a['id']}: {a['name']}. {a['definition']}")
-        listing.extend(f"    kind {s['id']}: {s['name']}. {s['definition']}" for s in subtypes.get(a["id"], []))
     return in_context(chat_question(
-        "Which digital asset or assets, if any, does the sentence in the 'sentence' field commit the project to "
-        "financing, building, buying or running? Choose none when the sentence concerns no digital asset, or "
-        "only digital policy, strategy, training or equipment with no system or network named; otherwise choose at most two assets from the list, "
-        "and for each the one kind of it that fits best. "
-        "Assets, with their kinds:\n" + "\n".join(listing),
-        "assets", [a["id"] for a in assets], 2))
+        f"Which digital asset is {SENTENCE_FIELD} about? Pick one, or none. Pick a second only if the "
+        f"sentence itself names two.\n" + "\n".join(f"- {a['id']}: {a['name']}: {a['definition']}" for a in assets)
+        + f"\n{ASSET_RULE}",
+        "labels", [a["id"] for a in assets], 2))
 
 
-def asset_subtype_question(asset, kinds):
-    """Which kind of an asset a sentence already counted for it concerns (the kinds in the order of their ids)."""
-    kinds = sorted(kinds, key=lambda s: s["id"])
-    return in_context(chat_question(
-        f"{SENTENCE[:1].upper() + SENTENCE[1:]} is already counted as concerning {asset['name']}; this asks only which kind "
-        f"of it. {asset['name']} means: {asset['definition']}\nKinds:\n" +
-        "\n".join(f"- {s['id']}: {s['name']}. {s['definition']}" for s in kinds),
-        "choice", [s["id"] for s in kinds]))
+UNSPECIFIED = "unspecified"
+
+
+def asset_subtype_question(asset, types, package=False):
+    """Which type of an asset a sentence (with its paragraph) or a package is about: the types by
+    name, in the order of their ids, then unspecified (not stated)."""
+    types = sorted((t for t in types if t["id"] != UNSPECIFIED), key=lambda t: t["id"])
+    subject = PACKAGE if package else SENTENCE_FIELD
+    q = chat_question(
+        f"Which type of {asset['name']} is {subject} about?\n"
+        + "".join(f"- {t['id']}: {t['name']}\n" for t in types) + f"- {UNSPECIFIED}: not stated",
+        "choice", [t["id"] for t in types] + [UNSPECIFIED])
+    return q if package else in_context(q)
 
 
 def package_asset_second_question(asset):
@@ -300,9 +339,10 @@ def grader_link_question(lab):
 
 
 def graded_questions(name):
-    """{label_id: graded question} of a set, and its scale."""
+    """{label_id: graded question} of a set, and its scale (the assets: asset_question)."""
     labs, scale = load(name)
-    return {lab["id"]: graded_question(lab, scale) for lab in labs}, scale
+    build = asset_question if name == ASSETS else graded_question
+    return {lab["id"]: build(lab, scale) for lab in labs}, scale
 
 
 def type_questions(name):
@@ -320,11 +360,16 @@ def type_questions(name):
 
 
 def package_asset_questions():
-    """{asset_id: fit question}: does the package buy, build, install, connect,
-    operate or design the asset."""
-    return {a["id"]: fit_question(a, PACKAGE, given=(
-        f"It applies when what the package procures is {a['name']}, or equipment, works, "
-        f"systems or services for it, named or clearly implied. ")) for a in load(ASSETS)[0]}
+    """{asset_id: graded question}: how far the package is for the asset, on the package scale."""
+    labs, scale = load(ASSETS)
+    return {a["id"]: asset_question(a, scale, package=True) for a in labs}
+
+
+def package_subtype_questions():
+    """{asset_id: chat question}: which type of the asset the package is for (B2)."""
+    assets, subtypes = asset_catalogue()
+    return {a["id"]: asset_subtype_question(a, subtypes[a["id"]], package=True)
+            for a in assets if subtypes.get(a["id"])}
 
 
 def score(answer, fit=False):

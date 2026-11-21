@@ -73,8 +73,8 @@ def rows(conn, sql):
 def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(schema, wide, fake_model, fake_chat, capsys):
     corpus = wide
     default = fake_chat.reply
-    fake_chat.reply = lambda p: ('{"assets": [{"asset": "fiber", "subtype": "backbone"}]}'
-                                 if '"assets": [{"asset"' in p and "fibre backbone" in p else default(p))
+    fake_chat.reply = lambda p: ('{"labels": ["fiber"]}'
+                                 if "Which digital asset" in p and "fibre backbone" in p else default(p))
     with load_pg.transaction(schema):
         load_pg.load(schema, corpus, log=lambda *_: None)
     assert run(corpus, "--from", "classify", "--to", "publish", "--max-spend", "1") == 0
@@ -108,7 +108,7 @@ def test_a_dry_run_asks_nothing_prints_estimates_and_writes_nothing(schema, wide
     assert "requests to make" in out and "about US$" in out
     # on a fresh schema the steps after the first cannot be estimated, and say so instead of a quiet 0
     for step, until in (("digital", "measure"), ("policy", "measure"), ("asset second look", "digital"),
-                        ("asset kinds", "digital"), ("package asset second look", "link"),
+                        ("asset types", "digital"), ("package asset second look", "link"),
                         ("package_measure", "link"), ("activities", "digital")):
         assert f"{step}: cannot estimate until {until} has run" in out, step
     for stage in ("classify", "measure", "link", "activities"):
