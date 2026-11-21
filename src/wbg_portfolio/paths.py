@@ -54,6 +54,7 @@ LAYOUT = {
     "embeddings": "embeddings",
     "reports": "reports",
     "review": "review",
+    "samples": "samples",
     "runs": "runs",
     "search": "search",
     "measures": "measures",
