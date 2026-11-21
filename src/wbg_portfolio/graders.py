@@ -8,7 +8,9 @@
 Each item is asked through the chat asker (src/wbg_portfolio/chat.py), so every answer is stored once in
 <store>.answers under the grader, the item's state and the question, the ledger records what it cost, a
 stop and a restart never pay twice, an unreadable reply is tried again the house way (second.max_attempts)
-and never counted as a grade. The questions are the trial ruler's (questions.grader_*). The request is the
+and never counted as a grade. The questions are the trial ruler's (questions.grader_*): a measure item is
+two requests, the 0-3 grade alone in the ruler's exact wording (kind measure) and the digital and
+general-aim questions (kind measure_extra), whose answers are read together. The request is the
 trial's too (GRADER_REQUEST: replies of up to 1,500 tokens, the model's own reasoning left as it is), so the
 grades read like the trial's.
 
@@ -32,7 +34,7 @@ GRADERS = ("openai/gpt-5.6-luna", "openai/gpt-5.4-mini", "anthropic/claude-haiku
 GRADER_REQUEST = {"max_tokens": 1500, "reasoning": True}
 PILOT = 30                  # items a grader with no measured price is asked first, to measure it
 PRICED = 10                 # stored answers a grader needs for a measured price
-ITEM_KINDS = ("measure", "types", "package_measure", "link", "asset")
+ITEM_KINDS = ("measure", "measure_extra", "types", "package_measure", "link", "asset")
 
 
 # ------------------------------------------------------------------ the items
@@ -79,6 +81,8 @@ class _Questions:
         lab = labs[0]
         if kind == "measure":
             return Q.grader_measure_question(lab, scale)
+        if kind == "measure_extra":
+            return Q.grader_measure_extra_question()
         if kind == "types":
             types = [t for t in labels.load_types(name) if t["label_id"] == lab["id"]]
             return Q.grader_types_question(lab, types) if types else None
@@ -95,6 +99,8 @@ def items(data, seed):
         for r in sampling.read(data, seed, kind):
             todo = [(kind, _sentence_state(r) if kind in ("measure", "asset") else
                      _package_state(r) if kind == "package_measure" else _link_state(r))]
+            if kind == "measure":
+                todo.append(("measure_extra", _sentence_state(r)))
             if kind == "measure" and r.get("ask_types"):
                 todo.append(("types", _sentence_state(r)))
             for k, state in todo:
@@ -198,6 +204,10 @@ def answers(conn, data, seed, graders=GRADERS):
     for k in ITEM_KINDS:
         out[k] = [(i, r, {g: got[g][i]["fields"] for g in graders if i in got[g] and "fields" in got[g][i]})
                   for i, _, _, r in by_kind.get(k, [])]
+    # a measure item's two requests are read as one: the grade with the digital and general-aim answers
+    extra = {i.split("|", 1)[1]: by for i, _, by in out.pop("measure_extra", [])}
+    out["measure"] = [(i, r, {g: dict(f, **extra.get(i.split("|", 1)[1], {}).get(g, {})) for g, f in by.items()})
+                      for i, r, by in out["measure"]]
     return out, by_kind[None]
 
 
@@ -214,16 +224,17 @@ def _votes(values, yes, strict_yes, bad=()):
 
 def truth(kind, by_grader):
     """The truth of one item from the graders' readable answers ({grader: fields}), or None with fewer than
-    two. measure: lenient = two or more give 2 or 3, strict = two or more give 3, plus digital and
-    general_aim (two or more yes); package_measure and link: lenient = two or more yes, strict = two or more
-    yes and none unsure; asset: the asset (and type) two or more name, else split; types: the types two or
-    more list (lenient) or every reader lists (strict)."""
+    two. measure: lenient = two or more give 2 or 3, strict = two or more give 3, plus digital (two or more
+    grade it 2 or 3 on the digital scale) and general_aim (two or more yes), from the graders that answered
+    the second request; package_measure and link: lenient = two or more yes, strict = two or more yes and none
+    unsure; asset: the first asset (and type) two or more name, else split, and every asset two or more name
+    first or second (assets); types: the types two or more list (lenient) or every reader lists (strict)."""
     vals = list(by_grader.values())
     if kind == "measure":
         t = _votes([v["grade"] for v in vals], lambda g: g >= 2, lambda g: g == 3)
         if t:
-            t["digital"] = sum(1 for v in vals if v["digital"] == "yes") >= 2
-            t["general_aim"] = sum(1 for v in vals if v["general_aim"] == "yes") >= 2
+            t["digital"] = sum(1 for v in vals if isinstance(v.get("digital"), int) and v["digital"] >= 2) >= 2
+            t["general_aim"] = sum(1 for v in vals if v.get("general_aim") == "yes") >= 2
             t["grades"] = sorted(v["grade"] for v in vals)
         return t
     if kind in ("package_measure", "link"):
@@ -233,9 +244,11 @@ def truth(kind, by_grader):
     if kind == "asset":
         a, n = Counter(v["asset"] for v in vals).most_common(1)[0]
         asset = a if n >= 2 else None
-        kinds = Counter(v["type"] for v in vals if v["asset"] == asset).most_common(1)
+        types = Counter(v["type"] for v in vals if v["asset"] == asset).most_common(1)
+        named = Counter(a for v in vals for a in {v["asset"], v.get("second_asset", "none")} - {"none"})
         return {"asset": asset, "split": asset is None,
-                "type": kinds[0][0] if asset and asset != "none" and kinds and kinds[0][1] >= 2 else None,
+                "type": types[0][0] if asset and asset != "none" and types and types[0][1] >= 2 else None,
+                "assets": sorted(a for a, k in named.items() if k >= 2),
                 "unanimous": len(vals) == 3 and n == 3, "readable": len(vals)}
     c = Counter(t for v in vals for t in v["types"])
     return {"lenient": sorted(t for t, n in c.items() if n >= 2),
@@ -298,7 +311,8 @@ def read_person(conn, data, seed, path, graders=GRADERS, log=print):
     res["items"] = len(rows)
     for gr in graders:
         pairs = [(g, by[gr]["grade"]) for _, g, _, by in rows if gr in by]
-        dig = [(d, by[gr]["digital"]) for _, _, d, by in rows if gr in by and d in ("yes", "no")]
+        dig = [(d, "yes" if by[gr].get("digital", -1) >= 2 else "no") for _, _, d, by in rows
+               if gr in by and d in ("yes", "no") and "digital" in by[gr]]
         res["graders"][gr] = {
             "n": len(pairs), "exact": sum(a == b for a, b in pairs),
             "lenient_agree": sum((a >= 2) == (b >= 2) for a, b in pairs),

@@ -387,7 +387,7 @@ def tune(conn, data, seed, graders=G.GRADERS, settings=None, log=print):
         for h in ("lenient", "strict"):
             est, rng = f.total(f.col(lambda r, h=h: r["truth"][h]))
             holdout.setdefault("never_asked", {})[h] = {"estimate": est, "range": rng}
-        lines += [f"Packages never asked the measure question (no asset): about "
+        lines += [f"Packages never asked the measure question (not among their likeliest measures): about "
                   f"{holdout['never_asked']['lenient']['estimate']:,.0f} package x measure pairs are about the measure "
                   f"(lenient; range {holdout['never_asked']['lenient']['range'][0]:,.0f}-"
                   f"{holdout['never_asked']['lenient']['range'][1]:,.0f}), "
@@ -396,7 +396,7 @@ def tune(conn, data, seed, graders=G.GRADERS, settings=None, log=print):
     # ---- the link ladder
     ho_links = split("link", "holdout")
     if ho_links:
-        lines += ["## Links by ladder level (holdout set): share where carrying out the package delivers the commitment",
+        lines += ["## Links by level (holdout set): share where carrying out the package delivers the commitment",
                   "", "| Level | Graded | Lenient | Strict | Lenient, not cancelled | Cumulative lenient (levels 1 to here) |",
                   "|---|---|---|---|---|---|"]
         f = Frame(ho_links)
@@ -412,8 +412,10 @@ def tune(conn, data, seed, graders=G.GRADERS, settings=None, log=print):
             lines.append(f"| {lv} | {int(at.sum())} | {_p(*m['lenient'])} | {_p(*m['strict'])} | "
                          f"{_p(f.ratio(at * live * yes['lenient'], at * live))} | "
                          f"{_p(f.ratio(upto * yes['lenient'], upto))} |")
-        src = Counter(r["package_type_source"] for r in ho_links)
-        lines += ["", "Package asset type read from: " + ", ".join(f"{k} {v}" for k, v in sorted(src.items())) + ".", ""]
+        keyed = Counter(k for r in ho_links for k in r.get("commitment_keys", []))
+        lines += ["", "Levels as published (commitment_package_links.level). The linked sentences' commitments, by "
+                      "the key that made them: " + (", ".join(f"{k} {v}" for k, v in sorted(keyed.items())) or "none")
+                  + ".", ""]
 
     # ---- types
     lines += ["## Types (floor.types)", ""]

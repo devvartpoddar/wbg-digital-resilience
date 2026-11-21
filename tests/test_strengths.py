@@ -229,9 +229,10 @@ def test_a_package_asset_has_its_type_asked_stored_and_published(pg, corpus, fak
     got = {(p, a): (h, st) for p, a, h, st in db.rows(
         pg, f"SELECT package_id, label_id, has_asset, subtype_id FROM {db.SCHEMA}.package_assets")}
     assert got[("P1-1", "towers")] == (True, "mast") and got[("P1-1", "fiber")] == (False, None)
-    # the evaluation sampler reads the published type, under the same names
-    pk = sampling.load_packages(corpus)
-    assert sampling.package_types(pg, [], pk)["P1-1"] == ({("towers", "mast")}, "published")
+    # the evaluation sampler reads the published link levels, which use the published type
+    mf, ua, lk = sampling.published(pg)
+    units = sampling.link_units(lk, sampling.load_packages(corpus), sampling.commitments_of(pg))
+    assert units and all(u["region"] and u["level"] for u in units)
 
 
 def test_generic_and_component_rules():

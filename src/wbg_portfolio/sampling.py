@@ -8,7 +8,7 @@ Four kinds of item, each a population read from the published tables (db.SCHEMA)
 
   measure          every scored sentence x measure (measure_findings)
   package_measure  every package x measure with a package_measure score, and the packages never asked it
-  link             every commitment sentence x package linked in commitment_package_links
+  link             every kept sentence x package linked in commitment_package_links, at its published level
   asset            every kept sentence (is_committed and is_digital, in measure_findings)
 
 Each unit falls in one region of its stored scores, and each region has a target: the number of its
@@ -75,15 +75,10 @@ TARGETS = {
 # Regions a measure's minimum does not raise: below 0.3 a pair is only there to bound recall.
 NOT_RAISED = {"first<0.3"}
 
-# The word patterns of inputs/taxonomy/assets_patterns.csv are written per asset; the first part of a
-# pattern's id names the finer kind it looks for. This table reads that name as a kind of
-# assets_subtypes.csv, for typing a package without a model (evaluation only). A prefix that is itself
-# a kind's id is read as that kind; data_hosting names no single kind.
-PATTERN_KIND = {"fiber": "fibre", "mobile_towers": "mobile_wireless", "satellite": "satellite",
-                "submarine_cable": "international", "institutional_networks": "institutional",
-                "access_connectivity": "last_mile", "dpi": "dpi", "geospatial": "geospatial",
-                "digital_systems": "sector_systems", "drm_ews": "hazard_warning",
-                "operational_tech": "operational_tech"}
+# The link regions, from the level the publish gives each link (commitment_package_links.level) and,
+# for a same-asset link, whether the components are unknown or differ.
+LEVEL_REGION = {"strong": "1 strong", "type_and_component": "2 same type, same component", "type": "3 same type",
+                "component": "4 same asset, same component"}
 
 
 def folder(data, seed):
@@ -142,36 +137,11 @@ def asset_band(p):
     return _bin(p if p is not None else 0.0, (0.5, 0.8, 0.9), ("<0.5", "0.5-0.8", "0.8-0.9", ">=0.9"))
 
 
-def top_component(x):
-    """The top-level component number of a plan or appraisal component ('Component 2.1', '2b', 'II' -> '2'),
-    '' when there is none."""
-    t = (x or "").strip().lower()
-    t = re.sub(r"^(component|composante|componente|sub-?component)\s*", "", t)
-    m = re.match(r"(\d+)", t)
-    if m:
-        return str(int(m.group(1)))
-    m = re.match(r"([ivx]+)\b", t)
-    if m:
-        vals, total, prev = {"i": 1, "v": 5, "x": 10}, 0, 0
-        for ch in reversed(m.group(1)):
-            v = vals[ch]
-            total, prev = (total - v, prev) if v < prev else (total + v, v)
-        return str(total)
-    return ""
-
-
-def ladder(strong, same_type, sentence_comp, package_comp):
-    """The level of a link: 1 strong; then by the asset type and the top-level component."""
-    if strong:
-        return "1 strong"
-    same = sentence_comp and package_comp and sentence_comp == package_comp
-    if same_type:
-        return "2 same type, same component" if same else "3 same type"
-    if same:
-        return "4 same asset, same component"
-    if not (sentence_comp and package_comp):
-        return "5 same asset, component unknown"
-    return "6 same asset, component differs"
+def link_region(level, relation):
+    """The region of a link from its published level and component relation."""
+    if level in LEVEL_REGION:
+        return LEVEL_REGION[level]
+    return "5 same asset, component unknown" if relation == "unknown" else "6 same asset, component differs"
 
 
 # ------------------------------------------------------------------ chances
@@ -282,9 +252,23 @@ def published(conn):
                        f"FROM {s}.measure_findings")
     ua = db.rows(conn, f"SELECT unit_id, asset_rank, asset_id, subtype_id, asset_level, own_best_probability, "
                        f"second_look_asset_id, project_ids FROM {s}.unit_assets")
-    links = db.rows(conn, f"SELECT project_id, label_set, unit_id, package_id, strength, shared_asset_ids, strong_p "
-                          f"FROM {s}.commitment_package_links")
+    links = db.rows(conn, f"SELECT project_id, label_set, unit_id, package_id, strength, shared_asset_ids, strong_p, "
+                          f"level, level_rank, same_type, component_relation, sentence_component, package_component, "
+                          f"package_cancelled FROM {s}.commitment_package_links")
     return mf, ua, links
+
+
+def commitments_of(conn):
+    """{(label_set, unit_id): [(commitment_id, commitment_key)]} of the published commitments, {} before any."""
+    s = db.SCHEMA
+    if not (db.exists(conn, f"{s}.commitment_members") and db.exists(conn, f"{s}.commitments")):
+        return {}
+    out = defaultdict(list)
+    for lset, uid, cid, key in db.rows(conn, f"SELECT m.label_set, m.unit_id, m.commitment_id, c.commitment_key "
+                                             f"FROM {s}.commitment_members m JOIN {s}.commitments c USING "
+                                             f"(commitment_id) ORDER BY 1, 2, 3"):
+        out[(lset, uid)].append((cid, key))
+    return out
 
 
 def measure_units(mf, type_scores):
@@ -343,72 +327,32 @@ def asset_targets(units):
     return out
 
 
-def package_types(conn, rules, packages):
-    """{package_id: ({(asset, kind)}, source)}: the package's asset types as published when the pipeline
-    stores them (scores kind package_asset_subtype, or a subtype_id column of package_assets), else read
-    with the word patterns (PATTERN_KIND); source says which."""
-    pub = defaultdict(set)
-    for _, aid, pid, _, answer, *_ in decide.scores(conn, "package_asset_subtype"):
-        for lab in (answer or {}).get("labels") or []:
-            pub[pid].add((aid, lab))
-    t = f"{db.SCHEMA}.package_assets"
-    if db.exists(conn, t) and db.one(conn, "SELECT count(*) FROM information_schema.columns WHERE table_schema = %s "
-                                           "AND table_name = 'package_assets' AND column_name = 'subtype_id'",
-                                     (db.SCHEMA,))[0]:
-        for pid, aid, st in db.rows(conn, f"SELECT package_id, label_id, subtype_id FROM {t} "
-                                          f"WHERE coalesce(subtype_id, '') <> ''"):
-            pub[pid].add((aid, st))
-    out = {}
-    for pid, p in packages.items():
-        if pub.get(pid):
-            out[pid] = (pub[pid], "published")
-            continue
-        got = {(a, k) for a, k, rx in rules if rx.search(p["description"])}
-        out[pid] = (got, "word pattern" if got else "none")
-    return out
-
-
-def pattern_rules():
-    """[(asset, kind, regex)] from the assets' word patterns, read as kinds by PATTERN_KIND."""
-    kinds = {a: {s["id"] for s in v} for a, v in labels.load_subtypes(Q.ASSETS).items()}
-    out = []
-    for p in labels.load_patterns(Q.ASSETS):
-        pid = p["pattern_id"]
-        prefix = pid.split("_search")[0] if "_search" in pid else re.sub(r"_\d+$", "", pid)
-        kind = PATTERN_KIND.get(prefix) or (prefix if prefix in kinds.get(p["label_id"], ()) else "")
-        if kind:
-            out.append((p["label_id"], kind, p["regex"]))
-    return out
-
-
-def link_units(links, mf, ua, packages, ptypes):
-    comp = {}
-    for lset, lid, uid, pids, *_rest in mf:
-        comp.setdefault(uid, top_component(_rest[-1]))
-    stypes = defaultdict(set)
-    for r in ua:
-        if r[2] and r[3] and r[3] != "unspecified":
-            stypes[r[0]].add((r[2], r[3]))
+def link_units(links, packages, commitments=None):
+    """Every kept sentence x package linked, at the best level of its links (one per measure), read as
+    published: level, same asset type, component relation, the package's cancelled flag, and the
+    commitments the sentence belongs to under the link's measure."""
+    commitments = commitments or {}
     pairs = defaultdict(list)
-    for pid_, lset, uid, pkg, strength, shared, sp in links:
-        pairs[(uid, pkg)].append((lset, strength, list(shared or []), _f(sp), pid_))
+    for pid_, lset, uid, pkg, strength, shared, sp, level, rank, same, rel, sc, pc, cancelled in links:
+        pairs[(uid, pkg)].append({"label_set": lset, "strength": strength, "shared": list(shared or []),
+                                  "strong_p": _f(sp), "project": pid_, "level": level, "rank": rank or 9,
+                                  "same_type": bool(same), "relation": rel, "sc": sc or "", "pc": pc or "",
+                                  "cancelled": bool(cancelled)})
     out = []
     for (uid, pkg), rs in sorted(pairs.items()):
         p = packages.get(pkg, {})
-        strong = any(s == "strong" for _, s, *_ in rs)
-        lset = max(rs, key=lambda r: (r[1] == "strong", r[3] or 0, r[0]))[0] if strong else sorted(r[0] for r in rs)[0]
-        shared = sorted({a for r in rs for a in r[2]})
-        kinds, source = ptypes.get(pkg, (set(), "none"))
-        same_type = bool({(a, k) for a, k in stypes.get(uid, ()) if a in shared} & kinds)
-        sc, pc = comp.get(uid, ""), top_component(p.get("component_number") or p.get("component") or "")
-        out.append({"key": f"{uid}|{pkg}", "unit_id": uid, "package_id": pkg, "label_set": lset,
-                    "label_sets": sorted({r[0] for r in rs}), "project": rs[0][4], "project_ids": [rs[0][4]],
-                    "strong": strong, "strong_p": max((r[3] for r in rs if r[3] is not None), default=None),
-                    "shared_asset_ids": shared, "sentence_types": sorted("/".join(x) for x in stypes.get(uid, ())),
-                    "package_types": sorted("/".join(x) for x in kinds), "package_type_source": source,
-                    "same_type": same_type, "sentence_component": sc, "package_component": pc,
-                    "status": p.get("status", ""), "cancelled": "cancel" in (p.get("status") or "").lower(),
-                    "region": ladder(strong, same_type, sc, pc)})
+        best = min(rs, key=lambda r: (r["rank"], -(r["strong_p"] or 0), r["label_set"]))
+        out.append({"key": f"{uid}|{pkg}", "unit_id": uid, "package_id": pkg, "label_set": best["label_set"],
+                    "label_sets": sorted({r["label_set"] for r in rs}), "project": best["project"],
+                    "project_ids": [best["project"]], "strong": best["level"] == "strong",
+                    "strong_p": max((r["strong_p"] for r in rs if r["strong_p"] is not None), default=None),
+                    "shared_asset_ids": sorted({a for r in rs for a in r["shared"]}), "level": best["level"],
+                    "same_type": best["same_type"], "sentence_component": best["sc"],
+                    "package_component": best["pc"], "component_relation": best["relation"],
+                    "commitment_ids": [c for c, _ in commitments.get((best["label_set"], uid), [])],
+                    "commitment_keys": sorted({k for _, k in commitments.get((best["label_set"], uid), [])}),
+                    "status": p.get("status", ""), "cancelled": best["cancelled"],
+                    "region": link_region(best["level"], best["relation"])})
     return out
 
 
@@ -447,7 +391,7 @@ def package_measure_units(conn, mf, packages, seed):
 
 
 def load_packages(data):
-    """{package_id: the plan row's fields the graders and the ladder read} of the non-placeholder packages
+    """{package_id: the plan row's fields the graders read} of the non-placeholder packages
     of included projects with a description."""
     included = Q.included_projects()
     out = {}
@@ -514,7 +458,7 @@ def draw(conn, data, seed, corpus=None, log=print, dry_run=False):
     packages = load_packages(data)
     units = {"measure": measure_units(mf, type_scores), "asset": asset_units(mf, ua, own),
              "package_measure": package_measure_units(conn, mf, packages, seed),
-             "link": link_units(links, mf, ua, packages, package_types(conn, pattern_rules(), packages))}
+             "link": link_units(links, packages, commitments_of(conn))}
     lines, short = [], {}
     for kind in KINDS:
         targets = asset_targets(units[kind]) if kind == "asset" else TARGETS[kind]

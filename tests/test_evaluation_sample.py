@@ -131,21 +131,24 @@ def test_the_vectorised_rule_is_the_band_rule():
 
 
 def test_the_truth_rules():
-    t = G.truth("measure", {"a": {"grade": 3, "digital": "yes", "general_aim": "no"},
-                            "b": {"grade": 2, "digital": "yes", "general_aim": "no"},
-                            "c": {"grade": 0, "digital": "no", "general_aim": "yes"}})
+    t = G.truth("measure", {"a": {"grade": 3, "digital": 3, "general_aim": "no"},
+                            "b": {"grade": 2, "digital": 2, "general_aim": "no"},
+                            "c": {"grade": 0, "digital": 0, "general_aim": "yes"}})
     assert t["lenient"] and not t["strict"] and t["digital"] and not t["general_aim"] and not t["unanimous"]
-    t = G.truth("measure", {"a": {"grade": 3, "digital": "no", "general_aim": "no"},
-                            "b": {"grade": 3, "digital": "no", "general_aim": "no"}})
-    assert t["lenient"] and t["strict"] and not t["digital"]
-    assert G.truth("measure", {"a": {"grade": 3, "digital": "no", "general_aim": "no"}}) is None
+    t = G.truth("measure", {"a": {"grade": 3, "digital": 1, "general_aim": "no"},
+                            "b": {"grade": 3, "digital": 3, "general_aim": "no"}})
+    assert t["lenient"] and t["strict"] and not t["digital"]             # one grader in two reads it digital
+    t = G.truth("measure", {"a": {"grade": 3}, "b": {"grade": 3}})       # the second request not answered yet
+    assert t["strict"] and not t["digital"] and not t["general_aim"]
+    assert G.truth("measure", {"a": {"grade": 3, "digital": 0, "general_aim": "no"}}) is None
     t = G.truth("link", {"a": {"verdict": "yes"}, "b": {"verdict": "yes"}, "c": {"verdict": "unsure"}})
     assert t["lenient"] and not t["strict"]
     t = G.truth("link", {"a": {"verdict": "yes"}, "b": {"verdict": "yes"}, "c": {"verdict": "yes"}})
     assert t["strict"] and t["unanimous"]
-    t = G.truth("asset", {"a": {"asset": "fiber", "type": "backbone"}, "b": {"asset": "fiber", "type": "backbone"},
-                          "c": {"asset": "none", "type": "none"}})
-    assert t["asset"] == "fiber" and t["type"] == "backbone" and not t["split"]
+    t = G.truth("asset", {"a": {"asset": "fiber", "type": "backbone", "second_asset": "towers", "second_type": "mast"},
+                          "b": {"asset": "fiber", "type": "backbone", "second_asset": "towers", "second_type": "none"},
+                          "c": {"asset": "none", "type": "none", "second_asset": "none", "second_type": "none"}})
+    assert t["asset"] == "fiber" and t["type"] == "backbone" and not t["split"] and t["assets"] == ["fiber", "towers"]
     t = G.truth("asset", {"a": {"asset": "fiber", "type": "x"}, "b": {"asset": "towers", "type": "y"}})
     assert t["split"]
     t = G.truth("types", {"a": {"types": ["site"]}, "b": {"types": ["site", "route"]}, "c": {"types": []}})
@@ -163,26 +166,42 @@ def test_a_fields_reply_is_read_strictly():
             chat.parse(bad, q["reply"])
 
 
-def test_component_numbers_are_compared_at_the_top_level():
-    assert sampling.top_component("Component 2.1: Data") == "2"
-    assert sampling.top_component("2b") == "2"
-    assert sampling.top_component("II. Platforms") == "2"
-    assert sampling.top_component("IV") == "4"
-    assert sampling.top_component("") == ""
-    assert sampling.ladder(False, True, "2", "2") == "2 same type, same component"
-    assert sampling.ladder(False, False, "", "2") == "5 same asset, component unknown"
-    assert sampling.ladder(False, False, "1", "2") == "6 same asset, component differs"
+def test_component_numbers_are_compared_at_the_top_level_and_the_link_regions_follow_the_published_level():
+    assert decide.top_component("Component 2.1: Data") == "2"
+    assert decide.top_component("2b") == "2"
+    assert decide.top_component("II. Platforms") == "2"
+    assert decide.top_component("IV") == "4"
+    assert decide.top_component("") == ""
+    assert sampling.link_region("type_and_component", "same") == "2 same type, same component"
+    assert sampling.link_region("asset", "unknown") == "5 same asset, component unknown"
+    assert sampling.link_region("asset", "different") == "6 same asset, component differs"
+
+
+def test_the_measure_grade_is_asked_alone_in_the_rulers_words_and_the_rest_in_a_second_request():
+    lab, scale = Q.load("cra")[0][0], Q.load("cra")[1]
+    one = Q.grader_measure_question(lab, scale)
+    assert one["template"].endswith('Reply with JSON only: {{"grade": 0-3}}') and "digital" not in one["template"]
+    assert [f for f, _ in one["reply"]["fields"]] == ["grade"] and one["system"] == Q.GRADER_SYSTEM
+    two = Q.grader_measure_extra_question()
+    assert "How far is the marked sentence about a digital technology?" in two["template"]
+    assert "0: Not at all." in two["template"] and "3: It is what the sentence is about." in two["template"]
+    assert [f for f, _ in two["reply"]["fields"]] == ["digital", "general_aim"]
+    a = Q.grader_asset_question(*Q.asset_catalogue())
+    assert [f for f, _ in a["reply"]["fields"]] == ["asset", "type", "second_asset", "second_type"]
+    assert "Pick a second only if the sentence itself names two." in a["template"]
 
 
 # ------------------------------------------------------------------ the three commands on an invented store
 
 def _reply(prompt):
     if '"grade": 0-3' in prompt:
-        return json.dumps({"grade": 2, "digital": "yes", "general_aim": "no"})
+        return json.dumps({"grade": 2})
+    if '"digital": 0-3' in prompt:
+        return json.dumps({"digital": 3, "general_aim": "no"})
     if '"types": [' in prompt:
         return json.dumps({"types": ["site"]})
     if '"asset": "<asset id>"' in prompt:
-        return json.dumps({"asset": "towers", "type": "mast"})
+        return json.dumps({"asset": "towers", "type": "mast", "second_asset": "none", "second_type": "none"})
     return json.dumps({"verdict": "yes"})
 
 
@@ -207,14 +226,23 @@ def _publish(pg, data):
           {"unit_id": uids[1], "asset_rank": 1, "asset_id": "fiber", "subtype_id": "backbone",
            "asset_level": "second_look", "own_best_probability": 0.4, "second_look_asset_id": "fiber", "project_ids": "P1"}]
     links = [{"project_id": "P1", "label_set": "cra", "unit_id": uids[0], "package_id": "P1-1", "strength": "asset",
-              "shared_asset_ids": "towers"},
+              "shared_asset_ids": "towers", "level": "type_and_component", "level_rank": 2, "same_type": "true",
+              "component_relation": "same", "sentence_component": "1", "package_component": "1",
+              "package_cancelled": "false"},
              {"project_id": "P1", "label_set": "cra", "unit_id": uids[1], "package_id": "P1-2", "strength": "asset",
-              "shared_asset_ids": "fiber"}]
+              "shared_asset_ids": "fiber", "level": "asset", "level_rank": 5, "same_type": "false",
+              "component_relation": "unknown", "sentence_component": "1", "package_component": "",
+              "package_cancelled": "false"}]
+    commitments = [{"commitment_id": "c1", "project_id": "P1", "label_set": "cra", "instrument": "investment",
+                    "commitment_key": "asset_type", "asset_id": "towers", "subtype_id": "mast", "sentences": 1}]
+    members = [{"commitment_id": "c1", "project_id": "P1", "label_set": "cra", "unit_id": uids[0]}]
     with pg.transaction():
         load_pg.prepare(pg)
         load_pg.load_rows(pg, "measure_findings", load_pg.FINDING_COLS, mf, "t")
         load_pg.load_rows(pg, "unit_assets", load_pg.UNIT_ASSET_COLS, ua, "t")
         load_pg.load_rows(pg, "commitment_package_links", load_pg.STRENGTH_COLS, links, "t")
+        load_pg.load_rows(pg, "commitments", load_pg.COMMITMENT_COLS, commitments, "t")
+        load_pg.load_rows(pg, "commitment_members", load_pg.MEMBER_COLS, members, "t")
         for kind, lset, lid, item, score, answer in (
                 ("package_measure", "cra", "cra", "P1-2", 0.8, {}),
                 ("package_asset_subtype", "assets", "towers", "P1-1", 1, {"labels": ["mast"]}),
@@ -238,9 +266,9 @@ def test_sample_grade_and_tune_end_to_end(pg, corpus, fake_chat, monkeypatch, ca
     with pytest.raises(SystemExit):
         sampling.draw(pg, data, 1, log=lambda *_: None)                  # a drawn seed is never drawn over
     links = {r["package_id"]: r for r in rows["link"]}
-    assert links["P1-1"]["package_type_source"] == "published" and links["P1-1"]["same_type"]
-    assert links["P1-1"]["region"] == "2 same type, same component"
-    assert links["P1-2"]["package_type_source"] == "word pattern" and links["P1-2"]["package_types"] == ["fiber/backbone"]
+    assert links["P1-1"]["same_type"] and links["P1-1"]["region"] == "2 same type, same component"
+    assert links["P1-1"]["commitment_ids"] == ["c1"] and links["P1-1"]["commitment_keys"] == ["asset_type"]
+    assert links["P1-2"]["region"] == "5 same asset, component unknown" and links["P1-2"]["commitment_ids"] == []
     pm = {r["package_id"]: r for r in rows["package_measure"]}
     assert pm["P1-2"]["region"] == "score0.7-0.9" and not pm["P1-2"]["has_asset"]   # scored without an asset
     assert pm["P1-1"]["region"].startswith("never asked")
