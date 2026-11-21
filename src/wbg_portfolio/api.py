@@ -144,7 +144,8 @@ MEASURED_MIN_CALLS = 20        # paid requests the ledger needs before their ave
 
 def measured_cost(conn, stage, model):
     """(US$ a request, basis): the ledger's average cost per request of this step with this model, else of
-    the model over every step, once it holds MEASURED_MIN_CALLS paid requests; (None, "upper bound")
+    the model over every step, once it holds MEASURED_MIN_CALLS paid requests (rows recorded at
+    US$0 are left out: calls paid through the owner's own provider key were once recorded so); (None, "upper bound")
     with neither. What a step's estimate rests on is logged with it."""
     from wbg_portfolio import db
     if not db.exists(conn, f"{db.STORE}.spend"):
@@ -152,7 +153,7 @@ def measured_cost(conn, stage, model):
     for cond, args, what in (("stage = %s AND model = %s", (stage, model), f"step {stage}"),
                              ("model = %s", (model,), f"model {model}")):
         n, cost = db.one(conn, f"SELECT coalesce(sum(calls), 0), coalesce(sum(cost_usd), 0) "
-                               f"FROM {db.STORE}.spend WHERE {cond}", args)
+                               f"FROM {db.STORE}.spend WHERE {cond} AND cost_usd > 0", args)
         conn.commit()
         if n >= MEASURED_MIN_CALLS and cost > 0:
             return float(cost) / n, f"measured: US${float(cost) / n:.6f} a request over {int(n):,} paid requests of {what}"

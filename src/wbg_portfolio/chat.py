@@ -97,11 +97,18 @@ def estimate(prompt_text, q, request=None):
 
 
 def cost_of(response, prompt_text, text, q, request=None):
-    """What a response cost: usage.cost when it reports one, else its token counts at the panel's
-    prices, else the estimate (never 0, so the cap cannot be bypassed by a missing field)."""
+    """What a response cost: usage.cost when it reports one above zero; else what the provider
+    behind the key charged (usage.cost_details.upstream_inference_cost: a call paid through the
+    owner's own provider key comes back with cost 0 and the real charge there); else its token
+    counts at the panel's prices; else the estimate. Never 0 for a call that used tokens, so the
+    cap cannot be bypassed by a zero or a missing field."""
     usage = response.get("usage") or {}
-    if usage.get("cost") is not None:
-        return float(usage["cost"])
+    for reported in (usage.get("cost"), (usage.get("cost_details") or {}).get("upstream_inference_cost")):
+        try:
+            if reported is not None and float(reported) > 0:
+                return float(reported)
+        except (TypeError, ValueError):
+            pass
     p_in, p_out = float(panel.require("second.price_in_per_mtok")), float(panel.require("second.price_out_per_mtok"))
     t_in, t_out = usage.get("prompt_tokens"), usage.get("completion_tokens")
     if t_in is None and t_out is None:

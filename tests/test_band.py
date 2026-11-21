@@ -452,6 +452,15 @@ def test_a_response_without_a_cost_is_priced_from_its_tokens_or_the_estimate(pg,
     seen["usage"] = {"cost": 0.25}                                                       # a reported cost wins
     got, st = chat.ask(pg, [("c", {"sentence": "three"}, q)], stage="t", api_key="k", workers=1, log=lambda *_: None)
     assert st["cost_usd"] == 0.25
+    # a call paid through the owner's own provider key: cost 0, the real charge beside it
+    seen["usage"] = {"cost": 0, "cost_details": {"upstream_inference_cost": 0.0004},
+                     "prompt_tokens": 1000, "completion_tokens": 10}
+    got, st = chat.ask(pg, [("d", {"sentence": "four"}, q)], stage="t", api_key="k", workers=1, log=lambda *_: None)
+    assert st["cost_usd"] == 0.0004
+    # cost 0 and no charge reported: never recorded as free, priced from its tokens
+    seen["usage"] = {"cost": 0, "prompt_tokens": 1_000_000, "completion_tokens": 0}
+    got, st = chat.ask(pg, [("e", {"sentence": "five"}, q)], stage="t", api_key="k", workers=1, log=lambda *_: None)
+    assert abs(st["cost_usd"] - 0.10) < 1e-9
 
 
 def test_the_estimate_uses_the_prompt_length_and_the_panels_prices(pg, fake_chat):
