@@ -104,8 +104,10 @@ class Progress:
         p.end()
     """
 
-    def __init__(self, what, total, log=say, clock=time.monotonic):
-        self.what, self.total, self.log, self.clock = what, total, log, clock
+    def __init__(self, what, total, log=say, clock=time.monotonic, retry="tried again on the next run"):
+        """retry: when an item left out is tried again, as the closing line says it (a stage that runs
+        again until nothing is left out: the next run; a fetch: the next day's run, or now with --update)."""
+        self.what, self.total, self.log, self.clock, self.retry = what, total, log, clock, retry
         self.n, self.skipped, self.t0, self.last = 0, [], clock(), None
 
     def step(self, note=""):
@@ -131,7 +133,7 @@ class Progress:
             names = ", ".join(str(i) for i, _ in self.skipped[:20])
             more = f" and {len(self.skipped) - 20:,} more" if len(self.skipped) > 20 else ""
             self.log(f"{self.what}: {len(self.skipped):,} of {self.total:,} skipped "
-                     f"(tried again on the next run): {names}{more}")
+                     f"({self.retry}): {names}{more}")
         return self.skipped
 
 

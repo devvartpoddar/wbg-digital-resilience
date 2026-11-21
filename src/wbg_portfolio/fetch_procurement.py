@@ -35,6 +35,9 @@ AWARDS = "https://search.worldbank.org/api/contractdata"
 PLAN_DOCTY = "Procurement Plan"
 PAGE = 500          # records per page from the notices and awards interfaces
 PLAN_PAGE = 200     # documents per page from the documents interface
+# When a fetch that failed is tried again (cli.prepare: a project not fully fetched is fetched again on
+# the next day's run, or at once with --update), as a skipped item's line says it.
+FETCH_RETRY = "the project is fetched again on the next day's run, or now with --update"
 
 
 def last_page(batch, records, response, offset, cap=20000, page=PAGE):
@@ -683,7 +686,7 @@ def fetch_plan_pdfs(tasks, data, log, refresh, delay, workers, referenced=None):
     if not jobs:
         return out
     os.makedirs(pdf_dir, exist_ok=True)
-    progress = common.Progress("  plan PDFs", len(jobs))
+    progress = common.Progress("  plan PDFs", len(jobs), retry=FETCH_RETRY)
     with ThreadPoolExecutor(max_workers=max(1, workers)) as pool:
         futures = {pool.submit(_fetch_plan_pdf, os.path.join(pdf_dir, f"{d['doc_id']}.pdf"),
                                d["pdfurl"], refresh, delay): (pid, d) for pid, d in jobs}
@@ -701,10 +704,19 @@ def fetch_plan_pdfs(tasks, data, log, refresh, delay, workers, referenced=None):
                 log.record("plan_pdf", d["pdfurl"], f"doc={d['doc_id']}", 1, sha)
             else:
                 out["cached"] += 1
+    progress.end()
     out["no_pdf"].sort()
     out["failed"].sort()
     out["not_referenced"].sort()
     return out
+
+
+def fully_fetched(asked, plans_ok, notices_ok, awards_ok, pdf_report, skip_plans=False):
+    """The projects a fetch read in full: their plans (unless skipped), notices and awards, and every
+    plan PDF they reference. A failed PDF download leaves its project not fully fetched, so it is fetched
+    again on the schedule of every failed fetch (FETCH_RETRY)."""
+    pdf_failed = {f[0] for f in pdf_report["failed"]}
+    return ((set(asked) if skip_plans else set(plans_ok)) & set(notices_ok) & set(awards_ok)) - pdf_failed
 
 
 def referenced_plan_docs(data):
@@ -819,7 +831,7 @@ def _collect(projects, data, folder, refresh, delay, fetch, to_row):
     raw_dir = where(data, folder)
     os.makedirs(raw_dir, exist_ok=True)
     rows, failures = [], []
-    progress = common.Progress(f"  {folder}", len(projects))
+    progress = common.Progress(f"  {folder}", len(projects), retry=FETCH_RETRY)
     for proj in projects:
         pid = proj["project_id"]
         try:
@@ -831,6 +843,7 @@ def _collect(projects, data, folder, refresh, delay, fetch, to_row):
             continue
         rows.extend(to_row(rec, pid) for rec in records)
         progress.step(pid)
+    progress.end()
     return rows, failures
 
 
@@ -1015,8 +1028,10 @@ def main():
         write_csv(path, cols, rows)
     log.write()
     # With --skip-plans the plan rows are kept as they were, which is not a failed fetch:
-    # the status covers only what this run asked for.
-    done = (asked if args.skip_plans else plans_ok) & notices_ok & awards_ok
+    # the status covers only what this run asked for. A project with a plan PDF that could not be
+    # downloaded is not fully fetched: its rows are written, and it is fetched again on the schedule of
+    # every failed fetch (FETCH_RETRY), so the PDF is asked for again.
+    done = fully_fetched(asked, plans_ok, notices_ok, awards_ok, pdf_report, args.skip_plans)
     write_fetch_status(args.data, "procurement", sorted(done), sorted(asked - done))
 
     distinct_versions = len({(r["project_id"], r["plan_version"]) for r in prep})

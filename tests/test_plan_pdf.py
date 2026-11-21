@@ -251,7 +251,7 @@ def test_a_plan_pdf_is_fetched_once_kept_and_a_bad_body_is_refused(tmp_path, mon
     assert not (tmp_path / "D2.pdf").exists()
 
 
-def test_a_plan_whose_pdf_fails_is_listed_and_skipped_not_fatal(tmp_path, monkeypatch):
+def test_a_plan_whose_pdf_fails_is_listed_and_skipped_not_fatal(tmp_path, monkeypatch, capsys):
     def fake(path, url, refresh, delay):
         if url.endswith("bad.pdf"):
             raise RuntimeError("HTTP 403")
@@ -272,6 +272,9 @@ def test_a_plan_whose_pdf_fails_is_listed_and_skipped_not_fatal(tmp_path, monkey
     assert out["fetched"] == 1 and out["no_pdf"] == ["3"]
     assert [(p, d) for p, d, _ in out["failed"]] == [("P1", "2")]
     assert len(log.rows) == 1 and log.rows[0][0] == "plan_pdf"
+    # its project is not fully fetched, and the line says when it is tried again
+    assert FP.fully_fetched({"P1", "P2"}, {"P1", "P2"}, {"P1", "P2"}, {"P1", "P2"}, out) == {"P2"}
+    assert "fetched again on the next day's run, or now with --update" in capsys.readouterr().out
 
 
 # ---------------------------------------------------- only the plans packages reference
