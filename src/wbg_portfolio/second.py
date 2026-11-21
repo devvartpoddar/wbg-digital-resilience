@@ -5,7 +5,7 @@ second look; both must agree. Nothing here decides: each step asks and writes
 scores, and src/wbg_portfolio/decide.py reads them.
 
   measure_second  every sentence x measure whose first-pass posterior is in
-            [band.ask_low, band.ask_high) and whose digital P(yes) is digital.ask_low or more
+            [band.ask_low, band.ask_high) and whose digital score (P(2)+P(3)) is digital.ask_low or more
             (so it runs after digital; a sentence with no digital answer yet waits, one under
             digital.ask_low is left out): the decision model again with the
             paragraph beside the sentence (kind measure_ctx, P(grades 2, 3)),
@@ -13,7 +13,7 @@ scores, and src/wbg_portfolio/decide.py reads them.
   digital   (before measure_second) every sentence with a first-pass score in [band.ask_low, band.ask_high)
             for some measure, once whatever its measure: how far is it about a digital
             technology, graded 0 to 3 (kind digital, P(grades 2, 3)); only committed ones are published
-  policy    every committed sentence: investment or policy instrument, by the
+  policy    every committed, digital sentence: investment or policy instrument, by the
             chat model (kind policy, score 1 for policy, 0 for investment)
   asset_second, asset_subtype   for the committed, digital sentences: the chat model's
             assets (asset_second, for those whose best first-pass asset is under asset.ask_high),
@@ -216,7 +216,7 @@ def asset_subtype(conn, data, corpus, names, *, api_key="", dry_run=False, worke
 def package_asset_second(conn, data, corpus, names=None, *, api_key="", dry_run=False, workers=ask.WORKERS,
                          log=print, projects=None, **_):
     """The chat model's second look at a package's assets: every package x asset
-    whose first-pass P(yes) is from link.asset_ask_low up to link.asset_ask_high is
+    whose first-pass score (P(2)+P(3)) is from link.asset_ask_low up to link.asset_ask_high is
     asked yes or no (package description, category, component, the asset's
     definition). Writes kind package_asset_second (label_set assets, label the
     asset, item the package; score 1 yes, 0 no)."""

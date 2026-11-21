@@ -22,14 +22,14 @@ Every sentence-level question sends the same state (`questions.Corpus.state`): t
 
 | Kind | Items | Question | Writes |
 |---|---|---|---|
-| type | every committed, digital unit of a measure x the measure's approved types (and the OTH types the gap step proposed) | fit: is it this type, told the sentence is already a commitment to the measure, "this asks only which type it is" (`questions.type_question`, one builder for the person's types and the proposed ones; a proposed type's name is sent without its "OTH." prefix) | `scores` kind type |
+| type | every committed, digital unit of a measure x the measure's listed types (a person's file, else the proposed list; and the OTH types the gap step proposed, used as soon as stored, no person approving them first) | fit: is it this type, told the sentence is already a commitment to the measure, "this asks only which type it is" (`questions.type_question`, one builder for the person's types and the proposed ones; a proposed type's name is sent without its "OTH." prefix) | `scores` kind type |
 | package_asset | every package x its best `link.asset_top` assets by cosine | graded on the package scale: how far is the package for the asset | kind package_asset |
 | asset_second / asset_subtype | chat model: every kept sentence whose best first-pass asset is under `asset.ask_high` (one asset, a second only when the sentence names two, or none) / every asset that counts for a kept sentence, whichever look found it (its type) | chat: which asset / which type of the asset, each type with its definition ("- id: name: definition") and unspecified | kinds asset_second, asset_subtype |
 | package_asset_second | every package x asset with a first score in `[link.asset_ask_low, link.asset_ask_high)` | chat: yes or no, does the package procure the asset | kind package_asset_second |
 | package_asset_subtype | every package x asset that counts | chat: which type of the asset, the sentences' type question with the package as subject | kind package_asset_subtype |
 | package_measure | every package in scope, with or without an asset, x its `link.package_measure_top` likeliest measures by cosine among those its project has a kept sentence for (and every pair already answered) | fit, on the package alone: is what the package procures the measure; strong at `link.strong_yes` | kind package_measure |
 
-A measure with no type list a person wrote has one proposed from its committed sentences by the chat model (`second.model`), asked through the chat asker like every chat question (`checks.generate`: the same answer store, keyed on its prompt, the spend cap and ledger, an empty reply asked again; its own request size, `chat.GENERATE_REQUEST`, so a long proposal is never cut at `second.max_tokens`) into `data/types/<set>_types.csv`; with `types.gaps` on, OTH types are proposed from the sentences no approved type reaches and asked of those sentences.
+A measure with no type list a person wrote has one proposed from its committed sentences by the chat model (`second.model`), asked through the chat asker like every chat question (`checks.generate`: the same answer store, keyed on its prompt, the spend cap and ledger, an empty reply asked again; its own request size, `chat.GENERATE_REQUEST`, so a long proposal is never cut at `second.max_tokens`) into `data/types/<set>_types.csv`; with `types.gaps` on, OTH types are proposed from the sentences no listed type reaches and asked of those sentences. Both are used as soon as they are stored, marked as proposed; no person approves them first.
 
 ## The decision (`src/wbg_portfolio/decide.py`)
 
@@ -39,7 +39,7 @@ A measure with no type list a person wrote has one proposed from its committed s
 |---|---|---|
 | Asset map | fitted gate, else `asset.gate_cosine`; patterns; rounds | `asset.floor`; `asset.decay`, `asset.paragraph_floor`, `asset.multiple` |
 | Measure | fitted gate, else `measure.gate_cosine`; patterns; rounds | the band rule (`band.*`) |
-| Measure second look | a first score in `[band.ask_low, band.ask_high)` and a digital P(yes) of `digital.ask_low` or more | `band.low`, `band.keep`, `band.context`, `band.second_grade` |
+| Measure second look | a first score in `[band.ask_low, band.ask_high)` and a digital score (P(2)+P(3)) of `digital.ask_low` or more | `band.low`, `band.keep`, `band.context`, `band.second_grade` |
 | Digital | every sentence with a first-pass score in the asked band (asked before the measure second looks); graded 0-3, scored P(2)+P(3) | `digital.floor`; what is asked: `digital.ask_low` |
 | Type | every committed, digital unit | `floor.types`, `types.multiple` |
 | Package to asset | `link.asset_top` by cosine | `link.asset_yes`, `link.asset_band_low` |
@@ -55,6 +55,8 @@ The pattern for every step from 2026-11-20: **the judge decides; anything in the
 - from `band.low` (0.50) up to `band.keep` it is committed only when two second looks agree: the decision model asked the measure's graded question again with the paragraph beside the sentence (kind `measure_ctx`, P(grades 2, 3), at least `band.context` 0.70) and the chat model grades the pair at least `band.second_grade` 2 on the same 0-3 scale (kind `measure_second`; shown the sentence with lead-in, section and component, no paragraph). `decided_by` = second_look;
 - a pair in the band whose second look is missing is not committed; the publish log counts it as "waiting for a second look";
 - below `band.low` it is not committed.
+
+Grade 2 counts (`read.grades` 2 and 3, `band.second_grade` 2): on the measure scale grade 2 is "the project may finance, deliver or require it" (planned, optional or conditional) and grade 3 "it explicitly finances, delivers or requires it". So a kept pair, and a commitment, is planned or committed, not only committed; the strict reading of the evaluation (grade 3 only) is reported beside the lenient one.
 
 The context question is the same question with a note in front saying what the paragraph is for: "The 'context' field is the paragraph around the sentence. It is there only to show what the sentence refers to." (`questions.CONTEXT_NOTE`, `questions.in_context`, the one note of every question that sends the paragraph, the policy question included; `Corpus.context_state` sends `second.context_chars` characters of the paragraph centred on the sentence, so the sentence is always inside: `questions.window`, the same window the graders' marked paragraph uses with its own length). The first-pass state and every stored first-pass answer are unchanged. The later stages (types, policy, assets' second look, links) ask about the sentences committed under the band rule and digital.
 

@@ -51,7 +51,7 @@ def test_the_gap_step_reads_the_committed_digital_sentences_and_proposes_oth_typ
     path = checks.oth_path(corpus, "cra")
     assert [t["type_id"] for t in checks.oth_types(corpus, "cra")] == ["OTH.backup"] and os.path.exists(path)
     line = [m for m in logged if "OTH type" in m][0]
-    assert "units no approved type reaches" in line and "1 OTH type(s) proposed" in line
+    assert "units no listed type reaches" in line and "1 OTH type(s) proposed" in line
     # the call is in the ledger, counted like a chat question
     assert db.one(pg, f"SELECT sum(calls) FROM {db.STORE}.spend WHERE stage = 'types:generate'")[0] == 1
 

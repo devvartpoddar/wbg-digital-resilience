@@ -34,19 +34,11 @@ From those two, every run derives the same things: a `scores` table (the model's
 
 ## Where the work stands
 
-| Stage | State |
-|---|---|
-| Fetch appraisal documents, procurement records and project records; the projects table | Built |
-| Clean appraisal documents into paragraphs and sentences; components and costs | Built |
-| Clean procurement packages, notices and awards; link notices and awards to their package | Built |
-| Embed the search units; score every label set's phrases (sections 5, 5a) | Built |
-| The funnel, the same for the asset map and every measure: gate, word patterns, stored answers, feedback rounds (5b, 5c) | Built, rewritten 2026-10-24; not yet run on the box in this form |
-| The checks: types, package assets, package-to-measure links (5d, 5e) | Built, rewritten 2026-10-24 |
-| One decision function and the dashboards' views (5f, 5g) | Built, rewritten 2026-10-24 |
-| Grading as self-contained tasks a person or an agent fills; one evaluation for every decision kind (5g) | Built 2026-10-24; the file-based grades import once |
-| Release v1.0 (provisional, 2026-10-23): decisions on the raw score, the layer off, floors read off the seed-7 grades | Settings unchanged; figures are upper estimates until an evaluation draw is graded |
+- Fetching, reading the documents and the procurement records, embedding and the search are built and run on the box.
+- The questions were rewritten on 2026-11-21 and corrected after a review the same day (the band rule, the digital question, the assets' second look and types, the package links, the commitments made at publish); the next run asks again what changed (`docs/method/running.md`, "What a change costs").
+- The evaluation is the sample graded by three grader models (`check sample`, `grade`, `tune`; `docs/method/evaluation.md`); no person has graded it. The older person-graded path is kept only because it fits the skip gates.
 
-**Next on the box:** `./wbg_portfolio check import` (the grades of the file sheets into the store), then a run from `classify` (every stored answer is reused; a question is asked again only where its wording or state changed), then `./wbg_portfolio check evaluate`. `docs/method/running.md` has the order and the costs.
+**Next on the box:** a dry run from `classify`, one project with a small cap, the full run, then `check sample`, `check grade` and `check tune` (`docs/method/running.md` has the order and the costs).
 
 ## Where each part is described
 

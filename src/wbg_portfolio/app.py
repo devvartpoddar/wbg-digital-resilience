@@ -147,7 +147,8 @@ def measures(q):
 
 
 def measure_types(q, label_set=None):
-    """Each approved type of each measure (or of one), with its definition."""
+    """Each listed type of each measure (or of one: a person's list, else the proposed one), with its
+    definition."""
     return _numbers(q(_sql("""
         SELECT DISTINCT label_set, type_id, type_name, definition
         FROM wbg.measure_types
@@ -484,8 +485,8 @@ def commitment_detail(q, family=None, *, cohort=None, **filters):
     subtype_id, subtype_name (its main asset: its key's asset, else the one most of its sentences
     name), asset2_id, asset2_name, subtype2_id, subtype2_name (a second asset of its sentences, if
     any), n_assets (how many its sentences name in all), instrument ('investment', 'policy' or empty
-    while not asked), asset_column (the asset's name, "A + B" for two; else 'none': policy is an
-    instrument, not an asset), component_number, component_name (the component most of its
+    while not asked), asset_column (the asset's name, "A + B" for two; else 'none'; policy is not an asset,
+    but a policy sentence can be about an asset and then carries it), component_number, component_name (the component most of its
     sentences sit under), n_sentences, n_paragraphs, n_documents, first_document_date,
     linked_packages (distinct packages linked to its sentences), strong_packages, next_package_date
     (the soonest next date of a linked package still to come), best_link_level ('strong',
@@ -790,7 +791,8 @@ def asset_types(q):
 def type_definitions(q):
     """Every measure's types with names and definitions, the proposed ones too: label_set,
     measure_name, type_id, type_name, definition, is_proposed (a type proposed from sentences no
-    approved type reaches: its id and name start with "OTH."), merged_from."""
+    listed type reaches, used as soon as it is stored with no person approving it first: its id and name
+    start with "OTH."), merged_from."""
     return _numbers(q(_sql("""
         SELECT t.label_set, l.label_name AS measure_name, t.type_id, t.type_name, t.definition,
                starts_with(t.type_id, 'OTH.') AS is_proposed, t.merged_from
@@ -816,15 +818,15 @@ _COMMITMENT_DOWNLOAD = [
     ("measure_name", "measure_name", "The measure's name."),
     ("commitment", "commitment_label", "What the commitment is grouped by: the asset and its type, the measure type, or 'Sentences of one paragraph'."),
     ("grouped_by", "commitment_key", "asset_type (an investment: one commitment per asset type), type (a policy, or an investment with no asset: one per measure type) or paragraph (sentences with nothing else to group them by; a bucket, not a finding)."),
-    ("instrument", "instrument", "investment (the project builds, buys or runs something) or policy (a law, strategy, standard or plan); the model's reading of the commitment's sentences."),
-    ("asset", "asset_column", "The asset when there is one (two joined with +); else 'none'. Policy is not an asset: see instrument."),
+    ("instrument", "instrument", "investment (the project builds, buys or runs something) or policy (a law, strategy, standard or plan); the model's reading of the commitment's sentences. A policy sentence about an asset carries that asset."),
+    ("asset", "asset_column", "The asset when there is one (two joined with +); else 'none'. Policy is not an asset, but a policy sentence can be about an asset and then carries it: see instrument."),
     ("asset_id", "asset_id", "The main asset's id: the commitment's own asset, else the one most of its sentences name."),
     ("asset_name", "asset_name", "The main asset's name."),
     ("asset_type_id", "subtype_id", "The main asset's type, id."),
     ("asset_type_name", "subtype_name", "The main asset's type, name."),
     ("second_asset_name", "asset2_name", "A second asset its sentences name, if any."),
     ("second_asset_type_name", "subtype2_name", "The second asset's type."),
-    ("type_ids", "type_ids", "The types of the commitment's sentences (ids, joined with ';'); empty when none. An id starting OTH. is a type proposed from sentences no approved type reaches."),
+    ("type_ids", "type_ids", "The types of the commitment's sentences (ids, joined with ';'); empty when none. An id starting OTH. is a type the chat model proposed from sentences no listed type reaches; it is used as soon as it is stored, and no person approves it first."),
     ("type_names", "type_names", "The same types by name."),
     ("has_proposed_type", "has_proposed_type", "True when one of the types is a proposed OTH. type."),
     ("component_number", "component_number", "The project component its sentences sit under, as the document numbers it."),
@@ -849,7 +851,7 @@ _SENTENCE_DOWNLOAD = [
     ("commitment", "commitment_label", "What the commitment is grouped by."),
     ("grouped_by", "commitment_key", "asset_type, type or paragraph: see the commitment level."),
     ("instrument", "instrument", "The commitment's instrument (investment or policy)."),
-    ("asset", "asset_column", "The commitment's asset: the asset, else 'none'. Policy is not an asset: see instrument."),
+    ("asset", "asset_column", "The commitment's asset: the asset, else 'none'. Policy is not an asset, but a policy sentence can be about an asset and then carries it: see instrument."),
     ("sentence_id", "unit_id", "The sentence's id."),
     ("sentence", "text", "The sentence as the document prints it (with its list lead-in where it is an item)."),
     ("document_kind", "document_kind", "pad, additional_financing, restructuring or project_paper_other."),
@@ -863,7 +865,7 @@ _SENTENCE_DOWNLOAD = [
     ("asset_type_name", "subtype_name", "That asset's type."),
     ("type_ids", "type_ids", "The sentence's types (ids, joined with ';')."),
     ("type_names", "type_names", "The sentence's types by name."),
-    ("score_first", "score_first", "The decision model's probability that the sentence commits, asked alone."),
+    ("score_first", "score_first", "The decision model's probability that the sentence is graded 2 or 3 (the project may finance it, or explicitly does), asked alone. Grade 2 counts: a kept sentence is planned or committed."),
     ("score_context", "score_context", "The same with the paragraph beside the sentence; empty unless asked."),
     ("second_grade", "second_grade", "The chat model's grade 0 to 3; empty unless asked."),
     ("decided_by", "decided_by", "score (the first score alone) or second_look (a middling score confirmed by the two second looks)."),

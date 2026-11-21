@@ -210,7 +210,7 @@ class Demo:
         for m, (slug, name) in OTH_TYPES.items():
             tid = "OTH." + slug
             self.type_rows.append({"label_set": m, "label_id": m, "type_id": tid, "type_name": "OTH. " + name,
-                                   "definition": "Proposed from sentences no approved type reaches: " + name.lower() + ".",
+                                   "definition": "Proposed from sentences no listed type reaches: " + name.lower() + ".",
                                    "merged_from": ""})
         self.oth = {m: ("OTH." + s, "OTH. " + n) for m, (s, n) in OTH_TYPES.items()}
         self.group_rows = []                                 # each group of sentences, for the procurement links

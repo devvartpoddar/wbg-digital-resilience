@@ -571,7 +571,7 @@ TABLES = {
                 "asset type and same top-level component), type (same asset type), component (same asset "
                 "and same component), asset (same asset only); level_rank is 1 to 5 in that order. The "
                 "levels add nothing and remove nothing: they only order the same links. A same-asset link "
-                "at any level says the package and the sentence concern the same kind of asset, not that "
+                "at any level says the package and the sentence concern the same asset, not that "
                 "the package delivers the commitment. Built from the model readings at every publish. The "
                 "models' reading, not a person's; documented is not done.",
         columns={

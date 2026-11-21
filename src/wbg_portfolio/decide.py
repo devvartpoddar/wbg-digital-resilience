@@ -242,14 +242,14 @@ def digital_asked_units(conn, corpus, names):
 
 
 def digital_floor():
-    """The P(yes) the digital question needs for a sentence to count as digital (digital.floor)."""
+    """The score (P(2)+P(3)) the digital question needs for a sentence to count as digital (digital.floor)."""
     fl = float(panel.require("digital.floor"))
     digital_ask_low(fl)
     return fl
 
 
 def digital_ask_low(floor=None):
-    """The P(yes) from which a sentence is asked its measure second looks (digital.ask_low); fails loudly when
+    """The digital score (P(2)+P(3)) from which a sentence is asked its measure second looks (digital.ask_low); fails loudly when
     it is above digital.floor, because a sentence counted as digital would then have no second look."""
     low = float(panel.require("digital.ask_low"))
     fl = float(panel.require("digital.floor")) if floor is None else floor
@@ -261,12 +261,12 @@ def digital_ask_low(floor=None):
 
 
 def digital_scores(conn):
-    """{unit_id: P(yes)} of the digital question (kind digital)."""
+    """{unit_id: P(2)+P(3)} of the digital question (kind digital), current question only."""
     return {uid: float(score) for _, _, uid, score, *_ in scores(conn, "digital")}
 
 
 def is_digital(p, fl=None):
-    """Whether a sentence with the digital question's P(yes) `p` (None when not
+    """Whether a sentence with the digital question's score `p` (P(2)+P(3)) (None when not
     asked) counts as digital: a sentence not asked is not digital."""
     fl = digital_floor() if fl is None else fl
     return p is not None and p >= fl
@@ -399,7 +399,7 @@ def has_scores(conn, kind):
 
 
 def package_band():
-    """(low, yes): the first-pass P(yes) of a package x asset pair from which a chat yes counts
+    """(low, yes): the first-pass score (P(2)+P(3)) of a package x asset pair from which a chat yes counts
     (link.asset_band_low) and at which it counts without one (link.asset_yes). What the chat model
     is asked about is wider: package_ask()."""
     low, yes = float(panel.require("link.asset_band_low")), float(panel.require("link.asset_yes"))
@@ -408,7 +408,7 @@ def package_band():
 
 
 def package_ask(low=None, yes=None):
-    """(ask_low, ask_high): the first-pass P(yes) of a package x asset pair that gets the chat
+    """(ask_low, ask_high): the first-pass score (P(2)+P(3)) of a package x asset pair that gets the chat
     model's second look (link.asset_ask_low up to link.asset_ask_high); checked against the
     decision band."""
     low = float(panel.require("link.asset_band_low")) if low is None else low
@@ -419,7 +419,7 @@ def package_ask(low=None, yes=None):
 
 
 def package_asset_posteriors(conn):
-    """{(package_id, asset_id): P(yes)} of the first-pass package-to-asset
+    """{(package_id, asset_id): P(2)+P(3)} of the first-pass package-to-asset
     question, through the asset's layer when one is fitted."""
     pq = Q.package_asset_questions()
     pa = posterior(conn, "package_asset", Q.ASSETS, {a: Q.sha(q) for a, q in pq.items()}, lambda i: None)
@@ -678,9 +678,9 @@ def types_of(conn, corpus, name):
 
 
 def type_winners(probs):
-    """The types that count, likeliest first: the approved types at
+    """The types that count, likeliest first: the listed types at
     floor.types (every one with types.multiple, else the best); the OTH
-    types only where no approved type counts."""
+    types only where no listed type counts."""
     fl, multiple = float(panel.require("floor.types")), bool(panel.require("types.multiple"))
     pick = lambda d: sorted((t for t, q in d.items() if q >= fl), key=lambda t: (-d[t], t))
     win = pick({t: q for t, q in probs.items() if not t.startswith(OTH)})

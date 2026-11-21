@@ -108,7 +108,7 @@ def _bin(x, edges, names):
 
 
 def measure_region(first, ctx, grade, dig):
-    """The region of a sentence x measure pair by its first score, digital P(yes), context score and chat
+    """The region of a sentence x measure pair by its first score, digital score (P(2)+P(3)), context score and chat
     grade (None where not asked)."""
     if first < 0.3:
         return "first<0.3"

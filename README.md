@@ -17,7 +17,7 @@ Finds climate resilience commitments for digital infrastructure in World Bank ap
 
 ./wbg_portfolio check draw --seed 3                  # grading tasks for a person or an agent (data/review/tasks_s3.jsonl)
 ./wbg_portfolio check fill --seed 3 --file fills_s3.jsonl --grader <who>   # read the grades into the store
-./wbg_portfolio check evaluate                       # precision and recall of every decision kind; fit the layers and gates
+./wbg_portfolio check evaluate                       # the person-graded path: precision and recall of every decision; fits the skip gates
 ./wbg_portfolio check import                         # once: the grades of the old file sheets into the store
 
 ./wbg_portfolio list    --region "South Asia"        # which cohort projects a selection covers

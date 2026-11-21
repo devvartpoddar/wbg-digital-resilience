@@ -1,7 +1,7 @@
 """The checks made after a classification, through the one asker, each writing
 scores (docs/method/decisions.md):
 
-  types            every committed, digital unit x the measure's approved
+  types            every committed, digital unit x the measure's listed
                    types (and the OTH types the gap step proposed): fit (yes, unsure, no)
   package_assets   every procurement package x its best link.asset_top assets
                    by cosine: how far the package is for the asset, graded 0 to 3
@@ -226,8 +226,8 @@ def propose(conn, data, corpus, name, *, api_key="", dry_run=False, log=print, m
 
 def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False, workers=ask.WORKERS,
           log=print, projects=None):
-    """Every committed, digital unit asked each approved type's fit
-    question; the units no approved type reaches at floor.types asked the OTH
+    """Every committed, digital unit asked each listed type's fit
+    question; the units no listed type reaches at floor.types asked the OTH
     types (re-proposed first when types.gaps is on). Writes kind 'type'. With projects, only
     those projects' sentences are asked and only their rows replaced, and no OTH type is
     proposed (the proposals already written are asked)."""
@@ -238,7 +238,7 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
     lab = labs[0]
     approved = tq.get(lab["id"], {})
     if not approved:
-        log(f"{name}: no approved types; skipped")
+        log(f"{name}: no types listed (no person's list and no proposed list yet); skipped")
         return None
     items = [(u, corpus.state(u), approved) for u in units]
     log(f"types {name}: {len(units):,} committed units x {len(approved)} types")
@@ -296,7 +296,7 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
         for tid, a in got2.get(u, {}).items():
             rows.append(_row("type", name, tid, u, corpus.state(u), oth_q[tid], a))
     write_scoped(conn, "type", name, rows, scope)
-    log(f"  {len(rows):,} type scores written; {len(none):,} units no approved type reaches"
+    log(f"  {len(rows):,} type scores written; {len(none):,} units no listed type reaches"
         + (f"; {proposed} OTH type(s) proposed" if proposed is not None else
            f"; {len(oth)} OTH type(s) kept from earlier"))
     return len(rows)
