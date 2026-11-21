@@ -34,9 +34,9 @@ from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 from wbg_portfolio.paths import where
 
-BATCH = int(os.environ.get("WBG_ASK_BATCH") or panel.get("ask.batch_items", 50))
-BATCH_MAX_CHARS = int(panel.get("ask.batch_max_chars", 80_000))
-MAX_REQUEST_CHARS = int(panel.get("ask.max_request_chars", 30_000))
+BATCH = int(os.environ.get("WBG_ASK_BATCH") or panel.require("ask.batch_items"))
+BATCH_MAX_CHARS = int(panel.require("ask.batch_max_chars"))
+MAX_REQUEST_CHARS = int(panel.require("ask.max_request_chars"))
 WORKERS = 10
 REFUSED = []                    # (stage, item, qid) the provider refused and the run skipped, this process
 HOW = ("Items i01, i02, ... are each one record. Field 'q <id>' states a question in full. "

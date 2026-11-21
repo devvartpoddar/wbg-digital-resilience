@@ -53,10 +53,6 @@ def firmness(text):
     return "activity" if ACTIVITY.search(text) else "outcome" if OUTCOME.search(text) else "none"
 
 
-def setting(key):
-    return panel.require(key)
-
-
 # ---------------------------------------------------------------- reading scores
 
 def measure_sets():
@@ -152,9 +148,9 @@ def posterior(conn, kind, label_set, qshas, vector_of):
 
 def band():
     """The band rule's settings (band.*)."""
-    b = {"low": float(setting("band.low")), "keep": float(setting("band.keep")),
-         "context": float(setting("band.context")), "second_grade": float(setting("band.second_grade")),
-         "ask_low": float(setting("band.ask_low")), "ask_high": float(setting("band.ask_high"))}
+    b = {"low": float(panel.require("band.low")), "keep": float(panel.require("band.keep")),
+         "context": float(panel.require("band.context")), "second_grade": float(panel.require("band.second_grade")),
+         "ask_low": float(panel.require("band.ask_low")), "ask_high": float(panel.require("band.ask_high"))}
     check_asked("band.", b["ask_low"], b["low"], b["ask_high"], b["keep"])
     return b
 
@@ -247,7 +243,7 @@ def digital_asked_units(conn, corpus, names):
 
 def digital_floor():
     """The P(yes) the digital question needs for a sentence to count as digital (digital.floor)."""
-    fl = float(setting("digital.floor"))
+    fl = float(panel.require("digital.floor"))
     digital_ask_low(fl)
     return fl
 
@@ -255,8 +251,8 @@ def digital_floor():
 def digital_ask_low(floor=None):
     """The P(yes) from which a sentence is asked its measure second looks (digital.ask_low); fails loudly when
     it is above digital.floor, because a sentence counted as digital would then have no second look."""
-    low = float(setting("digital.ask_low"))
-    fl = float(setting("digital.floor")) if floor is None else floor
+    low = float(panel.require("digital.ask_low"))
+    fl = float(panel.require("digital.floor")) if floor is None else floor
     if low > fl:
         raise SystemExit(f"panel: digital.ask_low ({low}) is above digital.floor ({fl}); lower digital.ask_low "
                          f"to {fl} or less, else sentences counted as digital would never be asked their "
@@ -339,15 +335,15 @@ def sentence_assets(own, earlier, s=None, second=None):
 
 
 def asset_settings():
-    return {"floor": float(setting("asset.floor")), "decay": float(setting("asset.decay")),
-            "paragraph_floor": float(setting("asset.paragraph_floor")),
-            "multiple": bool(setting("asset.multiple"))}
+    return {"floor": float(panel.require("asset.floor")), "decay": float(panel.require("asset.decay")),
+            "paragraph_floor": float(panel.require("asset.paragraph_floor")),
+            "multiple": bool(panel.require("asset.multiple"))}
 
 
 def asset_ask_high():
     """The best first-pass asset score under which a committed, digital sentence also gets the
     chat model's asset opinion (asset.ask_high); never below asset.floor, which decides."""
-    high, fl = float(setting("asset.ask_high")), float(setting("asset.floor"))
+    high, fl = float(panel.require("asset.ask_high")), float(panel.require("asset.floor"))
     if high < fl:
         raise SystemExit(f"panel: asset.ask_high ({high}) is below asset.floor ({fl}); raise asset.ask_high "
                          f"to {fl} or more, else sentences the first pass gave no asset would not be asked")
@@ -406,7 +402,7 @@ def package_band():
     """(low, yes): the first-pass P(yes) of a package x asset pair from which a chat yes counts
     (link.asset_band_low) and at which it counts without one (link.asset_yes). What the chat model
     is asked about is wider: package_ask()."""
-    low, yes = float(setting("link.asset_band_low")), float(setting("link.asset_yes"))
+    low, yes = float(panel.require("link.asset_band_low")), float(panel.require("link.asset_yes"))
     package_ask(low, yes)
     return low, yes
 
@@ -415,9 +411,9 @@ def package_ask(low=None, yes=None):
     """(ask_low, ask_high): the first-pass P(yes) of a package x asset pair that gets the chat
     model's second look (link.asset_ask_low up to link.asset_ask_high); checked against the
     decision band."""
-    low = float(setting("link.asset_band_low")) if low is None else low
-    yes = float(setting("link.asset_yes")) if yes is None else yes
-    a, b = float(setting("link.asset_ask_low")), float(setting("link.asset_ask_high"))
+    low = float(panel.require("link.asset_band_low")) if low is None else low
+    yes = float(panel.require("link.asset_yes")) if yes is None else yes
+    a, b = float(panel.require("link.asset_ask_low")), float(panel.require("link.asset_ask_high"))
     check_asked("link.asset_", a, low, b, yes)
     return a, b
 
@@ -518,7 +514,7 @@ def link_strength_rows(conn, corpus, names, ua, packages, asset_types_=None):
     asset type (`asset_types_` is asset_types(); the package's from package_asset_types(); unspecified never
     counts) and a top-level component (both known and equal). The levels only order the links: none
     is added or removed by them. The package's cancelled and generic flags ride along."""
-    strong_yes = float(setting("link.strong_yes"))
+    strong_yes = float(panel.require("link.strong_yes"))
     has = package_asset_sets(conn)
     asked = package_measure_scores(conn)
     stype_of = asset_types(conn) if asset_types_ is None else asset_types_
@@ -685,7 +681,7 @@ def type_winners(probs):
     """The types that count, likeliest first: the approved types at
     floor.types (every one with types.multiple, else the best); the OTH
     types only where no approved type counts."""
-    fl, multiple = float(setting("floor.types")), bool(setting("types.multiple"))
+    fl, multiple = float(panel.require("floor.types")), bool(panel.require("types.multiple"))
     pick = lambda d: sorted((t for t, q in d.items() if q >= fl), key=lambda t: (-d[t], t))
     win = pick({t: q for t, q in probs.items() if not t.startswith(OTH)})
     if not win:

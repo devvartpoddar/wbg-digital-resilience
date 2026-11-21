@@ -50,9 +50,9 @@ def settings(name):
     map's where the panel writes one."""
     asset = name == Q.ASSETS
     fb = feedback.settings(feedback.ASSET if asset else "feedback.")
-    return {"gate": float(panel.get("asset.gate_cosine" if asset else "measure.gate_cosine", 0.3)),
-            "ask_floor": float(panel.get("asset.ask_floor" if asset else "floor.ask", 0.5)),
-            "top": 0 if asset else int(panel.get("measure.top", 0)), **fb}
+    return {"gate": float(panel.require("asset.gate_cosine" if asset else "measure.gate_cosine")),
+            "ask_floor": float(panel.require("asset.ask_floor" if asset else "floor.ask")),
+            "top": 0 if asset else int(panel.require("measure.top")), **fb}
 
 
 def best_cosines(name, data, corpus):

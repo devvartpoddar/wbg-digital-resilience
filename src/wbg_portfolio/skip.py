@@ -10,8 +10,8 @@ from wbg_portfolio import panel
 
 
 def settings():
-    return {"max_loss": float(panel.get("skip.max_loss", 0.01)),
-            "min_positives": int(panel.get("skip.min_positives", 10))}
+    return {"max_loss": float(panel.require("skip.max_loss")),
+            "min_positives": int(panel.require("skip.min_positives"))}
 
 
 def fit(positives, s=None):

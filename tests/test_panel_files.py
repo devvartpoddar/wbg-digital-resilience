@@ -36,3 +36,16 @@ def test_no_description_speaks_of_a_before_and_after():
     bad = re.compile(r"\bv2\b|\bnew\b|\bold\b|retired|when on|as before", re.I)
     for r in shipped():
         assert not bad.search(r["what_it_does"]), r["setting"]
+
+
+def test_a_setting_the_code_needs_is_read_loudly_with_no_hidden_default():
+    """panel.require everywhere; panel.get only for an optional override (feedback's asset_feedback.<k>).
+    The posterior layer's own reads are left as they are: the layer is off and untouched."""
+    left = {"posterior.py", "fits.py", "grading.py"}
+    for name in os.listdir(SRC):
+        if name.endswith(".py") and name not in left:
+            with open(os.path.join(SRC, name), encoding="utf-8") as fh:
+                text = fh.read()
+            assert not re.search(r"panel\.get\([^)]*,", text), name           # no default given
+            if name != "feedback.py":
+                assert "panel.get(" not in text or name == "panel.py", name

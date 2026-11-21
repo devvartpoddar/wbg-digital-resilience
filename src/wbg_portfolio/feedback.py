@@ -15,13 +15,13 @@ BLOCK = 20_000
 def settings(prefix="feedback."):
     """feedback.* for the measures; asset_feedback.<k> overrides a line for
     the asset map where the panel writes one."""
-    def get(k, default):
-        v = panel.get(prefix + k)
-        return panel.get("feedback." + k, default) if v is None else v
-    return {"batch": int(get("batch", 500)),
-            "min_yield": int(get("min_yield", 10)),
-            "max_rounds": int(get("max_rounds", 6)),
-            "negative_weight": float(get("negative_weight", 0.5))}
+    def get(k):
+        v = panel.get(prefix + k)                   # an override the panel may write; no default
+        return panel.require("feedback." + k) if v is None else v
+    return {"batch": int(get("batch")),
+            "min_yield": int(get("min_yield")),
+            "max_rounds": int(get("max_rounds")),
+            "negative_weight": float(get("negative_weight"))}
 
 
 ASSET = "asset_feedback."

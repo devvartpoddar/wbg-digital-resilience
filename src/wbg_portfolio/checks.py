@@ -250,7 +250,7 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
     none = [u for u in units if not any(Q.score(a, fit=True) >= fl for a in got[u].values())]
     oth = oth_types(data, name)
     proposed = None
-    if not projects and str(panel.get("types.gaps", "off")).lower() in ("on", "true") and \
+    if not projects and str(panel.require("types.gaps")).lower() in ("on", "true") and \
             len(none) >= int(panel.require("types.gap_min_units")):
         existing = "\n".join(f"- {t['type_name']}: {t['definition']}"
                              for t in sorted(labels.load_types(name), key=lambda t: t["type_id"]))

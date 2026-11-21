@@ -24,7 +24,7 @@ UNIT_COLS = ["unit_id", "kind", "paragraph_id", "doc_id", "project_ids", "block"
              "char_start", "char_end", "n_tokens", "text_sha256", "lead_in_start",
              "lead_in_end", "left_out", "copy_of", "template_projects", "template_share"]
 from wbg_portfolio import panel  # noqa: E402
-TEMPLATE_SHINGLE = int(panel.get("text.shingle_words", 6))  # words per run, shared with the views
+TEMPLATE_SHINGLE = int(panel.require("text.shingle_words"))  # words per run, shared with the views
 TEMPLATE_MIN_PROJECTS = 2   # a shingle is template wording when this many other projects print it
 
 WORD = re.compile(r"[^\W\d_]{2,}")

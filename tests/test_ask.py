@@ -123,7 +123,8 @@ def test_a_sentence_state_carries_section_component_and_optionally_the_paragraph
     assert s["section"] == "Project Components" and s["component"] == "1 Connectivity"
     assert "paragraph" not in s
     from wbg_portfolio import panel
-    monkeypatch.setattr(panel, "get", lambda k, d=None: "paragraph" if k == "ask.context" else d)
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "ask.context": "paragraph"})
     c2 = Q.Corpus(corpus)
     assert "Floods are frequent." in c2.state(uid)["paragraph"]
     assert c.vector(uid).shape == (4,) and c.projects(uid) == ["P1"]

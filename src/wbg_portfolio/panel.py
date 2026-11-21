@@ -7,7 +7,7 @@ holding its own. A setting's value is part of the run key of every stage
 that reads it, so a changed number gives a new run, rebuilt from the stored
 answers where no question changed.
 
-  panel.get("asset.gate_cosine")      0.3
+  panel.require("asset.gate_cosine")  0.3
   panel.grades()                      (2, 3): the grades a score adds up
 """
 import csv, os
@@ -55,7 +55,8 @@ def settings():
 
 
 def get(key, default=None):
-    """A setting's value, or default when the panel does not write it."""
+    """A setting's value, or default when the panel does not write it. For an optional override only
+    (feedback.settings' asset_feedback.<k>); a setting the code needs is read with require()."""
     v = settings().get(key)
     return default if v is None else v
 
@@ -70,7 +71,7 @@ def require(key):
 
 def grades():
     """The grades a sentence's score adds up (read.grades, '2|3')."""
-    return tuple(int(g) for g in str(get("read.grades", "2|3")).split("|") if g.strip())
+    return tuple(int(g) for g in str(require("read.grades")).split("|") if g.strip())
 
 
 def items(prefix):

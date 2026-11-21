@@ -451,7 +451,7 @@ class Corpus:
         from wbg_portfolio import units
         self.data = data
         self.included = set(included) if included is not None else included_projects()
-        self.context = str(panel.get("ask.context", "sentence"))
+        self.context = str(panel.require("ask.context"))
         with open(where(data, "embeddings", "sentence_index.csv"), newline="", encoding="utf-8") as fh:
             self.index = list(csv.DictReader(fh))
         self.row_of = {r["unit_id"]: i for i, r in enumerate(self.index)}

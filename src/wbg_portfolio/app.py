@@ -1264,8 +1264,7 @@ def about(q):
     floors = {}
     for key in ("floor.default", "floor.types", "asset.floor", "link.asset_yes", "band.low", "band.keep",
                 "band.context"):
-        v = panel.get(key)
-        floors[key] = None if v is None else float(v)
+        floors[key] = float(panel.require(key))
     out["floors"] = floors
     for name, sql in _ABOUT.items():
         try:
