@@ -27,7 +27,8 @@ reply["max"], none allowed), assets (up to reply["max"] pairs of an asset and
 a kind of it, none allowed; the ids are read as text and checked against the
 files by the step, which discards and counts any it does not know), activities
 (a list of labelled groups of sentence numbers; the step validates and
-repairs them). temperature 0; the spend ledger and --max-spend
+repairs them), fields (named answers, each a grade, one of a list or any of a list: the evaluation's
+graders, whose question is a template with a system line, questions.grader_question). temperature 0; the spend ledger and --max-spend
 work as in src/wbg_portfolio/ask.py. Tests replace api.post (tests/conftest.py fake_chat).
 
 Reasoning is off for the short forms (second.reasoning false: the request body carries
@@ -61,38 +62,46 @@ def model():
     return str(panel.require("second.model"))
 
 
-def max_tokens(q):
+def max_tokens(q, request=None):
     """Most tokens a reply to this question may hold: second.max_tokens, or
-    activities.max_tokens for the activities form (a list of labelled groups)."""
+    activities.max_tokens for the activities form (a list of labelled groups); `request` (a step's
+    own request, {"max_tokens", "reasoning"}) overrides both."""
+    if request:
+        return int(request["max_tokens"])
     return int(panel.require("activities.max_tokens" if q["reply"]["form"] == "activities"
                              else "second.max_tokens"))
 
 
-def reasoning(q):
+def reasoning(q, request=None):
     """Whether the chat model may reason before it answers this question: activities.reasoning for the
-    activities form, second.reasoning for every other form (read through panel.require)."""
+    activities form, second.reasoning for every other form (read through panel.require); `request`
+    overrides both."""
+    if request:
+        return bool(request["reasoning"])
     return bool(panel.require("activities.reasoning" if q["reply"]["form"] == "activities"
                               else "second.reasoning"))
 
 
-def request_body(mdl, q, content):
-    """The request sent for one question. "reasoning": {"enabled": false} only when reasoning is off."""
-    body = {"model": mdl, "temperature": 0, "max_tokens": max_tokens(q),
-            "messages": [{"role": "user", "content": content}]}
-    if not reasoning(q):
+def request_body(mdl, q, content, request=None):
+    """The request sent for one question. "reasoning": {"enabled": false} only when reasoning is off;
+    a question with a "system" text sends it as the system message."""
+    messages = ([{"role": "system", "content": q["system"]}] if q.get("system") else []) + \
+        [{"role": "user", "content": content}]
+    body = {"model": mdl, "temperature": 0, "max_tokens": max_tokens(q, request), "messages": messages}
+    if not reasoning(q, request):
         body["reasoning"] = {"enabled": False}
     return body
 
 
-def estimate(prompt_text, q):
+def estimate(prompt_text, q, request=None):
     """US$ an item may cost: its prompt (characters / 4 tokens) at second.price_in_per_mtok plus a
     reply of up to max_tokens at second.price_out_per_mtok. An upper bound, so a cap is not passed
     by an estimate that is too low."""
     return (len(prompt_text) / 4 * float(panel.require("second.price_in_per_mtok"))
-            + max_tokens(q) * float(panel.require("second.price_out_per_mtok"))) / 1e6
+            + max_tokens(q, request) * float(panel.require("second.price_out_per_mtok"))) / 1e6
 
 
-def cost_of(response, prompt_text, text, q):
+def cost_of(response, prompt_text, text, q, request=None):
     """What a response cost: usage.cost when it reports one, else its token counts at the panel's
     prices, else the estimate (never 0, so the cap cannot be bypassed by a missing field)."""
     usage = response.get("usage") or {}
@@ -101,7 +110,7 @@ def cost_of(response, prompt_text, text, q):
     p_in, p_out = float(panel.require("second.price_in_per_mtok")), float(panel.require("second.price_out_per_mtok"))
     t_in, t_out = usage.get("prompt_tokens"), usage.get("completion_tokens")
     if t_in is None and t_out is None:
-        return estimate(prompt_text, q)
+        return estimate(prompt_text, q, request)
     return ((t_in if t_in is not None else len(prompt_text) / 4) * p_in
             + (t_out if t_out is not None else len(text or "") / 4) * p_out) / 1e6
 
@@ -125,7 +134,11 @@ def reply_text(reply):
 
 
 def prompt(state, q):
-    """The one message sent: the question, the item's fields, the reply format."""
+    """The one message sent: the question, the item's fields, the reply format. A question with a
+    "template" (the evaluation's graders, questions.grader_question) is that text with the item's
+    fields put in its {places}; it says how to reply itself."""
+    if q.get("template"):
+        return q["template"].format_map(state)
     fields = "\n\n".join(f"[{k}]\n{v}" for k, v in state.items())
     return (f"{q['instructions']}\n\n{fields}\n\nReply with only a JSON object, nothing else: "
             f"{reply_text(q['reply'])}")
@@ -192,6 +205,8 @@ def parse(text, reply):
         return {"grade": None, "labels": None,
                 "activities": [{"label": " ".join(x["label"].split()), "sentences": list(x["sentences"])}
                                for x in acts]}
+    if form == "fields":
+        return {"grade": None, "labels": None, **_fields(obj, reply["fields"])}
     labs = obj.get("labels")
     if not isinstance(labs, list) or not all(isinstance(x, str) for x in labs):
         raise ValueError("labels is not a list of text")
@@ -200,6 +215,32 @@ def parse(text, reply):
             or len(labs) > reply["max"]:
         raise ValueError(f"labels {labs!r} are not at most {reply['max']} of {reply['options']}")
     return {"grade": None, "labels": labs}
+
+
+def _fields(obj, specs):
+    """The named answers of a "fields" reply: {"fields": {name: value}}, and "grade" when a field is
+    named grade. A spec is {"max": n} (a whole number 0 to n), {"options": [..]} (one of them) or
+    {"options": [..], "many": true} (any of them, none allowed). Every field must be there."""
+    out = {}
+    for name, spec in specs:
+        v = obj.get(name)
+        if "max" in spec:
+            if isinstance(v, str) and v.strip().isdigit():
+                v = int(v.strip())
+            if isinstance(v, bool) or not isinstance(v, int) or not 0 <= v <= spec["max"]:
+                raise ValueError(f"{name} {v!r} is not a whole number from 0 to {spec['max']}")
+        elif spec.get("many"):
+            if not isinstance(v, list) or not all(isinstance(x, str) for x in v):
+                raise ValueError(f"{name} is not a list of text")
+            v = sorted({x.strip().lower() for x in v} - {"none"})
+            if any(x not in spec["options"] for x in v):
+                raise ValueError(f"{name} {v!r} are not among {spec['options']}")
+        else:
+            if not isinstance(v, str) or v.strip().lower() not in spec["options"]:
+                raise ValueError(f"{name} {v!r} is not one of {spec['options']}")
+            v = v.strip().lower()
+        out[name] = v
+    return {"fields": out, **({"grade": out["grade"]} if "grade" in out else {})}
 
 
 def usable(answer):
@@ -230,12 +271,14 @@ def failure_counts(conn, mdl, keys):
 
 
 def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=asker.WORKERS,
-        log=print, mdl=None):
+        log=print, mdl=None, request=None, price=None):
     """Answers for every item: ({item: answer}, stats). Asks only what the
     store lacks (and what it holds as a failure); with dry_run nothing is
     asked. An item with no usable answer is absent. stats: stored, to_ask,
     estimate_usd, calls, cost_usd, failures (requests that failed), unparsed
-    (replies that were not the JSON asked for), seconds."""
+    (replies that were not the JSON asked for), seconds. `request` is a step's own
+    {"max_tokens", "reasoning"} (the evaluation's graders); `price` a measured US$ per item, used
+    for the estimate in place of the upper bound."""
     mdl = mdl or model()
     keyed = [(item, state, Q.sha(state), q, Q.sha(q)) for item, state, q in items]
     keys = sorted({(s, qs) for _, _, s, _, qs in keyed})
@@ -259,14 +302,15 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
             todo.setdefault(k, (state, q))
     sent = {k: prompt(state, q) for k, (state, q) in todo.items()}
     stats = {"stored": sum(1 for k, v in have.items() if k not in legacy), "to_ask": len(todo),
-             "estimate_usd": sum(estimate(sent[k], todo[k][1]) for k in todo), "gave_up": len(gave_up),
+             "estimate_usd": (price * len(todo) if price is not None
+                              else sum(estimate(sent[k], todo[k][1], request) for k in todo)), "gave_up": len(gave_up),
              "calls": 0, "cost_usd": 0.0, "failures": [], "refused": [], "unparsed": 0, "seconds": 0.0}
     if todo and not dry_run:
         lock = Lock()
 
         def one(key):
             state, q = todo[key]
-            body = request_body(mdl, q, sent[key])
+            body = request_body(mdl, q, sent[key], request)
             cost = 0.0
             for _ in range(EMPTY_TRIES):
                 try:
@@ -278,7 +322,7 @@ def ask(conn, items, *, stage, label_set="", api_key="", dry_run=False, workers=
                     text = r["choices"][0]["message"]["content"]
                 except (KeyError, IndexError, TypeError):
                     raise api.Transport(f"reply has no message: {str(r)[:200]}")
-                cost += cost_of(r, sent[key], text, q)
+                cost += cost_of(r, sent[key], text, q, request)
                 if isinstance(text, str) and text.strip():
                     break
             else:

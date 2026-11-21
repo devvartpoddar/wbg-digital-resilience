@@ -98,7 +98,7 @@ def flag_question(flag_id):
 
 # ---------------------------------------------- the chat model's questions (second looks, activities)
 
-CHAT_FORMS = ("grade", "yesno", "choice", "labels", "assets", "activities")
+CHAT_FORMS = ("grade", "yesno", "choice", "labels", "assets", "activities", "fields")
 
 
 def chat_question(instructions, form, options=None, maximum=None):
@@ -193,6 +193,110 @@ def activity_question(lab):
         f"sentences or documents say it again or describe it in different words; two different things are two "
         f"activities. Every sentence belongs to exactly one activity. Give each activity a short label.",
         "activities")
+
+
+# ------------------------------------- the evaluation's graders (docs/method/evaluation.md)
+#
+# The wording of the trial ruler the earlier model-graded trials used, so a grade here reads like
+# theirs: a system line, the item laid out in the prompt, the 0-3 scale, a short JSON reply. Each
+# question is a template whose {places} the item's fields fill (chat.prompt); text from the label
+# files is escaped so its braces are never read as places.
+
+GRADER_SYSTEM = ("You are a careful, strict annotator for World Bank project documents. Output ONLY the JSON "
+                 "object, with no text before or after it.")
+VERDICT = ["yes", "unsure", "no"]
+_SENTENCE_PART = ("\nDocument section: {section}\nProject component: {component}\n{lead_in_line}"
+                  "\nParagraph (the sentence to judge is marked >>> <<<):\n{paragraph}\n")
+
+
+def _esc(text):
+    return str(text).replace("{", "{{").replace("}", "}}")
+
+
+def grader_question(template, fields):
+    """A grader's question: the template, the system line and the named fields of the reply
+    (chat.parse, form "fields")."""
+    return {"type": "chat", "system": GRADER_SYSTEM, "template": template,
+            "reply": {"form": "fields", "fields": [list(f) for f in fields]}}
+
+
+def grader_measure_question(lab, scale):
+    """The ruler's measure question (0-3 on the shared scale, the sentence marked in its paragraph),
+    with two yes-or-no questions on the same sentence in the same request: is it digital (the
+    pipeline's digital question's wording and definition) and is it only a general aim."""
+    name, dig = _esc(lab["name"]), labels.flag("digital")
+    sc = "\n".join(f"{i}: {_esc(g.replace('{name}', lab['name']))}" for i, g in enumerate(scale))
+    t = f"Measure: {name}\nDefinition: {_esc(lab['definition'])}\n" + _SENTENCE_PART
+    t += (f"\nHow does the marked sentence (with its lead-in) relate to the measure? Judge that sentence only; "
+          f"the paragraph is context.\nScale:\n{sc}\n\n")
+    t += (f"Also answer two questions about the same marked sentence, read with its paragraph:\n"
+          f"- digital: Does {_esc(dig['name'])} apply to the marked sentence? {_esc(dig['name'])} means: "
+          f"{_esc(dig['definition'])}\n"
+          f"- general_aim: Is the marked sentence only a general aim, with no specific thing to be done?\n\n")
+    t += 'Reply with JSON only: {{"grade": 0-3, "digital": "yes" | "no", "general_aim": "yes" | "no"}}'
+    return grader_question(t, [("grade", {"max": len(scale) - 1}), ("digital", {"options": ["yes", "no"]}),
+                               ("general_aim", {"options": ["yes", "no"]})])
+
+
+def grader_types_question(lab, types):
+    """Which of the measure's types the marked sentence describes (any, or none)."""
+    types = sorted(types, key=lambda t: t["type_id"])
+    t = f"Measure: {_esc(lab['name'])}\nDefinition: {_esc(lab['definition'])}\n" + _SENTENCE_PART
+    t += ("\nTypes of the measure:\n" + "\n".join(
+        f"- {_esc(x['type_id'])}: {_esc(x['type_name'])}. {_esc(x['definition'])}" for x in types))
+    t += ("\n\nQuestion: which of these types does the marked sentence (with its lead-in) describe? Judge that "
+          "sentence only; the paragraph is context. Choose every type that applies, or none.\n"
+          'Reply with JSON only: {{"types": [<type ids>]}}')
+    return grader_question(t, [("types", {"options": [x["type_id"] for x in types], "many": True})])
+
+
+def grader_asset_question(assets, subtypes):
+    """Which one of the four assets (or none) the marked sentence is about, and which type of it."""
+    assets = sorted(assets, key=lambda a: a["id"])
+    listing = []
+    for a in assets:
+        listing.append(f"- {_esc(a['id'])}: {_esc(a['name'])}. {_esc(a['definition'])}")
+        listing.extend(f"    type {_esc(s['id'])}: {_esc(s['name'])}. {_esc(s['definition'])}"
+                       for s in sorted(subtypes.get(a["id"], []), key=lambda s: s["id"]))
+    kinds = sorted({s["id"] for v in subtypes.values() for s in v})
+    t = "A sentence from a World Bank project appraisal document, in its paragraph.\n" + _SENTENCE_PART
+    t += "\nDigital assets, each with its types:\n" + "\n".join(listing)
+    t += ("\n\nQuestion: which one of these digital assets, if any, is the marked sentence (with its lead-in) "
+          "about, and which type of that asset? Judge that sentence only; the paragraph is context. Answer none "
+          "when it is about no digital asset; choose the type unspecified when the asset is clear but none of "
+          "its types is stated.\n"
+          'Reply with JSON only: {{"asset": "<asset id>" | "none", "type": "<type id of that asset>" | "none"}}')
+    return grader_question(t, [("asset", {"options": [a["id"] for a in assets] + ["none"]}),
+                               ("type", {"options": kinds + ["none"]})])
+
+
+def grader_package_measure_question(lab):
+    """The ruler's package question, asked of a measure: does the package procure it."""
+    name = _esc(lab["name"])
+    t = ("A procurement package from a World Bank project procurement plan:\nDescription: {package}\n"
+         "Plan component: {package_component}\nCategory: {category}\n\n"
+         f"Measure: {name}\nDefinition: {_esc(lab['definition'])}\n\n"
+         f"Question: does the package procure {name}, or equipment, works, systems or services for it, named or "
+         "clearly implied? yes = clearly applies; unsure = the text does not say enough; no = does not apply.\n"
+         'Reply with JSON only: {{"verdict": "yes" | "unsure" | "no"}}')
+    return grader_question(t, [("verdict", {"options": VERDICT})])
+
+
+def grader_link_question(lab):
+    """The ruler's link question: does carrying out this package deliver the commitment."""
+    t = ("A commitment sentence from a World Bank project appraisal document, and a procurement package from the "
+         "same project's procurement plan.\n\n"
+         f"Commitment measure: {_esc(lab['name'])}\nMeasure definition: {_esc(lab['definition'])}\n"
+         "Appraisal component: {sentence_component}\nLead-in: {lead_in}\nSentence: {sentence}\n\n"
+         "Procurement package: {package}\nPlan component: {package_component}\n"
+         "Category: {category}; method: {method}; estimated amount USD: {amount}\n\n"
+         "Question: does carrying out this package deliver the commitment? Answer yes when the package procures, "
+         "builds, installs or contracts the asset, works, equipment, system or service the commitment concerns, or "
+         "the study or service the commitment itself requires, so the commitment is delivered or applied through "
+         "what the package delivers. Belonging to the same project is not enough. Answer unsure when the text does "
+         "not say enough to tell, no when it does not apply.\n"
+         'Reply with JSON only: {{"verdict": "yes" | "unsure" | "no"}}')
+    return grader_question(t, [("verdict", {"options": VERDICT})])
 
 
 def graded_questions(name):

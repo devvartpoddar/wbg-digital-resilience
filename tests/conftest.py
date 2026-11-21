@@ -362,6 +362,6 @@ def fake_chat(monkeypatch, fake_model):
             return inner(path, b, api_key, **kw)
         chat.calls.append(b)
         return {"model": "chat-served", "usage": {"cost": 0.0002},
-                "choices": [{"message": {"content": chat.reply(b["messages"][0]["content"])}}]}
+                "choices": [{"message": {"content": chat.reply(b["messages"][-1]["content"])}}]}
     monkeypatch.setattr(api, "post", post)
     return chat
