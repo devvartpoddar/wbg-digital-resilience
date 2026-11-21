@@ -115,7 +115,7 @@ def test_the_type_is_asked_for_every_asset_that_counts_whichever_look_found_it(p
     assert second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1      # the first pass's asset
     prompt = fake_chat.prompts()[0]
     assert "Which type of Mobile networks is the sentence in the 'sentence' field about?" in prompt
-    assert "- mast: Masts\n- unspecified: not stated" in prompt and "tall masts" not in prompt
+    assert "- mast: Masts: tall masts\n- unspecified: not stated" in prompt          # each type with its definition
     assert decide.asset_types(pg) == {(u0, "towers"): "mast"}
     second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)
     assert len(fake_chat.calls) == 1

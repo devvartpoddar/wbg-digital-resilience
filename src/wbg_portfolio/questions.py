@@ -1,15 +1,13 @@
-"""What is sent to the decision model, for every decision alike: the label
-sets, the two question forms, the one score, and the corpus a sentence's
-state is built from.
+"""What is sent to the models, for every decision alike: the label sets, the question forms, the one
+score, and the corpus a sentence's state is built from.
 
-Two forms of question (docs/method/decisions.md). A classification (asset,
-measure) asks graded_question on the set's 0-3 scale, scored as the
-probability of the grades the panel counts (read.grades). A check made after
-it (type, package to asset, package to measure) asks
-fit_question, yes / unsure / no, told what is already decided, scored as
-P(yes). Every sentence-level question sends the same state (sentence_state):
-the sentence with its list lead-in, the section title, the component, and
-with ask.context = paragraph the paragraph too.
+Two forms of decision-model question (docs/method/decisions.md). A classification (measure, asset,
+digital, package to asset) asks a graded question on its set's 0-3 scale, scored as the probability of
+the grades the panel counts (read.grades: P(2)+P(3)). A check made after it (a measure type, package to
+measure) asks fit_question, yes / unsure / no, told what is already decided, scored as P(yes). Every
+sentence-level question sends the same state (Corpus.state): the sentence with its list lead-in, the
+section title, the component, and with ask.context = paragraph the paragraph too; a question that reads
+the paragraph beside the sentence sends Corpus.context_state under CONTEXT_NOTE.
 """
 import csv
 import hashlib
@@ -86,19 +84,17 @@ def fit_question(lab, subject=SENTENCE, given=""):
             "criteria": [g.replace("{name}", lab["name"]) for g in FIT_SCALE]}
 
 
+# The one note of every question that sends the paragraph (the 'context' field, second.context_chars of
+# it centred on the sentence: Corpus.context_state).
 CONTEXT_NOTE = ("The 'context' field is the paragraph around the sentence. It is there only to show what "
                 "the sentence refers to. ")
-# The policy question keeps the note it was first asked with, so its stored answers stand
-# (it was not part of the 2026-11-21 rewrite of the questions).
-POLICY_NOTE = ("Only the sentence in the 'sentence' field is judged; the 'context' field is the "
-               "paragraph around it, for reference. ")
 
 
-def in_context(question, note=CONTEXT_NOTE):
+def in_context(question):
     """The same question for a state that carries a 'context' field (the
-    paragraph): a note says what the paragraph is for. A different question,
+    paragraph): CONTEXT_NOTE says what the paragraph is for. A different question,
     so a different hash and its own stored answers."""
-    return dict(question, instructions=note + question["instructions"])
+    return dict(question, instructions=CONTEXT_NOTE + question["instructions"])
 
 
 # ------------------------------------------------- the digital and asset questions
@@ -118,10 +114,11 @@ def package_scale(scale):
 
 
 def asset_question(lab, scale, package=False):
-    """How far a sentence is about an asset (the first pass), or how far a package is for it."""
+    """How far a sentence is about an asset (the first pass), or how far a package is for it: the asset
+    named, "{name} means: {definition}", then ASSET_RULE."""
     ask = f"How far is {PACKAGE} for" if package else f"How far is {SENTENCE_FIELD} about"
     return {"type": "score",
-            "instructions": f"{ask} {lab['name']}? {lab['name']} are: {lab['definition']} {ASSET_RULE}",
+            "instructions": f"{ask} {lab['name']}? {lab['name']} means: {lab['definition']} {ASSET_RULE}",
             "criteria": [g.replace("{name}", lab["name"]) for g in (package_scale(scale) if package else scale)]}
 
 
@@ -162,12 +159,12 @@ def second_grade_question(lab, scale):
 
 
 def policy_question():
-    """Investment or policy instrument, for a committed sentence (flag policy)."""
+    """Investment or policy instrument, for a committed sentence (flag policy), with the paragraph
+    beside it under the one CONTEXT_NOTE."""
     f = labels.flag("policy")
     return in_context(chat_question(
         f"Does the sentence commit the project to an investment or to a policy instrument? "
-        f"{f['name'][:1].upper() + f['name'][1:]} means: {f['definition']}", "choice", ["investment", "policy"]),
-        POLICY_NOTE)
+        f"{f['name'][:1].upper() + f['name'][1:]} means: {f['definition']}", "choice", ["investment", "policy"]))
 
 
 def asset_catalogue():
@@ -193,13 +190,15 @@ UNSPECIFIED = "unspecified"
 
 
 def asset_subtype_question(asset, types, package=False):
-    """Which type of an asset a sentence (with its paragraph) or a package is about: the types by
-    name, in the order of their ids, then unspecified (not stated)."""
+    """Which type of an asset a sentence (with its paragraph) or a package is about: one simple question,
+    the types one a line as "- id: name: definition" in the order of their ids (so the rules a definition
+    holds reach the model), then unspecified (not stated). ASSET_RULE is not said: a type is picked once
+    the asset counts, and the rule does not help that pick."""
     types = sorted((t for t in types if t["id"] != UNSPECIFIED), key=lambda t: t["id"])
     subject = PACKAGE if package else SENTENCE_FIELD
     q = chat_question(
         f"Which type of {asset['name']} is {subject} about?\n"
-        + "".join(f"- {t['id']}: {t['name']}\n" for t in types) + f"- {UNSPECIFIED}: not stated",
+        + "".join(f"- {t['id']}: {t['name']}: {t['definition']}\n" for t in types) + f"- {UNSPECIFIED}: not stated",
         "choice", [t["id"] for t in types] + [UNSPECIFIED])
     return q if package else in_context(q)
 
@@ -312,13 +311,15 @@ def grader_asset_question(assets, subtypes):
 
 
 def grader_package_measure_question(lab):
-    """The ruler's package question, asked of a measure: does the package procure it."""
+    """The graders' package question about a measure: the strong-link question the pipeline asks
+    (package_measure_question), with the same core, "what the package procures is the measure"."""
     name = _esc(lab["name"])
     t = ("A procurement package from a World Bank project procurement plan:\nDescription: {package}\n"
          "Plan component: {package_component}\nCategory: {category}\n\n"
          f"Measure: {name}\nDefinition: {_esc(lab['definition'])}\n\n"
-         f"Question: does the package procure {name}, or equipment, works, systems or services for it, named or "
-         "clearly implied? yes = clearly applies; unsure = the text does not say enough; no = does not apply.\n"
+         f"Question: does {name} apply to the package? It applies when what the package procures is {name}, "
+         "named or clearly implied in the package's own description. yes = clearly applies; unsure = the text "
+         "does not say enough; no = does not apply.\n"
          'Reply with JSON only: {{"verdict": "yes" | "unsure" | "no"}}')
     return grader_question(t, [("verdict", {"options": VERDICT})])
 
