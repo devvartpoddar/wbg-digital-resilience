@@ -56,12 +56,13 @@ LANGUAGE sql IMMUTABLE AS $$ SELECT regexp_replace(url, '^http://', 'https://') 
 COMMENT ON FUNCTION wbg.https(text) IS 'A link with http:// made https://.';
 
 -- Two component names are the same component when their keys are equal or
--- one is a prefix of the other and both are at least 12 characters (a
--- restructuring paper shortens a heading; a short key would match too much).
+-- one is a prefix of the other and both are at least keys.SAME_COMPONENT_MIN_CHARS (12)
+-- characters (a restructuring paper shortens a heading; a short key would match too much).
+-- The number is put in at publish: keys.same_component, the component reader's rule, is the one rule.
 DROP FUNCTION IF EXISTS wbg.same_component(text, text) CASCADE;
 CREATE FUNCTION wbg.same_component(a text, b text) RETURNS boolean
 LANGUAGE sql IMMUTABLE AS $$
-  SELECT coalesce(a, '') <> '' AND (a = b OR (least(length(a), length(b)) >= 12
+  SELECT coalesce(a, '') <> '' AND (a = b OR (least(length(a), length(b)) >= {{same_component_min_chars}}
          AND (a LIKE b || '%' OR b LIKE a || '%')))
 $$;
 COMMENT ON FUNCTION wbg.same_component(text, text) IS

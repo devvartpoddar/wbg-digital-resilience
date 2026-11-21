@@ -28,6 +28,7 @@ from wbg_portfolio.paths import REPO as ROOT
 from wbg_portfolio.paths import data_root, where  # noqa: E402
 from wbg_portfolio.common import file_sha256  # noqa: E402
 from wbg_portfolio import db  # noqa: E402
+from wbg_portfolio import keys  # noqa: E402
 from wbg_portfolio import labels  # noqa: E402
 from wbg_portfolio import schema as S  # noqa: E402
 
@@ -532,6 +533,7 @@ def finish(conn, log=print):
             sql = sql.replace("{VECTOR}", vec)
         sql = re.sub(r"\{\{panel:([a-z0-9_.]+)\}\}", lambda m: panel.sql_value(m.group(1)), sql)
         sql = sql.replace("{{cancelled_statuses}}", _cancelled_sql())
+        sql = sql.replace("{{same_component_min_chars}}", str(int(keys.SAME_COMPONENT_MIN_CHARS)))
         if db.SCHEMA != "wbg":
             sql = re.sub(r"\bwbg\.", db.SCHEMA + ".", sql).replace("'wbg'", f"'{db.SCHEMA}'")
         try:

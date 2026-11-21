@@ -252,6 +252,19 @@ def test_generic_and_component_rules():
     assert decide.top_component("C.1 Platforms") == "C" and decide.top_component("") == ""
     assert decide.component_relation("2", "2") == "same" and decide.component_relation("2", "") == "unknown"
     assert decide.component_relation("1", "2") == "different"
+    # the forms the reviewer found unread, and roman numerals, read by the one function (keys.top_component)
+    from wbg_portfolio import keys
+    assert decide.top_component is keys.top_component
+    for x, want in (("C1", "C"), ("A1", "A"), ("B2", "B"), ("(a)", "A"), ("Component (b)", "B"),
+                    ("Component IIa", "2"), ("Part A", "A"), ("iii)", "3"), ("IV.2", "4"), ("ix", "9"),
+                    ("Annex", ""), ("Component One", "")):
+        assert decide.top_component(x) == want, x
+    # letters on one side and numbers on the other: unknown, never different
+    assert decide.component_relation("A", "1") == "unknown" == decide.component_relation("2", "B")
+    assert decide.component_relation("A", "B") == "different" and decide.component_relation("B", "B") == "same"
+    # one rule for two names of one component, in Python and in the views
+    assert keys.same_component("projectmanagement", "projectmanagementandinstitutions")
+    assert not keys.same_component("roads", "roadsandbridges") and not keys.same_component("", "")
 
 
 def level_of(pg, u, pkg):

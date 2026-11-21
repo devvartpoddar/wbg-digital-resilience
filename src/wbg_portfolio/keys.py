@@ -11,7 +11,8 @@ _COMPONENT_PREFIX = re.compile(
     r"(?![A-Za-z]))\s*[.:\-–]?\s*", re.I)
 COMPONENT_PREFIX = _COMPONENT_PREFIX
 
-_ROMAN = re.compile(r"^X{0,3}(?:IX|IV|V?I{0,3})$")
+ROMAN = re.compile(r"^X{0,3}(?:IX|IV|V?I{0,3})$")
+_ROMAN = ROMAN
 
 
 def normal_number(number):
@@ -36,6 +37,51 @@ def _roman_value(s):
     for a, b in zip(s, s[1:] + " "):
         total += -vals[a] if vals.get(b, 0) > vals[a] else vals[a]
     return total
+
+
+# The top-level component of a plan's or an appraisal document's component, as published on a link
+# (decide.link_strength_rows): a number ('Component 2.1', '2b', 'II', 'IIa', 'iii)' -> '2', '2', '2', '2',
+# '3') or a letter A to H ('D', 'C1', 'Component C.1', '(a)', 'Component (b)', 'Part A' -> 'D', 'C', 'C',
+# 'A', 'B', 'A'); '' when there is none. A roman numeral is a number.
+_TOP_WORD = re.compile(r"^(?:component|composante|componente|sub-?component|part)\s*", re.I)
+_TOP_DIGITS = re.compile(r"(\d+)")
+_TOP_ROMAN = re.compile(r"([ivx]+)[a-h]?(?![a-z])", re.I)
+_TOP_LETTER = re.compile(r"([a-h])(?![a-z])", re.I)
+
+
+def top_component(x):
+    """The top-level component of a component number or heading: a number as digits, or a letter A
+    to H in capitals; '' when there is none (see _TOP_WORD and the examples above)."""
+    t = _TOP_WORD.sub("", (x or "").strip()).lstrip("( ")
+    m = _TOP_DIGITS.match(t)
+    if m:
+        return str(int(m.group(1)))
+    m = _TOP_ROMAN.match(t)
+    if m and ROMAN.match(m.group(1).upper()):
+        return str(_roman_value(m.group(1).upper()))
+    m = _TOP_LETTER.match(t)
+    return m.group(1).upper() if m else ""
+
+
+def component_relation(a, b):
+    """same or different when both top-level components are known and of one scheme (both numbers or
+    both letters); unknown when either is missing, or when one side is lettered and the other numbered
+    (a plan's 'Component A' may well be the document's 1)."""
+    if not a or not b or a.isdigit() != b.isdigit():
+        return "unknown"
+    return "same" if a == b else "different"
+
+
+# Two component names (name_key) are one component when they are equal, or one starts the other and the
+# shorter has at least this many characters (a restructuring paper shortens a heading; a short key would
+# match too much). The views' wbg.same_component reads the same number, put in at publish.
+SAME_COMPONENT_MIN_CHARS = 12
+
+
+def same_component(a, b):
+    """Whether two name keys name one component (SAME_COMPONENT_MIN_CHARS)."""
+    short, long_ = sorted((a or "", b or ""), key=len)
+    return bool(short) and (short == long_ or (len(short) >= SAME_COMPONENT_MIN_CHARS and long_.startswith(short)))
 
 
 def number_key(number, roman=False):

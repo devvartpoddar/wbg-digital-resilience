@@ -18,7 +18,7 @@ from wbg_portfolio.paths import data_root, file_sha256, where  # noqa: E402
 from wbg_portfolio import common  # noqa: E402
 from wbg_portfolio.common import write_csv  # noqa: E402
 from wbg_portfolio.keys import (name_key, project_parts, project_at, number_key,  # noqa: E402
-                                normal_number, uses_roman, COMPONENT_PREFIX)
+                                normal_number, uses_roman, COMPONENT_PREFIX, ROMAN, same_component)
 from wbg_portfolio.pdf_layout import _title_line  # noqa: E402
 
 COMP_WORD = r"(?:Component|Composante|Componente|Komponen)"
@@ -46,7 +46,6 @@ SUB_WORD_HEAD = re.compile(
 # 'Component B.1: ...' and 'Component A1: ...': only a letter before the sub-number.
 SUB_COMP_HEAD = re.compile(
     rf"^\s*{COMP_WORD}\s*(?!\d){_SUBID}\.?\s*[:.\-–)]?\s*(.+?)\s*$", re.I)
-_ROMAN_OK = re.compile(r"^X{0,3}(?:IX|IV|V?I{0,3})$")
 
 
 def _ok(m):
@@ -54,7 +53,7 @@ def _ok(m):
     if m is None:
         return None
     n = m.group(1)
-    return m if n.isdigit() or len(n) == 1 or _ROMAN_OK.match(n) else None
+    return m if n.isdigit() or len(n) == 1 or ROMAN.match(n) else None
 
 
 def comp_match(text):
@@ -630,14 +629,6 @@ def read_table_pages(pdf_path, pages):
     return []
 
 
-def _same_component(a, b):
-    """Whether two name keys name one component: equal, or one the start of
-    the other ('projectmanagement' and 'projectmanagementandinstitutional...'),
-    the shorter at least 12 characters."""
-    short, long_ = sorted((a, b), key=len)
-    return bool(short) and (short == long_ or (len(short) >= 12 and long_.startswith(short)))
-
-
 def number_by_name(rows):
     """Number the rows of a table that printed no numbers (row order may differ
     from the project's): each takes the number the project's headings and numbered
@@ -661,7 +652,7 @@ def number_by_name(rows):
         known.sort()
         taken, unmatched = set(), []
         for r in table:
-            hit = next((n for _, k, n in known if _same_component(r["name_key"], k)), None)
+            hit = next((n for _, k, n in known if same_component(r["name_key"], k)), None)
             if hit and hit not in taken:
                 r["number"] = hit
                 taken.add(hit)

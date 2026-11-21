@@ -20,6 +20,7 @@ from collections import defaultdict
 
 from wbg_portfolio import db
 from wbg_portfolio import fits
+from wbg_portfolio import keys
 from wbg_portfolio import labels
 from wbg_portfolio import load_pg
 from wbg_portfolio import panel
@@ -496,30 +497,8 @@ def is_cancelled(status):
     return (status or "").strip() in CANCELLED
 
 
-def top_component(x):
-    """The top-level component of a plan or appraisal component ('Component 2.1', '2b', 'II' -> '2'; 'D',
-    'Component C.1' -> 'D', 'C'), '' when there is none."""
-    t = (x or "").strip().lower()
-    t = re.sub(r"^(component|composante|componente|sub-?component)\s*", "", t)
-    m = re.match(r"(\d+)", t)
-    if m:
-        return str(int(m.group(1)))
-    m = re.match(r"([ivx]+)\b", t)
-    if m:
-        vals, total, prev = {"i": 1, "v": 5, "x": 10}, 0, 0
-        for ch in reversed(m.group(1)):
-            v = vals[ch]
-            total, prev = (total - v, prev) if v < prev else (total + v, v)
-        return str(total)
-    m = re.match(r"([a-h])(?:\b|[.:)])", t)
-    return m.group(1).upper() if m else ""
-
-
-def component_relation(a, b):
-    """same, different, or unknown when either side has no top-level component."""
-    if not a or not b:
-        return "unknown"
-    return "same" if a == b else "different"
+# The one reading of a component number (src/wbg_portfolio/keys.py), shared with the component reader.
+top_component, component_relation = keys.top_component, keys.component_relation
 
 
 def link_level(strong, same_type, relation):
