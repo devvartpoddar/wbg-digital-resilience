@@ -337,22 +337,33 @@ def load_packages(data, projects=None):
     return out
 
 
-def package_vectors(data, packages, api_key, log):
-    """(P, dim) unit vectors of the package texts, embedded once and cached."""
+def package_vectors(data, packages, api_key, log, dry_run=False):
+    """(P, dim) unit vectors of the package texts, embedded once and cached.
+
+    A text with no cached vector is embedded when a key is to hand; with no key it is an
+    error on a real run (it would be scored against nothing) and a reported gap on a dry
+    run, where the text keeps a zero vector: an estimate must not call the model, and must
+    not stop the run for the lack of a vector either."""
     model, dim = embed.DEFAULT_MODEL, embed.DEFAULT_DIM
     root = embed.cache_root(data, model, dim)
     unique = {p["sha"]: p["text"] for p in packages}
     todo = [s for s in unique if embed.read_cached(root, s, dim) is None]
     if todo:
         if not api_key:
-            raise SystemExit(f"link: {len(todo)} package description(s) are not embedded yet and no key is set")
-        _, failures = embed.fetch_missing(todo, unique, root, dim, model=model, api_key=api_key,
-                                          base_url=embed.DEFAULT_BASE, log=log)
-        if failures:
-            raise SystemExit(f"link: {len(failures)} package description(s) failed to embed")
+            if not dry_run:
+                raise SystemExit(f"link: {len(todo)} package description(s) are not embedded yet and no key is set")
+            log(f"link: {len(todo)} package description(s) are not embedded yet; a dry run does not embed them")
+        else:
+            _, failures = embed.fetch_missing(todo, unique, root, dim, model=model, api_key=api_key,
+                                              base_url=embed.DEFAULT_BASE, log=log)
+            if failures:
+                raise SystemExit(f"link: {len(failures)} package description(s) failed to embed")
     out = numpy.zeros((len(packages), dim), dtype="float32")
     for i, p in enumerate(packages):
-        out[i] = numpy.frombuffer(embed.read_cached(root, p["sha"], dim), dtype="<f4")
+        blob = embed.read_cached(root, p["sha"], dim)
+        if blob is None:                                    # dry run: a text not embedded yet
+            continue
+        out[i] = numpy.frombuffer(blob, dtype="<f4")
     return out
 
 
@@ -367,7 +378,7 @@ def package_assets(conn, data, corpus, *, model=Q.MODEL, api_key="", dry_run=Fal
     if not packages:
         log("link: no package in scope")
         return None
-    vecs = package_vectors(data, packages, api_key, log)
+    vecs = package_vectors(data, packages, api_key, log, dry_run=dry_run)
     aq = Q.package_asset_questions()
     queries = search.load_queries(Q.ASSETS, labels.folder(Q.ASSETS))
     qv = search.query_vectors(queries, data, embed.DEFAULT_MODEL, embed.DEFAULT_DIM, embed.DEFAULT_BASE,
