@@ -1,14 +1,14 @@
 asset_id,subtype_id,subtype_name,definition,active,version
-connectivity,fibre,Fibre networks,"Fibre-optic networks and their ducts, poles and civil works: backbone, middle mile, metro rings and last-mile fibre. Use it whenever the sentence or its paragraph names or implies fibre, including a last-mile connection by fibre.",true,v3.0
+connectivity,fibre,Fibre networks,"Fibre-optic networks and their ducts, poles and civil works: backbone, middle mile, metro rings and last-mile fibre.",true,v3.0
 connectivity,international,Submarine cables and international links,"Submarine cables, landing stations, cross-border links and international gateways, with the cable installation, maintenance and repair they need.",true,v3.0
-connectivity,mobile_wireless,Mobile and wireless networks,"Mobile and fixed wireless networks: towers, base stations, radio access, microwave links and their site power and shelter. Use it whenever the sentence or its paragraph names or implies a wireless medium.",true,v3.0
-connectivity,satellite,Satellite connectivity,"Satellite communications: ground stations, teleports, VSAT terminals and purchased satellite capacity. Satellite imagery is not this type.",true,v3.0
+connectivity,mobile_wireless,Mobile and wireless networks,"Mobile and fixed wireless networks: towers, base stations, radio access, microwave links and their site power and shelter.",true,v3.0
+connectivity,satellite,Satellite connectivity,"Satellite communications: ground stations, teleports, VSAT terminals and purchased satellite capacity. Not satellite imagery.",true,v3.0
 connectivity,institutional,Government and institutional networks,"Shared networks that link institutions or their sites: government wide area networks, local area networks, research and education networks and their operations centres.",true,v3.0
-connectivity,last_mile,"Last-mile access, medium not stated","Connections for schools, clinics, communities and public access points, including public Wi-Fi, when the medium is not stated. When the sentence or its paragraph names fibre, wireless or satellite, use that type instead.",true,v3.0
+connectivity,last_mile,"Last-mile access, medium not stated","Connections for schools, clinics, communities and public access points, including public Wi-Fi, when the medium is not stated.",true,v3.0
 connectivity,unspecified,"Connectivity, type not stated",The asset is clear but none of the finer types is stated.,true,v3.0
 hosting,data_centre,Data centres and server rooms,"Government or shared data centres, server rooms and colocation space, with their power and cooling.",true,v3.0
 hosting,cloud,Cloud hosting and computing services,"Cloud hosting, computing capacity and storage bought or built as a service, including data warehouses and data lakes as storage capacity.",true,v3.0
-hosting,recovery_site,Backup and disaster recovery sites,"A secondary, backup or disaster recovery site, or replication to one. A backup inside a system belongs to that system, not to this type.",true,v3.0
+hosting,recovery_site,Backup and disaster recovery sites,"A secondary, backup or disaster recovery site, or replication to one.",true,v3.0
 hosting,ixp,Internet exchange points,Internet exchange points where networks swap traffic locally.,true,v3.0
 hosting,unspecified,"Hosting, type not stated",The asset is clear but none of the finer types is stated.,true,v3.0
 platforms,dpi,Digital public infrastructure,"Shared foundations for identity, civil registration, payments, data exchange, digital signatures and trust services.",true,v3.0
