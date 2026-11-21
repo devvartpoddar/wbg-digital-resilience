@@ -1,6 +1,8 @@
 -- Per measure: what the app's measure view reads beside the commitments.
 -- Every count is of commitments (16_commitments.sql) or of the projects
--- holding them.
+-- holding them. commitments counts every commitment, paragraph groups included:
+-- keyed_commitments (grouped by an asset type or a measure type) plus paragraph_groups
+-- (sentences with nothing else to group them by, a bucket, not a finding).
 
 -- measure_quality is written by the evaluation (src/wbg_portfolio/grading.py);
 -- the load creates it empty until then.
@@ -12,7 +14,10 @@ WITH m AS (
   ORDER BY label_set, label_id
 ),
 c AS (
-  SELECT label_set, count(*) AS commitments, count(DISTINCT project_id) AS projects,
+  SELECT label_set, count(*) AS commitments,
+         count(*) FILTER (WHERE commitment_key <> 'paragraph') AS keyed_commitments,
+         count(*) FILTER (WHERE commitment_key = 'paragraph') AS paragraph_groups,
+         count(DISTINCT project_id) AS projects,
          count(DISTINCT country_name) FILTER (WHERE NOT is_regional) AS countries,
          (SELECT count(DISTINCT t) FROM wbg.commitment_summary x, unnest(x.type_ids) t
            WHERE x.label_set = cs.label_set) AS types
@@ -28,7 +33,8 @@ q AS (
   ORDER BY label_set, (sheet = 'holdout') DESC, (sheet = 'evaluation') DESC, evaluated_at DESC
 )
 SELECT m.label_set, m.measure_name, m.family, m.definition, m.version,
-       coalesce(c.commitments, 0) AS commitments, coalesce(c.projects, 0) AS projects,
+       coalesce(c.commitments, 0) AS commitments, coalesce(c.keyed_commitments, 0) AS keyed_commitments,
+       coalesce(c.paragraph_groups, 0) AS paragraph_groups, coalesce(c.projects, 0) AS projects,
        coalesce(c.countries, 0) AS countries, coalesce(c.types, 0) AS types,
        q.graded_sheet, q.graded_units, q.precision, q.recall, q.graded_version,
        q.graded_question_sha256,
@@ -37,7 +43,7 @@ FROM m
 LEFT JOIN c USING (label_set)
 LEFT JOIN q USING (label_set);
 COMMENT ON VIEW wbg.measure_summary IS
-  'One row per measure: its definition and version, how many commitments, projects, countries (regional operations not counted as countries) and types the model finds, and a graded sheet''s numbers (graded_units, precision, recall of the pipeline''s decision, weighted; null where no sheet is graded): the evaluation sample''s holdout sheet when one exists (graded by three models; graded_scope overall means the figures are over every measure because this one has too few holdout rows), else an evaluation sheet (a random draw, the dashboards'' figures) when one exists, else the latest training sheet (the hard cases near the floor; graded_sheet says which). A sheet graded under an earlier wording of the definition says so in graded_question_sha256: compare it with the current question before quoting.';
+  'One row per measure: its definition and version, how many commitments (commitments: every one, paragraph groups included; keyed_commitments: those grouped by an asset type or a measure type; paragraph_groups: the buckets of sentences with nothing else to group them by), projects, countries (regional operations not counted as countries) and types the model finds, and a graded sheet''s numbers (graded_units, precision, recall of the pipeline''s decision, weighted; null where no sheet is graded): the evaluation sample''s holdout sheet when one exists (graded by three models; graded_scope overall means the figures are over every measure because this one has too few holdout rows), else an evaluation sheet (a random draw, the dashboards'' figures) when one exists, else the latest training sheet (the hard cases near the floor; graded_sheet says which). A sheet graded under an earlier wording of the definition says so in graded_question_sha256: compare it with the current question before quoting.';
 
 -- How many committed units two measures share: a report, not a
 -- correction. A unit can be a commitment to several measures (on 2026-10-20

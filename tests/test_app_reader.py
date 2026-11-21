@@ -255,7 +255,10 @@ def test_downloads_have_fixed_columns_whatever_the_filters(demo):
     acts = app.download(demo, "commitment", "climate")
     assert proj["commitments"].sum() == len(acts) and proj["investment"].sum() + proj["policy"].sum() <= len(acts)
     assert len(app.download(demo, "project")) == len(flags) == len(app.projects(demo))
-    assert len(app.download(demo, "sentence", "climate")) == acts["sentences"].sum()
+    # sentences counts distinct wordings (the summary's definition); the sentence download lists every copy
+    sents = app.download(demo, "sentence", "climate")
+    wordings = sents.assign(w=sents["sentence"].str.lower().str.split().str.join(" "))
+    assert wordings.drop_duplicates(["commitment_id", "w"]).shape[0] == acts["sentences"].sum() <= len(sents)
     only = app.download(demo, "project_flags", "climate", measure="cra")
     assert (only["cra"] == 1).all() and len(only) < len(flags)
     assert (only[[c for c in climate if c != "cra"]].sum().sum() >= 0)

@@ -138,11 +138,15 @@ def evidence(q, commitment_ids):
 
 def measures(q):
     """One row per measure: its definition, counts and the graded sheet's
-    precision (graded_sheet says whether it is an evaluation or a training
-    draw; a training draw's figure is provisional)."""
+    precision (graded_sheet says whether it is the holdout sample, an evaluation or a training
+    draw; a training draw's figure is provisional; graded_scope 'overall' means the precision is
+    over every measure, because this one has too few graded rows, and the page must say so).
+    commitments counts every commitment, paragraph groups included: keyed_commitments (grouped by
+    an asset type or a measure type) plus paragraph_groups (buckets)."""
     return _numbers(q(_sql("""
         SELECT label_set, measure_name, to_jsonb(m)->>'family' AS family, definition, commitments,
-               projects, countries, types, graded_sheet, graded_units, precision
+               keyed_commitments, paragraph_groups,
+               projects, countries, types, graded_sheet, graded_units, precision, graded_scope
         FROM wbg.measure_summary m ORDER BY commitments DESC NULLS LAST, measure_name"""), None))
 
 
@@ -293,41 +297,39 @@ def _statuses(values):
     return out
 
 
-# Everything about a commitment, built once and read by commitment_detail(),
-# commitment_sentences_detail() and download(). cm: the commitments in scope; u: their sentences with
-# the measure's reading of each; the rest gather by commitment. {{filters}} is _COMMITMENT_WHERE below.
+# Everything about a commitment, read by commitment_detail(), commitment_sentences_detail() and
+# download(). cm is the published summary, wbg.commitment_summary (16_commitments.sql): every count,
+# date and link figure of a commitment comes from there and nowhere else, so every page and download
+# shows the same numbers. u: its sentences that count (wbg.commitment_units); the rest only gather
+# what the summary does not hold (its assets ranked, its type names, its component's name, its
+# packages' ids). {{filters}} is _COMMITMENT_WHERE below.
 _COMMITMENT_CTES = """
 cm AS (
   SELECT c.commitment_id, c.project_id, c.label_set, c.commitment_label, c.sentences AS n_sentences,
-         c.paragraphs AS n_paragraphs, c.documents AS n_documents, nullif(c.instrument, '') AS instrument,
-         c.commitment_key, nullif(c.asset_id, '') AS key_asset_id, c.best_link_level, c.best_link_rank,
+         c.paragraphs AS n_paragraphs, c.documents AS n_documents, c.first_seen_date AS first_document_date,
+         c.linked_packages, c.strong_packages, c.next_date AS next_package_date,
+         nullif(c.instrument, '') AS instrument,
+         c.commitment_key, nullif(c.asset_id, '(no asset)') AS key_asset_id, c.best_link_level, c.best_link_rank,
          coalesce(c.type_ids, '{}') AS type_ids
-  FROM wbg.commitments c
-  JOIN wbg.project_info i ON i.project_id = c.project_id
-  CROSS JOIN wbg.dashboard_settings s
-  WHERE (i.is_ipf OR NOT s.ipf_only)
-    AND (%(project)s::text[] IS NULL OR c.project_id = ANY (%(project)s::text[]))
+  FROM wbg.commitment_summary c
+  WHERE (%(project)s::text[] IS NULL OR c.project_id = ANY (%(project)s::text[]))
     AND (%(commitment_id)s::text[] IS NULL OR c.commitment_id = ANY (%(commitment_id)s::text[]))
     AND (%(key)s::text[] IS NULL OR c.commitment_key = ANY (%(key)s::text[]))
-    AND (%(cohort)s::text IS NULL OR i.cohort_set = %(cohort)s::text)),
+    AND (%(cohort)s::text IS NULL OR c.cohort_set = %(cohort)s::text)),
 u AS (
   SELECT DISTINCT ON (a.commitment_id, a.unit_id)
-         a.commitment_id, a.project_id, a.label_set, a.unit_id, f.component_number,
-         f.document_id, pa.component_name
-  FROM wbg.commitment_members a
+         a.commitment_id, a.project_id, a.label_set, a.unit_id, a.component_number, pa.component_name
+  FROM wbg.commitment_units a
   JOIN cm ON cm.commitment_id = a.commitment_id
-  JOIN wbg.measure_findings f ON f.label_set = a.label_set AND f.unit_id = a.unit_id
-  LEFT JOIN wbg.paragraphs pa ON pa.paragraph_id = f.paragraph_id
-  ORDER BY a.commitment_id, a.unit_id, f.posterior_probability DESC NULLS LAST),
+  LEFT JOIN wbg.paragraphs pa ON pa.paragraph_id = a.paragraph_id
+  ORDER BY a.commitment_id, a.unit_id),
 fnd AS (
   SELECT u.commitment_id,
          mode() WITHIN GROUP (ORDER BY u.component_number)
            FILTER (WHERE coalesce(u.component_number, '') <> '') AS component_number,
          mode() WITHIN GROUP (ORDER BY u.component_name)
-           FILTER (WHERE coalesce(u.component_name, '') <> '') AS paragraph_component_name,
-         min(d.disclosure_date) AS first_document_date
-  FROM u LEFT JOIN wbg.documents d ON d.document_id = u.document_id
-  GROUP BY u.commitment_id),
+           FILTER (WHERE coalesce(u.component_name, '') <> '') AS paragraph_component_name
+  FROM u GROUP BY u.commitment_id),
 typ AS (
   SELECT t.commitment_id, array_agg(t.type_id ORDER BY t.type_id) AS type_arr,
          array_agg(coalesce(mt.type_name, t.type_id) ORDER BY t.type_id) AS type_name_arr,
@@ -357,15 +359,9 @@ allx AS (
            AS subtype_arr
   FROM ua GROUP BY commitment_id),
 prc AS (
-  SELECT u.commitment_id, count(DISTINCT cl.package_id) AS linked_packages,
-         count(DISTINCT cl.package_id) FILTER (WHERE cl.strength = 'strong') AS strong_packages,
-         min(ps.next_date) AS next_package_date,
-         array_agg(DISTINCT cl.package_id) AS package_arr
-  FROM u
-  JOIN wbg.commitment_package_links cl
-    ON cl.label_set = u.label_set AND cl.unit_id = u.unit_id AND cl.project_id = u.project_id
-  LEFT JOIN wbg.package_status ps ON ps.package_id = cl.package_id
-  GROUP BY u.commitment_id),
+  SELECT ps.commitment_id, array_agg(ps.package_id ORDER BY ps.package_id) AS package_arr
+  FROM wbg.commitment_package_status ps JOIN cm ON cm.commitment_id = ps.commitment_id
+  GROUP BY ps.commitment_id),
 comp AS (
   SELECT project_id, component_number, min(component_name) AS component_name
   FROM wbg.project_components WHERE component_level = 'component' GROUP BY project_id, component_number),
@@ -389,9 +385,8 @@ x AS (
                              THEN ' + ' || coalesce(al2.label_name, r2.asset_id) ELSE '' END
               ELSE 'none' END AS asset_column,
          fnd.component_number, coalesce(comp.component_name, fnd.paragraph_component_name) AS component_name,
-         cm.n_sentences, cm.n_paragraphs, cm.n_documents, fnd.first_document_date,
-         coalesce(prc.linked_packages, 0) AS linked_packages,
-         coalesce(prc.strong_packages, 0) AS strong_packages, prc.next_package_date,
+         cm.n_sentences, cm.n_paragraphs, cm.n_documents, cm.first_document_date,
+         cm.linked_packages, coalesce(cm.strong_packages, 0) AS strong_packages, cm.next_package_date,
          nullif(cm.best_link_level, '') AS best_link_level, cm.best_link_rank,
          coalesce(prc.package_arr, '{}') AS package_arr
   FROM cm
@@ -431,7 +426,8 @@ def _commitment_params(family, filters, cohort=None):
 
 def families(q, cohort=None):
     """The families of measures that exist (climate, cloud_data, ...) and, under each, its
-    measures with counts of projects and commitments. A measure whose family is "a|b" has a row
+    measures with counts of projects and commitments (wbg.commitment_summary; paragraph groups
+    included). A measure whose family is "a|b" has a row
     under both. One row per family and measure: family, label_set (the measure's id),
     measure_name, definition, measure_projects, measure_commitments (the projects with at least
     one commitment of the measure, and the commitments), family_projects, family_commitments (the
@@ -448,10 +444,8 @@ def families(q, cohort=None):
                  CASE WHEN coalesce(m.family, '') = '' THEN '(no family)' ELSE m.family END, '|'))
                  AS f(family)),
         a AS (
-          SELECT DISTINCT a.label_set, a.commitment_id, a.project_id
-          FROM wbg.commitments a JOIN wbg.project_info i ON i.project_id = a.project_id
-          CROSS JOIN wbg.dashboard_settings s WHERE (i.is_ipf OR NOT s.ipf_only)
-            AND (%(cohort)s::text IS NULL OR i.cohort_set = %(cohort)s::text))
+          SELECT DISTINCT a.label_set, a.commitment_id, a.project_id FROM wbg.commitment_summary a
+          WHERE %(cohort)s::text IS NULL OR a.cohort_set = %(cohort)s::text)
         SELECT fam.family, fam.label_set, fam.label_name AS measure_name, fam.definition,
                (SELECT count(DISTINCT project_id) FROM a WHERE a.label_set = fam.label_set)
                  AS measure_projects,
@@ -840,7 +834,7 @@ _COMMITMENT_DOWNLOAD = [
     ("has_proposed_type", "has_proposed_type", "True when one of the types is a proposed OTH. type."),
     ("component_number", "component_number", "The project component its sentences sit under, as the document numbers it."),
     ("component_name", "component_name", "That component's name."),
-    ("sentences", "n_sentences", "How many sentences the commitment has."),
+    ("sentences", "n_sentences", "How many distinct sentences the commitment has: a sentence printed word for word in several documents counts once (the sentence download lists each copy)."),
     ("paragraphs", "n_paragraphs", "How many paragraphs they sit in."),
     ("documents", "n_documents", "How many documents they come from."),
     ("first_document_date", "first_document_date", "Disclosure date of the earliest document with one of its sentences."),
@@ -933,7 +927,9 @@ _PROJECT_COLUMNS = _PROJECT_FACTS + [
     ("practice", "The Global Practice leading the project."),
     ("documents_read", "Appraisal documents read for the project."),
     ("measures", "Measures with at least one commitment in the project (within the family and filters)."),
-    ("commitments", "Commitments (within the family and filters)."),
+    ("commitments", "Commitments (within the family and filters), paragraph groups included: keyed_commitments plus paragraph_groups."),
+    ("keyed_commitments", "Of those, commitments grouped by an asset type or a measure type."),
+    ("paragraph_groups", "Of those, paragraph groups: sentences with nothing else to group them by (a bucket, not a finding)."),
     ("investment", "Of those, commitments whose instrument is investment."),
     ("policy", "Of those, commitments whose instrument is policy."),
     ("assets", "Distinct assets its commitments name."),
@@ -977,6 +973,10 @@ def _project_frame(q, family, filters, cohort=None):
         SELECT b.*,
                (SELECT count(DISTINCT s.label_set) FROM sel s WHERE s.project_id = b.project_id) AS measures,
                (SELECT count(*) FROM sel s WHERE s.project_id = b.project_id) AS commitments,
+               (SELECT count(*) FROM sel s WHERE s.project_id = b.project_id AND s.commitment_key <> 'paragraph')
+                 AS keyed_commitments,
+               (SELECT count(*) FROM sel s WHERE s.project_id = b.project_id AND s.commitment_key = 'paragraph')
+                 AS paragraph_groups,
                (SELECT count(*) FROM sel s WHERE s.project_id = b.project_id AND s.instrument = 'investment')
                  AS investment,
                (SELECT count(*) FROM sel s WHERE s.project_id = b.project_id AND s.instrument = 'policy')
@@ -1090,17 +1090,23 @@ def download_notes(q, level, family=None, filters=None):
 # ---------------------------------------------------------------- on the frame
 
 def headline(df):
-    """The numbers at the top of a page, from a frame of commitments."""
+    """The numbers at the top of a page, from a frame of commitments. commitments counts every row,
+    paragraph groups included; keyed_commitments those grouped by an asset type or a measure type,
+    paragraph_groups the buckets of sentences with nothing else to group them by."""
     if df.empty:
-        return {"commitments": 0, "projects": 0, "countries": 0, "measures": 0, "linked_share": None}
+        return {"commitments": 0, "keyed_commitments": 0, "paragraph_groups": 0, "projects": 0, "countries": 0,
+                "measures": 0, "linked_share": None}
     countries = df.loc[~df["is_regional"].fillna(False).astype(bool), "country_code"].dropna()
-    return {"commitments": len(df), "projects": df["project_id"].nunique(),
+    buckets = int((df["commitment_key"] == "paragraph").sum())
+    return {"commitments": len(df), "keyed_commitments": len(df) - buckets, "paragraph_groups": buckets,
+            "projects": df["project_id"].nunique(),
             "countries": countries.nunique(), "measures": df["label_set"].nunique(),
             "linked_share": float((df["stage"] != "No package linked").mean())}
 
 
 def count(df, *by):
-    """Commitments per value of the columns given, largest first."""
+    """Commitments per value of the columns given, largest first (every row of the frame: paragraph
+    groups included unless the frame was filtered on commitment_key)."""
     if df.empty:
         return pd.DataFrame(columns=[*by, "commitments"])
     return (df.groupby(list(by), dropna=False).size().rename("commitments").reset_index()
