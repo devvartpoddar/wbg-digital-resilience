@@ -99,21 +99,47 @@ def test_a_dry_run_asks_nothing(pg, corpus, fake_chat):
     assert not fake_chat.calls and decide.package_asset_sets(pg) == {"P1-1": {"towers"}}
 
 
-def test_the_strong_question_is_asked_of_packages_with_an_asset_for_the_measures_of_their_project(
-        pg, corpus, fake_model):
+def test_the_strong_question_is_asked_of_every_package_with_or_without_an_asset(pg, corpus, fake_model):
     c = ready(pg, corpus)
+    assert decide.package_asset_sets(pg) == {"P1-1": {"towers"}}          # the roads package has no asset
     n = len(fake_model)
-    assert checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET) == 1
+    assert checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET) == 2
     asked = [b for b in fake_model[n:]]
-    assert len(asked) == 1 and asked[0]["state"]["package"] == "Supply of towers"
+    assert sorted(b["state"]["package"] for b in asked) == ["Consulting on roads", "Supply of towers"]
     q = list(asked[0]["questions"].values())[0]["instructions"]
     assert q.startswith("Does Hazard assessment apply to the procurement package in the 'package' field?")
     assert "named or clearly implied in the package's own description" in q
-    assert decide.package_measure_scores(pg)[("cra", "P1-1")] >= 0.7
+    assert decide.package_measure_scores(pg)[("cra", "P1-1")] >= 0.7 > decide.package_measure_scores(pg)[("cra", "P1-2")]
     n = len(fake_model)
     checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET)
     assert len(fake_model) == n                                          # stored: nothing asked again
     assert checks.package_measure(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None and len(fake_model) == n
+
+
+def test_a_package_is_asked_only_its_likeliest_measures_and_what_is_stored_stays(pg, corpus, fake_model, monkeypatch):
+    from wbg_portfolio import panel
+    c = ready(pg, corpus)
+    live = panel.settings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.package_measure_top": 0})
+    n = len(fake_model)
+    assert checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0 and len(fake_model) == n
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.package_measure_top": 1})
+    assert checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET) == 2
+    n = len(fake_model)
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "link.package_measure_top": 0})
+    assert checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET) == 2      # kept from the store
+    assert len(fake_model) == n
+
+
+def test_a_package_with_no_asset_can_have_a_strong_link(pg, corpus, fake_model):
+    c = ready(pg, corpus)
+    u0 = c.index[0]["unit_id"]
+    checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET)
+    pg.execute(f"UPDATE {db.SCHEMA}.scores SET score = 0.9 WHERE kind = 'package_measure' AND item_id = 'P1-2'")
+    pg.commit()
+    publish(pg, corpus, c)
+    assert "P1-2" not in decide.package_asset_sets(pg)
+    assert links(pg)[(u0, "P1-2")][0] == "strong" and not links(pg)[(u0, "P1-2")][1]
 
 
 def test_a_measure_with_no_committed_digital_sentence_in_the_project_is_not_asked(pg, corpus, fake_model):

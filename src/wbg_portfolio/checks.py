@@ -5,9 +5,9 @@ scores (docs/method/decisions.md):
                    types (and the OTH types the gap step proposed): fit (yes, unsure, no)
   package_assets   every procurement package x its best link.asset_top assets
                    by cosine: how far the package is for the asset, graded 0 to 3
-  package_measure  every package that has an asset x each measure its project
-                   has a committed, digital sentence for: does the measure
-                   apply to the package alone (the strong link)
+  package_measure  every package x its link.package_measure_top likeliest measures by
+                   cosine among those its project has a kept sentence for: does
+                   the measure apply to the package alone (the strong link)
 
 Sentence-level questions send the same state as the measures did
 (questions.Corpus.state). Nothing here decides; src/wbg_portfolio/decide.py reads the thresholds.
@@ -405,32 +405,56 @@ def package_assets(conn, data, corpus, *, model=Q.MODEL, api_key="", dry_run=Fal
 
 # ---------------------------------------------------------------- strong links
 
+def measure_cosines(data, packages, names, api_key, log):
+    """{measure: (P,) array}: each package's best cosine over the measure's phrases and definition
+    (the measure's search queries), from the cached vectors."""
+    vecs = package_vectors(data, packages, api_key, log)
+    out = {}
+    for name in names:
+        queries = search.load_queries(name, labels.folder(name))
+        qv = search.query_vectors(queries, data, embed.DEFAULT_MODEL, embed.DEFAULT_DIM, embed.DEFAULT_BASE,
+                                  api_key, log=log)
+        out[name] = (vecs @ qv.T).max(axis=1)
+    return out
+
+
 def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=False,
                     workers=ask.WORKERS, log=print, projects=None):
-    """The strong link: each package that has an asset (first pass, or the chat
-    model's second look) asked, on its own, about each measure its project has
-    at least one committed, digital sentence for. Writes kind
-    'package_measure' (label_set the measure, item the package)."""
+    """The strong link: every package in scope (placeholders left out), whether or not it has an
+    asset, asked on its own about the measures its project has a kept sentence for, but only its
+    link.package_measure_top likeliest of them by cosine (the package's description against the measure's
+    phrases and definition), and every one the store already answers (nothing paid for is dropped).
+    Writes kind 'package_measure' (label_set the measure, item the package)."""
     if cannot_estimate(conn, dry_run, log, "package_measure", ("package_asset", "link"), digital=True):
         return None
     packages = load_packages(data, projects)
     if not packages:
         log("package_measure: no package in scope")
         return 0
-    has = decide.package_asset_sets(conn, [p["package_id"] for p in packages])
     by_pkg = {p["package_id"]: p for p in packages}
-    wanted = defaultdict(set)                              # measure -> projects with a committed digital sentence
+    wanted = defaultdict(set)                              # project -> measures with a kept sentence
     for name in names:
         for u in decide.committed_digital_units(conn, corpus, [name]):
-            wanted[name].update(corpus.projects(u))
-    log(f"package_measure: {sum(1 for p in packages if has.get(p['package_id']))} of {len(packages):,} packages "
-        f"have an asset")
+            for pid in corpus.projects(u):
+                wanted[pid].add(name)
+    labs = {name: Q.load(name)[0][0] for name in names}
+    qs = {name: {labs[name]["id"]: Q.package_measure_question(labs[name])} for name in names}
+    cands = [(i, p, name) for i, p in enumerate(packages) for name in sorted(wanted.get(p["project_id"], ()))]
+    have = ask.stored(conn, model, [(Q.sha(Q.package_state(p)), Q.sha(qs[n][labs[n]["id"]])) for _, p, n in cands])
+    cos = measure_cosines(data, packages, sorted({n for _, _, n in cands}), api_key, log) if cands else {}
+    top = int(panel.require("link.package_measure_top"))
+    chosen = defaultdict(list)                             # measure -> packages to ask
+    for i, p in enumerate(packages):
+        mine = sorted(wanted.get(p["project_id"], ()), key=lambda n: (-float(cos[n][i]), n))
+        for rank, name in enumerate(mine):
+            if rank < top or (Q.sha(Q.package_state(p)), Q.sha(qs[name][labs[name]["id"]])) in have:
+                chosen[name].append(p)
+    log(f"package_measure: {sum(len(v) for v in chosen.values()):,} package x measure pair(s) of "
+        f"{len(cands):,} (each package's {top} likeliest measures of its project by cosine, and what is stored)")
     asked = {}
     for name in names:
-        lab = Q.load(name)[0][0]
-        q = {lab["id"]: Q.package_measure_question(lab)}
-        items = [(p["package_id"], Q.package_state(p), q) for p in packages
-                 if has.get(p["package_id"]) and p["project_id"] in wanted[name]]
+        lab, q = labs[name], qs[name]
+        items = [(p["package_id"], Q.package_state(p), q) for p in chosen.get(name, [])]
         got = _ask(conn, model, items, f"package_measure:{name}", name, api_key, dry_run, workers, log, data)
         if got is None:
             if dry_run:
@@ -439,10 +463,11 @@ def package_measure(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry
         asked[name] = (lab, q, got)
     if dry_run:
         return None
-    n = 0
+    n, at = 0, {p["package_id"]: i for i, p in enumerate(packages)}
     for name, (lab, q, got) in asked.items():
         rows = [_row("package_measure", name, lab["id"], pid, Q.package_state(by_pkg[pid]), q[lab["id"]],
-                     g[lab["id"]]) for pid, g in got.items()]
+                     g[lab["id"]], cosine=float(cos[name][at[pid]]))
+                for pid, g in got.items()]
         write_scoped(conn, "package_measure", name, rows, by_pkg)
         n += len(rows)
     log(f"  {n:,} package-measure scores written")

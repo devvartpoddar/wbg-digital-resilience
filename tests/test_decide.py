@@ -39,8 +39,9 @@ def test_packages_get_their_best_assets_and_commitments_their_packages(pg, corpu
     pa = db.rows(pg, f"SELECT item_id, label_id, score, rank FROM {db.SCHEMA}.scores WHERE kind = 'package_asset'")
     assert {(p, a) for p, a, _, _ in pa} == {("P1-1", "towers"), ("P1-1", "fiber"), ("P1-2", "towers"), ("P1-2", "fiber")}
     assert float(next(s for p, a, s, _ in pa if (p, a) == ("P1-1", "towers"))) >= 0.89
-    pm = db.rows(pg, f"SELECT label_set, item_id, score FROM {db.SCHEMA}.scores WHERE kind = 'package_measure'")
-    assert [(m, p) for m, p, _ in pm] == [("cra", "P1-1")] and float(pm[0][2]) >= 0.89
+    pm = {p: float(s) for m, p, s in db.rows(
+        pg, f"SELECT label_set, item_id, score FROM {db.SCHEMA}.scores WHERE kind = 'package_measure'")}
+    assert pm["P1-1"] >= 0.89 > pm["P1-2"]          # every package is asked, with an asset or not
 
 
 def test_publish_writes_the_decision_tables_and_the_views_build(pg, corpus, fake_model, fake_chat):
