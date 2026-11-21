@@ -134,6 +134,9 @@ def read_pdf(path):
         for n, page in enumerate(pdf.pages, 1):
             for t in page.extract_tables():
                 tables.append((n, t))
+            # pdfplumber keeps everything it read off a page until told otherwise: about 13 MB a
+            # page on a plan, so a 1,800-page plan would hold over 20 GB. Release each page.
+            page.close()
     return rows_from_tables(tables)
 
 

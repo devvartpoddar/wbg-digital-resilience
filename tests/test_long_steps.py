@@ -274,3 +274,16 @@ def test_components_reads_each_table_with_a_limit_and_keeps_what_it_read(tmp_pat
     assert common.exit_status(components.main()) == 0
     rows = common.read_csv(str(data / "appraisal" / "components.csv"))
     assert {r["doc_id"] for r in rows if r["source"] == "datasheet"} == {"D1", "D2"}
+
+
+def test_an_item_that_takes_too_much_memory_fails_alone():
+    """A reader that would take more memory than one item may have is stopped by its own limit
+    and named; the machine and the other items are not affected."""
+    def read(item):
+        if item == "greedy":
+            return len(bytearray(common.CHILD_MEMORY + 1024 ** 3))
+        return item
+    got = {item: (result, error) for item, result, error in
+           common.limited(read, ["a", "greedy", "b"], 60)}
+    assert got["a"] == ("a", "") and got["b"] == ("b", "")
+    assert got["greedy"][0] is None and "MemoryError" in got["greedy"][1]

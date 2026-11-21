@@ -174,8 +174,16 @@ def pdf_seconds(path):
     return max(PDF_MIN_SECONDS, PDF_SECONDS_PER_PAGE * pages)
 
 
+# The most memory one item's reader may take. An item that needs more is a fault in how it is
+# read, and must fail on its own (it is named and left out) rather than push the machine into
+# swap and stall everything else running on it.
+CHILD_MEMORY = 6 * 1024 ** 3
+
+
 def _limited_child(fn, item, conn):
     try:
+        import resource
+        resource.setrlimit(resource.RLIMIT_AS, (CHILD_MEMORY, CHILD_MEMORY))
         conn.send(("ok", fn(item)))
     except BaseException as exc:                    # noqa: BLE001 - reported to the parent
         conn.send(("error", f"{type(exc).__name__}: {str(exc)[:200]}"))
