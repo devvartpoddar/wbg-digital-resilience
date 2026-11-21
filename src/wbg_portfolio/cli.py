@@ -6,6 +6,8 @@
     ./wbg_portfolio add <set>...        a measure from its files to Postgres (run --from search --to measure)
     ./wbg_portfolio publish             every decision read again from the scores, then the views
     ./wbg_portfolio check draw|fill|evaluate|spotcheck|import   the grading cycle (src/wbg_portfolio/grading.py)
+    ./wbg_portfolio check sample|grade|tune --seed n             the evaluation sample: draw it, have three models
+        grade it (--max-spend), tune on one part and report on the other (docs/method/evaluation.md)
     ./wbg_portfolio list|prepare|summary [filters]              the cohort, the corpus, where each project stands
     ./wbg_portfolio try <slug> --expand "..." | --definition ... --phrase ...   a scratch measure in minutes (src/wbg_portfolio/scratch.py)
     ./wbg_portfolio status | release | audit | sensitivity
@@ -903,6 +905,18 @@ def check(args, data):
         out = args.out or where(data, "review", f"spotcheck_s{args.seed}.xlsx")
         print(f"wrote {grading.spotcheck(data, args.seed, args.file, out)}")
         return 0
+    if args.what in ("grade", "tune") and len(set(args.graders)) != 3:
+        raise SystemExit("check: --graders takes three different models")
+    if args.what == "sample":
+        from wbg_portfolio import sampling
+        sampling.draw(conn, data, args.seed, dry_run=args.dry_run)
+        return 0
+    if args.what == "grade":
+        return grade(args, data, conn)
+    if args.what == "tune":
+        from wbg_portfolio import tuning
+        tuning.tune(conn, data, args.seed, graders=args.graders, settings=args.setting)
+        return 0
     corpus = Q.Corpus(data)
     if args.what == "draw":
         grading.draw(conn, data, corpus, args.seed, design=args.design, dry_run=args.dry_run)
@@ -911,7 +925,32 @@ def check(args, data):
     return 0
 
 
+def grade(args, data, conn):
+    """check grade: the graders' answers for a drawn sample (paid: --max-spend), or the person's file."""
+    from wbg_portfolio import api
+    from wbg_portfolio import graders
+    if args.export_for_person is not None:
+        graders.export_for_person(data, args.seed, args.export_for_person)
+        return 0
+    if args.read_person:
+        graders.read_person(conn, data, args.seed, args.read_person, args.graders)
+        return 0
+    command = {"stages": ["grade"], "seed": args.seed, "graders": list(args.graders)}
+    if not args.dry_run:
+        if args.max_spend is None:
+            raise SystemExit("check grade: the graders are paid; give --max-spend <US$> (what you expect it to "
+                             "cost), or --dry-run for the estimate")
+        print(api.open_window(data, command, args.max_spend), flush=True)
+    ok = graders.grade(conn, data, args.seed, args.graders, api_key="" if args.dry_run else api.key(),
+                       dry_run=args.dry_run, workers=args.workers)
+    _refused_report()
+    if ok and not args.dry_run:
+        api.close_window(data, command)
+    return 0 if ok or args.dry_run else 1
+
+
 def main(argv=None):
+    from wbg_portfolio.graders import GRADERS
     ap = argparse.ArgumentParser(prog="wbg_portfolio", description=__doc__.split("\n\n")[0])
     ap.add_argument("--data", default=None, help="data folder (default: the main checkout's data/)")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -961,13 +1000,22 @@ def main(argv=None):
         p.add_argument(f"--{k}", action="append")
     p.add_argument("--set", action="append", dest="cohort_set")
     p = sub.add_parser("check", help="the grading cycle (src/wbg_portfolio/grading.py)")
-    p.add_argument("what", choices=("draw", "fill", "evaluate", "spotcheck", "import"))
+    p.add_argument("what", choices=("draw", "fill", "evaluate", "spotcheck", "import", "sample", "grade", "tune"))
     p.add_argument("--seed", type=int, default=1)
     p.add_argument("--design", choices=("train", "eval", "elusion"), default="train")
     p.add_argument("--file", help="fill: the JSONL of answers; spotcheck: the fills to check")
     p.add_argument("--grader", help="fill: who or what graded (recorded on every grade)")
     p.add_argument("--out", help="spotcheck: the workbook to write")
     p.add_argument("--grid", action="store_true", help="evaluate: also rank the layer settings (slow)")
+    p.add_argument("--graders", nargs="+", default=list(GRADERS),
+                   help="grade, tune: the three grader models (default: %(default)s)")
+    p.add_argument("--max-spend", type=float, default=None, help="grade: US$ the graders may spend")
+    p.add_argument("--workers", type=int, default=10, help="grade: model requests in flight")
+    p.add_argument("--export-for-person", type=int, nargs="?", const=100, default=None, metavar="N",
+                   help="grade: write N measure items (default 100) for a person to grade")
+    p.add_argument("--read-person", metavar="FILE", help="grade: how the graders agree with a person's grades")
+    p.add_argument("--setting", action="append", metavar="NAME=VALUE",
+                   help="tune: also report these settings on the holdout set (repeat)")
     p.add_argument("--dry-run", action="store_true")
     sub.add_parser("audit", help="the parse and procurement audits (reports in data/reports/)")
     p = sub.add_parser("sensitivity", help="how much the cleaned text depends on its settings")
