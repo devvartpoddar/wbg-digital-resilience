@@ -37,6 +37,12 @@ CHOICE = Q.chat_question("Which?", "choice", ["investment", "policy"])
      {"grade": None, "labels": ["policy"]}),
     ('{"labels": ["a"]}', {"form": "labels", "options": ["a", "b"], "max": 2}, {"grade": None, "labels": ["a"]}),
     ('{"labels": []}', {"form": "labels", "options": ["a", "b"], "max": 2}, {"grade": None, "labels": []}),
+    # ids are read without regard to case, as the choice form reads its answer; a repeat is one id
+    ('{"labels": ["Hosting"]}', {"form": "labels", "options": ["hosting", "b"], "max": 2},
+     {"grade": None, "labels": ["hosting"]}),
+    ('{"labels": ["a", "b", "a"]}', {"form": "labels", "options": ["a", "b"], "max": 2},
+     {"grade": None, "labels": ["a", "b"]}),
+    ('{"labels": ["a", "A"]}', {"form": "labels", "options": ["a", "b"], "max": 1}, {"grade": None, "labels": ["a"]}),
 ])
 def test_a_reply_is_read_only_when_it_is_exactly_the_json_asked_for(text, reply, expect):
     assert chat.parse(text, reply) == expect
@@ -55,7 +61,7 @@ def test_a_reply_is_read_only_when_it_is_exactly_the_json_asked_for(text, reply,
     ('{"answer": "maybe"}', {"form": "yesno"}),
     ('{"answer": "other"}', {"form": "choice", "options": ["investment", "policy"]}),
     ('{"labels": ["c"]}', {"form": "labels", "options": ["a", "b"], "max": 2}),
-    ('{"labels": ["a", "b", "a"]}', {"form": "labels", "options": ["a", "b"], "max": 2}),
+    ('{"labels": ["a", "b", "c"]}', {"form": "labels", "options": ["a", "b", "c"], "max": 2}),
     ("", {"form": "grade", "max": 3}),
 ])
 def test_anything_else_is_not_read(text, reply):

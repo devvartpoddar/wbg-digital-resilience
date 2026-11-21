@@ -100,14 +100,14 @@ def test_none_is_a_valid_answer_and_an_old_asset_type_answer_reads_as_its_asset(
     assert decide.asset_second_looks(pg) == {u1: ["fiber"]}
 
 
-def test_more_than_two_assets_or_a_malformed_reply_is_never_a_yes(pg, corpus, fake_chat):
+def test_a_malformed_reply_is_never_a_yes_and_a_repeated_id_is_read_once(pg, corpus, fake_chat):
     c, u0, u1 = ready(pg, corpus, fake_chat)
-    fake_chat.reply = lambda p: json.dumps({"labels": ["fiber", "towers", "fiber"]})
-    assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 0
-    assert count(pg, "asset_second") == 0 and decide.asset_second_looks(pg) == {}
     fake_chat.reply = lambda p: "fiber"
     second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
-    assert count(pg, "asset_second") == 0
+    assert count(pg, "asset_second") == 0 and decide.asset_second_looks(pg) == {}
+    fake_chat.reply = lambda p: json.dumps({"labels": ["Fiber", "towers", "fiber"]})
+    assert second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET) == 2
+    assert set(map(tuple, decide.asset_second_looks(pg).values())) == {("fiber", "towers")}
 
 
 def test_the_type_is_asked_for_every_asset_that_counts_whichever_look_found_it(pg, corpus, fake_chat, only_where_none):

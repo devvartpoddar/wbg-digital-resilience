@@ -23,7 +23,8 @@ it is never read as a yes.
 
 Replies (reply["form"]): grade (0 to reply["max"]), yesno (yes or no), choice
 (one of reply["options"]), labels (any of reply["options"], at most
-reply["max"], none allowed; an id not among the options is unreadable), fields (named answers, each a grade, one of a list or any of a list: the evaluation's
+reply["max"], none allowed, read without regard to case, a repeated id read once; an id not among the
+options is unreadable), fields (named answers, each a grade, one of a list or any of a list: the evaluation's
 graders, whose question is a template with a system line, questions.grader_question). temperature 0; the spend ledger and --max-spend
 work as in src/wbg_portfolio/ask.py. Tests replace api.post (tests/conftest.py fake_chat).
 
@@ -178,9 +179,11 @@ def parse(text, reply):
     labs = obj.get("labels")
     if not isinstance(labs, list) or not all(isinstance(x, str) for x in labs):
         raise ValueError("labels is not a list of text")
-    labs = [x.strip() for x in labs]
-    if any(x not in reply["options"] for x in labs) or len(set(labs)) != len(labs) \
-            or len(labs) > reply["max"]:
+    # ids are read as the choice form reads its answer: without regard to case; an id given twice is
+    # one id (a repeat is not unreadable)
+    known = {o.lower(): o for o in reply["options"]}
+    labs = list(dict.fromkeys(known.get(x.strip().lower(), x.strip()) for x in labs))
+    if any(x not in reply["options"] for x in labs) or len(labs) > reply["max"]:
         raise ValueError(f"labels {labs!r} are not at most {reply['max']} of {reply['options']}")
     return {"grade": None, "labels": labs}
 
