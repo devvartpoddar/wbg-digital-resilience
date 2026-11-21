@@ -116,21 +116,21 @@ def test_the_type_is_asked_for_every_asset_that_counts_whichever_look_found_it(p
     prompt = fake_chat.prompts()[0]
     assert "Which type of Mobile networks is the sentence in the 'sentence' field about?" in prompt
     assert "- mast: Masts\n- unspecified: not stated" in prompt and "tall masts" not in prompt
-    assert decide.asset_kinds(pg) == {(u0, "towers"): "mast"}
+    assert decide.asset_types(pg) == {(u0, "towers"): "mast"}
     second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)
     assert len(fake_chat.calls) == 1
     # the second look finds fibre for the other sentence: its type is asked too
     fake_chat.reply = lambda p: FIBRE if '"labels"' in p else '{"answer": "backbone"}'
     second.asset_second(pg, corpus, c, NAMES, api_key="k", **QUIET)
     assert second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET) == 2
-    assert decide.asset_kinds(pg) == {(u0, "towers"): "mast", (u1, "fiber"): "backbone"}
+    assert decide.asset_types(pg) == {(u0, "towers"): "mast", (u1, "fiber"): "backbone"}
     # a type that is not one of the asset's is not stored
     pg.execute(f"DELETE FROM {db.SCHEMA}.scores WHERE kind = 'asset_subtype'")
     pg.execute(f"DELETE FROM {db.STORE}.answers WHERE model = 'anthropic/claude-haiku-5.5'")
     pg.commit()
     fake_chat.reply = lambda p: FIBRE if '"labels"' in p else '{"answer": "mast"}'
     second.asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)
-    assert decide.asset_kinds(pg) == {(u0, "towers"): "mast"}
+    assert decide.asset_types(pg) == {(u0, "towers"): "mast"}
 
 
 def test_nothing_is_asked_on_a_dry_run(pg, corpus, fake_chat):

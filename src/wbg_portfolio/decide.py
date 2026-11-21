@@ -25,7 +25,7 @@ from wbg_portfolio import load_pg
 from wbg_portfolio import panel
 from wbg_portfolio import questions as Q
 
-OTH = "OTH."
+OTH = Q.OTH
 # The wording's firmness, a column to filter on, never a cut: 'activity' (the
 # project finances, builds, requires...), 'outcome' (what should follow), 'none'.
 ACTIVITY = re.compile(
@@ -58,17 +58,85 @@ def setting(key):
 
 # ---------------------------------------------------------------- reading scores
 
-def scores(conn, kind, label_set=None):
-    """Rows of the scores table for a kind (and set)."""
+def measure_sets():
+    """Every measure set (every label set but the assets)."""
+    return [n for n in labels.label_sets() if n != Q.ASSETS]
+
+
+def question_shas(kind, label_set=None):
+    """{(label_set, label_id): sha} of the question each label of a kind is asked now (every measure
+    set for a measure-level kind when no set is named). A score stored under another sha was asked
+    under an earlier wording and is not an answer to the current question."""
+    if kind in ("measure", "measure_ctx", "measure_second", "type", "package_measure"):
+        out = {}
+        for name in ([label_set] if label_set else measure_sets()):
+            labs, scale = Q.load(name)
+            for lab in labs:
+                if kind == "measure":
+                    q = {lab["id"]: Q.graded_question(lab, scale)}
+                elif kind == "measure_ctx":
+                    q = {lab["id"]: Q.in_context(Q.graded_question(lab, scale))}
+                elif kind == "measure_second":
+                    q = {lab["id"]: Q.second_grade_question(lab, scale)}
+                elif kind == "package_measure":
+                    q = {lab["id"]: Q.package_measure_question(lab)}
+                else:
+                    q = {**Q.type_questions(name).get(lab["id"], {}),
+                         **Q.oth_type_questions(name).get(lab["id"], {})}
+                out.update({(name, lid): Q.sha(x) for lid, x in q.items()})
+        return out
+    if kind == "digital":
+        qs = {"digital": Q.digital_question()}
+    elif kind == "policy":
+        qs = {"policy": Q.policy_question()}
+    elif kind == "asset":
+        qs = Q.graded_questions(Q.ASSETS)[0]
+    elif kind == "asset_second":
+        qs = {"second": Q.asset_second_question(Q.asset_catalogue()[0])}
+    elif kind == "asset_subtype":
+        assets, subtypes = Q.asset_catalogue()
+        qs = {a["id"]: Q.asset_subtype_question(a, subtypes[a["id"]]) for a in assets if subtypes.get(a["id"])}
+    elif kind == "package_asset":
+        qs = Q.package_asset_questions()
+    elif kind == "package_asset_second":
+        qs = {a["id"]: Q.package_asset_second_question(a) for a in Q.asset_catalogue()[0]}
+    elif kind == "package_asset_subtype":
+        qs = Q.package_subtype_questions()
+    else:
+        raise ValueError(f"scores: no current question known for kind {kind!r}")
+    lset = kind if kind in ("digital", "policy") else Q.ASSETS
+    return {(lset, lid): Q.sha(q) for lid, q in qs.items()}
+
+
+IGNORED = {}            # (kind, label_set) -> rows the last read left out as asked under an earlier question
+
+
+def scores(conn, kind, label_set=None, log=print):
+    """Rows of the scores table for a kind (and set) whose question is the current one
+    (question_shas). A row asked under an earlier wording is left out, read as not asked yet, and
+    counted in IGNORED; the count is logged once per kind, set and number."""
     t = f"{db.SCHEMA}.scores"
     if not db.exists(conn, t):
         return []
-    sql = f"SELECT label_set, label_id, item_id, score, answer, served, route, round, cosine, rank FROM {t} WHERE kind = %s"
+    sql = (f"SELECT label_set, label_id, item_id, score, answer, served, route, round, cosine, rank, "
+           f"question_sha FROM {t} WHERE kind = %s")
     params = [kind]
     if label_set:
         sql += " AND label_set = %s"
         params.append(label_set)
-    return db.rows(conn, sql + " ORDER BY label_set, label_id, item_id", params)
+    current = question_shas(kind, label_set)
+    out, dropped = [], 0
+    for r in db.rows(conn, sql + " ORDER BY label_set, label_id, item_id", params):
+        if current.get((r[0], r[1])) == r[10]:
+            out.append(r[:10])
+        else:
+            dropped += 1
+    key = (kind, label_set or "")
+    if dropped and IGNORED.get(key) != dropped and log:
+        log(f"  scores: {dropped:,} {kind} row(s){' of ' + label_set if label_set else ''} were asked under an "
+            f"earlier wording of the question; ignored (read as not asked yet)")
+    IGNORED[key] = dropped
+    return out
 
 
 def posterior(conn, kind, label_set, qshas, vector_of):
@@ -300,7 +368,7 @@ def asset_second_looks(conn):
     return out
 
 
-def asset_kinds(conn):
+def asset_types(conn):
     """{(unit_id, asset_id): subtype_id} of the assets that count (kind
     asset_subtype), whichever look found them; absent where the question was not asked or answered."""
     out = {}
@@ -380,7 +448,7 @@ def package_asset_sets(conn, only=None):
     return out
 
 
-def package_asset_kinds(conn):
+def package_asset_types(conn):
     """{(package_id, asset_id): subtype_id} of the assets a package has (kind package_asset_subtype)."""
     out = {}
     for _, aid, pid, _, answer, *_ in scores(conn, "package_asset_subtype"):
@@ -451,21 +519,21 @@ def link_level(strong, same_type, relation):
     return "component" if relation == "same" else "asset"
 
 
-def link_strength_rows(conn, corpus, names, ua, packages, kinds=None):
+def link_strength_rows(conn, corpus, names, ua, packages, asset_types_=None):
     """The commitment_package_links rows. A kept sentence and a package of the same project are
     linked when the package, asked alone, is about the sentence's measure at link.strong_yes or more
     (strength strong), or when they share a top-level asset (the sentence's, at the levels the panel
     counts, and the package's; strength asset). A pair that is both is one row, strong. Each link
     also has a level (LINK_LEVELS): strong; else by whether the sentence and the package share an
-    asset type (`kinds` is asset_kinds(); the package's from package_asset_kinds(); unspecified never
+    asset type (`asset_types_` is asset_types(); the package's from package_asset_types(); unspecified never
     counts) and a top-level component (both known and equal). The levels only order the links: none
     is added or removed by them. The package's cancelled and generic flags ride along."""
     strong_yes = float(setting("link.strong_yes"))
     levels = link_levels()
     has = package_asset_sets(conn)
     asked = package_measure_scores(conn)
-    kinds = asset_kinds(conn) if kinds is None else kinds
-    pkinds = package_asset_kinds(conn)
+    stype_of = asset_types(conn) if asset_types_ is None else asset_types_
+    ptype_of = package_asset_types(conn)
     by_project = defaultdict(list)
     for p in packages:
         by_project[p["project_id"]].append(p)
@@ -474,7 +542,7 @@ def link_strength_rows(conn, corpus, names, ua, packages, kinds=None):
     for name in names:
         for u in committed_digital_units(conn, corpus, [name]):
             mine = linked_assets(ua.get(u, ({}, [], "none")), levels)
-            stypes = typed((a, kinds.get((u, a), "")) for a in mine)
+            stypes = typed((a, stype_of.get((u, a), "")) for a in mine)
             scomp = top_component(corpus.row(u).get("component_number", ""))
             for pid in corpus.projects(u):
                 for p in by_project.get(pid, []):
@@ -485,7 +553,7 @@ def link_strength_rows(conn, corpus, names, ua, packages, kinds=None):
                     if not strong and not shared:
                         continue
                     same_type = bool({x for x in stypes if x[0] in shared}
-                                     & typed((a, pkinds.get((pkg, a), "")) for a in shared))
+                                     & typed((a, ptype_of.get((pkg, a), "")) for a in shared))
                     pcomp = top_component(p.get("component_number", ""))
                     rel = component_relation(scomp, pcomp)
                     level = link_level(strong, same_type, rel)
@@ -540,11 +608,11 @@ def commitment_keys(instrument, assets, types, paragraph_id):
     return [("paragraph", "", "", "", paragraph_id)]
 
 
-def commitment_assets(ua, kinds):
+def commitment_assets(ua, type_of):
     """{unit_id: [(asset_id, subtype_id)]}: each sentence's assets at the levels the panel counts
-    (unit_assets()) with their types (asset_kinds(); '' where none was asked yet)."""
+    (unit_assets()) with their types (asset_types(); '' where none was asked yet)."""
     levels = link_levels()
-    return {u: [(a, kinds.get((u, a), "")) for a in sorted(linked_assets(x, levels))] for u, x in ua.items()}
+    return {u: [(a, type_of.get((u, a), "")) for a in sorted(linked_assets(x, levels))] for u, x in ua.items()}
 
 
 def commitment_names():
@@ -703,11 +771,11 @@ def measure_rows(conn, corpus, names, ua, stats=None):
     return fl_rows
 
 
-def asset_rows(conn, corpus, amap, ua, kinds=None, second=None):
-    """(paragraph_grades rows, unit_assets rows). `kinds` is asset_kinds()
+def asset_rows(conn, corpus, amap, ua, type_of=None, second=None):
+    """(paragraph_grades rows, unit_assets rows). `type_of` is asset_types()
     and `second` asset_second_looks(): a row's subtype_id is the chat model's
     type of that asset for that sentence, '' where none was asked."""
-    kinds, second = kinds or {}, second or {}
+    type_of, second = type_of or {}, second or {}
     grades, assets = [], []
     qs, _ = Q.graded_questions(Q.ASSETS)
     for lset, lid, uid, score, answer, served, route, rnd, cos, rank in scores(conn, "asset"):
@@ -729,7 +797,7 @@ def asset_rows(conn, corpus, amap, ua, kinds=None, second=None):
                 "own_best_probability": f"{own[best]:.4f}" if best else ""}
         chat_assets = "|".join(second.get(uid, []))
         for k, (a, p) in enumerate(win, 1):
-            assets.append(dict(base, asset_rank=k, asset_id=a, subtype_id=kinds.get((uid, a), ""),
+            assets.append(dict(base, asset_rank=k, asset_id=a, subtype_id=type_of.get((uid, a), ""),
                                second_look_asset_id=chat_assets,
                                probability="" if p is None else f"{p:.4f}"))
         if not win:
@@ -742,7 +810,7 @@ def package_asset_rows(conn, packages):
     """The package_assets rows: every package x asset the first pass asked about, with the asset's type
     where the package has the asset and its type was asked (kind package_asset_subtype)."""
     pq = Q.package_asset_questions()
-    kinds, has = package_asset_kinds(conn), package_asset_sets(conn)
+    type_of, has = package_asset_types(conn), package_asset_sets(conn)
     pa = posterior(conn, "package_asset", Q.ASSETS, {a: Q.sha(q) for a, q in pq.items()}, lambda i: None)
     by_pkg = {p["package_id"]: p for p in packages}
     assets = []
@@ -753,7 +821,7 @@ def package_asset_rows(conn, packages):
                        "cosine": f"{float(cos or 0):.4f}", "cosine_rank": rank or "",
                        "probability": f"{float(score):.3f}", "p_calibrated": f"{pa(aid, pid, score):.3f}",
                        "has_asset": str(aid in has.get(pid, ())).lower(),
-                       "subtype_id": kinds.get((pid, aid), "") if aid in has.get(pid, ()) else "",
+                       "subtype_id": type_of.get((pid, aid), "") if aid in has.get(pid, ()) else "",
                        "model_served": served or ""})
     return assets
 
@@ -764,12 +832,12 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
     from wbg_portfolio import checks
     t0 = time.time()
     corpus = corpus or Q.Corpus(data)
-    names = [n for n in labels.label_sets() if n != Q.ASSETS]
+    names = measure_sets()
     amap = asset_map(conn, corpus)
     second = asset_second_looks(conn)
     ua = unit_assets(corpus, amap, second)
-    kinds = asset_kinds(conn)
-    grades, assets = asset_rows(conn, corpus, amap, ua, kinds, second)
+    type_of = asset_types(conn)
+    grades, assets = asset_rows(conn, corpus, amap, ua, type_of, second)
     counts = {}
     findings = measure_rows(conn, corpus, names, ua, counts)
     if counts.get("waiting"):
@@ -778,8 +846,8 @@ def publish(conn, data, *, corpus=None, log=print, views=True):
         log(f"  {counts['no_digital_answer']:,} committed pair(s) have no digital answer yet; not digital")
     packages = checks.load_packages(data)
     pk_assets = package_asset_rows(conn, packages)
-    strengths = link_strength_rows(conn, corpus, names, ua, packages, kinds)
-    commitments, members = commitment_rows(findings, commitment_assets(ua, kinds), strengths, commitment_names())
+    strengths = link_strength_rows(conn, corpus, names, ua, packages, type_of)
+    commitments, members = commitment_rows(findings, commitment_assets(ua, type_of), strengths, commitment_names())
     written = {}
     with load_pg.transaction(conn):
         load_pg.prepare(conn)

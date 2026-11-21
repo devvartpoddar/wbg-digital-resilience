@@ -220,7 +220,7 @@ def test_a_package_asset_has_its_type_asked_stored_and_published(pg, corpus, fak
     prompt = fake_chat.prompts()[-1]
     assert prompt.startswith("Which type of Mobile networks is the procurement package in the 'package' field about?")
     assert "- mast: Masts\n- unspecified: not stated" in prompt and "[package]\nSupply of towers" in prompt
-    assert decide.package_asset_kinds(pg) == {("P1-1", "towers"): "mast"}
+    assert decide.package_asset_types(pg) == {("P1-1", "towers"): "mast"}
     n = len(fake_chat.calls)
     second.package_asset_subtype(pg, corpus, c, NAMES, api_key="k", **QUIET)
     assert len(fake_chat.calls) == n                                        # a rerun asks nothing

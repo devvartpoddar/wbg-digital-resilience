@@ -347,17 +347,44 @@ def graded_questions(name):
     return {lab["id"]: build(lab, scale) for lab in labs}, scale
 
 
+OTH = "OTH."            # a proposed type's id and stored name start with this
+
+
+def type_question(measure, t):
+    """The one type question: does a type of the measure apply to a sentence already counted as a
+    commitment to it (fit: yes, unsure, no). A proposed type's name is sent without its "OTH." prefix
+    (the id keeps it, so the reply still maps to the type)."""
+    name = t["type_name"]
+    if name.startswith(OTH):
+        name = name[len(OTH):].strip()
+    return fit_question({"id": t["type_id"], "name": name, "definition": t["definition"]},
+                        given=f"The sentence is already counted as a commitment to {measure['name']}; this asks "
+                              f"only which type it is. ")
+
+
 def type_questions(name):
-    """{label_id: {type_id: fit question}} for the measure's approved types,
-    told the sentence is already a commitment to the measure."""
+    """{label_id: {type_id: type question}} for the measure's types (a person's list, else the
+    proposed list the types step wrote)."""
     labs, _ = load(name)
+    return {lab["id"]: {t["type_id"]: type_question(lab, t) for t in labels.load_types(name)
+                        if t["label_id"] == lab["id"]} for lab in labs}
+
+
+def oth_types(name, data=None):
+    """The OTH types the gap step proposed for a measure (data/types/<set>_oth_types.csv), [] when none."""
+    from wbg_portfolio.paths import data_root
+    path = where(data or data_root(), "types", f"{name}_oth_types.csv")
+    return labels.rows(path) if os.path.exists(path) else []
+
+
+def oth_type_questions(name, data=None):
+    """{label_id: {type_id: type question}} for the measure's OTH types."""
+    labs = {lab["id"]: lab for lab in load(name)[0]}
     out = {}
-    for lab in labs:
-        given = (f"The sentence is already counted as a commitment to {lab['name']}; this asks "
-                 f"only which kind it is. ")
-        out[lab["id"]] = {t["type_id"]: fit_question(
-            {"id": t["type_id"], "name": t["type_name"], "definition": t["definition"]},
-            given=given) for t in labels.load_types(name) if t["label_id"] == lab["id"]}
+    for t in oth_types(name, data):
+        lab = labs.get(t.get("label_id"))
+        if lab:
+            out.setdefault(lab["id"], {})[t["type_id"]] = type_question(lab, t)
     return out
 
 

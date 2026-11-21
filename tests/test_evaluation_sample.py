@@ -248,8 +248,10 @@ def _publish(pg, data):
                 ("package_asset_subtype", "assets", "towers", "P1-1", 1, {"labels": ["mast"]}),
                 ("type", "cra", "site", uids[0], 0.7, {}), ("type", "cra", "route", uids[0], 0.2, {}),
                 ("asset", "assets", "towers", uids[0], 0.95, {})):
-            pg.execute(f"INSERT INTO {db.SCHEMA}.scores (kind, label_set, label_id, item_id, score, answer) "
-                       f"VALUES (%s, %s, %s, %s, %s, %s)", (kind, lset, lid, item, score, json.dumps(answer)))
+            qsha = decide.question_shas(kind, lset if kind in ("type", "package_measure") else None)[(lset, lid)]
+            pg.execute(f"INSERT INTO {db.SCHEMA}.scores (kind, label_set, label_id, item_id, question_sha, score, "
+                       f"answer) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+                       (kind, lset, lid, item, qsha, score, json.dumps(answer)))
     pg.commit()
     return uids
 

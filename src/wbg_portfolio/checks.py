@@ -35,7 +35,7 @@ from wbg_portfolio import search
 from wbg_portfolio.paths import where
 
 GEN_MODEL = "anthropic/claude-haiku-5.5"
-OTH = decide.OTH
+OTH = Q.OTH
 MAX_UNITS = 400
 PROPOSE_PROMPT = """You are helping an analyst sort sentences from World Bank project appraisal documents.
 Every sentence below was judged to commit the project to the measure "{name}", defined as: {definition}
@@ -191,8 +191,7 @@ def oth_path(data, name):
 
 
 def oth_types(data, name):
-    path = oth_path(data, name)
-    return [t for t in labels.rows(path)] if os.path.exists(path) else []
+    return Q.oth_types(name, data)
 
 
 def propose(conn, data, corpus, name, *, api_key="", dry_run=False, log=print, max_types=8):
@@ -292,11 +291,7 @@ def types(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_run=False,
                 w.writeheader()
                 w.writerows(oth)
             os.replace(path + ".part", path)
-    oth_q = {t["type_id"]: Q.fit_question({"id": t["type_id"], "name": t["type_name"],
-                                           "definition": t["definition"]},
-                                          given=(f"The sentence is already counted as a commitment to "
-                                                 f"{lab['name']}; this asks only which kind it is. "))
-             for t in oth}
+    oth_q = {t["type_id"]: Q.type_question(lab, t) for t in oth if t.get("label_id", lab["id"]) == lab["id"]}
     got2 = {}
     if oth_q and none:
         got2 = _ask(conn, model, [(u, corpus.state(u), oth_q) for u in none], f"types:{name}:oth", name,
