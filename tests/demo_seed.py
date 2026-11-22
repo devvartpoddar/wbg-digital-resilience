@@ -379,7 +379,7 @@ class Demo:
     def finding(self, p, ms, uid, para_comp, text, **kw):
         """A measure_findings row; kw sets the decision (score, committed, digital, instrument, assets, types)."""
         rng, s = self.rng, kw["score"]
-        committed, band = kw.get("committed", True), kw.get("band", False)
+        committed = kw.get("committed", True)
         assets, types = kw.get("assets", []), kw.get("types", [])
         level = kw.get("level", "none")
         p3, p2 = round(0.75 * s, 3), round(0.25 * s, 3)
@@ -397,7 +397,6 @@ class Demo:
             "p1": round((1 - s) * 0.2, 3), "p2": p2, "p3": p3, "p_committed_calibrated": s,
             "types_yes": "|".join(types), "best_type": types[0] if types else "", "best_p": round(rng.uniform(0.55, 0.95), 3) if types else "",
             "score_first": s, "score_context": kw.get("context", ""), "second_grade": kw.get("grade", ""),
-            "decided_by": ("second_look" if band else "score") if committed else "",
             "is_digital": str(kw.get("digital", True)).lower(), "digital_p": kw.get("digital_p", round(rng.uniform(0.7, 0.99), 3)),
             "instrument": kw.get("instrument", ""), "model_served": "demo", "text": text}
         self.t["measure_findings"].append(row)
@@ -440,9 +439,9 @@ class Demo:
             ins = "policy" if policy else "investment"
             if rng.random() < 0.03:
                 ins = "investment" if policy else "policy"
-            ctx = round(rng.uniform(0.7, 0.97), 3) if band else (round(rng.uniform(0.6, 0.99), 3) if rng.random() < 0.7 else "")
-            grade = rng.choice([2, 3]) if band or rng.random() < 0.7 else ""
-            self.finding(p, ms, uid, comp[0], t, score=score, band=band, context=ctx, grade=grade, assets=assets,
+            ctx = round(rng.uniform(max(0.6, 1.2 - score), 0.99), 3)        # the mean of first and context is 0.6 or more
+            grade = rng.choice([2, 3])
+            self.finding(p, ms, uid, comp[0], t, score=score, context=ctx, grade=grade, assets=assets,
                          types=types, level=level, instrument=ins, doc=p["docs"][kind]["id"])
             self.unit_assets(uid, uid.rsplit(":", 1)[0], p, assets, level)
         self.group_rows.append({"project": p["project_id"], "measure": ms, "units": units, "assets": dict(assets),
@@ -454,7 +453,7 @@ class Demo:
         for _ in range(rng.randint(1, 2)):
             text = rng.choice(NOT_DIGITAL).format(topic=TOPIC[ms], thing=rng.choice(THINGS), where=rng.choice(WHERE), n=comp[0])
             uid = self.paragraph(p, "pad", comp, [(text, None)], None)[0]
-            self.finding(p, ms, uid, comp[0], text, score=round(rng.uniform(0.9, 0.99), 3), digital=False,
+            self.finding(p, ms, uid, comp[0], text, score=round(rng.uniform(0.9, 0.99), 3), context=0.9, grade=3, digital=False,
                          digital_p=round(rng.uniform(0.05, 0.4), 3), instrument="", doc=p["docs"]["pad"]["id"])
             self.unit_assets(uid, uid.rsplit(":", 1)[0], p, [], "none")
 

@@ -47,7 +47,7 @@ FINDING_COLS = ["label_set", "label_id", "unit_id", "kind", "paragraph_id", "doc
                 "score", "patterns", "firmness", "asset_unit", "asset_p_unit", "assets_yes", "asset_link",
                 "asset_link_level", "asset_link_p", "asset_links", "template_projects", "template_share",
                 "sent", "committed", "measure_rule", "confidence", "p0", "p1", "p2", "p3", "p_committed_calibrated",
-                "types_yes", "best_type", "best_p", "score_first", "score_context", "second_grade", "decided_by",
+                "types_yes", "best_type", "best_p", "score_first", "score_context", "second_grade",
                 "is_digital", "digital_p", "instrument", "model_served", "text"]
 GRADE_COLS = ["label_set", "unit_id", "paragraph_id", "doc_id", "project_ids", "component_number",
               "label_id", "asked", "route", "round", "best_cosine", "confidence", "p0", "p1", "p2", "p3",

@@ -115,8 +115,19 @@ def test_tuning_reads_the_published_rule(monkeypatch):
     monkeypatch.setattr(decide, "band_rule", lambda *a: calls.append(a) or real(*a))
     f = tuning.measure_frame([{"score_first": 0.7, "score_context": 0.8, "second_grade": 3, "digital_p": 0.9,
                                "weight": 1, "project": "P", "truth": {"lenient": True, "strict": True, "digital": True}}])
-    assert list(tuning.measure_kept(f, {"keep": 0.9, "low": 0.5, "context": 0.7, "second_grade": 2, "digital": 0.5})) == [1.0]
+    assert list(tuning.measure_kept(f, {"low": 0.5, "context": 0.7, "second_grade": 2, "digital": 0.5})) == [1.0]
     assert calls and calls[0][3]["context"] == 0.7
+
+
+def test_the_sweep_is_the_one_published_rule_and_nothing_else():
+    grid = tuning._grid()
+    assert len(grid) == 3 * 9 * 4 * 4 and all(set(r) == {"low", "context", "second_grade", "digital"} for r in grid)
+    assert {r["low"] for r in grid} == {0.5, 0.6, 0.7} and {r["second_grade"] for r in grid} == {0, 1, 2, 3}
+    assert {r["context"] for r in grid} == {0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9}
+    assert {r["digital"] for r in grid} == {0.3, 0.4, 0.5, 0.6}
+    assert tuning.describe({"low": 0.5, "context": 0.6, "second_grade": 2, "digital": 0.5}) == \
+        "low 0.5, mean(first, context) 0.6, grade 2, digital 0.5"
+    assert "band.keep" not in tuning.SETTING_KEYS
 
 
 def test_the_tuned_rule_is_the_band_rule():
@@ -130,8 +141,8 @@ def test_the_tuned_rule_is_the_band_rule():
         rows.append({"score_first": first, "score_context": ctx, "second_grade": g, "digital_p": dig, "weight": 1,
                      "project": "P", "truth": {"lenient": True, "strict": False, "digital": True}})
     f = tuning.measure_frame(rows)
-    for rule in ({"keep": 0.9, "low": 0.5, "context": 0.7, "second_grade": 2, "digital": 0.5},
-                 {"keep": 0.85, "low": 0.6, "context": 0.0, "second_grade": 1, "digital": 0.3}):
+    for rule in ({"low": 0.5, "context": 0.6, "second_grade": 2, "digital": 0.5},
+                 {"low": 0.6, "context": 0.8, "second_grade": 1, "digital": 0.3}):
         b = dict(rule)
         got = tuning.measure_kept(f, rule)
         for r, k in zip(rows, got):
@@ -225,15 +236,15 @@ def _publish(pg, data):
         fh.write("asset_id,pattern_id,pattern,flags,active\nfiber,backbone_01,\\broads?\\b,IGNORECASE,true\n")
     c = Q.Corpus(data, vectors=False)
     uids = [r["unit_id"] for r in c.index]
-    scores = [(0.97, None, None, 0.9), (0.7, 0.8, 3, 0.8), (0.4, None, None, None), (0.1, None, None, None)]
+    scores = [(0.97, 0.9, 3, 0.9), (0.7, 0.8, 3, 0.8), (0.4, None, None, None), (0.1, None, None, None)]
     mf = []
     for uid, (first, ctx, g, dig) in zip(uids, scores):
-        committed = first >= 0.9 or (first >= 0.5 and ctx and ctx >= 0.7 and g >= 2)
+        committed = first >= 0.5 and ctx is not None and (first + ctx) / 2 >= 0.6 and g >= 2
         mf.append({"label_set": "cra", "label_id": "cra", "unit_id": uid, "project_ids": "P1", "component_number": "1",
                    "score_first": first, "score_context": "" if ctx is None else ctx,
                    "second_grade": "" if g is None else g, "digital_p": "" if dig is None else dig,
                    "committed": str(committed).lower(), "is_digital": str(bool(dig and dig >= 0.5)).lower(),
-                   "decided_by": "score" if first >= 0.9 else "", "text": c.texts[uid]})
+                   "text": c.texts[uid]})
     ua = [{"unit_id": uids[0], "asset_rank": 1, "asset_id": "towers", "subtype_id": "mast", "asset_level": "unit",
            "own_best_probability": 0.95, "project_ids": "P1"},
           {"unit_id": uids[1], "asset_rank": 1, "asset_id": "fiber", "subtype_id": "backbone",
@@ -318,7 +329,7 @@ def test_sample_grade_and_tune_end_to_end(pg, corpus, fake_chat, monkeypatch, ca
 
     out, no_truth, _ = tuning.load(pg, data, 1, G.GRADERS)
     assert not no_truth and all(r["truth"]["lenient"] for r in out["measure"])
-    report = tuning.tune(pg, data, 1, log=lambda *_: None, settings=["band.keep=0.85"])
+    report = tuning.tune(pg, data, 1, log=lambda *_: None, settings=["band.context=0.65"])
     text = open(report, encoding="utf-8").read() + open(os.path.join(os.path.dirname(report), "holdout_s1.json")).read()
     for uid in uids:
         assert Q.Corpus(data, vectors=False).texts[uid].split("\n")[-1] not in text
@@ -373,10 +384,10 @@ def test_the_holdout_sheet_and_the_person_graded_sheets_keep_each_other(pg):
 
 
 def test_a_pair_with_no_digital_truth_is_left_out_of_the_digital_figures():
-    row = lambda dig_truth: {"score_first": 0.95, "score_context": None, "second_grade": None, "digital_p": 0.9,
+    row = lambda dig_truth: {"score_first": 0.95, "score_context": 0.9, "second_grade": 3, "digital_p": 0.9,
                              "weight": 1, "project": "P",
                              "truth": {"lenient": True, "strict": True, "digital": dig_truth}}
-    rule = {"keep": 0.9, "low": 0.5, "context": 0.7, "second_grade": 2, "digital": 0.5}
+    rule = {"low": 0.5, "context": 0.6, "second_grade": 2, "digital": 0.5}
     known = tuning.measure_figures(tuning.measure_frame([row(True), row(False)]), rule)
     with_unknown = tuning.measure_figures(tuning.measure_frame([row(True), row(False), row(None), row(None)]), rule)
     assert with_unknown["lenient_recall_digital"] == known["lenient_recall_digital"] == 1.0

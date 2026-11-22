@@ -13,14 +13,13 @@ SELECT
   -- Another project prints a sentence near-identically when its committed
   -- sentences hold at least this share of the sentence's six-word runs.
   {{panel:dashboard.near_copy_share}}::numeric AS near_copy_share,
-  -- The band rule (control panel band.*): a first-pass score of band_keep or
-  -- more is committed; one from band_low to band_keep is committed only when the
-  -- paragraph-aware score reaches band_context and the chat model's grade
-  -- reaches band_second_grade. Decided at publish (measure_findings.passes_measure_rule;
+  -- The band rule (control panel band.*): a first-pass score of band_low or
+  -- more is committed only when the mean of it and the paragraph-aware score
+  -- reaches band_context and the chat model's grade reaches
+  -- band_second_grade. Decided at publish (measure_findings.passes_measure_rule;
   -- is_committed is that and digital);
   -- shown here so a reader sees the rule behind the counts.
   {{panel:band.low}}::numeric AS band_low,
-  {{panel:band.keep}}::numeric AS band_keep,
   {{panel:band.context}}::numeric AS band_context,
   {{panel:band.second_grade}}::numeric AS band_second_grade,
   -- The digital rule: a sentence is kept (is_committed) only when is_digital (digital_floor).

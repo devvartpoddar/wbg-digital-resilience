@@ -5,12 +5,12 @@ second look; both must agree. Nothing here decides: each step asks and writes
 scores, and src/wbg_portfolio/decide.py reads them.
 
   measure_second  every sentence x measure whose first-pass posterior is in
-            [band.ask_low, band.ask_high) and whose digital score (P(2)+P(3)) is digital.ask_low or more
+            band.ask_low or more and whose digital score (P(2)+P(3)) is digital.ask_low or more
             (so it runs after digital; a sentence with no digital answer yet waits, one under
             digital.ask_low is left out): the decision model again with the
             paragraph beside the sentence (kind measure_ctx, P(grades 2, 3)),
             and the chat model's grade 0 to 3 (kind measure_second)
-  digital   (before measure_second) every sentence with a first-pass score in [band.ask_low, band.ask_high)
+  digital   (before measure_second) every sentence with a first-pass score of band.ask_low or more
             for some measure, once whatever its measure: how far is it about a digital
             technology, graded 0 to 3 (kind digital, P(grades 2, 3)); only committed ones are published
   policy    every committed, digital sentence: investment or policy instrument, by the
@@ -25,7 +25,7 @@ scores, and src/wbg_portfolio/decide.py reads them.
 
 What is asked and what decides are separate, the same way for each look: the
 `*ask_low`/`*ask_high` settings say which pairs are asked (wide), and
-decide.py applies band.low/band.keep, link.asset_band_low/link.asset_yes and
+decide.py applies band.low/band.context/band.second_grade, link.asset_band_low/link.asset_yes and
 asset.floor to the stored scores at publish. A look stored where it decides
 nothing is published for reading only.
 
@@ -81,7 +81,7 @@ def measure_second(conn, data, corpus, name, *, model=Q.MODEL, api_key="", dry_r
     lab = labs[0]
     gq = Q.graded_questions(name)[0][lab["id"]]
     cq, sq = Q.in_context(gq), Q.second_grade_question(lab, scale)
-    log(f"second look {name}: {len(units):,} sentence(s) with a first score in [{b['ask_low']}, {b['ask_high']}) "
+    log(f"second look {name}: {len(units):,} sentence(s) with a first score of {b['ask_low']} or more "
         f"and a digital score of {low} or more; {len(skipped):,} left out as not digital, "
         f"{len(waiting_dig):,} waiting for the digital question")
     ctx = checks._ask(conn, model, [(u, corpus.context_state(u), {lab["id"]: cq}) for u in units],
@@ -112,7 +112,7 @@ def digital(conn, data, corpus, names, *, model=Q.MODEL, api_key="", dry_run=Fal
                              partial=_partial(names, every))
     q = Q.digital_question()
     b = decide.band()
-    log(f"digital: {len(units):,} sentence(s) with a first score in [{b['ask_low']}, {b['ask_high']})")
+    log(f"digital: {len(units):,} sentence(s) with a first score of {b['ask_low']} or more")
     got = checks._ask(conn, model, [(u, corpus.context_state(u), {"digital": q}) for u in units],
                       "digital", "digital", api_key, dry_run, workers, log, data)
     if got is None:

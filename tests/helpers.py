@@ -25,3 +25,16 @@ def first_pass(pg, corpus, score=0.95, units=(0,), name="cra"):
 
 def count(pg, kind):
     return db.one(pg, f"SELECT count(*) FROM {db.SCHEMA}.scores WHERE kind = %s", (kind,))[0]
+
+
+def looks(pg, corpus, c, names):
+    """The digital question, then each measure's two second looks: what the band rule needs before a
+    first-pass score commits a sentence."""
+    import conftest
+    from wbg_portfolio import second
+    model = conftest.LIVE["model"]       # the fibre sentence and the road read as the measure with the paragraph
+    model.also_yes = tuple(model.also_yes) + ("fibre backbone", "road will be widened")
+    second.digital(pg, corpus, c, list(names), api_key="k", **QUIET)
+    for n in names:
+        second.measure_second(pg, corpus, c, n, api_key="k", **QUIET)
+    del model[:], conftest.LIVE["chat"].calls[:]      # the setup's own requests are not what a test counts

@@ -33,33 +33,27 @@ THRESHOLDS = [round(0.30 + 0.05 * i, 2) for i in range(14)]          # 0.30 .. 0
 
 
 def _grid():
-    """The one-rule-for-all family (the shapes of the earlier tuning study): the two-look rule over keep,
-    low, context, grade and the digital floor (context 0 is grade only, grade 0 context only, keep 1.01 no
-    free pass), and the mean shape (mean of first and context, with a grade)."""
+    """The rules the sweep tries: the published rule's shape (the mean of the first score and the context
+    score against `context`, the grade, the digital floor) over low, context, grade and digital."""
     out = []
-    for keep in (0.80, 0.85, 0.90, 0.95, 1.01):
-        for low in (0.5, 0.6, 0.7):
-            for ctx in (0.0, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8):
-                for g in (0, 1, 2, 3):
-                    for dig in (0.3, 0.4, 0.5, 0.6):
-                        out.append({"keep": keep, "low": low, "context": ctx, "second_grade": g, "digital": dig})
-    for keep in (0.85, 0.90, 1.01):
-        for m in (0.6, 0.7, 0.75, 0.8, 0.85, 0.9):
-            for g in (1, 2):
-                out.append({"keep": keep, "low": 0.5, "context": 0.0, "second_grade": g, "digital": 0.5, "mean": m})
+    for low in (0.5, 0.6, 0.7):
+        for ctx in (0.5, 0.55, 0.6, 0.65, 0.7, 0.75, 0.8, 0.85, 0.9):
+            for g in (0, 1, 2, 3):
+                for dig in (0.3, 0.4, 0.5, 0.6):
+                    out.append({"low": low, "context": ctx, "second_grade": g, "digital": dig})
     return out
 
 
 def current():
     """The settings as the panel reads them now."""
     b = decide.band()
-    return {"keep": b["keep"], "low": b["low"], "context": b["context"], "second_grade": b["second_grade"],
+    return {"low": b["low"], "context": b["context"], "second_grade": b["second_grade"],
             "digital": decide.digital_floor(), "strong_yes": float(panel.require("link.strong_yes")),
             "types": float(panel.require("floor.types")), "asset": float(panel.require("asset.floor")),
             "asset_multiple": bool(panel.require("asset.multiple"))}
 
 
-SETTING_KEYS = {"band.keep": "keep", "band.low": "low", "band.context": "context",
+SETTING_KEYS = {"band.low": "low", "band.context": "context",
                 "band.second_grade": "second_grade", "digital.floor": "digital", "link.strong_yes": "strong_yes",
                 "floor.types": "types", "asset.floor": "asset"}
 
@@ -78,9 +72,7 @@ def given(settings):
 
 
 def describe(r):
-    if "mean" in r:
-        return f"keep {r['keep']:g}, mean(first, context) {r['mean']:g}, grade {r['second_grade']:g}, digital {r['digital']:g}"
-    return (f"keep {r['keep']:g}, low {r['low']:g}, context {r['context']:g}, grade {r['second_grade']:g}, "
+    return (f"low {r['low']:g}, mean(first, context) {r['context']:g}, grade {r['second_grade']:g}, "
             f"digital {r['digital']:g}")
 
 
@@ -133,14 +125,10 @@ def _f(x):
 
 def measure_kept(f, r):
     """Kept under a candidate rule: the published rule itself (decide.band_rule, then decide.is_digital)
-    with the candidate's settings, row by row, so what is tuned is what is published. A rule with "mean"
-    gives band_rule the mean of first and context in place of the context score, read at "mean"."""
-    b = {"keep": r["keep"], "low": r["low"], "context": r.get("mean", r["context"]),
-         "second_grade": r["second_grade"]}
+    with the candidate's settings, row by row, so what is tuned is what is published."""
+    b = {"low": r["low"], "context": r["context"], "second_grade": r["second_grade"]}
     out = numpy.zeros(len(f.rows))
     for i, (first, ctx, grade, dig) in enumerate(f.rule_inputs):
-        if ctx is not None and "mean" in r:
-            ctx = (first + ctx) / 2
         out[i] = decide.band_rule(first, ctx, grade, b)[0] and decide.is_digital(dig, r["digital"])
     return out
 
@@ -203,7 +191,7 @@ def operating_points(points, base, p="lenient_precision", rc="lenient_recall_ask
     def dist(r):
         if not near:
             return 0.0
-        return sum(abs(float(v) - float(near.get(k, v))) for k, v in r.items() if k in near) + (1 if "mean" in r else 0)
+        return sum(abs(float(v) - float(near.get(k, v))) for k, v in r.items() if k in near)
 
     def best(floor):
         ok = [(r, m) for r, m in points if not numpy.isnan(m[p]) and m[p] >= floor - 1e-9 and not numpy.isnan(m[rc])]

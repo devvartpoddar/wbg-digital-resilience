@@ -5,7 +5,7 @@ import json
 
 import pytest
 
-from helpers import QUIET, count, first_pass
+from helpers import QUIET, count, first_pass, looks
 from wbg_portfolio import db
 from wbg_portfolio import decide
 from wbg_portfolio import funnel
@@ -29,7 +29,7 @@ def ready(pg, corpus, fake_chat):
     """Both sentences committed and digital; the fibre sentence has no first-pass asset."""
     c = first_pass(pg, corpus, 0.95, units=(0, 1))
     assert funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET) is not None
-    second.digital(pg, corpus, c, NAMES, api_key="k", **QUIET)
+    looks(pg, corpus, c, NAMES)
     u0, u1 = c.index[0]["unit_id"], c.index[1]["unit_id"]
     pg.execute(f"DELETE FROM {db.SCHEMA}.scores WHERE kind = 'asset' AND item_id = %s", (u1,))
     pg.commit()

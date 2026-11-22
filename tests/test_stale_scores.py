@@ -3,7 +3,7 @@ one (src/wbg_portfolio/decide.py, scores): it is left out, counted and logged, a
 The fake models only."""
 import pytest
 
-from helpers import QUIET, first_pass
+from helpers import QUIET, first_pass, looks
 from wbg_portfolio import checks
 from wbg_portfolio import db
 from wbg_portfolio import decide
@@ -48,12 +48,12 @@ def test_the_current_question_is_read(pg):
     assert decide.IGNORED[("digital", "")] == 0
 
 
-def test_publish_after_a_stopped_step_does_not_mix_old_and_new_answers(pg, corpus, fake_model):
+def test_publish_after_a_stopped_step_does_not_mix_old_and_new_answers(pg, corpus, fake_model, fake_chat):
     """The digital step asked under a new wording stopped part way: the sentence still holding only
     an old-wording digital row is not digital (not asked yet), never digital on the old answer."""
     c = first_pass(pg, corpus, 0.95, units=(0, 1))
     funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
-    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
+    looks(pg, corpus, c, ["cra"])
     decide.publish(pg, corpus, corpus=c, log=lambda *_: None, views=False)
     before = {u: d for u, d in db.rows(pg, f"SELECT unit_id, is_digital FROM {db.SCHEMA}.measure_findings")}
     assert any(before.values())

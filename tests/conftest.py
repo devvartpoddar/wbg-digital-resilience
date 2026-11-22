@@ -287,6 +287,8 @@ def fake_model(monkeypatch):
         strong_too = ()         # package texts a test wants the package-measure question to say yes to
 
     calls = Calls()
+    LIVE.clear()
+    LIVE["model"] = calls
 
     def post(path, b, api_key, **kw):
         calls.append(b)
@@ -323,6 +325,9 @@ def fake_model(monkeypatch):
     return calls
 
 
+LIVE = {}       # the fake decision model of the running test, for helpers.looks
+
+
 class _Chat:
     """The fake chat model's record: every request body, and `reply`, a
     function from the prompt to the text the model sends back."""
@@ -354,6 +359,7 @@ def fake_chat(monkeypatch, fake_model):
     replies come from fake_chat.reply(prompt), a JSON object by default."""
     from wbg_portfolio import api
     inner, chat = api.post, _Chat()
+    LIVE["chat"] = chat
 
     def post(path, b, api_key, **kw):
         if path != "/v1/chat/completions":

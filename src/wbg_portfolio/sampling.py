@@ -248,7 +248,7 @@ def published(conn):
     if missing:
         raise SystemExit(f"check sample: {s} has no {', '.join(missing)}; publish first")
     mf = db.rows(conn, f"SELECT label_set, label_id, unit_id, project_ids, score_first, score_context, second_grade, "
-                       f"digital_p, is_committed, is_digital, decided_by, component_number "
+                       f"digital_p, is_committed, is_digital, component_number "
                        f"FROM {s}.measure_findings")
     ua = db.rows(conn, f"SELECT unit_id, asset_rank, asset_id, subtype_id, asset_level, own_best_probability, "
                        f"second_look_asset_id, project_ids FROM {s}.unit_assets")
@@ -273,14 +273,14 @@ def commitments_of(conn):
 
 def measure_units(mf, type_scores):
     out = []
-    for lset, lid, uid, pids, first, ctx, grade, dig, committed, digital, by, comp in mf:
+    for lset, lid, uid, pids, first, ctx, grade, dig, committed, digital, comp in mf:
         project, ids = _cluster(pids)
         first = _f(first) or 0.0
         out.append({"key": f"{lset}|{uid}", "label_set": lset, "label_id": lid, "unit_id": uid,
                     "project": project, "project_ids": ids, "group": lset,
                     "score_first": first, "score_context": _f(ctx), "second_grade": _f(grade),
                     "digital_p": _f(dig), "is_committed": bool(committed), "is_digital": bool(digital),
-                    "kept": bool(committed) and bool(digital), "decided_by": by or "",
+                    "kept": bool(committed) and bool(digital),
                     "type_scores": type_scores.get((lset, uid), {}),
                     "region": measure_region(first, _f(ctx), _f(grade), _f(dig))})
     return out

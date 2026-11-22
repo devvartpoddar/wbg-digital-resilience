@@ -9,7 +9,7 @@ DROP VIEW IF EXISTS wbg.not_digital_findings CASCADE;
 CREATE VIEW wbg.not_digital_findings AS
 SELECT m.label_set, m.label_id, l.label_name AS measure_name, pp.project_id, pr.cohort_set,
        pr.project_name, pr.country_name, m.document_id, m.component_number, m.unit_id,
-       m.posterior_probability, m.score_first, m.score_context, m.second_grade, m.decided_by,
+       m.posterior_probability, m.score_first, m.score_context, m.second_grade,
        m.digital_p, m.instrument, m.text, pa.section_title
 FROM wbg.measure_findings m
 LEFT JOIN wbg.labels l ON l.label_set = m.label_set AND l.label_id = m.label_id
@@ -18,7 +18,7 @@ LEFT JOIN wbg.paragraph_projects pp ON pp.paragraph_id = m.paragraph_id
 LEFT JOIN wbg.projects pr ON pr.project_id = pp.project_id
 WHERE m.was_sent_to_model AND m.passes_measure_rule AND NOT m.is_digital;
 COMMENT ON VIEW wbg.not_digital_findings IS
-  'Sentences that pass the measure rule but that the digital question says are not about a digital technology (digital_p below digital.floor, or never asked): listed here, never kept (is_committed false), left out of every commitment. One row per sentence, measure and project; with the score, the two second looks and who decided. The model''s reading, not a person''s.';
+  'Sentences that pass the measure rule but that the digital question says are not about a digital technology (digital_p below digital.floor, or never asked): listed here, never kept (is_committed false), left out of every commitment. One row per sentence, measure and project; with the score and the two second looks. The model''s reading, not a person''s.';
 
 -- Link strengths: a committed, digital sentence and a package of the same
 -- project, with the sentence's measure, asset and type and the package's plan

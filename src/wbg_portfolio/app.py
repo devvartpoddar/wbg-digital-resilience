@@ -513,7 +513,7 @@ def commitment_sentences_detail(q, commitment_ids=None, family=None, *, cohort=N
     the link sentences() gives), section_title, component_number, component_name,
     sentence_instrument (this sentence's reading), asset_id, asset_name, subtype_id, subtype_name
     (its own best asset), type_ids, type_names (its own, joined with "; "), score_first,
-    score_context, second_grade, decided_by ('score', 'second_look'; what the strength rests on),
+    score_context, second_grade,
     posterior_probability, firmness."""
     if commitment_ids is not None:
         filters["commitment_id"] = list(dict.fromkeys(commitment_ids)) or ["-"]   # none asked: no rows
@@ -536,7 +536,7 @@ def commitment_sentences_detail(q, commitment_ids=None, family=None, *, cohort=N
                          FROM unnest(f.type_ids_above_threshold) AS t(id)
                          LEFT JOIN wbg.measure_types mt ON mt.label_set = f.label_set
                               AND mt.label_id = f.label_id AND mt.type_id = t.id), '') AS type_names,
-               f.score_first, f.score_context, f.second_grade, f.decided_by,
+               f.score_first, f.score_context, f.second_grade,
                f.posterior_probability, f.firmness
         FROM x
         JOIN wbg.commitment_members a ON a.commitment_id = x.commitment_id
@@ -748,7 +748,7 @@ def not_digital(q, project_id=None, measure=None, *, cohort=None):
     Columns: label_set, measure_name, project_id, project_name, country_name, region,
     document_id, document_kind, document_title, document_date, page_number, pdf_url,
     section_title, component_number, unit_id, text, posterior_probability, score_first,
-    score_context, second_grade, decided_by, digital_p (the digital question's probability),
+    score_context, second_grade, digital_p (the digital question's probability),
     instrument. project_id and measure (an id or a name) are each a value, a list or None."""
     return _numbers(q(_sql("""
         SELECT n.label_set, n.measure_name, n.project_id, n.project_name, n.country_name, h.region,
@@ -757,7 +757,7 @@ def not_digital(q, project_id=None, measure=None, *, cohort=None):
                wbg.https(d.pdf_url) || CASE WHEN pa.page_from IS NOT NULL
                                             THEN '#page=' || pa.page_from ELSE '' END AS pdf_url,
                n.section_title, n.component_number, n.unit_id, n.text, n.posterior_probability,
-               n.score_first, n.score_context, n.second_grade, n.decided_by, n.digital_p, n.instrument
+               n.score_first, n.score_context, n.second_grade, n.digital_p, n.instrument
         FROM wbg.not_digital_findings n
         JOIN wbg.project_info i ON i.project_id = n.project_id
         JOIN wbg.project_header h ON h.project_id = n.project_id
@@ -868,7 +868,6 @@ _SENTENCE_DOWNLOAD = [
     ("score_first", "score_first", "The decision model's probability that the sentence is graded 2 or 3 (the project may finance it, or explicitly does), asked alone. Grade 2 counts: a kept sentence is planned or committed."),
     ("score_context", "score_context", "The same with the paragraph beside the sentence; empty unless asked."),
     ("second_grade", "second_grade", "The chat model's grade 0 to 3; empty unless asked."),
-    ("decided_by", "decided_by", "score (the first score alone) or second_look (a middling score confirmed by the two second looks)."),
     ("probability", "posterior_probability", "The probability every decision reads."),
 ]
 _PACKAGE_DOWNLOAD = [
@@ -1262,9 +1261,9 @@ def about(q):
     from wbg_portfolio import panel
     out = {}
     # floor.default is only the cut the evaluation reads a first-pass score at; the commitment is the
-    # band rule, so band.low, band.keep and band.context are given too.
+    # band rule, so band.low and band.context are given too.
     floors = {}
-    for key in ("floor.default", "floor.types", "asset.floor", "link.asset_yes", "band.low", "band.keep",
+    for key in ("floor.default", "floor.types", "asset.floor", "link.asset_yes", "band.low",
                 "band.context"):
         floors[key] = float(panel.require(key))
     out["floors"] = floors

@@ -148,47 +148,48 @@ def posterior(conn, kind, label_set, qshas, vector_of):
 
 def band():
     """The band rule's settings (band.*)."""
-    b = {"low": float(panel.require("band.low")), "keep": float(panel.require("band.keep")),
+    b = {"low": float(panel.require("band.low")),
          "context": float(panel.require("band.context")), "second_grade": float(panel.require("band.second_grade")),
-         "ask_low": float(panel.require("band.ask_low")), "ask_high": float(panel.require("band.ask_high"))}
-    check_asked("band.", b["ask_low"], b["low"], b["ask_high"], b["keep"])
+         "ask_low": float(panel.require("band.ask_low"))}
+    check_ask_low("band.", b["ask_low"], b["low"])
     return b
 
 
-def check_asked(prefix, ask_low, low, ask_high, keep):
+def check_ask_low(prefix, ask_low, low):
     """Fail loudly when the decision band is wider than the asked band: a pair the
     decision needs a second look for, but that was never asked, would wait forever."""
     if ask_low > low:
         raise SystemExit(f"panel: {prefix}ask_low ({ask_low}) is above the lowest score the decision reads "
                          f"a second look for ({low}); lower {prefix}ask_low to {low} or less, else pairs "
                          f"between them would wait for a second look that is never asked")
+
+
+def check_asked(prefix, ask_low, low, ask_high, keep):
+    """check_ask_low, and the asked range of a rule that keeps a score on its own
+    (the package-to-asset links) must reach that score."""
+    check_ask_low(prefix, ask_low, low)
     if ask_high < keep:
         raise SystemExit(f"panel: {prefix}ask_high ({ask_high}) is below the score that is kept on its own "
                          f"({keep}); raise {prefix}ask_high to {keep} or more")
 
 
 def band_rule(post, ctx, second, b):
-    """(committed, decided_by, waiting) for a sentence x measure pair under the
-    band rule. A first-pass score of band.keep or more is committed on its own
-    ('score'). A score in [band.low, band.keep) is committed only when the
-    decision model, shown the paragraph, scores it band.context or more AND the
-    chat model grades it band.second_grade or more ('second_look'). A pair in
-    the band with either look missing is not committed and is waiting."""
-    if post >= b["keep"]:
-        return True, "score", False
+    """(committed, waiting) for a sentence x measure pair under the band rule.
+    Below band.low the pair is not committed. With either second look missing
+    (the context score or the chat grade) it is not committed and is waiting.
+    Otherwise it is committed when the mean of the first score and the context
+    score is band.context or more AND the chat grade is band.second_grade or more."""
     if post < b["low"]:
-        return False, "", False
+        return False, False
     if ctx is None or second is None:
-        return False, "", True
-    if ctx >= b["context"] and second >= b["second_grade"]:
-        return True, "second_look", False
-    return False, "", False
+        return False, True
+    return (post + ctx) / 2 >= b["context"] and second >= b["second_grade"], False
 
 
 def asked_band(post, b):
-    """True for a first-pass score the second look is asked about: band.ask_low up to
-    band.ask_high. What it decides is band_rule's, from band.low and band.keep."""
-    return b["ask_low"] <= post < b["ask_high"]
+    """True for a first-pass score the second look is asked about: band.ask_low or more.
+    What it decides is band_rule's."""
+    return post >= b["ask_low"]
 
 
 def look_scores(conn, kind, name):
@@ -201,8 +202,7 @@ def measure_units(conn, corpus, name):
     asked. committed is the band rule (band_rule): the sentences the later
     stages ask about are the committed ones. A row also says its first
     score (score_first), the two looks (score_context, second_grade, None when
-    not asked), decided_by ('score', 'second_look' or '') and waiting (in the
-    band, a look missing)."""
+    not asked) and waiting (in the band, a look missing)."""
     qs, _ = Q.graded_questions(name)
     qshas = {lid: Q.sha(q) for lid, q in qs.items()}
     p = posterior(conn, "measure", name, qshas, corpus.vector)
@@ -218,7 +218,7 @@ def measure_units(conn, corpus, name):
                "route": route, "round": rnd, "cosine": float(cos or 0), "posterior": post,
                "score_first": post, "score_context": None, "second_grade": None, "waiting": False}
         row["score_context"], row["second_grade"] = ctx.get(uid), second.get(uid)
-        row["committed"], row["decided_by"], row["waiting"] = band_rule(
+        row["committed"], row["waiting"] = band_rule(
             post, row["score_context"], row["second_grade"], b)
         row["asked"] = asked_band(post, b)
         if row["waiting"] and dig.get(uid, 1.0) < dig_low:
@@ -234,7 +234,7 @@ def committed_units(conn, corpus, names):
 
 def digital_asked_units(conn, corpus, names):
     """[unit_id] the digital question is asked about: every sentence with a first-pass score
-    in the asked band [band.ask_low, band.ask_high) for at least one of the measures (the range the
+    from band.ask_low up for at least one of the measures (the range the
     measure second look is asked for), so a threshold loosened at publish finds the newly committed
     sentences already scored. Committed sentences outside that range are added."""
     asked = {u for n in names for u, r in measure_units(conn, corpus, n).items() if r.get("asked")}
@@ -747,7 +747,6 @@ def measure_rows(conn, corpus, names, ua, stats=None):
                 "score_first": f"{u['score_first']:.4f}",
                 "score_context": "" if u["score_context"] is None else f"{u['score_context']:.4f}",
                 "second_grade": "" if u["second_grade"] is None else f"{u['second_grade']:g}",
-                "decided_by": u["decided_by"],
                 "is_digital": str(digital).lower(),
                 "digital_p": f"{dig[uid]:.4f}" if uid in dig else "",
                 "instrument": instrument.get(uid, ""),

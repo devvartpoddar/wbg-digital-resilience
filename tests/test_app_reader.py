@@ -170,13 +170,11 @@ def test_the_sentences_of_commitments_come_with_their_strength_inputs_and_page(d
     s = app.commitment_sentences_detail(demo, a["commitment_id"])
     assert len(s) == a["n_sentences"].sum() and set(s["commitment_id"]) == set(a["commitment_id"])
     for col in ("text", "document_kind", "document_date", "page_number", "pdf_url", "section_title", "score_first",
-                "decided_by", "paragraph_id", "unit_id", "second_grade", "score_context"):
+                "paragraph_id", "unit_id", "second_grade", "score_context"):
         assert col in s
     assert s["text"].str.len().gt(20).all() and set(s["document_kind"]) <= {"pad", "additional_financing", "restructuring"}
-    assert s["pdf_url"].str.contains("#page=").all() and set(s["decided_by"]) <= {"score", "second_look"}
-    band = s[s["decided_by"] == "second_look"]
-    assert (band["score_context"] >= 0.7).all() and (band["second_grade"] >= 2).all()
-    assert (s[s["decided_by"] == "score"]["score_first"] >= 0.9).all()
+    assert s["pdf_url"].str.contains("#page=").all() and "decided_by" not in s
+    assert ((s["score_first"] + s["score_context"]) / 2 >= 0.6).all() and (s["second_grade"] >= 2).all()
     same = app.commitment_sentences_detail(demo, None, None, measure="cra")                  # by the filters instead
     assert sorted(same["unit_id"]) == sorted(s["unit_id"])
     assert app.commitment_sentences_detail(demo, []).empty and app.commitment_sentences_detail(demo, ["no such one"]).empty

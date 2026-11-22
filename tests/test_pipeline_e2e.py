@@ -12,6 +12,7 @@ from wbg_portfolio import api
 from wbg_portfolio import cli
 from wbg_portfolio import db
 from wbg_portfolio import load_pg
+from wbg_portfolio import panel
 from wbg_portfolio import search
 
 TABLES = ("commitment_package_links", "commitments", "commitment_members")
@@ -71,8 +72,12 @@ def rows(conn, sql):
     return db.rows(conn, sql.replace("{S}", db.SCHEMA))
 
 
-def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(schema, wide, fake_model, fake_chat, capsys):
+def test_a_full_run_from_classify_to_publish_fills_every_new_table_and_view(schema, wide, fake_model, fake_chat, capsys,
+                                                                             monkeypatch):
     corpus = wide
+    live = panel.settings
+    # the road is not digital; asked its second looks all the same, it passes the rule and fills not_digital_findings
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "digital.ask_low": 0.0})
     default = fake_chat.reply
     fake_chat.reply = lambda p: ('{"labels": ["fiber"]}'
                                  if "Which digital asset" in p and "fibre backbone" in p else default(p))

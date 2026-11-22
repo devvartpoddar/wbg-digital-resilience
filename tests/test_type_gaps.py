@@ -6,7 +6,7 @@ import os
 
 import pytest
 
-from helpers import QUIET, first_pass
+from helpers import QUIET, first_pass, looks
 from wbg_portfolio import api
 from wbg_portfolio import chat
 from wbg_portfolio import checks
@@ -29,7 +29,7 @@ def gaps(monkeypatch, fake_chat):
 
 def ready(pg, corpus):
     c = first_pass(pg, corpus, 0.95, units=(0, 1))
-    second.digital(pg, corpus, c, ["cra"], api_key="k", **QUIET)
+    looks(pg, corpus, c, ["cra"])
     return c
 
 

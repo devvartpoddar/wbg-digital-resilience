@@ -13,8 +13,9 @@ def run_all(pg, corpus, log=lambda *_: None):
     c = Q.Corpus(corpus)
     funnel.run(pg, corpus, "assets", corpus=c, api_key="k", log=log)
     funnel.run(pg, corpus, "cra", corpus=c, api_key="k", log=log)
+    second.digital(pg, corpus, c, ["cra"], api_key="k", log=log)
     second.measure_second(pg, corpus, c, "cra", api_key="k", log=log)
-    for step in (second.digital, second.policy, second.asset_second, second.asset_subtype):
+    for step in (second.policy, second.asset_second, second.asset_subtype):
         step(pg, corpus, c, ["cra"], api_key="k", log=log)
     checks.types(pg, corpus, c, "cra", api_key="k", log=log)
     checks.package_assets(pg, corpus, c, api_key="k", log=log)
@@ -71,7 +72,7 @@ def test_a_moved_threshold_is_a_publish_not_a_run(pg, corpus, fake_model, fake_c
     n = len(fake_model)
     from wbg_portfolio import panel
     live = panel.settings
-    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.keep": 0.99, "band.second_grade": 4})
+    monkeypatch.setattr(panel, "settings", lambda: {**live(), "band.second_grade": 4})
     with load_pg.transaction(pg):
         load_pg.load(pg, corpus, log=lambda *_: None)
     decide.publish(pg, corpus, corpus=c, log=lambda *_: None, views=False)

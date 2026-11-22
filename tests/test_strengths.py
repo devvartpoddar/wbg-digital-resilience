@@ -4,7 +4,7 @@ checks.py, decide.py). The fake decision and chat models only."""
 
 import pytest
 
-from helpers import QUIET, count, first_pass
+from helpers import QUIET, count, first_pass, looks
 from wbg_portfolio import checks
 from wbg_portfolio import db
 from wbg_portfolio import decide
@@ -27,7 +27,7 @@ def asked_where_it_decides(monkeypatch):
 def ready(pg, corpus):
     c = first_pass(pg, corpus, 0.95, units=(0, 1))
     funnel.run(pg, corpus, "assets", corpus=c, api_key="k", **QUIET)
-    second.digital(pg, corpus, c, NAMES, api_key="k", **QUIET)
+    looks(pg, corpus, c, NAMES)
     assert checks.package_assets(pg, corpus, c, api_key="k", **QUIET) is not None
     return c
 
@@ -38,7 +38,7 @@ def set_first_pass(pg, package, asset, score):
     pg.commit()
 
 
-def test_no_commitment_to_package_question_is_asked(pg, corpus, fake_model):
+def test_no_commitment_to_package_question_is_asked(pg, corpus, fake_model, fake_chat):
     ready(pg, corpus)
     assert count(pg, "package_asset") == 4 and count(pg, "link") == 0
     assert not any("carrying out" in json_q for b in fake_model for json_q in
@@ -99,7 +99,7 @@ def test_a_dry_run_asks_nothing(pg, corpus, fake_chat):
     assert not fake_chat.calls and decide.package_asset_sets(pg) == {"P1-1": {"towers"}}
 
 
-def test_the_strong_question_is_asked_of_every_package_with_or_without_an_asset(pg, corpus, fake_model):
+def test_the_strong_question_is_asked_of_every_package_with_or_without_an_asset(pg, corpus, fake_model, fake_chat):
     c = ready(pg, corpus)
     assert decide.package_asset_sets(pg) == {"P1-1": {"towers"}}          # the roads package has no asset
     n = len(fake_model)
@@ -116,7 +116,7 @@ def test_the_strong_question_is_asked_of_every_package_with_or_without_an_asset(
     assert checks.package_measure(pg, corpus, c, NAMES, dry_run=True, **QUIET) is None and len(fake_model) == n
 
 
-def test_a_package_is_asked_only_its_likeliest_measures_and_what_is_stored_stays(pg, corpus, fake_model, monkeypatch):
+def test_a_package_is_asked_only_its_likeliest_measures_and_what_is_stored_stays(pg, corpus, fake_model, monkeypatch, fake_chat):
     from wbg_portfolio import panel
     c = ready(pg, corpus)
     live = panel.settings
@@ -131,7 +131,7 @@ def test_a_package_is_asked_only_its_likeliest_measures_and_what_is_stored_stays
     assert len(fake_model) == n
 
 
-def test_a_package_with_no_asset_can_have_a_strong_link(pg, corpus, fake_model):
+def test_a_package_with_no_asset_can_have_a_strong_link(pg, corpus, fake_model, fake_chat):
     c = ready(pg, corpus)
     u0 = c.index[0]["unit_id"]
     checks.package_measure(pg, corpus, c, NAMES, api_key="k", **QUIET)
