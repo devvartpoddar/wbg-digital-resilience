@@ -18,7 +18,7 @@ Three commands, beside the pipeline's own grading cycle (`check draw|fill|evalua
 ./wbg_portfolio check tune   --seed 1 [--setting band.context=0.65 --setting band.second_grade=1]
 ```
 
-Beside the live data: `WBG_SCHEMA=wbg_v2 WBG_STORE=wbg_store WBG_DATA=<the data folder of that run> ./wbg_portfolio check ...`. A tune or grade beside a copy needs the sample folder inside that copy: `cp -a data/samples/<seed> data-v2/samples/` first, because `check tune` reads `samples/<seed>/` from `WBG_DATA` and fails without it (it does not fall back to `data/`). The draw reads the published tables of `WBG_SCHEMA`, the stored scores and the data folder's corpus (for the text); grading stores its answers in `WBG_STORE`; the tune step writes `data/reports/evaluation_s<seed>.md`, `data/reports/holdout_s<seed>.json` and the holdout rows of `<schema>.measure_quality`.
+Beside the live data: `WBG_SCHEMA=wbg_v2 WBG_STORE=wbg_store WBG_DATA=<the data folder of that run> ./wbg_portfolio check ...`. A tune or grade beside a copy needs the sample folder inside that copy: `cp -a data/samples/s<seed> data-v2/samples/` first, because the samples are read only from `WBG_DATA/samples/s<seed>/` (`sampling.folder`), with no fallback to `data/`. The draw reads the published tables of `WBG_SCHEMA`, the stored scores and the data folder's corpus (for the text); grading stores its answers in `WBG_STORE`; the tune step writes `data/reports/evaluation_s<seed>.md`, `data/reports/holdout_s<seed>.json` and the holdout rows of `<schema>.measure_quality`.
 
 ## Poisson sampling with unequal chances
 
